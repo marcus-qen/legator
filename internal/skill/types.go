@@ -33,6 +33,9 @@ type Skill struct {
 	// Actions is the parsed Action Sheet (nil if no actions.yaml).
 	Actions *ActionSheet
 
+	// Source records where this skill was loaded from (set by loader).
+	Source *SourceInfo
+
 	// RawFrontmatter preserves the original YAML frontmatter.
 	RawFrontmatter map[string]interface{}
 }

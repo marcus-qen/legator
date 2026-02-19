@@ -25,11 +25,22 @@ import (
 type Loader struct {
 	client    client.Client
 	namespace string
+	cache     *Cache
 }
 
 // NewLoader creates a new skill loader.
 func NewLoader(c client.Client, namespace string) *Loader {
 	return &Loader{client: c, namespace: namespace}
+}
+
+// NewLoaderWithCache creates a skill loader with caching enabled.
+func NewLoaderWithCache(c client.Client, namespace string, cache *Cache) *Loader {
+	return &Loader{client: c, namespace: namespace, cache: cache}
+}
+
+// SetCache sets the cache for the loader.
+func (l *Loader) SetCache(cache *Cache) {
+	l.cache = cache
 }
 
 // Load loads a skill from the given source string.
@@ -44,7 +55,7 @@ func (l *Loader) Load(ctx context.Context, name, source string) (*Skill, error) 
 	case strings.HasPrefix(source, "configmap://"):
 		return l.loadFromConfigMap(ctx, name, source)
 	case strings.HasPrefix(source, "git://"):
-		return nil, fmt.Errorf("git source not yet implemented (Phase 7): %s", source)
+		return l.loadFromGit(ctx, name, source)
 	default:
 		// Try as ConfigMap name for backwards compat
 		return l.loadFromConfigMap(ctx, name, "configmap://"+source)
