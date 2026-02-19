@@ -172,7 +172,7 @@ func (p *OpenAIProvider) buildRequest(req *CompletionRequest) *openaiRequest {
 		apiReq.Tools = append(apiReq.Tools, openaiTool{
 			Type: "function",
 			Function: openaiToolFunction{
-				Name:        tool.Name,
+				Name:        sanitizeToolName(tool.Name),
 				Description: tool.Description,
 				Parameters:  tool.Parameters,
 			},
@@ -207,7 +207,7 @@ func toOpenAIMessages(msg Message) []openaiMessage {
 				ID:   tc.ID,
 				Type: "function",
 				Function: openaiFunction{
-					Name:      tc.Name,
+					Name:      sanitizeToolName(tc.Name),
 					Arguments: string(argsJSON),
 				},
 			})
@@ -235,7 +235,7 @@ func (p *OpenAIProvider) parseResponse(apiResp *openaiResponse) *CompletionRespo
 		for _, tc := range choice.Message.ToolCalls {
 			toolCall := ToolCall{
 				ID:      tc.ID,
-				Name:    tc.Function.Name,
+				Name:    unsanitizeToolName(tc.Function.Name),
 				RawArgs: tc.Function.Arguments,
 			}
 			_ = json.Unmarshal([]byte(tc.Function.Arguments), &toolCall.Args)

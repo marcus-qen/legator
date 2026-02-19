@@ -130,8 +130,10 @@ func (r *Runner) Execute(ctx context.Context, agent *corev1alpha1.InfraAgent, cf
 	// Step 5: Execute the conversation loop
 	result := r.conversationLoop(ctx, assembled, eng, cfg, agent)
 
-	// Step 6: Finalize the AgentRun
-	r.finalizeRun(ctx, run, result, startTime, agent, assembled)
+	// Step 6: Finalize the AgentRun (use fresh context — run ctx may be expired)
+	finalizeCtx, finalizeCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer finalizeCancel()
+	r.finalizeRun(finalizeCtx, run, result, startTime, agent, assembled)
 
 	return run, nil
 }

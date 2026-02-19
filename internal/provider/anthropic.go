@@ -18,8 +18,20 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 )
+
+// sanitizeToolName converts dotted tool names (e.g. "http.get") to underscore-separated
+// (e.g. "http_get") for Anthropic API compatibility (must match ^[a-zA-Z0-9_-]{1,128}$).
+func sanitizeToolName(name string) string {
+	return strings.ReplaceAll(name, ".", "_")
+}
+
+// unsanitizeToolName reverses sanitizeToolName for internal tool lookup.
+func unsanitizeToolName(name string) string {
+	return strings.ReplaceAll(name, "_", ".")
+}
 
 const (
 	anthropicDefaultEndpoint = "https://api.anthropic.com"
@@ -83,11 +95,14 @@ type anthropicMessage struct {
 }
 
 type anthropicContentBlock struct {
-	Type  string          `json:"type"`
-	Text  string          `json:"text,omitempty"`
-	ID    string          `json:"id,omitempty"`
-	Name  string          `json:"name,omitempty"`
-	Input json.RawMessage `json:"input,omitempty"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
+	Content   json.RawMessage `json:"content,omitempty"`
 }
 
 type anthropicTool struct {
@@ -159,10 +174,10 @@ func (p *AnthropicProvider) buildRequest(req *CompletionRequest) (*anthropicRequ
 		apiReq.Messages = append(apiReq.Messages, am)
 	}
 
-	// Convert tools
+	// Convert tools — sanitize names for Anthropic (must match ^[a-zA-Z0-9_-]{1,128}$)
 	for _, tool := range req.Tools {
 		apiReq.Tools = append(apiReq.Tools, anthropicTool{
-			Name:        tool.Name,
+			Name:        sanitizeToolName(tool.Name),
 			Description: tool.Description,
 			InputSchema: tool.Parameters,
 		})
@@ -180,16 +195,13 @@ func toAnthropicMessage(msg Message) (anthropicMessage, error) {
 			// Tool results are sent as user messages with tool_result content blocks
 			var blocks []anthropicContentBlock
 			for _, tr := range msg.ToolResults {
+				// Anthropic tool_result format: tool_use_id (not id), content as string or array
+				contentJSON, _ := json.Marshal(tr.Content)
 				block := anthropicContentBlock{
-					Type: "tool_result",
-					ID:   tr.ToolCallID,
-				}
-				// For tool results, content goes in the text field at top level
-				if tr.IsError {
-					block.Type = "tool_result"
-					block.Text = tr.Content
-				} else {
-					block.Text = tr.Content
+					Type:      "tool_result",
+					ToolUseID: tr.ToolCallID,
+					Content:   contentJSON,
+					IsError:   tr.IsError,
 				}
 				blocks = append(blocks, block)
 			}
@@ -255,7 +267,7 @@ func (p *AnthropicProvider) parseResponse(apiResp *anthropicResponse) *Completio
 		case "tool_use":
 			tc := ToolCall{
 				ID:   block.ID,
-				Name: block.Name,
+				Name: unsanitizeToolName(block.Name),
 			}
 			if block.Input != nil {
 				tc.RawArgs = string(block.Input)

@@ -27,10 +27,16 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	"fmt"
+
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -38,14 +44,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	corev1alpha1 "github.com/marcus-qen/infraagent/api/v1alpha1"
+	"github.com/marcus-qen/infraagent/internal/assembler"
 	"github.com/marcus-qen/infraagent/internal/controller"
 	"github.com/marcus-qen/infraagent/internal/lifecycle"
 	_ "github.com/marcus-qen/infraagent/internal/metrics" // Register Prometheus metrics
 	"github.com/marcus-qen/infraagent/internal/multicluster"
+	"github.com/marcus-qen/infraagent/internal/provider"
 	"github.com/marcus-qen/infraagent/internal/ratelimit"
 	"github.com/marcus-qen/infraagent/internal/retention"
+	"github.com/marcus-qen/infraagent/internal/runner"
 	"github.com/marcus-qen/infraagent/internal/scheduler"
 	"github.com/marcus-qen/infraagent/internal/telemetry"
+	"github.com/marcus-qen/infraagent/internal/tools"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -280,10 +290,14 @@ func main() {
 		)
 	}
 
-	// Scheduler (with rate limiting)
+	// Build assembler and runner (before scheduler, which needs the runner)
+	asm := assembler.New(mgr.GetClient())
+	agentRunner := runner.NewRunner(mgr.GetClient(), asm, ctrl.Log.WithName("runner"))
+
+	// Scheduler (with rate limiting and runner)
 	schedCfg := scheduler.DefaultConfig()
 	schedCfg.MaxConcurrentRuns = maxConcurrentCluster
-	sched := scheduler.New(mgr.GetClient(), nil, ctrl.Log, schedCfg)
+	sched := scheduler.New(mgr.GetClient(), agentRunner, ctrl.Log, schedCfg)
 	if err := mgr.Add(sched); err != nil {
 		setupLog.Error(err, "Failed to add scheduler")
 		os.Exit(1)
@@ -297,14 +311,114 @@ func main() {
 	}
 	shutdownMgr := lifecycle.NewShutdownManager(sched.RunTrackerRef(), drainDur, ctrl.Log)
 
-	// Suppress unused warnings — these are wired into runner/scheduler at runtime
+	// Provider factory: resolves model tier → LLM provider with API key from Secret
+	providerFactory := func(agent *corev1alpha1.InfraAgent, mtc *corev1alpha1.ModelTierConfig) (provider.Provider, error) {
+		// Look up the ModelTierConfig if not provided
+		if mtc == nil {
+			mtc = &corev1alpha1.ModelTierConfig{}
+			if err := mgr.GetClient().Get(context.Background(), client.ObjectKey{Name: "default"}, mtc); err != nil {
+				return nil, fmt.Errorf("failed to get ModelTierConfig: %w", err)
+			}
+		}
+		// Find the tier mapping
+		tier := agent.Spec.Model.Tier
+		var tierSpec *corev1alpha1.TierMapping
+		for i := range mtc.Spec.Tiers {
+			if mtc.Spec.Tiers[i].Tier == tier {
+				tierSpec = &mtc.Spec.Tiers[i]
+				break
+			}
+		}
+		if tierSpec == nil {
+			return nil, fmt.Errorf("tier %q not found in ModelTierConfig", tier)
+		}
+		// Resolve API key from defaultAuth secretRef
+		apiKey := ""
+		if mtc.Spec.DefaultAuth != nil && mtc.Spec.DefaultAuth.SecretRef != "" {
+			secret := &corev1.Secret{}
+			ns := agent.Namespace
+			if err := mgr.GetClient().Get(context.Background(), client.ObjectKey{
+				Namespace: ns,
+				Name:      mtc.Spec.DefaultAuth.SecretRef,
+			}, secret); err != nil {
+				return nil, fmt.Errorf("failed to get auth secret %q: %w", mtc.Spec.DefaultAuth.SecretRef, err)
+			}
+			key := mtc.Spec.DefaultAuth.SecretKey
+			if key == "" {
+				key = "api-key"
+			}
+			apiKey = string(secret.Data[key])
+		}
+		cfg := provider.ProviderConfig{
+			Type:   tierSpec.Provider,
+			APIKey: apiKey,
+		}
+		if tierSpec.Endpoint != "" {
+			cfg.Endpoint = tierSpec.Endpoint
+		}
+		switch tierSpec.Provider {
+		case "anthropic":
+			return provider.NewAnthropicProvider(cfg)
+		case "openai":
+			return provider.NewOpenAIProvider(cfg)
+		default:
+			return nil, fmt.Errorf("unsupported provider: %s", tierSpec.Provider)
+		}
+	}
+
+	// Tool registry factory: builds tools for an agent
+	toolRegistryFactory := func(agent *corev1alpha1.InfraAgent) (*tools.Registry, error) {
+		reg := tools.NewRegistry()
+		// Register HTTP tools
+		reg.Register(tools.NewHTTPGetTool())
+		reg.Register(tools.NewHTTPPostTool())
+		reg.Register(tools.NewHTTPDeleteTool())
+		// Register kubectl tools using in-cluster config
+		restCfg := mgr.GetConfig()
+		cs, err := kubernetes.NewForConfig(restCfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create kubernetes clientset: %w", err)
+		}
+		dc, err := dynamic.NewForConfig(restCfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create dynamic client: %w", err)
+		}
+		reg.Register(tools.NewKubectlGetTool(cs, dc))
+		reg.Register(tools.NewKubectlDescribeTool(dc))
+		reg.Register(tools.NewKubectlLogsTool(cs))
+		reg.Register(tools.NewKubectlRolloutTool(dc))
+		reg.Register(tools.NewKubectlScaleTool(dc))
+		reg.Register(tools.NewKubectlDeleteTool(dc))
+		reg.Register(tools.NewKubectlApplyTool(dc))
+		return reg, nil
+	}
+
+	// Wire RunConfigFactory into scheduler so scheduled runs get providers + tools
+	sched.RunConfigFactory = func(agent *corev1alpha1.InfraAgent) (runner.RunConfig, error) {
+		cfg := runner.RunConfig{}
+		p, err := providerFactory(agent, nil)
+		if err != nil {
+			return cfg, fmt.Errorf("provider factory: %w", err)
+		}
+		cfg.Provider = p
+		reg, err := toolRegistryFactory(agent)
+		if err != nil {
+			return cfg, fmt.Errorf("tool registry factory: %w", err)
+		}
+		cfg.ToolRegistry = reg
+		return cfg, nil
+	}
+	sched.RateLimiter = rateLimiter
+
 	_ = clientFactory
-	_ = rateLimiter
 	_ = shutdownMgr
 
 	if err := (&controller.InfraAgentReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:              mgr.GetClient(),
+		Scheme:              mgr.GetScheme(),
+		Runner:              agentRunner,
+		ProviderFactory:     providerFactory,
+		ToolRegistryFactory: toolRegistryFactory,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "InfraAgent")
 		os.Exit(1)

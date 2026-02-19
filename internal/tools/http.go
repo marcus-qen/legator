@@ -26,7 +26,7 @@ type HTTPGetTool struct {
 
 func NewHTTPGetTool() *HTTPGetTool {
 	return &HTTPGetTool{
-		client: &http.Client{Timeout: 30 * time.Second},
+		client: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -91,7 +91,7 @@ type HTTPPostTool struct {
 
 func NewHTTPPostTool() *HTTPPostTool {
 	return &HTTPPostTool{
-		client: &http.Client{Timeout: 30 * time.Second},
+		client: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -171,7 +171,7 @@ type HTTPDeleteTool struct {
 
 func NewHTTPDeleteTool() *HTTPDeleteTool {
 	return &HTTPDeleteTool{
-		client: &http.Client{Timeout: 30 * time.Second},
+		client: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
