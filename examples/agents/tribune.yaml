@@ -1,0 +1,44 @@
+apiVersion: core.infraagent.io/v1alpha1
+kind: InfraAgent
+metadata:
+  name: tribune
+  namespace: agents
+  labels:
+    team: platform
+    role: triage
+spec:
+  description: "Issue triage — reviews open GitHub issues daily at 7 AM, deduplicates, labels, and prioritises."
+  emoji: "⚖️"
+  schedule:
+    cron: "0 7 * * *"
+    timezone: "UTC"
+  model:
+    tier: standard
+    tokenBudget: 20000
+    timeout: "300s"
+  skills:
+    - name: issue-triage
+      source: bundled
+  capabilities:
+    required:
+      - github.issues
+    optional:
+      - kubectl.read
+  guardrails:
+    autonomy: automate-safe
+    allowedActions:
+      - "github.issue.list *"
+      - "github.issue.comment *"
+      - "github.issue.label *"
+      - "github.issue.close *"
+      - "kubectl.get *"
+    deniedActions:
+      - "github.issue.delete *"
+      - "kubectl.delete *"
+    maxIterations: 15
+    maxRetries: 1
+  reporting:
+    onSuccess: silent
+    onFailure: escalate
+    onFinding: log
+  environmentRef: dev-lab

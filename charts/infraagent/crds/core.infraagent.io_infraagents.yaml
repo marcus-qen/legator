@@ -1,0 +1,412 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: infraagents.core.infraagent.io
+spec:
+  group: core.infraagent.io
+  names:
+    kind: InfraAgent
+    listKind: InfraAgentList
+    plural: infraagents
+    singular: infraagent
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.guardrails.autonomy
+      name: Autonomy
+      type: string
+    - jsonPath: .spec.schedule.cron
+      name: Schedule
+      type: string
+    - jsonPath: .status.lastRunTime
+      name: Last Run
+      type: date
+    - jsonPath: .status.runCount
+      name: Runs
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          InfraAgent is the Schema for the infraagents API.
+          It defines an autonomous infrastructure agent — its identity, schedule,
+          model configuration, skills, capabilities, guardrails, and environment binding.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: InfraAgentSpec defines the desired state of an InfraAgent.
+            properties:
+              capabilities:
+                description: capabilities declares required and optional tool capabilities.
+                properties:
+                  optional:
+                    description: optional capabilities are used if available.
+                    items:
+                      type: string
+                    type: array
+                  required:
+                    description: required capabilities must be satisfiable by the
+                      environment.
+                    items:
+                      type: string
+                    type: array
+                type: object
+              description:
+                description: description is a human-readable summary of what this
+                  agent does.
+                type: string
+              emoji:
+                description: emoji is an optional icon for human-friendly display.
+                type: string
+              environmentRef:
+                description: environmentRef names the AgentEnvironment to bind.
+                type: string
+              guardrails:
+                description: guardrails defines safety boundaries and escalation policy.
+                properties:
+                  allowedActions:
+                    description: allowedActions is a glob list of permitted tool calls
+                      (only when autonomy >= automate-safe).
+                    items:
+                      type: string
+                    type: array
+                  autonomy:
+                    default: observe
+                    description: autonomy is the graduated autonomy level.
+                    enum:
+                    - observe
+                    - recommend
+                    - automate-safe
+                    - automate-destructive
+                    type: string
+                  deniedActions:
+                    description: deniedActions is a glob list of always-blocked tool
+                      calls (overrides allowedActions).
+                    items:
+                      type: string
+                    type: array
+                  escalation:
+                    description: escalation configures how autonomy-ceiling events
+                      are handled.
+                    properties:
+                      channelName:
+                        description: channelName references a named channel in the
+                          AgentEnvironment (when target=channel).
+                        type: string
+                      onTimeout:
+                        default: cancel
+                        description: onTimeout defines what happens when the timeout
+                          expires.
+                        enum:
+                        - cancel
+                        - proceed
+                        - retry
+                        type: string
+                      target:
+                        description: target defines where escalations go.
+                        enum:
+                        - parent
+                        - channel
+                        - human
+                        type: string
+                      timeout:
+                        default: 300s
+                        description: timeout is how long to wait for a response.
+                        type: string
+                    required:
+                    - target
+                    type: object
+                  maxIterations:
+                    default: 10
+                    description: maxIterations is the hard limit on tool-call loops
+                      per run.
+                    format: int32
+                    type: integer
+                  maxRetries:
+                    default: 2
+                    description: maxRetries is the max retries on transient failure.
+                    format: int32
+                    type: integer
+                required:
+                - autonomy
+                type: object
+              model:
+                description: model configures the LLM tier and budget.
+                properties:
+                  tier:
+                    default: standard
+                    description: tier selects the model class (fast/standard/reasoning).
+                    enum:
+                    - fast
+                    - standard
+                    - reasoning
+                    type: string
+                  timeout:
+                    default: 120s
+                    description: timeout is the max wall-clock duration per run (e.g.
+                      "60s", "5m").
+                    type: string
+                  tokenBudget:
+                    default: 50000
+                    description: tokenBudget is the hard max tokens per run.
+                    format: int64
+                    type: integer
+                required:
+                - tier
+                type: object
+              observability:
+                description: observability configures metrics, tracing, and logging.
+                properties:
+                  logLevel:
+                    default: info
+                    description: logLevel sets the logging verbosity.
+                    enum:
+                    - debug
+                    - info
+                    - warn
+                    - error
+                    type: string
+                  metrics:
+                    default: true
+                    description: metrics enables Prometheus metric emission.
+                    type: boolean
+                  tracing:
+                    default: true
+                    description: tracing enables OpenTelemetry spans.
+                    type: boolean
+                type: object
+              paused:
+                description: paused stops scheduling without deleting the agent.
+                type: boolean
+              reporting:
+                description: reporting configures run outcome actions.
+                properties:
+                  onFailure:
+                    default: escalate
+                    description: onFailure defines the action on a failed run.
+                    enum:
+                    - silent
+                    - log
+                    - notify
+                    - escalate
+                    type: string
+                  onFinding:
+                    default: log
+                    description: onFinding defines the action when the agent discovers
+                      something noteworthy.
+                    enum:
+                    - silent
+                    - log
+                    - notify
+                    - escalate
+                    type: string
+                  onSuccess:
+                    default: silent
+                    description: onSuccess defines the action on a successful run.
+                    enum:
+                    - silent
+                    - log
+                    - notify
+                    - escalate
+                    type: string
+                type: object
+              schedule:
+                description: schedule defines when the agent runs.
+                properties:
+                  cron:
+                    description: cron is a standard cron expression (e.g. "*/5 * *
+                      * *").
+                    type: string
+                  interval:
+                    description: interval is an alternative to cron (e.g. "300s",
+                      "5m").
+                    type: string
+                  timezone:
+                    default: UTC
+                    description: timezone is an IANA timezone for cron evaluation
+                      (default "UTC").
+                    type: string
+                  triggers:
+                    description: triggers define event-driven execution.
+                    items:
+                      description: TriggerSpec defines an event-based trigger.
+                      properties:
+                        filter:
+                          description: filter is a CEL expression evaluated against
+                            the event payload.
+                          type: string
+                        reasons:
+                          description: reasons lists event reasons to match (for kubernetes-event
+                            type).
+                          items:
+                            type: string
+                          type: array
+                        resources:
+                          description: resources lists Kubernetes resource kinds to
+                            watch (for kubernetes-event type).
+                          items:
+                            type: string
+                          type: array
+                        source:
+                          description: source identifies the event origin (e.g. "alertmanager").
+                          type: string
+                        type:
+                          description: type is the trigger kind.
+                          enum:
+                          - webhook
+                          - kubernetes-event
+                          type: string
+                      required:
+                      - type
+                      type: object
+                    type: array
+                type: object
+              skills:
+                description: skills lists the Agent Skills to load.
+                items:
+                  description: SkillRef references a skill to load.
+                  properties:
+                    name:
+                      description: name identifies the skill.
+                      type: string
+                    source:
+                      description: source indicates where the skill lives.
+                      type: string
+                  required:
+                  - name
+                  - source
+                  type: object
+                minItems: 1
+                type: array
+            required:
+            - description
+            - environmentRef
+            - guardrails
+            - model
+            - schedule
+            - skills
+            type: object
+          status:
+            description: InfraAgentStatus defines the observed state of InfraAgent.
+            properties:
+              conditions:
+                description: conditions represent the current state of the InfraAgent.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              consecutiveFailures:
+                description: consecutiveFailures tracks sequential failures for alerting.
+                format: int32
+                type: integer
+              lastRunName:
+                description: lastRunName is the name of the most recent AgentRun CR.
+                type: string
+              lastRunTime:
+                description: lastRunTime is when the agent last executed.
+                format: date-time
+                type: string
+              nextRunTime:
+                description: nextRunTime is the computed next execution time.
+                format: date-time
+                type: string
+              phase:
+                description: phase is the current lifecycle phase.
+                enum:
+                - Pending
+                - Ready
+                - Running
+                - Error
+                - Paused
+                type: string
+              runCount:
+                description: runCount is the total number of runs.
+                format: int64
+                type: integer
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

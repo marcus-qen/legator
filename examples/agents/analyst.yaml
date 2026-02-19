@@ -1,0 +1,42 @@
+apiVersion: core.infraagent.io/v1alpha1
+kind: InfraAgent
+metadata:
+  name: analyst
+  namespace: agents
+  labels:
+    team: platform
+    role: reporting
+spec:
+  description: "Weekly review — analyses agent performance, platform trends, and cost. Runs Sunday 11 PM."
+  emoji: "📊"
+  schedule:
+    cron: "0 23 * * 0"
+    timezone: "UTC"
+  model:
+    tier: reasoning
+    tokenBudget: 50000
+    timeout: "600s"
+  skills:
+    - name: weekly-analysis
+      source: bundled
+  capabilities:
+    required:
+      - kubectl.read
+    optional:
+      - prometheus.query
+      - github.issues
+  guardrails:
+    autonomy: observe
+    allowedActions:
+      - "kubectl.get agentruns *"
+      - "kubectl.get infraagents *"
+      - "kubectl.get pods *"
+      - "kubectl.get events *"
+      - "github.issue.list *"
+    maxIterations: 10
+    maxRetries: 1
+  reporting:
+    onSuccess: notify
+    onFailure: escalate
+    onFinding: notify
+  environmentRef: dev-lab

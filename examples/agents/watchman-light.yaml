@@ -1,0 +1,50 @@
+apiVersion: core.infraagent.io/v1alpha1
+kind: InfraAgent
+metadata:
+  name: watchman-light
+  namespace: agents
+  labels:
+    team: platform
+    role: monitoring
+spec:
+  description: "Fast endpoint probe and critical alert check. Runs every 5 minutes."
+  emoji: "👁️"
+  schedule:
+    cron: "*/5 * * * *"
+    timezone: "UTC"
+  model:
+    tier: fast
+    tokenBudget: 8000
+    timeout: "60s"
+  skills:
+    - name: endpoint-monitoring
+      source: bundled
+  capabilities:
+    required:
+      - http
+      - kubectl.read
+    optional:
+      - kubectl.write.safe
+  guardrails:
+    autonomy: automate-safe
+    allowedActions:
+      - "http.get *"
+      - "kubectl.get *"
+      - "kubectl.describe *"
+      - "kubectl.rollout restart deployment/*"
+      - "kubectl.delete pod/*"
+    deniedActions:
+      - "kubectl.delete deployment/*"
+      - "kubectl.delete namespace/*"
+      - "kubectl.scale *"
+    escalation:
+      target: parent
+      timeout: "0s"
+      onTimeout: cancel
+    maxIterations: 5
+    maxRetries: 1
+  reporting:
+    onSuccess: silent
+    onFailure: escalate
+    onFinding: log
+  environmentRef: dev-lab

@@ -1,0 +1,53 @@
+apiVersion: core.infraagent.io/v1alpha1
+kind: InfraAgent
+metadata:
+  name: watchman-deep
+  namespace: agents
+  labels:
+    team: platform
+    role: monitoring
+spec:
+  description: "Deep infrastructure audit — certificate expiry, resource pressure, CNPG health, Velero backups. Runs hourly."
+  emoji: "🔍"
+  schedule:
+    cron: "0 * * * *"
+    timezone: "UTC"
+  model:
+    tier: standard
+    tokenBudget: 30000
+    timeout: "300s"
+  skills:
+    - name: deep-infrastructure-audit
+      source: bundled
+  capabilities:
+    required:
+      - kubectl.read
+      - http
+    optional:
+      - prometheus.query
+      - k8sgpt.analyze
+  guardrails:
+    autonomy: automate-safe
+    allowedActions:
+      - "kubectl.get *"
+      - "kubectl.describe *"
+      - "kubectl.logs *"
+      - "kubectl.top *"
+      - "http.get *"
+      - "kubectl.rollout restart deployment/*"
+    deniedActions:
+      - "kubectl.delete *"
+      - "kubectl.scale *"
+      - "kubectl.drain *"
+    escalation:
+      target: channel
+      channelName: oncall
+      timeout: "300s"
+      onTimeout: cancel
+    maxIterations: 15
+    maxRetries: 2
+  reporting:
+    onSuccess: log
+    onFailure: escalate
+    onFinding: notify
+  environmentRef: dev-lab

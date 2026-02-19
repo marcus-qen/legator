@@ -1,0 +1,9 @@
+apiVersion: core.infraagent.io/v1alpha1
+kind: AgentEnvironment
+metadata:
+  labels:
+    app.kubernetes.io/name: infraagent
+    app.kubernetes.io/managed-by: kustomize
+  name: agentenvironment-sample
+spec:
+  # TODO(user): Add fields here

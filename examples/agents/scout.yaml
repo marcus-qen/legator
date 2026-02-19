@@ -1,0 +1,43 @@
+apiVersion: core.infraagent.io/v1alpha1
+kind: InfraAgent
+metadata:
+  name: scout
+  namespace: agents
+  labels:
+    team: platform
+    role: qa
+spec:
+  description: "QA explorer — browses platform services as a real user, finds bugs and UX issues. Daily at 4 AM."
+  emoji: "🔭"
+  schedule:
+    cron: "0 4 * * *"
+    timezone: "UTC"
+  model:
+    tier: standard
+    tokenBudget: 40000
+    timeout: "1200s"
+  skills:
+    - name: qa-exploration
+      source: bundled
+  capabilities:
+    required:
+      - http
+      - kubectl.read
+  guardrails:
+    autonomy: observe
+    allowedActions:
+      - "http.get *"
+      - "http.post *"
+      - "kubectl.get *"
+      - "kubectl.describe *"
+      - "kubectl.logs *"
+    deniedActions:
+      - "kubectl.delete *"
+      - "kubectl.scale *"
+    maxIterations: 30
+    maxRetries: 1
+  reporting:
+    onSuccess: log
+    onFailure: escalate
+    onFinding: notify
+  environmentRef: dev-lab

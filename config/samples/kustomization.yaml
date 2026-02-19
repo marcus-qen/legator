@@ -1,0 +1,7 @@
+## Append samples of your project ##
+resources:
+- core_v1alpha1_infraagent.yaml
+- core_v1alpha1_agentenvironment.yaml
+- core_v1alpha1_agentrun.yaml
+- core_v1alpha1_modeltierconfig.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

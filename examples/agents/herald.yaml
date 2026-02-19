@@ -1,0 +1,40 @@
+apiVersion: core.infraagent.io/v1alpha1
+kind: InfraAgent
+metadata:
+  name: herald
+  namespace: agents
+  labels:
+    team: platform
+    role: reporting
+spec:
+  description: "Daily briefing for the operator — summarises overnight activity, agent results, and open issues at 8 AM."
+  emoji: "📯"
+  schedule:
+    cron: "0 8 * * *"
+    timezone: "UTC"
+  model:
+    tier: standard
+    tokenBudget: 15000
+    timeout: "120s"
+  skills:
+    - name: daily-digest
+      source: bundled
+  capabilities:
+    required:
+      - kubectl.read
+    optional:
+      - github.issues
+  guardrails:
+    autonomy: observe
+    allowedActions:
+      - "kubectl.get agentruns *"
+      - "kubectl.get infraagents *"
+      - "kubectl.get pods *"
+      - "github.issue.list *"
+    maxIterations: 5
+    maxRetries: 1
+  reporting:
+    onSuccess: notify
+    onFailure: escalate
+    onFinding: notify
+  environmentRef: dev-lab

@@ -1,0 +1,239 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: modeltierconfigs.core.infraagent.io
+spec:
+  group: core.infraagent.io
+  names:
+    kind: ModelTierConfig
+    listKind: ModelTierConfigList
+    plural: modeltierconfigs
+    singular: modeltierconfig
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.ready
+      name: Ready
+      type: boolean
+    - jsonPath: .status.tierCount
+      name: Tiers
+      priority: 1
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ModelTierConfig is the Schema for the modeltierconfigs API.
+          It is cluster-scoped and maps abstract model tiers (fast/standard/reasoning)
+          to specific LLM provider endpoints and authentication.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ModelTierConfigSpec defines the tier-to-model mappings.
+            properties:
+              defaultAuth:
+                description: |-
+                  defaultAuth is the default authentication config for all tiers
+                  unless overridden per tier.
+                properties:
+                  secretKey:
+                    default: api-key
+                    description: secretKey is the specific key within the Secret (for
+                      apiKey auth).
+                    type: string
+                  secretRef:
+                    description: |-
+                      secretRef references a Secret containing auth credentials.
+                      For apiKey: key "api-key". For oauth: keys "client-id", "client-secret", "token-url".
+                      For custom: keys used as HTTP headers.
+                    type: string
+                  type:
+                    description: type is the authentication method.
+                    enum:
+                    - apiKey
+                    - oauth
+                    - serviceAccount
+                    - none
+                    - custom
+                    type: string
+                required:
+                - type
+                type: object
+              tiers:
+                description: tiers maps abstract tier names to specific provider/model
+                  pairs.
+                items:
+                  description: TierMapping maps a model tier to a specific provider
+                    and model.
+                  properties:
+                    auth:
+                      description: |-
+                        auth configures authentication for this specific tier mapping.
+                        If unset, inherits from the top-level defaultAuth.
+                      properties:
+                        secretKey:
+                          default: api-key
+                          description: secretKey is the specific key within the Secret
+                            (for apiKey auth).
+                          type: string
+                        secretRef:
+                          description: |-
+                            secretRef references a Secret containing auth credentials.
+                            For apiKey: key "api-key". For oauth: keys "client-id", "client-secret", "token-url".
+                            For custom: keys used as HTTP headers.
+                          type: string
+                        type:
+                          description: type is the authentication method.
+                          enum:
+                          - apiKey
+                          - oauth
+                          - serviceAccount
+                          - none
+                          - custom
+                          type: string
+                      required:
+                      - type
+                      type: object
+                    costPerMillionInput:
+                      description: |-
+                        costPerMillionInput is the estimated cost per million input tokens (USD).
+                        Used for cost reporting in AgentRuns.
+                      type: string
+                    costPerMillionOutput:
+                      description: costPerMillionOutput is the estimated cost per
+                        million output tokens (USD).
+                      type: string
+                    endpoint:
+                      description: endpoint is the API base URL. Required for non-standard
+                        providers (Ollama, vLLM, etc.).
+                      type: string
+                    maxTokens:
+                      description: maxTokens is the max output tokens for this tier.
+                      format: int32
+                      type: integer
+                    model:
+                      description: model is the specific model ID (e.g. "claude-sonnet-4-20250514",
+                        "gpt-4o").
+                      type: string
+                    provider:
+                      description: provider is the LLM provider name (e.g. "anthropic",
+                        "openai", "ollama").
+                      type: string
+                    tier:
+                      description: tier is the abstract tier name (fast/standard/reasoning).
+                      enum:
+                      - fast
+                      - standard
+                      - reasoning
+                      type: string
+                  required:
+                  - model
+                  - provider
+                  - tier
+                  type: object
+                minItems: 1
+                type: array
+            required:
+            - tiers
+            type: object
+          status:
+            description: ModelTierConfigStatus defines the observed state.
+            properties:
+              conditions:
+                description: conditions represent the current state.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              ready:
+                description: ready indicates all configured tiers are reachable.
+                type: boolean
+              tierStatus:
+                additionalProperties:
+                  type: string
+                description: tierStatus reports per-tier health.
+                type: object
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

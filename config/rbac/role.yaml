@@ -1,0 +1,41 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - core.infraagent.io
+  resources:
+  - agentenvironments
+  - agentruns
+  - infraagents
+  - modeltierconfigs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - core.infraagent.io
+  resources:
+  - agentenvironments/finalizers
+  - agentruns/finalizers
+  - infraagents/finalizers
+  - modeltierconfigs/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - core.infraagent.io
+  resources:
+  - agentenvironments/status
+  - agentruns/status
+  - infraagents/status
+  - modeltierconfigs/status
+  verbs:
+  - get
+  - patch
+  - update

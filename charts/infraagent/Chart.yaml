@@ -1,0 +1,20 @@
+apiVersion: v2
+name: infraagent
+description: Kubernetes operator for autonomous infrastructure agents — lights-out cluster management with hard safety guarantees
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/marcus-qen/infraagent
+sources:
+  - https://github.com/marcus-qen/infraagent
+maintainers:
+  - name: marcus-qen
+    url: https://github.com/marcus-qen
+keywords:
+  - kubernetes
+  - operator
+  - autonomous
+  - infrastructure
+  - agents
+  - llm
+  - observability

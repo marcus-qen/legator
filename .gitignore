@@ -1,0 +1,31 @@
+# Binaries
+bin/
+testbin/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.tar
+
+# Coverage
+cover.out
+coverage.html
