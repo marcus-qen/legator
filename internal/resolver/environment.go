@@ -143,6 +143,12 @@ func (r *EnvironmentResolver) resolveSecret(ctx context.Context, secretName stri
 	return data, nil
 }
 
+// BuildDataIndexFromSpec creates a fast lookup index from DataResourcesSpec.
+// Exported for use by the engine package in tests.
+func BuildDataIndexFromSpec(dr *corev1alpha1.DataResourcesSpec) *DataResourceIndex {
+	return buildDataIndex(dr)
+}
+
 // buildDataIndex creates a fast lookup index from DataResourcesSpec.
 func buildDataIndex(dr *corev1alpha1.DataResourcesSpec) *DataResourceIndex {
 	idx := &DataResourceIndex{

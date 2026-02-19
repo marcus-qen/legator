@@ -29,12 +29,32 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	corev1alpha1 "github.com/marcus-qen/infraagent/api/v1alpha1"
+	_ "github.com/marcus-qen/infraagent/internal/assembler" // used transitively by runner
+	"github.com/marcus-qen/infraagent/internal/provider"
+	"github.com/marcus-qen/infraagent/internal/runner"
+	"github.com/marcus-qen/infraagent/internal/tools"
+)
+
+const (
+	// AnnotationRunNow triggers a manual agent run when set to "true".
+	AnnotationRunNow = "infraagent.io/run-now"
 )
 
 // InfraAgentReconciler reconciles an InfraAgent object.
 type InfraAgentReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+
+	// Runner executes agent runs. Nil in Phase 0 stubs.
+	Runner *runner.Runner
+
+	// ProviderFactory creates LLM providers for agent runs.
+	// Nil means manual triggers are disabled (Phase 0 mode).
+	ProviderFactory func(agent *corev1alpha1.InfraAgent, model *corev1alpha1.ModelTierConfig) (provider.Provider, error)
+
+	// ToolRegistryFactory builds the tool registry for an agent run.
+	// Nil means manual triggers are disabled.
+	ToolRegistryFactory func(agent *corev1alpha1.InfraAgent) (*tools.Registry, error)
 }
 
 // +kubebuilder:rbac:groups=core.infraagent.io,resources=infraagents,verbs=get;list;watch;create;update;patch;delete
@@ -65,6 +85,66 @@ func (r *InfraAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		"environmentRef", agent.Spec.EnvironmentRef,
 		"paused", agent.Spec.Paused,
 	)
+
+	// Step 2.25: Check for manual trigger annotation
+	if annotations := agent.GetAnnotations(); annotations != nil {
+		if annotations[AnnotationRunNow] == "true" {
+			log.Info("Manual run triggered via annotation", "agent", agent.Name)
+
+			// Remove the annotation immediately to prevent re-trigger
+			delete(annotations, AnnotationRunNow)
+			agent.SetAnnotations(annotations)
+			if err := r.Update(ctx, agent); err != nil {
+				log.Error(err, "Failed to remove run-now annotation")
+				return ctrl.Result{}, err
+			}
+
+			// Execute the run if runner is configured
+			if r.Runner != nil {
+				go func() {
+					runCtx := context.Background()
+					runLog := log.WithValues("trigger", "manual", "agent", agent.Name)
+
+					cfg := runner.RunConfig{
+						Trigger: corev1alpha1.RunTriggerManual,
+					}
+
+					// Create provider if factory is available
+					if r.ProviderFactory != nil {
+						p, err := r.ProviderFactory(agent, nil)
+						if err != nil {
+							runLog.Error(err, "Failed to create LLM provider")
+							return
+						}
+						cfg.Provider = p
+					}
+
+					// Create tool registry if factory is available
+					if r.ToolRegistryFactory != nil {
+						reg, err := r.ToolRegistryFactory(agent)
+						if err != nil {
+							runLog.Error(err, "Failed to create tool registry")
+							return
+						}
+						cfg.ToolRegistry = reg
+					}
+
+					agentRun, err := r.Runner.Execute(runCtx, agent, cfg)
+					if err != nil {
+						runLog.Error(err, "Agent run failed")
+						return
+					}
+					runLog.Info("Agent run completed",
+						"run", agentRun.Name,
+						"phase", agentRun.Status.Phase,
+					)
+				}()
+			} else {
+				log.Info("Runner not configured — manual trigger acknowledged but no execution",
+					"agent", agent.Name)
+			}
+		}
+	}
 
 	// Determine phase
 	phase := corev1alpha1.InfraAgentPhaseReady
