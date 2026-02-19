@@ -141,11 +141,37 @@ tiers:
 
 Supports: Anthropic, OpenAI, Ollama, any OpenAI-compatible endpoint. Auth: API key, OAuth, ServiceAccount, custom headers.
 
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| [Getting Started](docs/getting-started.md) | Install → first agent in 10 minutes |
+| [CRD Reference](docs/crd-reference.md) | Every field in every CRD |
+| [Writing Skills](docs/skills-authoring.md) | Create custom agent expertise |
+| [Environment Binding](docs/environment-binding.md) | Configure for your cluster |
+| [Data Protection](docs/data-protection.md) | How data resources are protected |
+| [Guardrails Deep-Dive](docs/guardrails.md) | The complete safety model |
+| [Model Tier Config](docs/model-tier-config.md) | Provider and model setup |
+| [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
+| [Architecture Decisions](docs/adr/) | Why we made the choices we did |
+| [Contributing](CONTRIBUTING.md) | Development setup and PR process |
+
+## Examples
+
+| Example | Description |
+|---------|-------------|
+| [hello-world](examples/agents/hello-world.yaml) | Simplest possible agent |
+| [watchman-light](examples/agents/watchman-light.yaml) | Endpoint monitoring (5-min cron) |
+| [multi-cluster](examples/agents/multi-cluster-watchman.yaml) | Monitor a remote cluster |
+| [All 10 agents](examples/agents/) | Full ops team (monitoring, deploy, triage, QA) |
+
 ## Status
 
-**Phase 0: Project Scaffolding** — CRDs defined, controller skeleton running, Helm chart ready.
+**v0.1.0-dev** — All core phases complete (0–8). Documentation and distribution in progress.
 
-See [PROJECT-PLAN.md](https://github.com/marcus-qen/infraagent/blob/main/docs/PROJECT-PLAN.md) for the full 10-phase roadmap.
+Implemented: CRDs, assembler, runner, guardrail engine, Action Sheet enforcement, data protection, scheduler (cron/interval/webhook), reporting (Slack/Telegram/webhook), escalation, Prometheus metrics, OTel tracing, MCP integration (k8sgpt), skill distribution (Git/ConfigMap), multi-cluster, rate limiting, credential sanitization, graceful shutdown, AgentRun retention.
+
+253 tests. Binary builds clean. See the [project plan](docs/PROJECT-PLAN.md) for the full roadmap.
 
 ## License
 

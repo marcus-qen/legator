@@ -1,0 +1,67 @@
+# Multi-cluster example: monitor a remote production cluster
+# from the management cluster where InfraAgent is installed.
+apiVersion: core.infraagent.io/v1alpha1
+kind: InfraAgent
+metadata:
+  name: prod-watchman
+  namespace: agents
+spec:
+  description: "Monitor production cluster from management cluster"
+  emoji: "🔭"
+  schedule:
+    cron: "*/5 * * * *"
+  model:
+    tier: fast
+    tokenBudget: 8000
+    timeout: "60s"
+  skills:
+    - name: endpoint-monitoring
+      source: bundled
+  capabilities:
+    required:
+      - http
+      - kubectl.read
+  guardrails:
+    autonomy: observe
+    maxIterations: 5
+  reporting:
+    onSuccess: silent
+    onFailure: escalate
+    onFinding: notify
+  # Points to an environment with connection.kind: kubeconfig
+  environmentRef: production
+---
+apiVersion: core.infraagent.io/v1alpha1
+kind: AgentEnvironment
+metadata:
+  name: production
+  namespace: agents
+spec:
+  connection:
+    kind: kubeconfig
+    kubeconfig:
+      secretRef: prod-kubeconfig
+      key: kubeconfig
+  endpoints:
+    app:
+      url: https://app.production.example.com
+      healthPath: /health
+    grafana:
+      url: https://grafana.production.example.com
+      healthPath: /api/health
+  namespaces:
+    apps:
+      - default
+      - production
+    system:
+      - kube-system
+  channels:
+    oncall:
+      type: slack
+      target: https://hooks.slack.com/services/XXX/YYY/ZZZ
+  dataResources:
+    backupMaxAge: "12h"
+    databases:
+      - kind: cnpg.io/Cluster
+        namespace: production
+        name: app-db
