@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	corev1alpha1 "github.com/marcus-qen/infraagent/api/v1alpha1"
+	"github.com/marcus-qen/infraagent/internal/metrics"
 	"github.com/marcus-qen/infraagent/internal/runner"
 )
 
@@ -195,6 +196,14 @@ func (s *Scheduler) evaluateAgent(ctx context.Context, agent *corev1alpha1.Infra
 		// Step 3.9: Update next run time on status
 		s.updateNextRunTime(ctx, agent, now)
 		return
+	}
+
+	// Metrics: record schedule lag (how late the trigger is)
+	if agent.Status.NextRunTime != nil {
+		lag := now.Sub(agent.Status.NextRunTime.Time)
+		if lag > 0 {
+			metrics.RecordScheduleLag(agent.Name, lag)
+		}
 	}
 
 	// Trigger the run

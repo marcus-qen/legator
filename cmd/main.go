@@ -17,9 +17,11 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -37,6 +39,8 @@ import (
 
 	corev1alpha1 "github.com/marcus-qen/infraagent/api/v1alpha1"
 	"github.com/marcus-qen/infraagent/internal/controller"
+	_ "github.com/marcus-qen/infraagent/internal/metrics" // Register Prometheus metrics
+	"github.com/marcus-qen/infraagent/internal/telemetry"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -61,6 +65,7 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
+	var otelEndpoint string
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -79,6 +84,9 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+	flag.StringVar(&otelEndpoint, "otel-endpoint", "",
+		"OTLP gRPC endpoint for tracing (e.g. tempo:4317). Empty disables tracing. "+
+			"Also configurable via OTEL_EXPORTER_OTLP_ENDPOINT env var.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -86,6 +94,28 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	// Allow env var override for OTLP endpoint
+	if otelEndpoint == "" {
+		otelEndpoint = os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	}
+
+	// Initialise OpenTelemetry tracing
+	shutdownTracer, err := telemetry.InitTraceProvider(context.Background(), otelEndpoint, "0.1.0")
+	if err != nil {
+		setupLog.Error(err, "Failed to initialise OTel tracing — continuing without traces")
+	} else {
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := shutdownTracer(ctx); err != nil {
+				setupLog.Error(err, "Failed to shutdown OTel tracer")
+			}
+		}()
+		if otelEndpoint != "" {
+			setupLog.Info("OTel tracing enabled", "endpoint", otelEndpoint)
+		}
+	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will

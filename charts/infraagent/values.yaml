@@ -42,6 +42,23 @@ metrics:
 healthProbe:
   port: 8081
 
+# OpenTelemetry tracing
+otel:
+  # Enable OTLP trace export
+  enabled: false
+  # OTLP gRPC endpoint (e.g. "tempo.monitoring:4317")
+  endpoint: ""
+
+# Grafana dashboard
+grafana:
+  dashboards:
+    enabled: false
+    # Namespace where the dashboard ConfigMap is created
+    namespace: ""
+    # Labels for Grafana sidecar discovery (e.g. grafana_dashboard: "1")
+    labels:
+      grafana_dashboard: "1"
+
 # Logging
 logLevel: info
 

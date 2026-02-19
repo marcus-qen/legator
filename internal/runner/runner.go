@@ -30,13 +30,16 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"go.opentelemetry.io/otel/codes"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	corev1alpha1 "github.com/marcus-qen/infraagent/api/v1alpha1"
 	"github.com/marcus-qen/infraagent/internal/assembler"
 	"github.com/marcus-qen/infraagent/internal/engine"
+	"github.com/marcus-qen/infraagent/internal/metrics"
 	"github.com/marcus-qen/infraagent/internal/provider"
+	"github.com/marcus-qen/infraagent/internal/telemetry"
 	"github.com/marcus-qen/infraagent/internal/tools"
 )
 
@@ -74,6 +77,14 @@ type RunConfig struct {
 func (r *Runner) Execute(ctx context.Context, agent *corev1alpha1.InfraAgent, cfg RunConfig) (*corev1alpha1.AgentRun, error) {
 	startTime := time.Now()
 
+	// Telemetry: parent span for the entire run
+	ctx, runSpan := telemetry.StartRunSpan(ctx, agent.Name, string(cfg.Trigger))
+	defer runSpan.End()
+
+	// Metrics: track active runs
+	metrics.ActiveRuns.Inc()
+	defer metrics.ActiveRuns.Dec()
+
 	// Parse wall-clock timeout
 	timeout, err := time.ParseDuration(agent.Spec.Model.Timeout)
 	if err != nil {
@@ -83,11 +94,16 @@ func (r *Runner) Execute(ctx context.Context, agent *corev1alpha1.InfraAgent, cf
 	defer cancel()
 
 	// Step 1: Assemble the agent
-	assembled, err := r.assembler.Assemble(ctx, agent)
+	asmCtx, asmSpan := telemetry.StartAssemblySpan(ctx, agent.Name)
+	assembled, err := r.assembler.Assemble(asmCtx, agent)
 	if err != nil {
+		asmSpan.RecordError(err)
+		asmSpan.SetStatus(codes.Error, "assembly failed")
+		asmSpan.End()
 		run := r.createFailedRun(agent, cfg.Trigger, startTime, fmt.Sprintf("assembly failed: %v", err))
 		return run, err
 	}
+	asmSpan.End()
 
 	// Step 2: Create AgentRun CR
 	run := r.createAgentRun(agent, assembled, cfg.Trigger)
@@ -114,7 +130,7 @@ func (r *Runner) Execute(ctx context.Context, agent *corev1alpha1.InfraAgent, cf
 	result := r.conversationLoop(ctx, assembled, eng, cfg, agent)
 
 	// Step 6: Finalize the AgentRun
-	r.finalizeRun(ctx, run, result, startTime, agent)
+	r.finalizeRun(ctx, run, result, startTime, agent, assembled)
 
 	return run, nil
 }
@@ -174,8 +190,9 @@ func (r *Runner) conversationLoop(
 			break
 		}
 
-		// Call LLM
-		resp, err := cfg.Provider.Complete(ctx, &provider.CompletionRequest{
+		// Call LLM (with tracing)
+		llmCtx, llmSpan := telemetry.StartLLMCallSpan(ctx, assembled.Model.Model, assembled.Model.Provider, int(iteration))
+		resp, err := cfg.Provider.Complete(llmCtx, &provider.CompletionRequest{
 			SystemPrompt: assembled.Prompt,
 			Messages:     messages,
 			Tools:        cfg.ToolRegistry.Definitions(),
@@ -183,6 +200,8 @@ func (r *Runner) conversationLoop(
 			MaxTokens:    int32(tokenBudget - result.totalIn - result.totalOut),
 		})
 		if err != nil {
+			llmSpan.RecordError(err)
+			llmSpan.End()
 			if ctx.Err() != nil {
 				result.phase = corev1alpha1.RunPhaseFailed
 				result.report = "wall-clock timeout exceeded"
@@ -193,6 +212,7 @@ func (r *Runner) conversationLoop(
 			result.err = err
 			break
 		}
+		telemetry.EndLLMCallSpan(llmSpan, resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.HasToolCalls())
 
 		// Track usage
 		result.totalIn += resp.Usage.InputTokens
@@ -230,6 +250,9 @@ func (r *Runner) conversationLoop(
 			// Extract target for engine evaluation
 			target := tools.ExtractTarget(tc.Name, tc.Args)
 
+			// Telemetry: span per tool call
+			_, toolSpan := telemetry.StartToolCallSpan(ctx, tc.Name, target, "")
+
 			// Run through the engine (all safety checks)
 			decision := eng.Evaluate(tc.Name, target)
 			result.guardrails.ChecksPerformed++
@@ -255,6 +278,9 @@ func (r *Runner) conversationLoop(
 				record.Result = decision.BlockReason
 				result.guardrails.ActionsBlocked++
 
+				// Metrics: record the block
+				metrics.RecordGuardrailBlock(agent.Name, tc.Name)
+
 				r.log.Info("action blocked",
 					"agent", agent.Name,
 					"tool", tc.Name,
@@ -276,7 +302,10 @@ func (r *Runner) conversationLoop(
 						Timestamp: now,
 					}
 					result.guardrails.EscalationsTriggered++
+					metrics.RecordEscalation(agent.Name, decision.BlockReason)
 				}
+
+				telemetry.EndToolCallSpan(toolSpan, string(record.Status), true, decision.BlockReason)
 			} else {
 				// Execute the tool
 				toolResult, err := cfg.ToolRegistry.Execute(ctx, tc.Name, tc.Args)
@@ -289,6 +318,8 @@ func (r *Runner) conversationLoop(
 						Content:    fmt.Sprintf("ERROR: %v", err),
 						IsError:    true,
 					})
+
+					telemetry.EndToolCallSpan(toolSpan, string(corev1alpha1.ActionStatusFailed), false, "")
 				} else {
 					record.Status = corev1alpha1.ActionStatusExecuted
 					// Truncate result for audit trail (keep full result for LLM)
@@ -307,6 +338,8 @@ func (r *Runner) conversationLoop(
 					if decision.MatchedAction != nil {
 						eng.RecordExecution(decision.MatchedAction.ID, target)
 					}
+
+					telemetry.EndToolCallSpan(toolSpan, string(corev1alpha1.ActionStatusExecuted), false, "")
 				}
 			}
 
@@ -421,6 +454,7 @@ func (r *Runner) finalizeRun(
 	result *conversationResult,
 	startTime time.Time,
 	agent *corev1alpha1.InfraAgent,
+	assembled *assembler.AssembledAgent,
 ) {
 	now := metav1.Now()
 	wallClock := time.Since(startTime).Milliseconds()
@@ -461,6 +495,26 @@ func (r *Runner) finalizeRun(
 			"agentRun", run.Name,
 			"phase", result.phase,
 		)
+	}
+
+	// Metrics: record run completion
+	modelUsed := ""
+	if assembled != nil {
+		modelUsed = assembled.Model.FullModelString
+	}
+	metrics.RecordRunComplete(
+		agent.Name,
+		string(result.phase),
+		modelUsed,
+		time.Duration(wallClock)*time.Millisecond,
+		result.totalIn,
+		result.totalOut,
+		result.iterations,
+	)
+
+	// Metrics: record findings
+	for _, f := range result.findings {
+		metrics.RecordFinding(agent.Name, string(f.Severity))
 	}
 
 	r.log.Info("agent run completed",

@@ -1,0 +1,15 @@
+{{- if .Values.grafana.dashboards.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "infraagent.fullname" . }}-dashboard
+  namespace: {{ .Values.grafana.dashboards.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "infraagent.labels" . | nindent 4 }}
+    {{- range $key, $val := .Values.grafana.dashboards.labels }}
+    {{ $key }}: {{ $val | quote }}
+    {{- end }}
+data:
+  infraagent-overview.json: |-
+    {{- .Files.Get "dashboards/infraagent-overview.json" | nindent 4 }}
+{{- end }}
