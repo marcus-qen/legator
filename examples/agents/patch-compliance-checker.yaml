@@ -1,0 +1,48 @@
+apiVersion: legator.io/v1alpha1
+kind: LegatorAgent
+metadata:
+  name: patch-compliance-checker
+  labels:
+    team: security
+    role: compliance
+    domain: infrastructure
+spec:
+  description: >
+    SSH into server fleet, check OS version, kernel version, package update
+    status, and flag non-compliant servers. Produces a patch compliance report
+    with severity ratings.
+  emoji: "🛡️"
+
+  schedule:
+    cron: "0 6 * * *"  # Daily 6 AM
+    timezone: "UTC"
+
+  model:
+    tier: fast
+    tokenBudget: 16000
+    timeout: "180s"
+
+  environmentRef: server-fleet
+
+  guardrails:
+    autonomy: observe
+    maxIterations: 10
+    maxRetries: 1
+    allowedActions:
+      - "ssh.exec read *"
+    deniedActions:
+      - "ssh.exec service-mutation *"
+      - "ssh.exec destructive-mutation *"
+    escalation:
+      target: parent
+      onTimeout: cancel
+      timeout: "0s"
+
+  skills:
+    - name: patch-compliance
+      source: "configmap://skill-patch-compliance"
+
+  reporting:
+    onSuccess: log
+    onFinding: log
+    onFailure: escalate

@@ -1,0 +1,51 @@
+apiVersion: legator.io/v1alpha1
+kind: LegatorEnvironment
+metadata:
+  name: server-fleet
+  labels:
+    tier: production
+spec:
+  connection:
+    kind: ssh
+    # SSH connections are defined per-host in the credentials section.
+    # The agent uses ssh.exec tool with host identifiers that map to these.
+
+  credentials:
+    # SSH credentials reference Kubernetes Secrets containing keys or passwords.
+    # Credentials are injected by the tool layer — never visible to the LLM.
+    web-server-1:
+      type: ssh-key
+      secretRef: ssh-web-server-1
+      # Secret must contain: host, user, private-key
+      # Optional: allow-sudo (true/false), allow-root (true/false)
+    web-server-2:
+      type: ssh-key
+      secretRef: ssh-web-server-2
+    db-server-1:
+      type: ssh-key
+      secretRef: ssh-db-server-1
+    bastion:
+      type: ssh-key
+      secretRef: ssh-bastion
+      # Bastion hosts can be used as jump hosts for accessing internal servers.
+
+  # Data resources that agents must protect
+  dataResources:
+    backupMaxAge: 24h
+    databases:
+      - kind: mysql
+        name: production-db
+        host: db-server-1
+    persistentStorage:
+      - kind: filesystem
+        name: /var/lib/mysql
+        host: db-server-1
+      - kind: filesystem
+        name: /var/www/html
+        host: web-server-1
+
+  # Notification channels for findings
+  channels:
+    slack-ops:
+      type: webhook
+      target: "https://hooks.slack.com/services/T.../B.../..."
