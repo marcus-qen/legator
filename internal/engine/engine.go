@@ -33,6 +33,7 @@ import (
 	corev1alpha1 "github.com/marcus-qen/legator/api/v1alpha1"
 	"github.com/marcus-qen/legator/internal/resolver"
 	"github.com/marcus-qen/legator/internal/skill"
+	"github.com/marcus-qen/legator/internal/tools"
 )
 
 // Decision is the result of the engine evaluating a tool call.
@@ -58,11 +59,13 @@ type Decision struct {
 
 // Engine is the Action Sheet enforcement engine.
 type Engine struct {
-	guardrails     *corev1alpha1.GuardrailsSpec
-	actionRegistry map[string]*skill.Action
-	dataIndex      *resolver.DataResourceIndex
-	cooldowns      *CooldownTracker
-	agentName      string
+	guardrails       *corev1alpha1.GuardrailsSpec
+	actionRegistry   map[string]*skill.Action
+	dataIndex        *resolver.DataResourceIndex
+	cooldowns        *CooldownTracker
+	protectionEngine *tools.ProtectionEngine
+	toolRegistry     *tools.Registry
+	agentName        string
 }
 
 // NewEngine creates an engine for a specific agent run.
@@ -79,6 +82,18 @@ func NewEngine(
 		dataIndex:      dataIndex,
 		cooldowns:      NewCooldownTracker(),
 	}
+}
+
+// WithProtectionEngine adds a configurable protection engine for domain-agnostic guardrails.
+func (e *Engine) WithProtectionEngine(pe *tools.ProtectionEngine) *Engine {
+	e.protectionEngine = pe
+	return e
+}
+
+// WithToolRegistry adds a tool registry for ClassifiableTool-based action classification.
+func (e *Engine) WithToolRegistry(reg *tools.Registry) *Engine {
+	e.toolRegistry = reg
+	return e
 }
 
 // Evaluate runs all pre-flight checks for a tool call.
@@ -112,6 +127,43 @@ func (e *Engine) Evaluate(toolName string, target string) *Decision {
 		return d
 	}
 	d.PreFlight.DataProtection = "pass"
+
+	// Step 3b: Check configurable protection classes (extends hardcoded rules)
+	if e.protectionEngine != nil {
+		domain := inferDomain(toolName)
+		result := e.protectionEngine.Evaluate(domain, toolName+" "+target)
+		if !result.Allowed {
+			reason := fmt.Sprintf("PROTECTION CLASS %q: %s", result.MatchedClass, result.MatchedRule.Description)
+			d.Allowed = false
+			d.Status = corev1alpha1.ActionStatusBlocked
+			d.PreFlight.DataProtection = "BLOCKED (protection class)"
+			d.PreFlight.Reason = reason
+			d.BlockReason = reason
+			return d
+		}
+	}
+
+	// Step 3c: Use ClassifiableTool for fine-grained classification when available
+	if e.toolRegistry != nil {
+		if tool, found := e.toolRegistry.Get(toolName); found {
+			if ct, ok := tool.(tools.ClassifiableTool); ok {
+				// Build args map from target (tool-specific parsing)
+				args := map[string]interface{}{"command": target, "host": target}
+				classification := ct.ClassifyAction(args)
+				if classification.Blocked {
+					d.Allowed = false
+					d.Status = corev1alpha1.ActionStatusBlocked
+					d.Tier = corev1alpha1.ActionTierDataMutation
+					d.PreFlight.DataProtection = "BLOCKED (tool classification)"
+					d.PreFlight.Reason = classification.BlockReason
+					d.BlockReason = classification.BlockReason
+					return d
+				}
+				// Use the tool's own classification if it returned a concrete tier
+				d.Tier = mapToolTierToAPITier(classification.Tier)
+			}
+		}
+	}
 
 	// Step 4: Check data resource impact
 	if e.dataIndex != nil {
@@ -421,6 +473,48 @@ func (t *CooldownTracker) Check(agent, actionID, target string, cooldownDuration
 		return false
 	}
 	return time.Since(last) < cooldownDuration
+}
+
+// inferDomain extracts the tool domain from a tool name.
+// "kubectl.get" → "kubernetes", "ssh.exec" → "ssh", "http.get" → "http"
+func inferDomain(toolName string) string {
+	lower := strings.ToLower(toolName)
+	if strings.HasPrefix(lower, "kubectl") {
+		return "kubernetes"
+	}
+	if strings.HasPrefix(lower, "ssh") {
+		return "ssh"
+	}
+	if strings.HasPrefix(lower, "http") {
+		return "http"
+	}
+	if strings.HasPrefix(lower, "sql") {
+		return "sql"
+	}
+	if strings.HasPrefix(lower, "mcp.") {
+		// MCP tools: mcp.<server>.<tool> — use server as domain
+		parts := strings.SplitN(lower, ".", 3)
+		if len(parts) >= 2 {
+			return parts[1]
+		}
+	}
+	return "unknown"
+}
+
+// mapToolTierToAPITier converts internal tool tiers to the API tier type.
+func mapToolTierToAPITier(tier tools.ActionTier) corev1alpha1.ActionTier {
+	switch tier {
+	case tools.TierRead:
+		return corev1alpha1.ActionTierRead
+	case tools.TierServiceMutation:
+		return corev1alpha1.ActionTierServiceMutation
+	case tools.TierDestructiveMutation:
+		return corev1alpha1.ActionTierDestructiveMutation
+	case tools.TierDataMutation:
+		return corev1alpha1.ActionTierDataMutation
+	default:
+		return corev1alpha1.ActionTierServiceMutation
+	}
 }
 
 func (e *Engine) checkCooldown(actionID, target, cooldownStr string) (blocked bool, reason string) {

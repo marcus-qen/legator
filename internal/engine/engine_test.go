@@ -11,12 +11,14 @@ You may obtain a copy of the License at
 package engine
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	corev1alpha1 "github.com/marcus-qen/legator/api/v1alpha1"
 	"github.com/marcus-qen/legator/internal/resolver"
 	"github.com/marcus-qen/legator/internal/skill"
+	"github.com/marcus-qen/legator/internal/tools"
 )
 
 // --- Matcher tests (Step 2.6) ---
@@ -552,5 +554,109 @@ func TestAutonomyRank(t *testing.T) {
 	}
 	if autonomyRank(corev1alpha1.AutonomySafe) >= autonomyRank(corev1alpha1.AutonomyDestructive) {
 		t.Error("safe should rank below destructive")
+	}
+}
+
+// --- Protection Engine Integration tests ---
+
+func TestEngine_ProtectionEngine_BlocksSSH(t *testing.T) {
+	pe := tools.NewProtectionEngine()
+
+	eng := NewEngine("test-agent", &corev1alpha1.GuardrailsSpec{
+		Autonomy:      corev1alpha1.AutonomyDestructive,
+		MaxIterations: 10,
+	}, map[string]*skill.Action{
+		"ssh-exec": {
+			ID:   "ssh-exec",
+			Tool: "ssh.exec",
+			Tier: "read",
+		},
+	}, nil)
+	eng.WithProtectionEngine(pe)
+
+	// SSH to /etc/shadow should be blocked by protection engine
+	d := eng.Evaluate("ssh.exec", "cat /etc/shadow")
+	if d.Allowed {
+		t.Fatal("SSH access to /etc/shadow should be blocked by protection engine")
+	}
+	if !strings.Contains(d.BlockReason, "ssh-safety") {
+		t.Errorf("BlockReason should mention ssh-safety class, got: %s", d.BlockReason)
+	}
+}
+
+func TestEngine_ProtectionEngine_AllowsSafeSSH(t *testing.T) {
+	pe := tools.NewProtectionEngine()
+
+	eng := NewEngine("test-agent", &corev1alpha1.GuardrailsSpec{
+		Autonomy:      corev1alpha1.AutonomyObserve,
+		MaxIterations: 10,
+	}, map[string]*skill.Action{
+		"ssh-exec": {
+			ID:   "ssh-exec",
+			Tool: "ssh.exec",
+			Tier: "read",
+		},
+	}, nil)
+	eng.WithProtectionEngine(pe)
+
+	// Reading uptime should be fine
+	d := eng.Evaluate("ssh.exec", "uptime")
+	if !d.Allowed {
+		t.Errorf("SSH uptime should be allowed, got blocked: %s", d.BlockReason)
+	}
+}
+
+func TestEngine_ProtectionEngine_CustomClass(t *testing.T) {
+	// Use a custom rule that the hardcoded checks don't cover
+	custom := tools.ProtectionClass{
+		Name:        "production-api",
+		Description: "Protect production API endpoints",
+		Rules: []tools.ProtectionRule{
+			{Domain: "http", Pattern: "*production.internal*", Action: tools.ProtectionBlock, Description: "No production API calls"},
+		},
+	}
+	pe := tools.NewProtectionEngine(custom)
+
+	eng := NewEngine("test-agent", &corev1alpha1.GuardrailsSpec{
+		Autonomy:      corev1alpha1.AutonomyDestructive,
+		MaxIterations: 10,
+	}, map[string]*skill.Action{
+		"http-get": {
+			ID:   "http-get",
+			Tool: "http.get",
+			Tier: "read",
+		},
+	}, nil)
+	eng.WithProtectionEngine(pe)
+
+	d := eng.Evaluate("http.get", "https://production.internal/api/users")
+	if d.Allowed {
+		t.Fatal("Production API access should be blocked by custom protection class")
+	}
+	if !strings.Contains(d.BlockReason, "production-api") {
+		t.Errorf("BlockReason should mention production-api class, got: %s", d.BlockReason)
+	}
+}
+
+func TestInferDomain(t *testing.T) {
+	tests := []struct {
+		toolName string
+		want     string
+	}{
+		{"kubectl.get", "kubernetes"},
+		{"kubectl.delete", "kubernetes"},
+		{"ssh.exec", "ssh"},
+		{"http.get", "http"},
+		{"http.post", "http"},
+		{"sql.execute", "sql"},
+		{"mcp.k8sgpt.analyze", "k8sgpt"},
+		{"unknown-tool", "unknown"},
+	}
+
+	for _, tt := range tests {
+		got := inferDomain(tt.toolName)
+		if got != tt.want {
+			t.Errorf("inferDomain(%q) = %q, want %q", tt.toolName, got, tt.want)
+		}
 	}
 }
