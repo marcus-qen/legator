@@ -80,6 +80,10 @@ type RunConfig struct {
 	// Use this to revoke dynamic credentials, close connections, etc.
 	// Errors are logged but don't affect the run result.
 	Cleanup func(ctx context.Context) []error
+
+	// NotifyFunc is called after run finalization to deliver notifications.
+	// If nil, no notifications are sent.
+	NotifyFunc func(ctx context.Context, agent *corev1alpha1.LegatorAgent, run *corev1alpha1.LegatorRun)
 }
 
 // Execute runs a full agent lifecycle.
@@ -154,6 +158,13 @@ func (r *Runner) Execute(ctx context.Context, agent *corev1alpha1.LegatorAgent, 
 				r.log.Error(err, "credential cleanup error", "agent", agent.Name)
 			}
 		}
+	}
+
+	// Step 8: Deliver notifications (non-blocking, errors logged)
+	if cfg.NotifyFunc != nil {
+		notifyCtx, notifyCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer notifyCancel()
+		cfg.NotifyFunc(notifyCtx, agent, run)
 	}
 
 	return run, nil

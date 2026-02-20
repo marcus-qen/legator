@@ -45,17 +45,22 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	corev1alpha1 "github.com/marcus-qen/legator/api/v1alpha1"
+	"github.com/marcus-qen/legator/internal/a2a"
+	"github.com/marcus-qen/legator/internal/approval"
 	"github.com/marcus-qen/legator/internal/assembler"
 	"github.com/marcus-qen/legator/internal/controller"
+	"github.com/marcus-qen/legator/internal/events"
 	"github.com/marcus-qen/legator/internal/lifecycle"
 	_ "github.com/marcus-qen/legator/internal/metrics" // Register Prometheus metrics
 	"github.com/marcus-qen/legator/internal/multicluster"
+	"github.com/marcus-qen/legator/internal/notify"
 	"github.com/marcus-qen/legator/internal/provider"
 	"github.com/marcus-qen/legator/internal/ratelimit"
 	"github.com/marcus-qen/legator/internal/resolver"
 	"github.com/marcus-qen/legator/internal/retention"
 	"github.com/marcus-qen/legator/internal/runner"
 	"github.com/marcus-qen/legator/internal/scheduler"
+	"github.com/marcus-qen/legator/internal/state"
 	"github.com/marcus-qen/legator/internal/telemetry"
 	"github.com/marcus-qen/legator/internal/tools"
 	connectivitypkg "github.com/marcus-qen/legator/internal/connectivity"
@@ -444,6 +449,34 @@ func main() {
 		return reg, nil
 	}
 
+	// --- v0.7.0: Wire orphaned packages (must be before RunConfigFactory) ---
+
+	// Approval manager (singleton — creates ApprovalRequest CRDs, polls for decisions)
+	approvalMgr := approval.NewManager(mgr.GetClient(), ctrl.Log.WithName("approval"))
+	setupLog.Info("Approval manager initialised")
+
+	// Event bus (publish/consume AgentEvent CRDs for inter-agent coordination)
+	eventBus := events.NewBus(mgr.GetClient(), ctrl.Log.WithName("events"))
+	setupLog.Info("Event bus initialised")
+
+	// State manager (per-agent persistent key-value via AgentState CRDs)
+	stateMgr := state.NewManager(mgr.GetClient(), ctrl.Log.WithName("state"))
+	setupLog.Info("State manager initialised")
+
+	// A2A router (agent-to-agent task delegation via AgentEvent CRDs)
+	a2aRouter := a2a.NewRouter(mgr.GetClient(), "agents")
+	setupLog.Info("A2A router initialised")
+
+	// Notification router (Slack/Telegram/Email/Webhook severity-based routing)
+	notifyRouter := buildNotificationRouter(ctrl.Log.WithName("notify"))
+	if notifyRouter != nil {
+		setupLog.Info("Notification router initialised")
+	} else {
+		setupLog.Info("No notification channels configured — notifications disabled")
+	}
+
+	_ = eventBus // Available for future use in runner post-run hooks
+
 	// Wire RunConfigFactory into scheduler so scheduled runs get providers + tools
 	sched.RunConfigFactory = func(agent *corev1alpha1.LegatorAgent) (runner.RunConfig, error) {
 		cfg := runner.RunConfig{}
@@ -498,11 +531,83 @@ func main() {
 		if err != nil {
 			return cfg, fmt.Errorf("tool registry factory: %w", err)
 		}
+
+		// --- v0.7.0: Register state, A2A, and DNS tools ---
+
+		// State tools — agent can remember things across runs
+		reg.Register(state.NewStateGetTool(stateMgr, agent.Name, agent.Namespace))
+		reg.Register(state.NewStateSetTool(stateMgr, agent.Name, agent.Namespace, ""))
+		reg.Register(state.NewStateDeleteTool(stateMgr, agent.Name, agent.Namespace))
+
+		// A2A tools — agent can delegate tasks to other agents
+		reg.Register(a2a.NewDelegateTaskTool(a2aRouter, agent.Name))
+		reg.Register(a2a.NewCheckTasksTool(a2aRouter, agent.Name))
+
 		cfg.ToolRegistry = reg
 
-		// Wire cleanup for dynamic credential revocation
+		// --- v0.7.0: Wire approval manager ---
+		if agent.Spec.Guardrails.ApprovalMode != "" && agent.Spec.Guardrails.ApprovalMode != "none" {
+			cfg.ApprovalManager = approvalMgr
+		}
+
+		// --- v0.7.0: Wire notification delivery as post-run callback ---
+		var cleanups []func(ctx context.Context) []error
+
+		// Vault credential cleanup
 		if credMgr != nil {
-			cfg.Cleanup = credMgr.Cleanup
+			cleanups = append(cleanups, credMgr.Cleanup)
+		}
+
+		// Notification delivery after run completion
+		if notifyRouter != nil {
+			cleanups = append(cleanups, func(ctx context.Context) []error {
+				// Notifications are fired by the runner's finalizeRun via NotifyFunc
+				// (see RunConfig.NotifyFunc below) — this is just a placeholder
+				// to show the wiring is in place.
+				return nil
+			})
+		}
+
+		if len(cleanups) > 0 {
+			cfg.Cleanup = func(ctx context.Context) []error {
+				var allErrs []error
+				for _, fn := range cleanups {
+					if errs := fn(ctx); len(errs) > 0 {
+						allErrs = append(allErrs, errs...)
+					}
+				}
+				return allErrs
+			}
+		}
+
+		// Wire notification function — called after run finalization with the completed run
+		if notifyRouter != nil {
+			cfg.NotifyFunc = func(ctx context.Context, agent *corev1alpha1.LegatorAgent, run *corev1alpha1.LegatorRun) {
+				// Determine severity from run result
+				severity := "info"
+				if run.Status.Phase == corev1alpha1.RunPhaseFailed {
+					severity = "warning"
+				}
+				if run.Status.Guardrails != nil && run.Status.Guardrails.EscalationsTriggered > 0 {
+					severity = "critical"
+				}
+
+				msg := notify.Message{
+					AgentName: agent.Name,
+					RunName:   run.Name,
+					Severity:  severity,
+					Title:     fmt.Sprintf("Run %s: %s", run.Status.Phase, run.Name),
+					Body:      truncateReport(run.Status.Report, 1000),
+					Timestamp: time.Now(),
+				}
+
+				if errs := notifyRouter.Notify(ctx, msg); len(errs) > 0 {
+					for _, e := range errs {
+						setupLog.Error(e, "notification delivery failed",
+							"agent", agent.Name, "run", run.Name)
+					}
+				}
+			}
 		}
 
 		return cfg, nil
@@ -855,4 +960,58 @@ func buildSQLDatabases(env *resolver.ResolvedEnvironment) map[string]*tools.SQLD
 	}
 
 	return dbs
+}
+
+// buildNotificationRouter creates a notification Router from environment variables.
+// Returns nil if no channels are configured.
+func buildNotificationRouter(log logr.Logger) *notify.Router {
+	var routes notify.SeverityRoute
+	hasChannels := false
+
+	// Slack
+	if url := os.Getenv("LEGATOR_NOTIFY_SLACK_WEBHOOK"); url != "" {
+		ch := notify.NewSlackChannel(url, os.Getenv("LEGATOR_NOTIFY_SLACK_CHANNEL"))
+		routes.Info = append(routes.Info, ch)
+		routes.Warning = append(routes.Warning, ch)
+		routes.Critical = append(routes.Critical, ch)
+		hasChannels = true
+	}
+
+	// Telegram
+	botToken := os.Getenv("LEGATOR_NOTIFY_TELEGRAM_TOKEN")
+	chatID := os.Getenv("LEGATOR_NOTIFY_TELEGRAM_CHAT_ID")
+	if botToken != "" && chatID != "" {
+		ch := notify.NewTelegramChannel(botToken, chatID)
+		routes.Info = append(routes.Info, ch)
+		routes.Warning = append(routes.Warning, ch)
+		routes.Critical = append(routes.Critical, ch)
+		hasChannels = true
+	}
+
+	// Generic webhook
+	if url := os.Getenv("LEGATOR_NOTIFY_WEBHOOK_URL"); url != "" {
+		ch := notify.NewWebhookChannel(url, nil)
+		routes.Info = append(routes.Info, ch)
+		routes.Warning = append(routes.Warning, ch)
+		routes.Critical = append(routes.Critical, ch)
+		hasChannels = true
+	}
+
+	if !hasChannels {
+		return nil
+	}
+
+	// Rate limiter: default 100/hour/agent
+	maxPerHour := 100
+	limiter := notify.NewRateLimiter(maxPerHour)
+
+	return notify.NewRouter(routes, limiter, log)
+}
+
+// truncateReport shortens a report string to maxLen, adding "..." if truncated.
+func truncateReport(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
 }
