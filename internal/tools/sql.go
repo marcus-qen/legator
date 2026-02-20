@@ -16,6 +16,10 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	// Database drivers — register with database/sql
+	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 // SQLTool executes read-only SQL queries against databases.
@@ -122,7 +126,13 @@ func (t *SQLTool) Execute(ctx context.Context, args map[string]interface{}) (str
 	queryCtx, cancel := context.WithTimeout(ctx, db.Timeout)
 	defer cancel()
 
-	conn, err := sql.Open(db.Driver, db.DSN)
+	// Map driver names to database/sql registered names
+	driverName := db.Driver
+	if driverName == "postgres" || driverName == "postgresql" {
+		driverName = "pgx" // pgx/v5/stdlib registers as "pgx"
+	}
+
+	conn, err := sql.Open(driverName, db.DSN)
 	if err != nil {
 		return "", fmt.Errorf("connect to %s: %w", dbName, err)
 	}
