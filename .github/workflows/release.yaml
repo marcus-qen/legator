@@ -65,7 +65,7 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           labels: |
             org.opencontainers.image.title=legator
-            org.opencontainers.image.description=Kubernetes operator for autonomous infrastructure agents
+            org.opencontainers.image.description=Autonomous agents that manage your entire IT estate
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -171,7 +171,7 @@ jobs:
           body: |
             ## LegatorAgent ${{ github.ref_name }}
 
-            Kubernetes operator for autonomous infrastructure agents — lights-out cluster management with hard safety guarantees.
+            Autonomous agents that manage your entire IT estate — safely. Scheduled. Guardrailed. Audited.
 
             ### Install
 
@@ -254,18 +254,18 @@ jobs:
       - name: Verify agent reaches Ready
         run: |
           sleep 5
-          kubectl get legators -n agents
-          PHASE=$(kubectl get legator watchman-light -n agents -o jsonpath='{.status.phase}')
+          kubectl get legatoragents -n agents
+          PHASE=$(kubectl get legatoragent watchman-light -n agents -o jsonpath='{.status.phase}')
           if [ "$PHASE" != "Ready" ] && [ "$PHASE" != "Pending" ]; then
             echo "ERROR: Agent phase is '$PHASE', expected Ready or Pending"
-            kubectl describe legator watchman-light -n agents
+            kubectl describe legatoragent watchman-light -n agents
             exit 1
           fi
           echo "✅ Agent phase: $PHASE"
 
       - name: Verify CRDs registered
         run: |
-          for crd in legators.legator.io agentenvironments.legator.io modeltierconfigs.legator.io agentruns.legator.io; do
+          for crd in legatoragents.legator.io legatorenvironments.legator.io modeltierconfigs.legator.io legatorruns.legator.io; do
             kubectl get crd "$crd" || (echo "CRD $crd not found" && exit 1)
           done
           echo "✅ All 4 CRDs registered"

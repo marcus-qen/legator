@@ -14,8 +14,8 @@ resources:
     namespaced: true
   controller: true
   domain: legator.io
-  group: core
-  kind: InfraAgent
+  group: ""
+  kind: LegatorAgent
   path: github.com/marcus-qen/legator/api/v1alpha1
   version: v1alpha1
 - api:
@@ -23,8 +23,8 @@ resources:
     namespaced: true
   controller: true
   domain: legator.io
-  group: core
-  kind: AgentEnvironment
+  group: ""
+  kind: LegatorEnvironment
   path: github.com/marcus-qen/legator/api/v1alpha1
   version: v1alpha1
 - api:
@@ -32,15 +32,15 @@ resources:
     namespaced: true
   controller: true
   domain: legator.io
-  group: core
-  kind: AgentRun
+  group: ""
+  kind: LegatorRun
   path: github.com/marcus-qen/legator/api/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
   controller: true
   domain: legator.io
-  group: core
+  group: ""
   kind: ModelTierConfig
   path: github.com/marcus-qen/legator/api/v1alpha1
   version: v1alpha1
