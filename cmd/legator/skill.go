@@ -14,6 +14,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/marcus-qen/legator/internal/skills"
 )
@@ -78,11 +79,20 @@ func handleSkillPush(args []string) {
 		fmt.Fprintln(os.Stderr, "Usage: legator skill push <directory> <oci-ref>")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Example: legator skill push ./my-skill oci://ghcr.io/my-org/my-skill:v1.0")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Options:")
+		fmt.Fprintln(os.Stderr, "  --plain-http    Use HTTP instead of HTTPS (for dev registries)")
 		os.Exit(1)
 	}
 
 	dir := args[0]
 	ref := args[1]
+	plainHTTP := false
+	for _, a := range args[2:] {
+		if a == "--plain-http" {
+			plainHTTP = true
+		}
+	}
 
 	// Parse reference
 	ociRef, err := skills.ParseOCIRef(ref)
@@ -91,47 +101,83 @@ func handleSkillPush(args []string) {
 		os.Exit(1)
 	}
 
-	// Pack
-	result, err := skills.PushSkill(context.Background(), dir)
+	// Push via ORAS
+	client := skills.NewRegistryClient().WithPlainHTTP(plainHTTP)
+
+	// Check for registry credentials in env
+	if u := os.Getenv("LEGATOR_REGISTRY_USERNAME"); u != "" {
+		client.WithAuth(u, os.Getenv("LEGATOR_REGISTRY_PASSWORD"))
+	}
+
+	fmt.Printf("📦 Packaging %s...\n", dir)
+	result, err := client.Push(context.Background(), dir, ociRef)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error packaging skill: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("📦 Packed: %s (%d files, %d bytes)\n", result.Manifest.Name, len(result.Manifest.Files), len(result.Content))
-	fmt.Printf("🏷️  Reference: %s\n", ociRef.String())
-	fmt.Println()
-
-	// TODO: Wire ORAS push here when dependency is added
-	fmt.Println("⚠️  OCI registry push requires ORAS integration (coming soon).")
-	fmt.Println("   For now, use ConfigMap or git:// skill sources.")
-	fmt.Printf("   Artifact is ready: %d bytes config + %d bytes content\n", len(result.Config), len(result.Content))
+	fmt.Printf("✅ Pushed to %s\n", result.Ref)
+	fmt.Printf("   Digest: %s\n", result.Digest)
+	fmt.Printf("   Config: %d bytes\n", result.ConfigSize)
+	fmt.Printf("   Content: %d bytes\n", result.ContentSize)
+	fmt.Printf("   Files: %d\n", len(result.Files))
+	for _, f := range result.Files {
+		fmt.Printf("     📄 %s\n", f)
+	}
 }
 
 func handleSkillPull(args []string) {
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "Usage: legator skill pull <oci-ref> [directory]")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Options:")
+		fmt.Fprintln(os.Stderr, "  --plain-http    Use HTTP instead of HTTPS")
 		os.Exit(1)
 	}
 
 	ref := args[0]
+	plainHTTP := false
+	destDir := ""
+	for i := 1; i < len(args); i++ {
+		if args[i] == "--plain-http" {
+			plainHTTP = true
+		} else if destDir == "" {
+			destDir = args[i]
+		}
+	}
+
 	ociRef, err := skills.ParseOCIRef(ref)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Invalid OCI reference: %v\n", err)
 		os.Exit(1)
 	}
 
-	destDir := ociRef.Path
-	if idx := len(args); idx > 1 {
-		destDir = args[1]
+	if destDir == "" {
+		// Use last path segment as directory name
+		parts := strings.Split(ociRef.Path, "/")
+		destDir = parts[len(parts)-1]
+	}
+
+	client := skills.NewRegistryClient().WithPlainHTTP(plainHTTP)
+	if u := os.Getenv("LEGATOR_REGISTRY_USERNAME"); u != "" {
+		client.WithAuth(u, os.Getenv("LEGATOR_REGISTRY_PASSWORD"))
 	}
 
 	fmt.Printf("📥 Pulling %s → %s\n", ociRef.String(), destDir)
-	fmt.Println()
+	result, err := client.PullToDir(context.Background(), ociRef, destDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 
-	// TODO: Wire ORAS pull here when dependency is added
-	fmt.Println("⚠️  OCI registry pull requires ORAS integration (coming soon).")
-	fmt.Println("   For now, use ConfigMap or git:// skill sources.")
+	fmt.Printf("✅ Pulled %s\n", result.Ref)
+	fmt.Printf("   Digest: %s\n", result.Digest)
+	if len(result.Files) > 0 {
+		fmt.Printf("   Files:\n")
+		for _, f := range result.Files {
+			fmt.Printf("     📄 %s\n", f)
+		}
+	}
 }
 
 func handleSkillInspect(args []string) {
