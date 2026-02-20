@@ -19,15 +19,64 @@ import (
 	"time"
 )
 
+// HTTPCredentialStore maps URL prefixes to authorization headers.
+// When a request URL matches a prefix, the corresponding auth header is added.
+type HTTPCredentialStore struct {
+	entries []credEntry
+}
+
+type credEntry struct {
+	urlPrefix string
+	authValue string // e.g. "Bearer ghp_xxx" or "token xxx"
+}
+
+// NewHTTPCredentialStore creates a credential store from endpoint→credential mappings.
+func NewHTTPCredentialStore(mappings map[string]string) *HTTPCredentialStore {
+	store := &HTTPCredentialStore{}
+	for prefix, token := range mappings {
+		if token == "" {
+			continue
+		}
+		// Default to Bearer token
+		authValue := token
+		if !strings.HasPrefix(strings.ToLower(token), "bearer ") &&
+			!strings.HasPrefix(strings.ToLower(token), "token ") &&
+			!strings.HasPrefix(strings.ToLower(token), "basic ") {
+			authValue = "Bearer " + token
+		}
+		store.entries = append(store.entries, credEntry{urlPrefix: prefix, authValue: authValue})
+	}
+	return store
+}
+
+// AuthHeader returns the authorization header for a URL, if any.
+func (s *HTTPCredentialStore) AuthHeader(url string) string {
+	if s == nil {
+		return ""
+	}
+	for _, e := range s.entries {
+		if strings.HasPrefix(url, e.urlPrefix) {
+			return e.authValue
+		}
+	}
+	return ""
+}
+
 // HTTPGetTool performs HTTP GET requests.
 type HTTPGetTool struct {
 	client *http.Client
+	creds  *HTTPCredentialStore
 }
 
 func NewHTTPGetTool() *HTTPGetTool {
 	return &HTTPGetTool{
 		client: &http.Client{Timeout: 10 * time.Second},
 	}
+}
+
+// WithCredentials returns a copy with a credential store attached.
+func (t *HTTPGetTool) WithCredentials(creds *HTTPCredentialStore) *HTTPGetTool {
+	return &HTTPGetTool{client: t.client, creds: creds}
 }
 
 func (t *HTTPGetTool) Name() string { return "http.get" }
@@ -67,6 +116,13 @@ func (t *HTTPGetTool) Execute(ctx context.Context, args map[string]interface{}) 
 	if headers, ok := args["headers"].(map[string]interface{}); ok {
 		for k, v := range headers {
 			req.Header.Set(k, fmt.Sprintf("%v", v))
+		}
+	}
+
+	// Auto-inject credentials for matching URLs
+	if req.Header.Get("Authorization") == "" {
+		if auth := t.creds.AuthHeader(url); auth != "" {
+			req.Header.Set("Authorization", auth)
 		}
 	}
 

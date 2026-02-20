@@ -51,6 +51,7 @@ import (
 	"github.com/marcus-qen/infraagent/internal/multicluster"
 	"github.com/marcus-qen/infraagent/internal/provider"
 	"github.com/marcus-qen/infraagent/internal/ratelimit"
+	"github.com/marcus-qen/infraagent/internal/resolver"
 	"github.com/marcus-qen/infraagent/internal/retention"
 	"github.com/marcus-qen/infraagent/internal/runner"
 	"github.com/marcus-qen/infraagent/internal/scheduler"
@@ -367,10 +368,22 @@ func main() {
 	}
 
 	// Tool registry factory: builds tools for an agent
-	toolRegistryFactory := func(agent *corev1alpha1.InfraAgent) (*tools.Registry, error) {
+	toolRegistryFactory := func(agent *corev1alpha1.InfraAgent, env *resolver.ResolvedEnvironment) (*tools.Registry, error) {
 		reg := tools.NewRegistry()
-		// Register HTTP tools
-		reg.Register(tools.NewHTTPGetTool())
+		// Build credential store for HTTP tools from resolved environment
+		var credStore *tools.HTTPCredentialStore
+		if env != nil && len(env.Credentials) > 0 {
+			credMappings := buildHTTPCredentialMappings(env)
+			if len(credMappings) > 0 {
+				credStore = tools.NewHTTPCredentialStore(credMappings)
+			}
+		}
+		// Register HTTP tools with credential store
+		httpGet := tools.NewHTTPGetTool()
+		if credStore != nil {
+			httpGet = httpGet.WithCredentials(credStore)
+		}
+		reg.Register(httpGet)
 		reg.Register(tools.NewHTTPPostTool())
 		reg.Register(tools.NewHTTPDeleteTool())
 		// Register kubectl tools using in-cluster config
@@ -401,7 +414,14 @@ func main() {
 			return cfg, fmt.Errorf("provider factory: %w", err)
 		}
 		cfg.Provider = p
-		reg, err := toolRegistryFactory(agent)
+		// Resolve environment for credential-aware HTTP tools
+		var resolvedEnv *resolver.ResolvedEnvironment
+		if agent.Spec.EnvironmentRef != "" {
+			envResolver := resolver.NewEnvironmentResolver(mgr.GetClient(), agent.Namespace)
+			resolvedEnv, _ = envResolver.Resolve(context.Background(), agent.Spec.EnvironmentRef)
+			// Non-fatal: tools work without creds, just can't auth
+		}
+		reg, err := toolRegistryFactory(agent, resolvedEnv)
 		if err != nil {
 			return cfg, fmt.Errorf("tool registry factory: %w", err)
 		}
@@ -460,4 +480,38 @@ func main() {
 		setupLog.Error(err, "Failed to run manager")
 		os.Exit(1)
 	}
+}
+
+// buildHTTPCredentialMappings maps known API URL prefixes to credential tokens
+// from the resolved environment. This allows HTTP tools to auto-inject auth headers.
+func buildHTTPCredentialMappings(env *resolver.ResolvedEnvironment) map[string]string {
+	mappings := make(map[string]string)
+
+	// Map well-known credential names to API URL prefixes
+	knownMappings := map[string][]string{
+		"github-pat": {"https://api.github.com"},
+	}
+
+	for credName, prefixes := range knownMappings {
+		credData, ok := env.Credentials[credName]
+		if !ok {
+			continue
+		}
+		// Look for "token" key first, then any key
+		token := credData["token"]
+		if token == "" {
+			for _, v := range credData {
+				token = v
+				break
+			}
+		}
+		if token == "" {
+			continue
+		}
+		for _, prefix := range prefixes {
+			mappings[prefix] = token
+		}
+	}
+
+	return mappings
 }

@@ -31,6 +31,7 @@ import (
 	corev1alpha1 "github.com/marcus-qen/infraagent/api/v1alpha1"
 	_ "github.com/marcus-qen/infraagent/internal/assembler" // used transitively by runner
 	"github.com/marcus-qen/infraagent/internal/provider"
+	"github.com/marcus-qen/infraagent/internal/resolver"
 	"github.com/marcus-qen/infraagent/internal/runner"
 	"github.com/marcus-qen/infraagent/internal/tools"
 )
@@ -54,7 +55,7 @@ type InfraAgentReconciler struct {
 
 	// ToolRegistryFactory builds the tool registry for an agent run.
 	// Nil means manual triggers are disabled.
-	ToolRegistryFactory func(agent *corev1alpha1.InfraAgent) (*tools.Registry, error)
+	ToolRegistryFactory func(agent *corev1alpha1.InfraAgent, env *resolver.ResolvedEnvironment) (*tools.Registry, error)
 }
 
 // +kubebuilder:rbac:groups=core.infraagent.io,resources=infraagents,verbs=get;list;watch;create;update;patch;delete
@@ -121,7 +122,7 @@ func (r *InfraAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 					// Create tool registry if factory is available
 					if r.ToolRegistryFactory != nil {
-						reg, err := r.ToolRegistryFactory(agent)
+						reg, err := r.ToolRegistryFactory(agent, nil)
 						if err != nil {
 							runLog.Error(err, "Failed to create tool registry")
 							return
