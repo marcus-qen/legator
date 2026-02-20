@@ -413,6 +413,19 @@ func main() {
 		reg.Register(tools.NewKubectlScaleTool(dc))
 		reg.Register(tools.NewKubectlDeleteTool(dc))
 		reg.Register(tools.NewKubectlApplyTool(dc))
+
+		// Register SSH tool if environment has SSH credentials
+		if env != nil {
+			sshCreds := buildSSHCredentials(env)
+			if len(sshCreds) > 0 {
+				sshTool := tools.NewSSHTool(sshCreds)
+				reg.Register(sshTool)
+				setupLog.Info("SSH tool registered",
+					"agent", agent.Name,
+					"hostCount", len(sshCreds))
+			}
+		}
+
 		return reg, nil
 	}
 
@@ -524,4 +537,54 @@ func buildHTTPCredentialMappings(env *resolver.ResolvedEnvironment) map[string]s
 	}
 
 	return mappings
+}
+
+// buildSSHCredentials extracts SSH credentials from the resolved environment.
+// Looks for credentials with type "ssh-key" or "ssh-password" and builds
+// SSHCredential structs for the SSH tool.
+func buildSSHCredentials(env *resolver.ResolvedEnvironment) map[string]*tools.SSHCredential {
+	creds := make(map[string]*tools.SSHCredential)
+
+	for name, data := range env.Credentials {
+		// SSH credentials must have a "host" key
+		host := data["host"]
+		if host == "" {
+			continue
+		}
+		user := data["user"]
+		if user == "" {
+			user = data["username"]
+		}
+		if user == "" {
+			continue
+		}
+
+		cred := &tools.SSHCredential{
+			Host:      host,
+			User:      user,
+			AllowSudo: data["allow-sudo"] == "true",
+			AllowRoot: data["allow-root"] == "true",
+		}
+
+		// Check for private key
+		if pk := data["private-key"]; pk != "" {
+			cred.PrivateKey = []byte(pk)
+		} else if pk := data["ssh-private-key"]; pk != "" {
+			cred.PrivateKey = []byte(pk)
+		}
+
+		// Check for password
+		if pw := data["password"]; pw != "" {
+			cred.Password = pw
+		}
+
+		// Must have at least one auth method
+		if len(cred.PrivateKey) == 0 && cred.Password == "" {
+			continue
+		}
+
+		creds[name] = cred
+	}
+
+	return creds
 }
