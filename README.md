@@ -1,8 +1,12 @@
 # InfraAgent
 
+[![CI](https://github.com/marcus-qen/infraagent/actions/workflows/ci.yaml/badge.svg)](https://github.com/marcus-qen/infraagent/actions/workflows/ci.yaml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/marcus-qen/infraagent)](https://goreportcard.com/report/github.com/marcus-qen/infraagent)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
 **Kubernetes operator for autonomous infrastructure agents — lights-out cluster management with hard safety guarantees.**
 
-> ⚠️ This project is in active development. Not yet ready for production use.
+> **v0.1.0** — Running in production on a 4-node Talos K8s cluster. 10 agents, 275+ runs, 82% success rate (improving daily). See [Dogfooding](#dogfooding) below.
 
 ## What Is This?
 
@@ -165,13 +169,51 @@ Supports: Anthropic, OpenAI, Ollama, any OpenAI-compatible endpoint. Auth: API k
 | [multi-cluster](examples/agents/multi-cluster-watchman.yaml) | Monitor a remote cluster |
 | [All 10 agents](examples/agents/) | Full ops team (monitoring, deploy, triage, QA) |
 
+## Dogfooding
+
+InfraAgent is running on a 4-node Talos Kubernetes cluster, managing the same platform it was built on. Ten autonomous agents handle monitoring, deployment verification, issue triage, security auditing, and daily briefings — replacing manually-scheduled cron jobs.
+
+### Fleet (live data from dogfooding)
+
+| Agent | Role | Schedule | Tokens/run | Status |
+|-------|------|----------|------------|--------|
+| 🔍 watchman-light | Endpoint monitoring | */5 min | ~11K | ✅ 120+ runs |
+| 🔍 watchman-deep | Deep infrastructure audit | Hourly | ~10K | ✅ |
+| 🔭 scout | QA exploration | Daily 4AM | ~3K | ✅ |
+| ⚖️ tribune | GitHub issue triage | Daily 7AM | ~17K | ✅ |
+| 📊 analyst | Fleet performance review | Weekly | ~9K | ✅ |
+| 📯 herald | Morning briefing | Daily 8AM | ~13K | ✅ |
+| 🔨 forge | Deployment verification | */5 min | ~17K | ✅ 85+ runs |
+| 🚀 promotion | Dev→prod drift detection | Every 6h | ~12K | ✅ |
+| 🔒 config-backup | Config audit | Daily 1AM | ~13K | ✅ |
+| 🔥 vigil | E2E platform verification | Daily 5AM | ~20K | ✅ |
+
+**Observability**: Prometheus metrics (9 custom metrics), Grafana dashboard, Tempo traces, 4 alert rules.
+
+**Provider flexibility**: Switched from Anthropic Sonnet to Kimi (`kimi-latest` via OpenAI-compatible endpoint) with zero code changes — just updated the `ModelTierConfig` CRD. Token usage dropped 60-70%.
+
+### What We Learned
+
+- **Token budgets matter**: Agents without explicit budgets waste 3-5x more tokens. Skills should specify tool call budgets.
+- **Credential injection must override LLM headers**: LLMs read credential placeholders from skill text and set them as literal HTTP headers. The tool layer must always override.
+- **Force-report on final iteration**: Without it, agents exhaust all iterations on data gathering and never synthesise a report.
+- **Conversation pruning prevents quadratic growth**: A sliding window (first message + last 4 pairs) keeps token usage flat across iterations.
+
 ## Status
 
-**v0.1.0-dev** — All core phases complete (0–8). Documentation and distribution in progress.
+**v0.1.0** — Running in production. 10 phases of build, 2 phases of dogfooding complete.
 
-Implemented: CRDs, assembler, runner, guardrail engine, Action Sheet enforcement, data protection, scheduler (cron/interval/webhook), reporting (Slack/Telegram/webhook), escalation, Prometheus metrics, OTel tracing, MCP integration (k8sgpt), skill distribution (Git/ConfigMap), multi-cluster, rate limiting, credential sanitization, graceful shutdown, AgentRun retention.
+Core: CRDs, prompt assembler, agentic runner, guardrail engine, Action Sheet enforcement, hardcoded data protection, cron/interval/webhook scheduler, conversation pruning, force-report, per-call token caps.
 
-253 tests. Binary builds clean. See the [project plan](docs/PROJECT-PLAN.md) for the full roadmap.
+Safety: Four-tier action classification, graduated autonomy, undeclared-action denial, cooldowns, credential sanitization in audit trail.
+
+Integration: Prometheus metrics (9 gauges/counters/histograms), OpenTelemetry tracing (GenAI conventions), Grafana dashboard, MCP client (k8sgpt), Git+ConfigMap skill loading.
+
+Production: Multi-cluster support, rate limiting (per-agent + cluster-wide), AgentRun retention (TTL + preserve-min), graceful shutdown, leader election.
+
+Providers: Anthropic, OpenAI, and any OpenAI-compatible endpoint (Kimi, Ollama, vLLM, etc.) with configurable base URL.
+
+253 tests.
 
 ## License
 
