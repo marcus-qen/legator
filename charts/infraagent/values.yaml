@@ -33,10 +33,14 @@ leaderElection:
 metrics:
   enabled: true
   port: 8443
+  # Serve metrics over HTTP (false) or HTTPS (true). Set false for easier Prometheus scraping.
+  secure: false
   serviceMonitor:
     enabled: false
     interval: 30s
     namespace: ""
+    # Extra labels for ServiceMonitor (e.g. release: prometheus)
+    labels: {}
 
 # Health probes
 healthProbe:

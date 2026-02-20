@@ -58,10 +58,9 @@ func InitTraceProvider(ctx context.Context, endpoint string, version string) (fu
 		return nil, fmt.Errorf("create OTLP exporter: %w", err)
 	}
 
-	res, err := resource.Merge(
-		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
+	res, err := resource.New(ctx,
+		resource.WithHost(),
+		resource.WithAttributes(
 			semconv.ServiceNameKey.String("infraagent-controller"),
 			semconv.ServiceVersionKey.String(version),
 		),

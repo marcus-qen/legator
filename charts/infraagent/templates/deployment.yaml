@@ -36,6 +36,7 @@ spec:
             - --leader-elect={{ .Values.leaderElection.enabled }}
             - --health-probe-bind-address=:{{ .Values.healthProbe.port }}
             - --metrics-bind-address=:{{ .Values.metrics.port }}
+            - --metrics-secure={{ .Values.metrics.secure | default false }}
             {{- if and .Values.otel.enabled .Values.otel.endpoint }}
             - --otel-endpoint={{ .Values.otel.endpoint }}
             {{- end }}
