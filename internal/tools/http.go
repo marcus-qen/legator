@@ -76,12 +76,25 @@ func (t *HTTPGetTool) Execute(ctx context.Context, args map[string]interface{}) 
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024)) // 64KB max
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return "", fmt.Errorf("read response: %w", err)
 	}
 
-	return fmt.Sprintf("HTTP %d %s\n\n%s", resp.StatusCode, resp.Status, string(body)), nil
+	return formatHTTPResponse(resp.StatusCode, resp.Status, body), nil
+}
+
+// maxResponseBytes limits HTTP response bodies to prevent token waste.
+// Health checks and API endpoints rarely need more than this.
+const maxResponseBytes = 8 * 1024 // 8KB
+
+// formatHTTPResponse formats an HTTP response, truncating oversized bodies.
+func formatHTTPResponse(statusCode int, status string, body []byte) string {
+	bodyStr := string(body)
+	if len(body) >= maxResponseBytes {
+		bodyStr = bodyStr[:maxResponseBytes-100] + "\n\n... [truncated at 8KB]"
+	}
+	return fmt.Sprintf("HTTP %d %s\n\n%s", statusCode, status, bodyStr)
 }
 
 // HTTPPostTool performs HTTP POST requests.
@@ -156,12 +169,12 @@ func (t *HTTPPostTool) Execute(ctx context.Context, args map[string]interface{})
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return "", fmt.Errorf("read response: %w", err)
 	}
 
-	return fmt.Sprintf("HTTP %d %s\n\n%s", resp.StatusCode, resp.Status, string(body)), nil
+	return formatHTTPResponse(resp.StatusCode, resp.Status, body), nil
 }
 
 // HTTPDeleteTool performs HTTP DELETE requests.
@@ -221,10 +234,10 @@ func (t *HTTPDeleteTool) Execute(ctx context.Context, args map[string]interface{
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return "", fmt.Errorf("read response: %w", err)
 	}
 
-	return fmt.Sprintf("HTTP %d %s\n\n%s", resp.StatusCode, resp.Status, string(body)), nil
+	return formatHTTPResponse(resp.StatusCode, resp.Status, body), nil
 }

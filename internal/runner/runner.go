@@ -193,14 +193,27 @@ func (r *Runner) conversationLoop(
 			break
 		}
 
+		// On the last iteration, withhold tools to force the LLM to produce
+		// a final report instead of making another tool call.
+		var iterTools []provider.ToolDefinition
+		if iteration < maxIterations-1 {
+			iterTools = cfg.ToolRegistry.Definitions()
+		} else {
+			// Last iteration: inject a "produce your report now" nudge
+			messages = append(messages, provider.Message{
+				Role:    "user",
+				Content: "You have used all available tool calls. Produce your final report NOW based on the data you have already collected. Do not request any more tools.",
+			})
+		}
+
 		// Call LLM (with tracing)
 		llmCtx, llmSpan := telemetry.StartLLMCallSpan(ctx, assembled.Model.Model, assembled.Model.Provider, int(iteration))
 		resp, err := cfg.Provider.Complete(llmCtx, &provider.CompletionRequest{
 			SystemPrompt: assembled.Prompt,
 			Messages:     messages,
-			Tools:        cfg.ToolRegistry.Definitions(),
+			Tools:        iterTools,
 			Model:        assembled.Model.Model,
-			MaxTokens:    int32(tokenBudget - result.totalIn - result.totalOut),
+			MaxTokens:    capMaxTokens(int32(tokenBudget - result.totalIn - result.totalOut)),
 		})
 		if err != nil {
 			llmSpan.RecordError(err)
@@ -350,6 +363,11 @@ func (r *Runner) conversationLoop(
 			Role:        "user",
 			ToolResults: toolResults,
 		})
+
+		// Conversation pruning: keep the first message (task instruction) plus
+		// the last maxConversationPairs exchanges to prevent quadratic context growth.
+		// Each "pair" is (assistant + user) = 2 messages.
+		messages = pruneConversation(messages, maxConversationPairs)
 	}
 
 	// Check if we exhausted iterations
@@ -543,6 +561,41 @@ func (r *Runner) buildBudgetUsage(
 		MaxIterations:  maxIterations,
 		TimeoutMs:      timeout.Milliseconds(),
 	}
+}
+
+// maxConversationPairs is the number of recent (assistant+user) exchange pairs
+// to keep in the conversation history. Earlier exchanges are pruned to prevent
+// quadratic context growth. The first message (task instruction) is always kept.
+const maxConversationPairs = 4
+
+// pruneConversation keeps the first message and the last N pairs of messages.
+// This prevents the conversation from growing without bound as tool calls accumulate.
+func pruneConversation(messages []provider.Message, keepPairs int) []provider.Message {
+	keepMessages := keepPairs * 2 // each pair = assistant + user
+	// +1 for the initial task instruction message
+	maxLen := keepMessages + 1
+	if len(messages) <= maxLen {
+		return messages
+	}
+	// Keep first message + last keepMessages
+	pruned := make([]provider.Message, 0, maxLen)
+	pruned = append(pruned, messages[0])
+	pruned = append(pruned, messages[len(messages)-keepMessages:]...)
+	return pruned
+}
+
+// capMaxTokens ensures max_tokens doesn't exceed model-level API limits.
+// Anthropic Sonnet: 64K, Opus: 32K, Haiku: 8K output.
+// We use a conservative 8192 per-call cap — agents iterate, they don't monologue.
+func capMaxTokens(remaining int32) int32 {
+	const perCallCap int32 = 8192
+	if remaining <= 0 {
+		return perCallCap
+	}
+	if remaining > perCallCap {
+		return perCallCap
+	}
+	return remaining
 }
 
 // extractFindings parses agent output for structured findings.

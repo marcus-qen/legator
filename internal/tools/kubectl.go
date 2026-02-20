@@ -486,6 +486,29 @@ func resourceToGVR(resource string) schema.GroupVersionResource {
 		return schema.GroupVersionResource{Group: "batch", Version: "v1", Resource: "cronjobs"}
 	case "replicasets", "replicaset", "rs":
 		return schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "replicasets"}
+	// ArgoCD
+	case "applications", "application", "app", "apps.argoproj.io":
+		return schema.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}
+	case "appprojects", "appproject":
+		return schema.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "appprojects"}
+	// InfraAgent CRDs
+	case "infraagent", "infraagents":
+		return schema.GroupVersionResource{Group: "core.infraagent.io", Version: "v1alpha1", Resource: "infraagents"}
+	case "agentrun", "agentruns":
+		return schema.GroupVersionResource{Group: "core.infraagent.io", Version: "v1alpha1", Resource: "agentruns"}
+	case "agentenvironment", "agentenvironments":
+		return schema.GroupVersionResource{Group: "core.infraagent.io", Version: "v1alpha1", Resource: "agentenvironments"}
+	case "modeltierconfig", "modeltierconfigs":
+		return schema.GroupVersionResource{Group: "core.infraagent.io", Version: "v1alpha1", Resource: "modeltierconfigs"}
+	// CNPG
+	case "clusters.postgresql.cnpg.io", "cluster.postgresql.cnpg.io":
+		return schema.GroupVersionResource{Group: "postgresql.cnpg.io", Version: "v1", Resource: "clusters"}
+	// Cilium
+	case "ciliumnetworkpolicies", "ciliumnetworkpolicy", "cnp":
+		return schema.GroupVersionResource{Group: "cilium.io", Version: "v2", Resource: "ciliumnetworkpolicies"}
+	// Gateway API
+	case "httproutes", "httproute":
+		return schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"}
 	default:
 		// Fallback: assume core group
 		return schema.GroupVersionResource{Version: "v1", Resource: strings.ToLower(resource)}
