@@ -2,6 +2,58 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.5.0] — 2026-02-20
+
+### Theme: Production & Community Readiness
+
+v0.5.0 makes Legator production-grade for teams beyond the dev-lab.
+
+### Added
+
+#### Agent State & Memory (Phase 1)
+- New CRD: `AgentState` — persistent key-value storage per agent
+- State tools: `state.get`, `state.set`, `state.delete` for LLM access
+- TTL per key, quota enforcement (max keys, max value size, 64KB total)
+- `FormatContext()` for injecting previous state into agent prompts
+- Enables dedup (only report new findings) and multi-step workflows
+
+#### Notification Channels (Phase 2)
+- Slack (webhook), Telegram (Bot API), Email (SMTP), generic Webhook
+- Severity-based routing: critical→all channels, warning→warning+info, info→info only
+- Per-agent per-hour rate limiting (sliding window)
+- Markdown escaping for Telegram MarkdownV2
+
+#### OCI Skill Distribution (Phase 3)
+- Pack/Unpack: skill directory ↔ OCI artifact layers (tar.gz + JSON config)
+- `oci://` reference parsing with tag and digest support
+- TTL-based skill cache with filesystem backing
+- CLI: `legator skill pack`, `legator skill push`, `legator skill pull`, `legator skill inspect`
+- Path traversal protection in Unpack
+- ORAS registry integration prepared (layers ready, wire when dependency added)
+
+#### Multi-Tenant Foundations (Phase 4)
+- `QuotaEnforcer`: per-team limits on agents, concurrent runs, daily runs, hourly tokens
+- Cost attribution: token usage tracked per team with lifetime totals
+- Team isolation: quotas enforced independently per team
+- Namespace conventions: `legator-<team>` mapping
+- Hourly/daily usage reset for quota windows
+
+#### AWS + Azure Cloud Tools (Phase 5)
+- `aws.cli`: AWS CLI wrapper with 4-tier command classification
+  - 43+ classified commands across EC2, S3, IAM, RDS, Lambda, ECS, DynamoDB
+  - S3/DynamoDB deletions always blocked, IAM changes audited, EC2 terminate requires approval
+- `az.cli`: Azure CLI wrapper with 4-tier command classification
+  - 50+ classified commands across VM, Storage, AKS, SQL, KeyVault, CosmosDB
+  - Storage/CosmosDB/KeyVault deletions always blocked, resource group deletion requires approval
+- Both tools: 30s timeout, JSON output, 8KB truncation, credential injection via env vars
+- 5 built-in protection classes: kubernetes, ssh, sql, aws, azure
+
+### Stats
+- 7 tool domains: kubectl, HTTP, SSH, SQL, DNS, AWS, Azure
+- 7 CRDs: LegatorAgent, LegatorEnvironment, LegatorRun, ModelTierConfig, ApprovalRequest, AgentEvent, AgentState
+- 5 built-in protection classes
+- 423 tests across 27 packages
+
 ## [v0.4.0] — 2026-02-20
 
 ### Theme: Observability & Adoption Readiness
