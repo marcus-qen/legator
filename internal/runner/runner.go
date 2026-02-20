@@ -70,6 +70,11 @@ type RunConfig struct {
 
 	// Trigger describes what initiated this run.
 	Trigger corev1alpha1.RunTrigger
+
+	// Cleanup is called when the run ends (success or failure).
+	// Use this to revoke dynamic credentials, close connections, etc.
+	// Errors are logged but don't affect the run result.
+	Cleanup func(ctx context.Context) []error
 }
 
 // Execute runs a full agent lifecycle.
@@ -134,6 +139,17 @@ func (r *Runner) Execute(ctx context.Context, agent *corev1alpha1.LegatorAgent, 
 	finalizeCtx, finalizeCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer finalizeCancel()
 	r.finalizeRun(finalizeCtx, run, result, startTime, agent, assembled)
+
+	// Step 7: Cleanup dynamic credentials (Vault leases, ephemeral keys, etc.)
+	if cfg.Cleanup != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		if errs := cfg.Cleanup(cleanupCtx); len(errs) > 0 {
+			for _, err := range errs {
+				r.log.Error(err, "credential cleanup error", "agent", agent.Name)
+			}
+		}
+	}
 
 	return run, nil
 }

@@ -36,6 +36,10 @@ type ResolvedEnvironment struct {
 	// Keys are credential names, values are the resolved secret data.
 	Credentials map[string]map[string]string
 
+	// RawCredentials preserves the original CredentialRef specs.
+	// Used to detect Vault credential types during run setup.
+	RawCredentials map[string]corev1alpha1.CredentialRef
+
 	// Channels maps named notification channels.
 	Channels map[string]corev1alpha1.ChannelSpec
 
@@ -44,6 +48,9 @@ type ResolvedEnvironment struct {
 
 	// MCPServers maps named MCP tool servers.
 	MCPServers map[string]corev1alpha1.MCPServerSpec
+
+	// VaultConfig holds the Vault server connection info (if configured).
+	VaultConfig *corev1alpha1.VaultConfig
 
 	// DataIndex is the pre-built index for fast data resource lookups.
 	DataIndex *DataResourceIndex
@@ -99,18 +106,29 @@ func (r *EnvironmentResolver) Resolve(ctx context.Context, envName string) (*Res
 	}
 
 	resolved := &ResolvedEnvironment{
-		Name:          env.Name,
-		Endpoints:     env.Spec.Endpoints,
-		Namespaces:    env.Spec.Namespaces,
-		Channels:      env.Spec.Channels,
-		DataResources: env.Spec.DataResources,
-		MCPServers:    env.Spec.MCPServers,
+		Name:           env.Name,
+		Endpoints:      env.Spec.Endpoints,
+		Namespaces:     env.Spec.Namespaces,
+		Channels:       env.Spec.Channels,
+		DataResources:  env.Spec.DataResources,
+		MCPServers:     env.Spec.MCPServers,
+		VaultConfig:    env.Spec.Vault,
+		RawCredentials: env.Spec.Credentials,
 	}
 
-	// Resolve credentials
+	// Resolve credentials from Kubernetes Secrets
 	if len(env.Spec.Credentials) > 0 {
 		resolved.Credentials = make(map[string]map[string]string)
 		for name, cred := range env.Spec.Credentials {
+			// Skip Vault-backed credentials — they're resolved at run time, not at assembly time
+			if cred.Type == "vault-kv" || cred.Type == "vault-ssh-ca" || cred.Type == "vault-database" {
+				// Initialize empty map so Vault credential injection can populate it
+				resolved.Credentials[name] = make(map[string]string)
+				continue
+			}
+			if cred.SecretRef == "" {
+				continue
+			}
 			secretData, err := r.resolveSecret(ctx, cred.SecretRef)
 			if err != nil {
 				return nil, fmt.Errorf("failed to resolve credential %q (secret %q): %w",

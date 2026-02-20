@@ -29,6 +29,7 @@ import (
 
 	"fmt"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -57,6 +58,7 @@ import (
 	"github.com/marcus-qen/legator/internal/scheduler"
 	"github.com/marcus-qen/legator/internal/telemetry"
 	"github.com/marcus-qen/legator/internal/tools"
+	vaultpkg "github.com/marcus-qen/legator/internal/vault"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -444,11 +446,42 @@ func main() {
 			resolvedEnv, _ = envResolver.Resolve(context.Background(), agent.Spec.EnvironmentRef)
 			// Non-fatal: tools work without creds, just can't auth
 		}
+
+		// Create Vault credential manager if environment has Vault config
+		var credMgr *vaultpkg.CredentialManager
+		if resolvedEnv != nil {
+			vaultCfg := getVaultConfigFromEnv(resolvedEnv, mgr.GetClient(), agent.Namespace)
+			if vaultCfg != nil {
+				vc, err := vaultpkg.NewClient(*vaultCfg)
+				if err != nil {
+					setupLog.Error(err, "failed to create Vault client", "agent", agent.Name)
+				} else {
+					if err := vc.Authenticate(context.Background()); err != nil {
+						setupLog.Error(err, "failed to authenticate to Vault", "agent", agent.Name)
+					} else {
+						credMgr = vaultpkg.NewCredentialManager(vc)
+						setupLog.Info("Vault credential manager created", "agent", agent.Name)
+					}
+				}
+			}
+		}
+
+		// Request dynamic SSH credentials from Vault if configured
+		if credMgr != nil && resolvedEnv != nil {
+			requestVaultSSHCredentials(context.Background(), credMgr, resolvedEnv, setupLog)
+		}
+
 		reg, err := toolRegistryFactory(agent, resolvedEnv)
 		if err != nil {
 			return cfg, fmt.Errorf("tool registry factory: %w", err)
 		}
 		cfg.ToolRegistry = reg
+
+		// Wire cleanup for dynamic credential revocation
+		if credMgr != nil {
+			cfg.Cleanup = credMgr.Cleanup
+		}
+
 		return cfg, nil
 	}
 	sched.RateLimiter = rateLimiter
@@ -587,4 +620,96 @@ func buildSSHCredentials(env *resolver.ResolvedEnvironment) map[string]*tools.SS
 	}
 
 	return creds
+}
+
+// getVaultConfigFromEnv extracts Vault client config from a resolved environment.
+// Returns nil if the environment has no Vault configuration.
+func getVaultConfigFromEnv(env *resolver.ResolvedEnvironment, c client.Client, namespace string) *vaultpkg.Config {
+	if env == nil || env.VaultConfig == nil {
+		return nil
+	}
+
+	vc := env.VaultConfig
+	cfg := &vaultpkg.Config{
+		Address:     vc.Address,
+		K8sAuthRole: vc.K8sAuthRole,
+		K8sAuthPath: vc.K8sAuthPath,
+	}
+
+	// Resolve Vault token from Secret if using token auth
+	if vc.AuthMethod == "token" && vc.TokenSecretRef != "" {
+		secret := &corev1.Secret{}
+		if err := c.Get(context.Background(), client.ObjectKey{
+			Name:      vc.TokenSecretRef,
+			Namespace: namespace,
+		}, secret); err == nil {
+			if token, ok := secret.Data["token"]; ok {
+				cfg.Token = string(token)
+			}
+		}
+	}
+
+	return cfg
+}
+
+// requestVaultSSHCredentials checks for vault-ssh-ca credential types in the environment
+// and requests ephemeral SSH certificates from Vault. The resulting credentials are
+// injected back into the resolved environment's credential map so buildSSHCredentials
+// can pick them up as normal SSH credentials.
+func requestVaultSSHCredentials(
+	ctx context.Context,
+	credMgr *vaultpkg.CredentialManager,
+	env *resolver.ResolvedEnvironment,
+	log logr.Logger,
+) {
+	if env.RawCredentials == nil {
+		return
+	}
+
+	for name, credRef := range env.RawCredentials {
+		if credRef.Type != "vault-ssh-ca" || credRef.Vault == nil {
+			continue
+		}
+
+		// Get the host and user from the existing credential data
+		credData := env.Credentials[name]
+		if credData == nil {
+			credData = make(map[string]string)
+		}
+
+		user := credData["user"]
+		if user == "" {
+			user = credData["username"]
+		}
+		if user == "" {
+			user = "root" // Vault SSH CA will enforce allowed principals
+		}
+
+		sshCreds, err := credMgr.RequestSSHCredentials(ctx, vaultpkg.SSHCARequest{
+			Mount: credRef.Vault.Mount,
+			Role:  credRef.Vault.Role,
+			User:  user,
+			TTL:   credRef.Vault.TTL,
+		})
+		if err != nil {
+			log.Error(err, "failed to request Vault SSH credentials",
+				"credential", name,
+				"mount", credRef.Vault.Mount,
+				"role", credRef.Vault.Role)
+			continue
+		}
+
+		// Inject the ephemeral credentials back into the resolved environment
+		if env.Credentials[name] == nil {
+			env.Credentials[name] = make(map[string]string)
+		}
+		env.Credentials[name]["private-key"] = sshCreds.PrivateKey
+		env.Credentials[name]["certificate"] = sshCreds.Certificate
+		env.Credentials[name]["user"] = sshCreds.User
+
+		log.Info("Vault SSH credentials injected",
+			"credential", name,
+			"user", sshCreds.User,
+			"mount", credRef.Vault.Mount)
+	}
 }
