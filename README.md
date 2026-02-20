@@ -173,14 +173,81 @@ Supports: Anthropic, OpenAI, Ollama, vLLM, Kimi, any OpenAI-compatible endpoint.
 | [Architecture Decisions](docs/adr/) | Why we made the choices we did |
 | [Contributing](CONTRIBUTING.md) | Development setup and PR process |
 
+## SSH Tool
+
+Agents can SSH into servers to manage non-Kubernetes infrastructure:
+
+```yaml
+apiVersion: legator.io/v1alpha1
+kind: LegatorAgent
+metadata:
+  name: legacy-server-scanner
+spec:
+  description: SSH into servers, parse configs, produce migration reports
+  schedule:
+    cron: "0 3 * * 1"
+  guardrails:
+    autonomy: observe
+    allowedActions:
+      - "ssh.exec read *"
+  environmentRef: server-fleet
+  skills:
+    - name: server-migration-scan
+      source: "configmap://skill-server-migration-scan"
+```
+
+**Built-in guardrails:**
+- 🚫 Blocked commands: `dd`, `mkfs`, `fdisk`, `psql`, `mysql`, `mongo`, `redis-cli`
+- 🔒 Protected paths: `/etc/shadow`, `/boot/`, `/dev/`, SSH keys
+- 🔑 sudo: blocked by default, opt-in per host
+- 👤 root login: blocked by default, opt-in per host
+- 📏 Output truncation: 8KB max
+- ⏱️ Per-command timeout: 30s default
+
+Credentials are injected at the tool layer — the LLM never sees private keys or passwords.
+
+## CLI
+
+```bash
+$ legator status
+⚡ Legator Status
+─────────────────
+Agents:       10/10 ready
+Environments: 1
+Runs:         43 total (30 succeeded, 13 failed, 0 running)
+Success rate: 69.8%
+Tokens used:  293.4K
+
+$ legator agents list
+NAME            PHASE  AUTONOMY  SCHEDULE     RUNS  LAST RUN
+watchman-light  Ready  observe   */5 * * * *  16    14s ago
+forge           Ready  observe   */5 * * * *  16    1s ago
+herald          Ready  observe   0 8 * * *    1     1h ago
+...
+
+$ legator runs logs forge-ckmpm
+Run: forge-ckmpm
+Agent: forge | Phase: Succeeded | Trigger: scheduled
+Model: openai/kimi-latest
+Iterations: 4 | Tokens: 9830 | Duration: 39.3s
+Autonomy: observe | Budget: 4/10 iterations, 50000 token budget
+
+Actions (9):
+  1. ✅ kubectl.get applications -n argocd
+  2. ✅ kubectl.get freight -n backstage
+  ...
+```
+
 ## Examples
 
 | Example | Description |
 |---------|-------------|
 | [hello-world](examples/agents/hello-world.yaml) | Simplest possible agent |
 | [watchman-light](examples/agents/watchman-light.yaml) | Endpoint monitoring (5-min cron) |
+| [legacy-server-scanner](examples/agents/legacy-server-scanner.yaml) | SSH server migration scan |
+| [patch-compliance-checker](examples/agents/patch-compliance-checker.yaml) | SSH fleet patch audit |
 | [multi-cluster](examples/agents/multi-cluster-watchman.yaml) | Monitor a remote cluster |
-| [All 10 agents](examples/agents/) | Full ops team: monitoring, deploy, triage, QA, briefings |
+| [All agents](examples/agents/) | Full ops team + SSH examples |
 
 ## Production Status
 
@@ -215,7 +282,7 @@ Supports: Anthropic, OpenAI, Ollama, vLLM, Kimi, any OpenAI-compatible endpoint.
 | Version | Focus |
 |---------|-------|
 | **v0.1.0** ✅ | Core operator, 10 K8s agents, dogfooding |
-| **v0.2.0** 🔄 | Rename to Legator, generalise protection classes, SSH tool, CLI |
+| **v0.2.0** 🔄 | Generalise protection classes, SSH tool, CLI |
 | **v0.3.0** | SQL + DNS tools, Headscale connectivity, web dashboard |
 | **v0.4.0** | A2A protocol, skill marketplace, multi-tenant |
 
