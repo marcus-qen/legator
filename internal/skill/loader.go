@@ -11,8 +11,12 @@ You may obtain a copy of the License at
 package skill
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -130,6 +134,7 @@ func (l *Loader) loadFromConfigMap(ctx context.Context, name, source string) (*S
 
 // loadFromOCI loads a skill from an OCI registry via ORAS.
 // Source format: "oci://registry/repo:tag" or "oci://registry/repo@sha256:..."
+// Extracts tar.gz content entirely in memory (no /tmp needed — works in distroless).
 func (l *Loader) loadFromOCI(ctx context.Context, name, source string) (*Skill, error) {
 	refStr := strings.TrimPrefix(source, "oci://")
 
@@ -151,22 +156,13 @@ func (l *Loader) loadFromOCI(ctx context.Context, name, source string) (*Skill, 
 		rc.WithAuth(u, os.Getenv("LEGATOR_REGISTRY_PASSWORD"))
 	}
 
-	// Pull the skill content
+	// Pull the raw content layer bytes
 	content, _, err := rc.Pull(ctx, ociRef)
 	if err != nil {
 		return nil, fmt.Errorf("pull OCI skill %q: %w", refStr, err)
 	}
 
-	// The content is the raw SKILL.md (pulled as tar.gz, extracted by PullToDir,
-	// but Pull returns the raw content layer — we need to extract SKILL.md).
-	// For now, use PullToDir to a temp dir then parse.
-	tmpDir, err := os.MkdirTemp("", "legator-skill-*")
-	if err != nil {
-		return nil, fmt.Errorf("create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// If content looks like SKILL.md directly (starts with ---), parse it
+	// Try to parse as plain text first (non-tarball)
 	contentStr := string(content)
 	if strings.HasPrefix(strings.TrimSpace(contentStr), "---") || strings.HasPrefix(strings.TrimSpace(contentStr), "name:") {
 		skill, err := Parse(contentStr)
@@ -176,28 +172,24 @@ func (l *Loader) loadFromOCI(ctx context.Context, name, source string) (*Skill, 
 		if skill.Name == "" {
 			skill.Name = name
 		}
-
-		// Cache the result
 		if l.cache != nil {
 			l.cache.Put(source, skill)
 		}
 		return skill, nil
 	}
 
-	// Otherwise try PullToDir (tar.gz content)
-	_, err = rc.PullToDir(ctx, ociRef, tmpDir)
+	// Extract tar.gz in memory
+	files, err := extractTarGzInMemory(content)
 	if err != nil {
-		return nil, fmt.Errorf("pull OCI skill to dir %q: %w", refStr, err)
+		return nil, fmt.Errorf("extract OCI skill %q: %w", refStr, err)
 	}
 
-	// Read SKILL.md from extracted directory
-	mdPath := tmpDir + "/SKILL.md"
-	mdBytes, err := os.ReadFile(mdPath)
-	if err != nil {
-		return nil, fmt.Errorf("read SKILL.md from OCI artifact %q: %w", refStr, err)
+	mdContent, ok := files["SKILL.md"]
+	if !ok {
+		return nil, fmt.Errorf("SKILL.md not found in OCI artifact %q (files: %v)", refStr, mapKeys(files))
 	}
 
-	skill, err := Parse(string(mdBytes))
+	skill, err := Parse(mdContent)
 	if err != nil {
 		return nil, fmt.Errorf("parse OCI skill %q: %w", refStr, err)
 	}
@@ -206,20 +198,66 @@ func (l *Loader) loadFromOCI(ctx context.Context, name, source string) (*Skill, 
 	}
 
 	// Load actions.yaml if present
-	actionsPath := tmpDir + "/actions.yaml"
-	if actionsBytes, err := os.ReadFile(actionsPath); err == nil {
-		sheet, err := ParseActionSheet(string(actionsBytes))
+	if actionsContent, ok := files["actions.yaml"]; ok {
+		sheet, err := ParseActionSheet(actionsContent)
 		if err == nil {
 			skill.Actions = sheet
 		}
 	}
 
-	// Cache the result
 	if l.cache != nil {
 		l.cache.Put(source, skill)
 	}
-
 	return skill, nil
+}
+
+// extractTarGzInMemory decompresses a tar.gz byte slice and returns a map of
+// filename → content. Only files (not directories) are included. Max 10MB total
+// to prevent resource exhaustion.
+func extractTarGzInMemory(data []byte) (map[string]string, error) {
+	gz, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("gzip: %w", err)
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+	files := make(map[string]string)
+	var totalSize int64
+	const maxTotal = 10 * 1024 * 1024 // 10MB
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("tar: %w", err)
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+		if totalSize+hdr.Size > maxTotal {
+			return nil, fmt.Errorf("skill artifact exceeds 10MB limit")
+		}
+		buf, err := io.ReadAll(io.LimitReader(tr, maxTotal-totalSize))
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", hdr.Name, err)
+		}
+		totalSize += int64(len(buf))
+		files[hdr.Name] = string(buf)
+	}
+
+	return files, nil
+}
+
+// mapKeys returns the keys of a map as a slice.
+func mapKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // Parse parses a SKILL.md string into a Skill struct.
