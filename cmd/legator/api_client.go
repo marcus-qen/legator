@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,7 +44,12 @@ func tryAPIClient() (*legatorAPIClient, bool, error) {
 		return nil, false, fmt.Errorf("token cache %s has no access_token; run 'legator login'", path)
 	}
 	if !tok.ExpiresAt.IsZero() && time.Now().After(tok.ExpiresAt.Add(-30*time.Second)) {
-		return nil, false, fmt.Errorf("cached token is expired; run 'legator login' again")
+		if strings.TrimSpace(tok.RefreshToken) == "" {
+			return nil, false, fmt.Errorf("cached token is expired and has no refresh token; run 'legator login' again")
+		}
+		if err := refreshCachedToken(&tok); err != nil {
+			return nil, false, fmt.Errorf("cached token is expired and refresh failed: %w; run 'legator login'", err)
+		}
 	}
 
 	apiURL := strings.TrimSpace(tok.APIURL)
@@ -115,6 +122,101 @@ func (c *legatorAPIClient) doJSON(method, path string, body any, out any) error 
 		return fmt.Errorf("failed to parse api response: %w", err)
 	}
 	return nil
+}
+
+func refreshCachedToken(tok *tokenCache) error {
+	issuer := strings.TrimSpace(tok.OIDCIssuer)
+	if issuer == "" {
+		return errors.New("token cache missing oidc_issuer")
+	}
+	clientID := strings.TrimSpace(tok.OIDCClientID)
+	if clientID == "" {
+		return errors.New("token cache missing oidc_client_id")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	discovery, err := fetchOIDCDiscovery(ctx, issuer)
+	if err != nil {
+		return fmt.Errorf("oidc discovery failed: %w", err)
+	}
+
+	clientSecret := envOr("LEGATOR_OIDC_CLIENT_SECRET", "")
+	resp, err := requestRefreshToken(ctx, discovery.TokenEndpoint, clientID, clientSecret, tok.RefreshToken)
+	if err != nil {
+		return err
+	}
+	if resp.AccessToken == "" {
+		return errors.New("refresh token response missing access_token")
+	}
+
+	tok.AccessToken = resp.AccessToken
+	if strings.TrimSpace(resp.RefreshToken) != "" {
+		tok.RefreshToken = resp.RefreshToken
+	}
+	if strings.TrimSpace(resp.TokenType) != "" {
+		tok.TokenType = resp.TokenType
+	}
+	if strings.TrimSpace(resp.Scope) != "" {
+		tok.Scope = resp.Scope
+	}
+	if resp.ExpiresIn <= 0 {
+		resp.ExpiresIn = 900
+	}
+	now := time.Now().UTC()
+	tok.IssuedAt = now
+	tok.ExpiresAt = now.Add(time.Duration(resp.ExpiresIn) * time.Second)
+
+	if _, err := saveTokenCache(*tok); err != nil {
+		return fmt.Errorf("failed to persist refreshed token: %w", err)
+	}
+	return nil
+}
+
+func requestRefreshToken(ctx context.Context, tokenEndpoint, clientID, clientSecret, refreshToken string) (*tokenResponse, error) {
+	form := url.Values{}
+	form.Set("grant_type", "refresh_token")
+	form.Set("client_id", clientID)
+	form.Set("refresh_token", refreshToken)
+	if clientSecret != "" {
+		form.Set("client_secret", clientSecret)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenEndpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("token refresh request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 32*1024))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read refresh response: %w", err)
+	}
+
+	var out tokenResponse
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("failed to parse refresh response: %w", err)
+	}
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return &out, nil
+	}
+	if out.Error == "" {
+		out.Error = fmt.Sprintf("http_%d", resp.StatusCode)
+		out.ErrorDescription = strings.TrimSpace(string(body))
+	}
+	detail := out.Error
+	if out.ErrorDescription != "" {
+		detail += ": " + out.ErrorDescription
+	}
+	return nil, fmt.Errorf("token refresh failed: %s", detail)
 }
 
 func asMap(v any) map[string]any {
