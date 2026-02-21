@@ -2,10 +2,13 @@
 # since it depends on service name and namespace that are out of this kustomize package.
 # It should be run by config/default
 resources:
-- bases/legator.io_legators.yaml
-- bases/legator.io_agentenvironments.yaml
-- bases/legator.io_agentruns.yaml
+- bases/legator.io_legatoragents.yaml
+- bases/legator.io_legatorenvironments.yaml
+- bases/legator.io_legatorruns.yaml
 - bases/legator.io_modeltierconfigs.yaml
+- bases/legator.io_agentevents.yaml
+- bases/legator.io_agentstates.yaml
+- bases/legator.io_approvalrequests.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:
