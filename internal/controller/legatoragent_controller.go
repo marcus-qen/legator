@@ -56,6 +56,10 @@ type LegatorAgentReconciler struct {
 	// ToolRegistryFactory builds the tool registry for an agent run.
 	// Nil means manual triggers are disabled.
 	ToolRegistryFactory func(agent *corev1alpha1.LegatorAgent, env *resolver.ResolvedEnvironment) (*tools.Registry, error)
+
+	// OnReconcile is called after successful reconciliation with the agent.
+	// Used to register webhook triggers with the scheduler.
+	OnReconcile func(agent *corev1alpha1.LegatorAgent)
 }
 
 // +kubebuilder:rbac:groups=legator.io,resources=legatoragents,verbs=get;list;watch;create;update;patch;delete
@@ -204,6 +208,11 @@ func (r *LegatorAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if err := r.Status().Update(ctx, agent); err != nil {
 		log.Error(err, "Failed to update LegatorAgent status")
 		return ctrl.Result{}, err
+	}
+
+	// Notify scheduler of trigger registrations (webhook sources, etc.)
+	if r.OnReconcile != nil {
+		r.OnReconcile(agent)
 	}
 
 	return ctrl.Result{}, nil

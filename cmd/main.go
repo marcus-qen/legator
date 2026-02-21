@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
+	"net/http"
 	"os"
 	"time"
 
@@ -132,6 +133,9 @@ func main() {
 		"Cluster-wide maximum simultaneous agent runs.")
 	flag.IntVar(&maxConcurrentPerAgent, "max-concurrent-per-agent", 1,
 		"Per-agent maximum simultaneous runs.")
+	var webhookListenAddr string
+	flag.StringVar(&webhookListenAddr, "webhook-listen-address", ":9443",
+		"The address the webhook trigger endpoint listens on. Set to 0 to disable.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -310,6 +314,23 @@ func main() {
 	if err := mgr.Add(sched); err != nil {
 		setupLog.Error(err, "Failed to add scheduler")
 		os.Exit(1)
+	}
+
+	// Webhook trigger handler — expose the scheduler's webhook handler over HTTP
+	if webhookListenAddr != "" && webhookListenAddr != "0" {
+		mux := http.NewServeMux()
+		mux.Handle("/webhook/", sched.WebhookHandler())
+		mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("ok"))
+		})
+
+		go func() {
+			setupLog.Info("Starting webhook trigger listener", "addr", webhookListenAddr)
+			if err := http.ListenAndServe(webhookListenAddr, mux); err != nil {
+				setupLog.Error(err, "Webhook listener failed")
+			}
+		}()
 	}
 
 	// Graceful shutdown manager
@@ -623,6 +644,9 @@ func main() {
 		Runner:              agentRunner,
 		ProviderFactory:     providerFactory,
 		ToolRegistryFactory: toolRegistryFactory,
+		OnReconcile: func(agent *corev1alpha1.LegatorAgent) {
+			sched.RegisterWebhookTriggers(agent)
+		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "LegatorAgent")
 		os.Exit(1)
