@@ -51,6 +51,21 @@ spec:
             - --drain-timeout={{ .Values.shutdown.drainTimeout }}
             - --max-concurrent-cluster={{ .Values.rateLimit.maxConcurrentCluster }}
             - --max-concurrent-per-agent={{ .Values.rateLimit.maxConcurrentPerAgent }}
+          {{- if .Values.headscale.enabled }}
+          env:
+            - name: HEADSCALE_API_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.headscale.secretName }}
+                  key: {{ .Values.headscale.apiURLKey }}
+                  optional: {{ .Values.headscale.optional | default true }}
+            - name: HEADSCALE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.headscale.secretName }}
+                  key: {{ .Values.headscale.apiKeyKey }}
+                  optional: {{ .Values.headscale.optional | default true }}
+          {{- end }}
           ports:
             - name: metrics
               containerPort: {{ .Values.metrics.port }}
