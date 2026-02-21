@@ -1,11 +1,21 @@
-# More info: https://docs.docker.com/engine/reference/builder/#dockerignore-file
-# Ignore everything by default and re-include only needed files
-**
+# Keep build context lean while preserving full Go package directories.
+# Do NOT blanket-ignore everything; Go builds need directory structure intact.
 
-# Re-include Go source files (but not *_test.go)
-!**/*.go
+# VCS / CI metadata
+.git
+.github
+.devcontainer
+
+# Local build artifacts
+bin/
+main
+legator
+legator-cli
+
+# Common transient files
+*.tar
+*.tar.gz
+*.log
+
+# Tests are not needed for image build
 **/*_test.go
-
-# Re-include Go module files
-!go.mod
-!go.sum

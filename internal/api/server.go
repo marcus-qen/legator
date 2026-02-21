@@ -11,7 +11,9 @@ You may obtain a copy of the License at
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -24,7 +26,13 @@ import (
 	corev1alpha1 "github.com/marcus-qen/legator/api/v1alpha1"
 	"github.com/marcus-qen/legator/internal/api/auth"
 	"github.com/marcus-qen/legator/internal/api/rbac"
+	"github.com/marcus-qen/legator/internal/inventory"
 )
+
+// InventoryProvider provides managed devices for the inventory endpoint.
+type InventoryProvider interface {
+	Devices() []inventory.ManagedDevice
+}
 
 // ServerConfig configures the Legator API server.
 type ServerConfig struct {
@@ -36,6 +44,9 @@ type ServerConfig struct {
 
 	// Policies for RBAC evaluation.
 	Policies []rbac.UserPolicy
+
+	// Inventory is an optional real-time device inventory source (e.g., Headscale).
+	Inventory InventoryProvider
 }
 
 // Server is the Legator API server.
@@ -44,6 +55,7 @@ type Server struct {
 	k8s       client.Client
 	validator *auth.Validator
 	rbacEng   *rbac.Engine
+	inventory InventoryProvider
 	log       logr.Logger
 	mux       *http.ServeMux
 }
@@ -55,6 +67,7 @@ func NewServer(cfg ServerConfig, k8s client.Client, log logr.Logger) *Server {
 		k8s:       k8s,
 		validator: auth.NewValidator(cfg.OIDC, log.WithName("auth")),
 		rbacEng:   rbac.NewEngine(cfg.Policies),
+		inventory: cfg.Inventory,
 		log:       log.WithName("api"),
 		mux:       http.NewServeMux(),
 	}
@@ -69,10 +82,40 @@ func (s *Server) Handler() http.Handler {
 	return s.auditMiddleware(s.validator.Middleware(s.mux))
 }
 
-// Start starts the API server.
-func (s *Server) Start() error {
+// Start starts the API server and blocks until context cancellation or server error.
+// Implements controller-runtime's manager.Runnable interface for lifecycle management.
+func (s *Server) Start(ctx context.Context) error {
 	s.log.Info("Starting Legator API server", "addr", s.config.ListenAddr)
-	return http.ListenAndServe(s.config.ListenAddr, s.Handler())
+
+	httpSrv := &http.Server{
+		Addr:              s.config.ListenAddr,
+		Handler:           s.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- httpSrv.ListenAndServe()
+	}()
+
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := httpSrv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("api shutdown failed: %w", err)
+		}
+		err := <-errCh
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("api server error after shutdown: %w", err)
+		}
+		return nil
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("api server failed: %w", err)
+		}
+		return nil
+	}
 }
 
 func (s *Server) registerRoutes() {
@@ -315,7 +358,20 @@ func (s *Server) handleListInventory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For now, inventory is derived from LegatorEnvironment endpoints
+	// Preferred source: live inventory provider (Headscale sync loop, etc.).
+	if s.inventory != nil {
+		devices := s.inventory.Devices()
+		if len(devices) > 0 {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"devices": devices,
+				"total":   len(devices),
+				"source":  "inventory-provider",
+			})
+			return
+		}
+	}
+
+	// Fallback source: LegatorEnvironment endpoints.
 	envs := &corev1alpha1.LegatorEnvironmentList{}
 	if err := s.k8s.List(r.Context(), envs); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list environments: "+err.Error())
@@ -323,9 +379,9 @@ func (s *Server) handleListInventory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type endpoint struct {
-		Name     string `json:"name"`
-		URL      string `json:"url"`
-		EnvRef   string `json:"environmentRef"`
+		Name   string `json:"name"`
+		URL    string `json:"url"`
+		EnvRef string `json:"environmentRef"`
 	}
 
 	var endpoints []endpoint
@@ -342,6 +398,7 @@ func (s *Server) handleListInventory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"devices": endpoints,
 		"total":   len(endpoints),
+		"source":  "environment-endpoints",
 	})
 }
 

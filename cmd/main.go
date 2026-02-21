@@ -47,10 +47,14 @@ import (
 
 	corev1alpha1 "github.com/marcus-qen/legator/api/v1alpha1"
 	"github.com/marcus-qen/legator/internal/a2a"
+	"github.com/marcus-qen/legator/internal/api"
+	apiauth "github.com/marcus-qen/legator/internal/api/auth"
+	apirbac "github.com/marcus-qen/legator/internal/api/rbac"
 	"github.com/marcus-qen/legator/internal/approval"
 	"github.com/marcus-qen/legator/internal/assembler"
 	"github.com/marcus-qen/legator/internal/controller"
 	"github.com/marcus-qen/legator/internal/events"
+	"github.com/marcus-qen/legator/internal/inventory"
 	"github.com/marcus-qen/legator/internal/lifecycle"
 	_ "github.com/marcus-qen/legator/internal/metrics" // Register Prometheus metrics
 	"github.com/marcus-qen/legator/internal/multicluster"
@@ -98,6 +102,15 @@ func main() {
 	var drainTimeout string
 	var maxConcurrentCluster int
 	var maxConcurrentPerAgent int
+	var apiListenAddr string
+	var apiOIDCIssuer string
+	var apiOIDCAudience string
+	var apiAdminGroup string
+	var apiOperatorGroup string
+	var apiViewerGroup string
+	var headscaleAPIURL string
+	var headscaleAPIKey string
+	var headscaleSyncInterval time.Duration
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -136,6 +149,24 @@ func main() {
 	var webhookListenAddr string
 	flag.StringVar(&webhookListenAddr, "webhook-listen-address", ":9443",
 		"The address the webhook trigger endpoint listens on. Set to 0 to disable.")
+	flag.StringVar(&apiListenAddr, "api-bind-address", ":8090",
+		"The address the Legator API server listens on. Set to 0 to disable.")
+	flag.StringVar(&apiOIDCIssuer, "api-oidc-issuer", os.Getenv("API_OIDC_ISSUER"),
+		"OIDC issuer URL for API JWT validation.")
+	flag.StringVar(&apiOIDCAudience, "api-oidc-audience", os.Getenv("API_OIDC_AUDIENCE"),
+		"OIDC audience (client ID) for API JWT validation.")
+	flag.StringVar(&apiAdminGroup, "api-admin-group", envOrDefault("API_ADMIN_GROUP", "legator-admin"),
+		"OIDC group granted admin role.")
+	flag.StringVar(&apiOperatorGroup, "api-operator-group", envOrDefault("API_OPERATOR_GROUP", "legator-operator"),
+		"OIDC group granted operator role.")
+	flag.StringVar(&apiViewerGroup, "api-viewer-group", envOrDefault("API_VIEWER_GROUP", "legator-viewer"),
+		"OIDC group granted viewer role.")
+	flag.StringVar(&headscaleAPIURL, "headscale-api-url", os.Getenv("HEADSCALE_API_URL"),
+		"Headscale API base URL (enables inventory sync when set with --headscale-api-key).")
+	flag.StringVar(&headscaleAPIKey, "headscale-api-key", os.Getenv("HEADSCALE_API_KEY"),
+		"Headscale API key (enables inventory sync when set with --headscale-api-url).")
+	flag.DurationVar(&headscaleSyncInterval, "headscale-sync-interval", 30*time.Second,
+		"How often to poll Headscale for inventory updates.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -683,6 +714,50 @@ func main() {
 		os.Exit(1)
 	}
 
+	// --- v0.8.0: Wire Headscale inventory sync loop (optional) ---
+	var headscaleSync *inventory.HeadscaleSync
+	if headscaleAPIURL != "" && headscaleAPIKey != "" {
+		headscaleSync = inventory.NewHeadscaleSync(inventory.HeadscaleSyncConfig{
+			BaseURL:      headscaleAPIURL,
+			APIKey:       headscaleAPIKey,
+			SyncInterval: headscaleSyncInterval,
+		}, ctrl.Log)
+
+		if err := mgr.Add(headscaleSync); err != nil {
+			setupLog.Error(err, "Failed to add Headscale sync loop")
+			os.Exit(1)
+		}
+		setupLog.Info("Headscale inventory sync registered",
+			"url", headscaleAPIURL,
+			"interval", headscaleSyncInterval.String(),
+		)
+	} else {
+		setupLog.Info("Headscale inventory sync disabled",
+			"reason", "headscale-api-url or headscale-api-key not set",
+		)
+	}
+
+	// --- v0.8.0: Wire Legator API server ---
+	if apiListenAddr != "" && apiListenAddr != "0" {
+		apiSrv := api.NewServer(api.ServerConfig{
+			ListenAddr: apiListenAddr,
+			OIDC: apiauth.OIDCConfig{
+				IssuerURL:   apiOIDCIssuer,
+				Audience:    apiOIDCAudience,
+				BypassPaths: []string{"/healthz"},
+			},
+			Policies:  buildAPIPolicies(apiAdminGroup, apiOperatorGroup, apiViewerGroup),
+			Inventory: headscaleSync,
+		}, mgr.GetClient(), ctrl.Log)
+
+		// Register as a controller-runtime Runnable so it starts/stops with the manager
+		if err := mgr.Add(apiSrv); err != nil {
+			setupLog.Error(err, "Failed to add API server to manager")
+			os.Exit(1)
+		}
+		setupLog.Info("API server registered", "addr", apiListenAddr)
+	}
+
 	setupLog.Info("Starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "Failed to run manager")
@@ -1038,4 +1113,33 @@ func truncateReport(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// buildAPIPolicies constructs RBAC policies from OIDC group names.
+func buildAPIPolicies(adminGroup, operatorGroup, viewerGroup string) []apirbac.UserPolicy {
+	return []apirbac.UserPolicy{
+		{
+			Name:     "admin-group",
+			Subjects: []apirbac.SubjectMatcher{{Claim: "groups", Value: adminGroup}},
+			Role:     apirbac.RoleAdmin,
+		},
+		{
+			Name:     "operator-group",
+			Subjects: []apirbac.SubjectMatcher{{Claim: "groups", Value: operatorGroup}},
+			Role:     apirbac.RoleOperator,
+		},
+		{
+			Name:     "viewer-group",
+			Subjects: []apirbac.SubjectMatcher{{Claim: "groups", Value: viewerGroup}},
+			Role:     apirbac.RoleViewer,
+		},
+	}
+}
+
+// envOrDefault reads an environment variable, returning a default if empty.
+func envOrDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
