@@ -362,7 +362,7 @@ func (s *Server) handleListInventory(w http.ResponseWriter, r *http.Request) {
 	if s.inventory != nil {
 		devices := s.inventory.Devices()
 		if len(devices) > 0 {
-			writeJSON(w, http.StatusOK, map[string]interface{}{
+			writeJSON(w, http.StatusOK, map[string]any{
 				"devices": devices,
 				"total":   len(devices),
 				"source":  "inventory-provider",
