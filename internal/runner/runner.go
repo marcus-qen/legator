@@ -140,6 +140,9 @@ func (r *Runner) Execute(ctx context.Context, agent *corev1alpha1.LegatorAgent, 
 		assembled.ActionRegistry,
 		assembled.Environment.DataIndex,
 	)
+	if cfg.ToolRegistry != nil {
+		eng.WithToolRegistry(cfg.ToolRegistry)
+	}
 
 	// Step 5: Execute the conversation loop
 	result := r.conversationLoop(ctx, assembled, eng, cfg, agent)

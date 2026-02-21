@@ -1,0 +1,147 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: agentevents.legator.io
+spec:
+  group: legator.io
+  names:
+    kind: AgentEvent
+    listKind: AgentEventList
+    plural: agentevents
+    singular: agentevent
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.sourceAgent
+      name: Source
+      type: string
+    - jsonPath: .spec.eventType
+      name: Type
+      type: string
+    - jsonPath: .spec.severity
+      name: Severity
+      type: string
+    - jsonPath: .spec.summary
+      name: Summary
+      priority: 1
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          AgentEvent is a finding, alert, or signal published by an agent for
+          consumption by other agents or the dashboard.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: AgentEventSpec defines a finding or signal published by an
+              agent.
+            properties:
+              detail:
+                description: detail provides full context for consuming agents.
+                type: string
+              eventType:
+                description: eventType classifies the event (e.g. "finding", "alert",
+                  "recommendation").
+                type: string
+              labels:
+                additionalProperties:
+                  type: string
+                description: labels are key-value pairs for filtering and routing.
+                type: object
+              severity:
+                description: severity indicates the importance.
+                enum:
+                - critical
+                - warning
+                - info
+                type: string
+              sourceAgent:
+                description: sourceAgent is the agent that published this event.
+                type: string
+              sourceRun:
+                description: sourceRun is the LegatorRun that produced this event.
+                type: string
+              summary:
+                description: summary is a one-line human-readable description.
+                type: string
+              targetAgent:
+                description: targetAgent is a specific agent to trigger (optional
+                  — for directed events).
+                type: string
+              ttl:
+                default: 1h
+                description: ttl is how long the event remains actionable.
+                type: string
+            required:
+            - eventType
+            - severity
+            - sourceAgent
+            - summary
+            type: object
+          status:
+            description: AgentEventStatus tracks consumption of the event.
+            properties:
+              consumedBy:
+                description: consumedBy lists agents that have processed this event.
+                items:
+                  description: EventConsumer records which agent consumed an event
+                    and when.
+                  properties:
+                    agent:
+                      description: agent is the consuming agent's name.
+                      type: string
+                    consumedAt:
+                      description: consumedAt is when the agent processed this event.
+                      format: date-time
+                      type: string
+                    runName:
+                      description: runName is the LegatorRun triggered by consumption.
+                      type: string
+                  required:
+                  - agent
+                  - consumedAt
+                  type: object
+                type: array
+              phase:
+                default: New
+                description: phase is the current processing state.
+                type: string
+              triggeredRuns:
+                description: triggeredRuns lists LegatorRuns triggered by this event.
+                items:
+                  type: string
+                type: array
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

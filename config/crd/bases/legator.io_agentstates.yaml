@@ -1,0 +1,113 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: agentstates.legator.io
+spec:
+  group: legator.io
+  names:
+    kind: AgentState
+    listKind: AgentStateList
+    plural: agentstates
+    shortNames:
+    - as
+    singular: agentstate
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.agentName
+      name: Agent
+      type: string
+    - jsonPath: .status.totalSize
+      name: Keys
+      type: integer
+    - jsonPath: .status.lastUpdated
+      name: Updated
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          AgentState is the Schema for the agentstates API.
+          Provides persistent key-value storage for agents between runs.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: AgentStateSpec defines the desired state for an agent's persistent
+              memory.
+            properties:
+              agentName:
+                description: agentName is the agent this state belongs to.
+                type: string
+              maxKeys:
+                description: 'maxKeys is the maximum number of keys allowed (default:
+                  100).'
+                type: integer
+              maxValueSize:
+                description: 'maxValueSize is the maximum size of a single value in
+                  bytes (default: 4096).'
+                type: integer
+            required:
+            - agentName
+            type: object
+          status:
+            description: AgentStateStatus holds the actual state data.
+            properties:
+              entries:
+                additionalProperties:
+                  description: StateEntry is a single key-value entry with metadata.
+                  properties:
+                    ttl:
+                      description: |-
+                        ttl is the optional time-to-live for this entry (e.g., "24h").
+                        Expired entries are cleaned up by the controller.
+                      type: string
+                    updatedAt:
+                      description: updatedAt is when this entry was last written.
+                      format: date-time
+                      type: string
+                    updatedBy:
+                      description: updatedBy is the LegatorRun that last wrote this
+                        entry.
+                      type: string
+                    value:
+                      description: value is the stored data (string, JSON, etc.).
+                      type: string
+                  required:
+                  - updatedAt
+                  - value
+                  type: object
+                description: entries is the key-value store.
+                type: object
+              lastUpdated:
+                description: lastUpdated is the last time any entry was modified.
+                format: date-time
+                type: string
+              totalSize:
+                description: totalSize is the approximate total size of all entries
+                  in bytes.
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

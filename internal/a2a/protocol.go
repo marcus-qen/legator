@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	corev1alpha1 "github.com/marcus-qen/legator/api/v1alpha1"
+	"github.com/marcus-qen/legator/internal/tools"
 )
 
 // TaskPriority defines urgency of a task request.
@@ -362,6 +363,24 @@ func (t *DelegateTaskTool) Execute(ctx context.Context, args map[string]interfac
 	return fmt.Sprintf("Task delegated to %s: %s (ID: %s)", target, truncate(desc, 80), id), nil
 }
 
+// Capability implements ClassifiableTool. Delegation is internal bookkeeping (creating
+// a CRD event), not an external system mutation — safe at observe level.
+func (t *DelegateTaskTool) Capability() tools.ToolCapability {
+	return tools.ToolCapability{
+		Domain:         "a2a",
+		SupportedTiers: []tools.ActionTier{tools.TierRead},
+	}
+}
+
+// ClassifyAction implements ClassifiableTool.
+func (t *DelegateTaskTool) ClassifyAction(args map[string]interface{}) tools.ActionClassification {
+	target, _ := args["target_agent"].(string)
+	return tools.ActionClassification{
+		Tier:        tools.TierRead,
+		Description: fmt.Sprintf("delegate task to agent %q (internal coordination)", target),
+	}
+}
+
 // CheckTasksTool implements Tool for checking incoming tasks.
 type CheckTasksTool struct {
 	router    *Router
@@ -404,6 +423,22 @@ func (t *CheckTasksTool) Execute(ctx context.Context, args map[string]interface{
 	}
 
 	return sb.String(), nil
+}
+
+// Capability implements ClassifiableTool. Checking tasks is purely read-only.
+func (t *CheckTasksTool) Capability() tools.ToolCapability {
+	return tools.ToolCapability{
+		Domain:         "a2a",
+		SupportedTiers: []tools.ActionTier{tools.TierRead},
+	}
+}
+
+// ClassifyAction implements ClassifiableTool.
+func (t *CheckTasksTool) ClassifyAction(args map[string]interface{}) tools.ActionClassification {
+	return tools.ActionClassification{
+		Tier:        tools.TierRead,
+		Description: "check pending tasks from other agents (read-only)",
+	}
 }
 
 // --- Helpers ---

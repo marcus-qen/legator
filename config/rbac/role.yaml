@@ -7,9 +7,9 @@ rules:
 - apiGroups:
   - legator.io
   resources:
-  - agentenvironments
-  - agentruns
-  - legators
+  - legatoragents
+  - legatorenvironments
+  - legatorruns
   - modeltierconfigs
   verbs:
   - create
@@ -22,18 +22,18 @@ rules:
 - apiGroups:
   - legator.io
   resources:
-  - agentenvironments/finalizers
-  - agentruns/finalizers
-  - legators/finalizers
+  - legatoragents/finalizers
+  - legatorenvironments/finalizers
+  - legatorruns/finalizers
   - modeltierconfigs/finalizers
   verbs:
   - update
 - apiGroups:
   - legator.io
   resources:
-  - agentenvironments/status
-  - agentruns/status
-  - legators/status
+  - legatoragents/status
+  - legatorenvironments/status
+  - legatorruns/status
   - modeltierconfigs/status
   verbs:
   - get

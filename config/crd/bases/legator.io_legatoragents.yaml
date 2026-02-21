@@ -95,6 +95,24 @@ spec:
                     items:
                       type: string
                     type: array
+                  approvalMode:
+                    description: |-
+                      approvalMode controls how actions exceeding autonomy are handled.
+                      "none" (default): exceed → block.
+                      "mutation-gate": exceed → create ApprovalRequest, wait for decision.
+                      "plan-first": agent proposes plan, all mutations need approval.
+                      "every-action": every non-read action needs approval.
+                    enum:
+                    - none
+                    - mutation-gate
+                    - plan-first
+                    - every-action
+                    type: string
+                  approvalTimeout:
+                    default: 30m
+                    description: approvalTimeout is the duration to wait for an approval
+                      decision before expiring.
+                    type: string
                   autonomy:
                     default: observe
                     description: autonomy is the graduated autonomy level.

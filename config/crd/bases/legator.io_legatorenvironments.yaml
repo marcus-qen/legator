@@ -111,12 +111,68 @@ spec:
                 required:
                 - kind
                 type: object
+              connectivity:
+                description: |-
+                  connectivity configures how the agent reaches non-Kubernetes targets
+                  (servers, databases, network devices) across network boundaries.
+                properties:
+                  headscale:
+                    description: |-
+                      headscale configures Headscale/Tailscale mesh VPN connectivity.
+                      Required when type is "headscale" or "tailscale".
+                    properties:
+                      acceptRoutes:
+                        default: true
+                        description: acceptRoutes enables accepting advertised routes
+                          from subnet routers.
+                        type: boolean
+                      authKeySecretRef:
+                        description: |-
+                          authKeySecretRef references a Secret containing the pre-authentication key.
+                          The Secret must have a "key" data field with the Headscale/Tailscale auth key.
+                        type: string
+                      controlServer:
+                        description: |-
+                          controlServer is the Headscale server URL (e.g. "https://headscale.example.com").
+                          For Tailscale, use "https://controlplane.tailscale.com".
+                        type: string
+                      exitNode:
+                        description: exitNode specifies an exit node to route all
+                          traffic through (optional).
+                        type: string
+                      hostname:
+                        description: hostname is the Tailscale hostname for this agent
+                          (defaults to agent name).
+                        type: string
+                      tags:
+                        description: |-
+                          tags are the ACL tags to assign to this agent's node (e.g. ["tag:agent-runtime"]).
+                          Used for Headscale/Tailscale ACL policy.
+                        items:
+                          type: string
+                        type: array
+                    required:
+                    - authKeySecretRef
+                    - controlServer
+                    type: object
+                  type:
+                    description: type specifies the connectivity method.
+                    enum:
+                    - direct
+                    - headscale
+                    - tailscale
+                    type: string
+                required:
+                - type
+                type: object
               credentials:
                 additionalProperties:
-                  description: CredentialRef references a Secret for tool authentication.
+                  description: CredentialRef references a Secret or Vault path for
+                    tool authentication.
                   properties:
                     secretRef:
-                      description: secretRef is the name of the Secret.
+                      description: secretRef is the name of the Secret. Used for static
+                        credentials.
                       type: string
                     type:
                       description: type indicates the credential format.
@@ -126,9 +182,36 @@ spec:
                       - api-key
                       - basic-auth
                       - tls
+                      - vault-kv
+                      - vault-ssh-ca
+                      - vault-database
                       type: string
+                    vault:
+                      description: |-
+                        vault contains Vault-specific credential configuration.
+                        Required when type is vault-kv, vault-ssh-ca, or vault-database.
+                      properties:
+                        mount:
+                          description: mount is the Vault secrets engine mount path
+                            (e.g. "secret", "ssh-client-signer", "database").
+                          type: string
+                        path:
+                          description: path is the secret path within the mount (for
+                            KV).
+                          type: string
+                        role:
+                          description: role is the Vault role to use (for SSH CA and
+                            database).
+                          type: string
+                        ttl:
+                          default: 5m
+                          description: ttl is the requested credential TTL (e.g. "5m"
+                            for SSH certs).
+                          type: string
+                      required:
+                      - mount
+                      type: object
                   required:
-                  - secretRef
                   - type
                   type: object
                 description: credentials maps named credentials to Secret references.
@@ -279,6 +362,38 @@ spec:
                     items:
                       type: string
                     type: array
+                type: object
+              vault:
+                description: |-
+                  vault configures HashiCorp Vault for dynamic credential management.
+                  When set, credentials with vault-* types use this Vault server.
+                properties:
+                  address:
+                    description: address is the Vault server URL.
+                    type: string
+                  authMethod:
+                    description: authMethod is how the controller authenticates to
+                      Vault.
+                    enum:
+                    - kubernetes
+                    - token
+                    type: string
+                  k8sAuthPath:
+                    default: kubernetes
+                    description: k8sAuthPath is the Vault K8s auth mount path (default
+                      "kubernetes").
+                    type: string
+                  k8sAuthRole:
+                    description: k8sAuthRole is the Vault K8s auth role (required
+                      when authMethod is "kubernetes").
+                    type: string
+                  tokenSecretRef:
+                    description: tokenSecretRef references a Secret containing a Vault
+                      token (required when authMethod is "token").
+                    type: string
+                required:
+                - address
+                - authMethod
                 type: object
             type: object
           status:

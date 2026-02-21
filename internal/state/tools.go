@@ -161,15 +161,15 @@ func (t *StateSetTool) Execute(ctx context.Context, args map[string]interface{})
 func (t *StateSetTool) Capability() tools.ToolCapability {
 	return tools.ToolCapability{
 		Domain:         "state",
-		SupportedTiers: []tools.ActionTier{tools.TierServiceMutation},
+		SupportedTiers: []tools.ActionTier{tools.TierRead},
 	}
 }
 
 // ClassifyAction implements ClassifiableTool.
 func (t *StateSetTool) ClassifyAction(args map[string]interface{}) tools.ActionClassification {
 	return tools.ActionClassification{
-		Tier:        tools.TierServiceMutation,
-		Description: "write agent state",
+		Tier:        tools.TierRead,
+		Description: "write agent's own state (internal bookkeeping, not an external mutation)",
 	}
 }
 
@@ -227,14 +227,14 @@ func (t *StateDeleteTool) Execute(ctx context.Context, args map[string]interface
 func (t *StateDeleteTool) Capability() tools.ToolCapability {
 	return tools.ToolCapability{
 		Domain:         "state",
-		SupportedTiers: []tools.ActionTier{tools.TierServiceMutation},
+		SupportedTiers: []tools.ActionTier{tools.TierRead},
 	}
 }
 
 // ClassifyAction implements ClassifiableTool.
 func (t *StateDeleteTool) ClassifyAction(args map[string]interface{}) tools.ActionClassification {
 	return tools.ActionClassification{
-		Tier:        tools.TierServiceMutation,
-		Description: "delete agent state entry",
+		Tier:        tools.TierRead,
+		Description: "delete agent's own state entry (internal bookkeeping, not an external mutation)",
 	}
 }
