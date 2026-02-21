@@ -72,11 +72,45 @@ func NewHeadscaleSync(cfg HeadscaleSyncConfig, log logr.Logger) *HeadscaleSync {
 	}
 
 	return &HeadscaleSync{
-		config: cfg,
-		client: &http.Client{Timeout: 10 * time.Second},
-		log:    log.WithName("headscale-sync"),
+		config:  cfg,
+		client:  &http.Client{Timeout: 10 * time.Second},
+		log:     log.WithName("headscale-sync"),
 		devices: make(map[string]*ManagedDevice),
 	}
+}
+
+// Start runs the periodic Headscale synchronization loop.
+// Implements controller-runtime's manager.Runnable interface.
+func (h *HeadscaleSync) Start(ctx context.Context) error {
+	h.log.Info("Headscale sync loop starting",
+		"baseURL", h.config.BaseURL,
+		"interval", h.config.SyncInterval.String(),
+	)
+
+	// Initial sync (best-effort).
+	if err := h.Sync(ctx); err != nil {
+		h.log.Error(err, "Initial Headscale sync failed")
+	}
+
+	ticker := time.NewTicker(h.config.SyncInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			h.log.Info("Headscale sync loop stopping")
+			return nil
+		case <-ticker.C:
+			if err := h.Sync(ctx); err != nil {
+				h.log.Error(err, "Headscale sync failed")
+			}
+		}
+	}
+}
+
+// NeedLeaderElection ensures only the elected manager performs inventory sync.
+func (h *HeadscaleSync) NeedLeaderElection() bool {
+	return true
 }
 
 // Sync performs one synchronization cycle: fetch nodes from Headscale, update inventory.
