@@ -62,6 +62,7 @@ type Server struct {
 	log    logr.Logger
 	pages  map[string]*template.Template
 	mux    *http.ServeMux
+	oidc   *OIDCMiddleware
 }
 
 // NewServer creates a new dashboard server.
@@ -113,6 +114,22 @@ func NewServer(c client.Client, cfg Config, log logr.Logger) (*Server, error) {
 	}
 
 	s.registerRoutes()
+
+	// Wire OIDC middleware if configured
+	if cfg.OIDCIssuer != "" && cfg.OIDCClientID != "" {
+		s.oidc = NewOIDCMiddleware(OIDCConfig{
+			IssuerURL:    cfg.OIDCIssuer,
+			ClientID:     cfg.OIDCClientID,
+			ClientSecret: cfg.OIDCClientSecret,
+			RedirectURL:  cfg.OIDCRedirectURL,
+		})
+		log.Info("OIDC authentication enabled",
+			"issuer", cfg.OIDCIssuer,
+			"clientID", cfg.OIDCClientID,
+			"redirectURL", cfg.OIDCRedirectURL,
+		)
+	}
+
 	return s, nil
 }
 
@@ -145,11 +162,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
+// handler returns the top-level HTTP handler, wrapping with OIDC if configured.
+func (s *Server) handler() http.Handler {
+	var h http.Handler = s
+	if s.oidc != nil {
+		h = s.oidc.Wrap(h)
+	}
+	return h
+}
+
 // Start runs the dashboard server.
 func (s *Server) Start(ctx context.Context) error {
 	srv := &http.Server{
 		Addr:    s.config.ListenAddr,
-		Handler: s,
+		Handler: s.handler(),
 	}
 
 	go func() {
