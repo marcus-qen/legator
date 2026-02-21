@@ -124,6 +124,17 @@ agents: []
 #       - monitoring
 #       - argocd
 
+# Headscale API credentials for inventory sync loop.
+headscale:
+  # Inject HEADSCALE_API_URL + HEADSCALE_API_KEY from a secret.
+  enabled: true
+  # Secret synced by ESO from Vault.
+  secretName: legator-headscale
+  apiURLKey: api-url
+  apiKeyKey: api-key
+  # Keep optional true so controller still starts before ESO first sync.
+  optional: true
+
 # Connectivity — Headscale/Tailscale mesh VPN sidecar for reaching
 # non-Kubernetes targets (servers, databases, network devices).
 connectivity:
