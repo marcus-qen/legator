@@ -2,6 +2,70 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.7.0] — 2026-02-21
+
+### Theme: Wire It Up
+
+v0.7.0 closes the gap between "tests pass" and "works in production." Eight orphaned packages were wired into the running controller, deployed, validated, and debugged. Every feature now has production evidence.
+
+### Added
+
+#### Controller Integration (Phase 1)
+- Wired `approval.Manager`, `events.Bus`, `state.Manager`, `a2a.Router`, `notify.Router` into `cmd/main.go`
+- `NotifyFunc` in `RunConfig` — called after cleanup to send severity-based notifications
+- Notification routing via env vars (`LEGATOR_NOTIFY_SLACK_WEBHOOK`, `LEGATOR_NOTIFY_TELEGRAM_TOKEN` + `CHAT_ID`, `LEGATOR_NOTIFY_WEBHOOK_URL`)
+- All singletons initialised before `RunConfigFactory` closure
+
+#### Dashboard OIDC (Phase 2)
+- Created `legator-dashboard` Keycloak client in `dev-lab` realm
+- OIDC middleware wired into dashboard Server struct
+- Dashboard redirects to Keycloak, SSO with Pomerium means one login max
+- Deployed and accessible at `https://legator.lab.k-dev.uk/`
+
+#### OCI Skill Distribution (Phase 3)
+- Skills pushed to Harbor via `legator skill push` with env var auth
+- Controller pulls skills from OCI at runtime via `RegistryClient`
+- watchman-light running on `oci://harbor.lab.k-dev.uk/legator/skills/endpoint-monitoring:v1`
+- Full push → pull → execute → succeed cycle validated
+
+#### State Management (Phase 4.3)
+- `AgentState` CRD persisting across agent runs
+- watchman-light saves endpoint status map, reads it back on next run
+- Agents remember previous findings, skip duplicate alerts, report only changes
+
+#### Webhook Triggers (Phase 5)
+- HTTP listener on `:9443` for webhook-triggered agent runs
+- `POST /webhook/{source}` routes to agents registered for that source
+- AlertManager webhook receiver configured (critical/warning alerts → Legator)
+- Debounce (30s window) prevents alert storms from flooding agents
+- Reconciler registers webhook triggers on agent create/update
+- K8s Service + HTTPRoute expose webhook endpoint
+
+### Fixed
+
+- **Engine not wired to tool registry** — `ClassifiableTool` overrides were dead code since v0.5.0. All tool classifications fell through to heuristic fallback.
+- **State tools classified as service mutations** — `state.set`/`state.delete` were `TierServiceMutation`, blocking observe-level agents from using state. Reclassified to `TierRead` (agent's own bookkeeping).
+- **A2A tools classified as service mutations** — `a2a.delegate` fell to heuristic default. Added `ClassifiableTool` implementation, classified as `TierRead`.
+- **Controller RBAC missing CRD resources** — `agentstates`, `legatorruns`, `approvalrequests`, `agentevents` not in ClusterRole.
+- **CRD schema stale** — `approvalMode` and `approvalTimeout` fields missing from cluster CRD. Regenerated manifests.
+- **Container entrypoint mismatch** — Dockerfile used `/legator-controller` but deployment expected `/manager`.
+- **Reconciler didn't register webhook triggers** — Added `OnReconcile` callback to wire agent triggers to scheduler.
+
+### Changed
+
+- `endpoint-monitoring` skill v1.2.0 — state-aware, reads/writes `run_state` key
+- `deployment-verification` skill v2.0.0 — attempts repairs (gated by approval mode)
+- `alert-investigation` skill v2.0.0 — delegates to tribune via A2A
+- `issue-triage` skill v2.0.0 — processes A2A tasks from other agents
+
+### Infrastructure
+
+- 10/10 agents succeeding on cluster
+- 7 CRDs installed (all schemas current)
+- Prometheus scraping UP, 4 alert rules active
+- AlertManager → Legator webhook integration live
+- Harbor hosting OCI skill artifacts
+
 ## [v0.6.0] — 2026-02-20
 
 ### Theme: Ecosystem & Integration
