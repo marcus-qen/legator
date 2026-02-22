@@ -92,6 +92,8 @@ func main() {
 		handleCheck(os.Args[2:])
 	case "login":
 		handleLogin(os.Args[2:])
+	case "logout":
+		handleLogout(os.Args[2:])
 	case "whoami", "me":
 		handleWhoAmI(os.Args[2:])
 	case "inventory", "inv":
@@ -153,6 +155,7 @@ Usage:
     --client-id <id>                OIDC client ID (default: legator-cli)
     --api-url <url>                 Legator API URL to store with token
   legator whoami                    Show authenticated identity + RBAC permissions
+  legator logout                    Remove cached API login token
   legator inventory                 List managed endpoints
   legator inventory show <name>     Show endpoint details
   legator runs list [--agent X]     List recent runs
