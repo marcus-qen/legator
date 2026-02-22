@@ -59,6 +59,7 @@ func handleLogin(args []string) {
 	clientSecret := envOr("LEGATOR_OIDC_CLIENT_SECRET", "")
 	apiURL := envOr("LEGATOR_API_URL", "http://127.0.0.1:8090")
 	scope := envOr("LEGATOR_OIDC_SCOPE", "openid profile email offline_access")
+	verify := true
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -92,6 +93,10 @@ func handleLogin(args []string) {
 				fatal(errors.New("--scope requires a value"))
 			}
 			scope = args[i]
+		case "--verify":
+			verify = true
+		case "--no-verify":
+			verify = false
 		case "-h", "--help", "help":
 			printLoginUsage()
 			return
@@ -144,6 +149,27 @@ func handleLogin(args []string) {
 	fmt.Printf("Token saved: %s\n", path)
 	fmt.Printf("Access token expires: %s\n", cache.ExpiresAt.Format(time.RFC3339))
 	fmt.Printf("API URL: %s\n", cache.APIURL)
+
+	if verify {
+		apiClient := &legatorAPIClient{
+			baseURL: strings.TrimSuffix(cache.APIURL, "/"),
+			bearer:  strings.TrimSpace(cache.AccessToken),
+			httpClient: &http.Client{
+				Timeout: 20 * time.Second,
+			},
+		}
+
+		me, err := fetchWhoAmI(apiClient)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\n⚠️  Login token acquired, but API verification failed: %v\n", err)
+			fmt.Fprintln(os.Stderr, "   You can still run: legator whoami (after fixing API URL/reachability)")
+			return
+		}
+
+		fmt.Println("\nAPI verification")
+		fmt.Println("────────────────")
+		fmt.Printf("Authenticated as: %s (%s)\n", fallback(me.Email, "unknown"), fallback(me.EffectiveRole, "unknown"))
+	}
 }
 
 func printLoginUsage() {
@@ -155,6 +181,8 @@ Options:
   --client-secret <val>  OIDC client secret (optional; for confidential clients)
   --api-url <url>        Legator API base URL to store with token
   --scope <scopes>       OAuth scopes (default: openid profile email offline_access)
+  --verify               Verify token immediately via /api/v1/me (default)
+  --no-verify            Skip immediate API verification
 `)
 }
 

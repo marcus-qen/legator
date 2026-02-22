@@ -21,18 +21,8 @@ func handleWhoAmI(args []string) {
 		fatal(fmt.Errorf("no API login session found; run 'legator login'"))
 	}
 
-	var resp struct {
-		Subject       string `json:"subject"`
-		Email         string `json:"email"`
-		Name          string `json:"name"`
-		Groups        []string `json:"groups"`
-		EffectiveRole string `json:"effectiveRole"`
-		Permissions   map[string]struct {
-			Allowed bool   `json:"allowed"`
-			Reason  string `json:"reason"`
-		} `json:"permissions"`
-	}
-	if err := apiClient.getJSON("/api/v1/me", &resp); err != nil {
+	resp, err := fetchWhoAmI(apiClient)
+	if err != nil {
 		fatal(err)
 	}
 
