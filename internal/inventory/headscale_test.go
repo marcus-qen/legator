@@ -188,6 +188,12 @@ func TestHeadscaleSync_StatusSuccess(t *testing.T) {
 	if st.DeviceCount != 1 {
 		t.Fatalf("DeviceCount = %d, want 1", st.DeviceCount)
 	}
+	if st.Stale {
+		t.Fatalf("Stale = true, want false")
+	}
+	if st.FreshnessThreshold == "" {
+		t.Fatalf("FreshnessThreshold empty")
+	}
 }
 
 func TestHeadscaleSync_StatusFailure(t *testing.T) {
@@ -220,5 +226,8 @@ func TestHeadscaleSync_StatusFailure(t *testing.T) {
 	}
 	if st.LastError == "" {
 		t.Fatalf("LastError empty, want message")
+	}
+	if !st.Stale {
+		t.Fatalf("Stale = false, want true")
 	}
 }

@@ -61,13 +61,16 @@ type SyncStatus struct {
 	Provider            string     `json:"provider"`
 	BaseURL             string     `json:"baseUrl,omitempty"`
 	SyncInterval        string     `json:"syncInterval"`
+	FreshnessThreshold  string     `json:"freshnessThreshold"`
 	DeviceCount         int        `json:"deviceCount"`
 	LastAttempt         *time.Time `json:"lastAttempt,omitempty"`
 	LastSuccess         *time.Time `json:"lastSuccess,omitempty"`
+	AgeSinceLastSuccess string     `json:"ageSinceLastSuccess,omitempty"`
 	LastError           string     `json:"lastError,omitempty"`
 	ConsecutiveFailures int        `json:"consecutiveFailures"`
 	TotalSyncs          int        `json:"totalSyncs"`
 	TotalFailures       int        `json:"totalFailures"`
+	Stale               bool       `json:"stale"`
 	Healthy             bool       `json:"healthy"`
 }
 
@@ -246,15 +249,20 @@ func (h *HeadscaleSync) Status() SyncStatus {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	freshnessThreshold := 2 * h.config.SyncInterval
+	if freshnessThreshold < 60*time.Second {
+		freshnessThreshold = 60 * time.Second
+	}
+
 	status := SyncStatus{
 		Provider:            "headscale",
 		BaseURL:             h.config.BaseURL,
 		SyncInterval:        h.config.SyncInterval.String(),
+		FreshnessThreshold:  freshnessThreshold.String(),
 		DeviceCount:         len(h.devices),
 		ConsecutiveFailures: h.consecutiveFailures,
 		TotalSyncs:          h.totalSyncs,
 		TotalFailures:       h.totalFailures,
-		Healthy:             h.consecutiveFailures == 0,
 	}
 	if h.lastAttempt != nil {
 		t := *h.lastAttempt
@@ -263,10 +271,17 @@ func (h *HeadscaleSync) Status() SyncStatus {
 	if h.lastSuccess != nil {
 		t := *h.lastSuccess
 		status.LastSuccess = &t
+		age := time.Since(t)
+		status.AgeSinceLastSuccess = age.Round(time.Second).String()
+		status.Stale = age > freshnessThreshold
+	} else {
+		status.Stale = true
 	}
 	if h.lastError != "" {
 		status.LastError = h.lastError
 	}
+
+	status.Healthy = h.consecutiveFailures == 0 && !status.Stale
 	return status
 }
 
@@ -277,13 +292,16 @@ func (h *HeadscaleSync) InventoryStatus() map[string]any {
 		"provider":            s.Provider,
 		"baseUrl":             s.BaseURL,
 		"syncInterval":        s.SyncInterval,
+		"freshnessThreshold":  s.FreshnessThreshold,
 		"deviceCount":         s.DeviceCount,
 		"lastAttempt":         s.LastAttempt,
 		"lastSuccess":         s.LastSuccess,
+		"ageSinceLastSuccess": s.AgeSinceLastSuccess,
 		"lastError":           s.LastError,
 		"consecutiveFailures": s.ConsecutiveFailures,
 		"totalSyncs":          s.TotalSyncs,
 		"totalFailures":       s.TotalFailures,
+		"stale":               s.Stale,
 		"healthy":             s.Healthy,
 	}
 }

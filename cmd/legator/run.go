@@ -399,7 +399,14 @@ func printInventorySyncStatus(sync map[string]any) {
 	fmt.Println("───────────")
 	fmt.Printf("  Provider:   %s\n", asString(sync["provider"]))
 	fmt.Printf("  Healthy:    %t\n", asBool(sync["healthy"]))
+	fmt.Printf("  Stale:      %t\n", asBool(sync["stale"]))
 	fmt.Printf("  Last sync:  %s\n", asString(sync["lastSuccess"]))
+	if asString(sync["ageSinceLastSuccess"]) != "" {
+		fmt.Printf("  Sync age:   %s\n", asString(sync["ageSinceLastSuccess"]))
+	}
+	if asString(sync["freshnessThreshold"]) != "" {
+		fmt.Printf("  Freshness:  %s\n", asString(sync["freshnessThreshold"]))
+	}
 	if asString(sync["lastError"]) != "" {
 		fmt.Printf("  Last error: %s\n", asString(sync["lastError"]))
 	}
