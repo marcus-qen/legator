@@ -21,6 +21,18 @@ type legatorAPIClient struct {
 	httpClient *http.Client
 }
 
+type whoAmIResponse struct {
+	Subject       string   `json:"subject"`
+	Email         string   `json:"email"`
+	Name          string   `json:"name"`
+	Groups        []string `json:"groups"`
+	EffectiveRole string   `json:"effectiveRole"`
+	Permissions   map[string]struct {
+		Allowed bool   `json:"allowed"`
+		Reason  string `json:"reason"`
+	} `json:"permissions"`
+}
+
 func tryAPIClient() (*legatorAPIClient, bool, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -75,6 +87,14 @@ func (c *legatorAPIClient) getJSON(path string, out any) error {
 
 func (c *legatorAPIClient) postJSON(path string, body any, out any) error {
 	return c.doJSON(http.MethodPost, path, body, out)
+}
+
+func fetchWhoAmI(apiClient *legatorAPIClient) (*whoAmIResponse, error) {
+	var resp whoAmIResponse
+	if err := apiClient.getJSON("/api/v1/me", &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 func (c *legatorAPIClient) doJSON(method, path string, body any, out any) error {

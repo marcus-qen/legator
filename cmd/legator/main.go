@@ -92,6 +92,10 @@ func main() {
 		handleCheck(os.Args[2:])
 	case "login":
 		handleLogin(os.Args[2:])
+	case "logout":
+		handleLogout(os.Args[2:])
+	case "whoami", "me":
+		handleWhoAmI(os.Args[2:])
 	case "inventory", "inv":
 		handleInventory(os.Args[2:])
 	case "approvals", "approval":
@@ -150,8 +154,12 @@ Usage:
     --issuer <url>                  OIDC issuer (default: env or dev-lab Keycloak)
     --client-id <id>                OIDC client ID (default: legator-cli)
     --api-url <url>                 Legator API URL to store with token
-  legator inventory                 List managed endpoints
-  legator inventory show <name>     Show endpoint details
+    --no-verify                     Skip immediate /api/v1/me verification
+  legator whoami [--json]           Show authenticated identity + RBAC permissions
+  legator logout                    Remove cached API login token
+  legator inventory [--json]        List managed endpoints
+  legator inventory show <name>      Show endpoint details
+  legator inventory status [--json]  Show inventory sync health/freshness
   legator runs list [--agent X]     List recent runs
   legator runs logs <name>          Show run report/audit trail
   legator approvals                 List pending approvals

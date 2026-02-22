@@ -56,6 +56,24 @@ type HeadscaleSyncConfig struct {
 	SyncInterval time.Duration
 }
 
+// SyncStatus summarizes the health and freshness of the Headscale sync loop.
+type SyncStatus struct {
+	Provider            string     `json:"provider"`
+	BaseURL             string     `json:"baseUrl,omitempty"`
+	SyncInterval        string     `json:"syncInterval"`
+	FreshnessThreshold  string     `json:"freshnessThreshold"`
+	DeviceCount         int        `json:"deviceCount"`
+	LastAttempt         *time.Time `json:"lastAttempt,omitempty"`
+	LastSuccess         *time.Time `json:"lastSuccess,omitempty"`
+	AgeSinceLastSuccess string     `json:"ageSinceLastSuccess,omitempty"`
+	LastError           string     `json:"lastError,omitempty"`
+	ConsecutiveFailures int        `json:"consecutiveFailures"`
+	TotalSyncs          int        `json:"totalSyncs"`
+	TotalFailures       int        `json:"totalFailures"`
+	Stale               bool       `json:"stale"`
+	Healthy             bool       `json:"healthy"`
+}
+
 // HeadscaleSync synchronizes Headscale nodes to the device inventory.
 type HeadscaleSync struct {
 	config  HeadscaleSyncConfig
@@ -63,6 +81,13 @@ type HeadscaleSync struct {
 	log     logr.Logger
 	mu      sync.RWMutex
 	devices map[string]*ManagedDevice // keyed by node name
+
+	lastAttempt         *time.Time
+	lastSuccess         *time.Time
+	lastError           string
+	consecutiveFailures int
+	totalSyncs          int
+	totalFailures       int
 }
 
 // NewHeadscaleSync creates a new Headscale synchronizer.
@@ -115,13 +140,25 @@ func (h *HeadscaleSync) NeedLeaderElection() bool {
 
 // Sync performs one synchronization cycle: fetch nodes from Headscale, update inventory.
 func (h *HeadscaleSync) Sync(ctx context.Context) error {
+	attempt := time.Now().UTC()
 	nodes, err := h.fetchNodes(ctx)
+
+	h.mu.Lock()
+	h.totalSyncs++
+	h.lastAttempt = &attempt
+
 	if err != nil {
+		h.totalFailures++
+		h.consecutiveFailures++
+		h.lastError = err.Error()
+		h.mu.Unlock()
 		return fmt.Errorf("failed to fetch Headscale nodes: %w", err)
 	}
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.consecutiveFailures = 0
+	h.lastError = ""
+	now := time.Now().UTC()
+	h.lastSuccess = &now
 
 	// Track which nodes are still present
 	seen := make(map[string]bool)
@@ -164,9 +201,12 @@ func (h *HeadscaleSync) Sync(ctx context.Context) error {
 		}
 	}
 
+	inventorySize := len(h.devices)
+	h.mu.Unlock()
+
 	h.log.Info("Headscale sync completed",
 		"totalNodes", len(nodes),
-		"inventorySize", len(h.devices),
+		"inventorySize", inventorySize,
 	)
 
 	return nil
@@ -202,6 +242,65 @@ func (h *HeadscaleSync) DeviceCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.devices)
+}
+
+// Status returns sync health/freshness metadata for API consumers.
+func (h *HeadscaleSync) Status() SyncStatus {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	freshnessThreshold := max(2*h.config.SyncInterval, 60*time.Second)
+
+	status := SyncStatus{
+		Provider:            "headscale",
+		BaseURL:             h.config.BaseURL,
+		SyncInterval:        h.config.SyncInterval.String(),
+		FreshnessThreshold:  freshnessThreshold.String(),
+		DeviceCount:         len(h.devices),
+		ConsecutiveFailures: h.consecutiveFailures,
+		TotalSyncs:          h.totalSyncs,
+		TotalFailures:       h.totalFailures,
+	}
+	if h.lastAttempt != nil {
+		t := *h.lastAttempt
+		status.LastAttempt = &t
+	}
+	if h.lastSuccess != nil {
+		t := *h.lastSuccess
+		status.LastSuccess = &t
+		age := time.Since(t)
+		status.AgeSinceLastSuccess = age.Round(time.Second).String()
+		status.Stale = age > freshnessThreshold
+	} else {
+		status.Stale = true
+	}
+	if h.lastError != "" {
+		status.LastError = h.lastError
+	}
+
+	status.Healthy = h.consecutiveFailures == 0 && !status.Stale
+	return status
+}
+
+// InventoryStatus returns sync health/freshness metadata as an API-friendly map.
+func (h *HeadscaleSync) InventoryStatus() map[string]any {
+	s := h.Status()
+	return map[string]any{
+		"provider":            s.Provider,
+		"baseUrl":             s.BaseURL,
+		"syncInterval":        s.SyncInterval,
+		"freshnessThreshold":  s.FreshnessThreshold,
+		"deviceCount":         s.DeviceCount,
+		"lastAttempt":         s.LastAttempt,
+		"lastSuccess":         s.LastSuccess,
+		"ageSinceLastSuccess": s.AgeSinceLastSuccess,
+		"lastError":           s.LastError,
+		"consecutiveFailures": s.ConsecutiveFailures,
+		"totalSyncs":          s.TotalSyncs,
+		"totalFailures":       s.TotalFailures,
+		"stale":               s.Stale,
+		"healthy":             s.Healthy,
+	}
 }
 
 // fetchNodes calls the Headscale API to list all nodes.

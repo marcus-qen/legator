@@ -34,6 +34,11 @@ type InventoryProvider interface {
 	Devices() []inventory.ManagedDevice
 }
 
+// InventoryStatusProvider optionally exposes sync/status metadata for inventory sources.
+type InventoryStatusProvider interface {
+	InventoryStatus() map[string]any
+}
+
 // ServerConfig configures the Legator API server.
 type ServerConfig struct {
 	// ListenAddr is the address to listen on (e.g., ":8090").
@@ -122,6 +127,9 @@ func (s *Server) registerRoutes() {
 	// Health (bypasses auth)
 	s.mux.HandleFunc("/healthz", s.handleHealthz)
 
+	// Identity
+	s.mux.HandleFunc("GET /api/v1/me", s.handleWhoAmI)
+
 	// Agents
 	s.mux.HandleFunc("GET /api/v1/agents", s.handleListAgents)
 	s.mux.HandleFunc("GET /api/v1/agents/{name}", s.handleGetAgent)
@@ -146,6 +154,53 @@ func (s *Server) registerRoutes() {
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleWhoAmI(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "no authenticated user")
+		return
+	}
+
+	type permission struct {
+		Allowed bool   `json:"allowed"`
+		Reason  string `json:"reason"`
+	}
+
+	actions := []rbac.Action{
+		rbac.ActionViewAgents,
+		rbac.ActionViewRuns,
+		rbac.ActionViewInventory,
+		rbac.ActionViewAudit,
+		rbac.ActionRunAgent,
+		rbac.ActionApprove,
+		rbac.ActionManageDevice,
+		rbac.ActionConfigure,
+		rbac.ActionChat,
+	}
+
+	perms := make(map[string]permission, len(actions))
+	for _, action := range actions {
+		d := s.rbacEng.Authorize(r.Context(), user, action, "")
+		perms[string(action)] = permission{Allowed: d.Allowed, Reason: d.Reason}
+	}
+
+	effectiveRole := "viewer"
+	if perms[string(rbac.ActionConfigure)].Allowed {
+		effectiveRole = "admin"
+	} else if perms[string(rbac.ActionRunAgent)].Allowed || perms[string(rbac.ActionApprove)].Allowed {
+		effectiveRole = "operator"
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"subject":       user.Subject,
+		"email":         user.Email,
+		"name":          user.Name,
+		"groups":        user.Groups,
+		"effectiveRole": effectiveRole,
+		"permissions":   perms,
+	})
 }
 
 func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
@@ -361,14 +416,16 @@ func (s *Server) handleListInventory(w http.ResponseWriter, r *http.Request) {
 	// Preferred source: live inventory provider (Headscale sync loop, etc.).
 	if s.inventory != nil {
 		devices := s.inventory.Devices()
-		if len(devices) > 0 {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"devices": devices,
-				"total":   len(devices),
-				"source":  "inventory-provider",
-			})
-			return
+		resp := map[string]any{
+			"devices": devices,
+			"total":   len(devices),
+			"source":  "inventory-provider",
 		}
+		if statusProvider, ok := s.inventory.(InventoryStatusProvider); ok {
+			resp["sync"] = statusProvider.InventoryStatus()
+		}
+		writeJSON(w, http.StatusOK, resp)
+		return
 	}
 
 	// Fallback source: LegatorEnvironment endpoints.
