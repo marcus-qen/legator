@@ -249,10 +249,7 @@ func (h *HeadscaleSync) Status() SyncStatus {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	freshnessThreshold := 2 * h.config.SyncInterval
-	if freshnessThreshold < 60*time.Second {
-		freshnessThreshold = 60 * time.Second
-	}
+	freshnessThreshold := max(2*h.config.SyncInterval, 60*time.Second)
 
 	status := SyncStatus{
 		Provider:            "headscale",
