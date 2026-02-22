@@ -156,3 +156,67 @@ func TestHeadscaleSync_DevicesList(t *testing.T) {
 		t.Errorf("Devices() len = %d, want 2", len(devices))
 	}
 }
+
+func TestHeadscaleSync_StatusSuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(HeadscaleNodesResponse{
+			Nodes: []HeadscaleNode{{ID: "1", Name: "a", GivenName: "a", Online: true, IPAddresses: []string{"100.64.0.1"}}},
+		})
+	}))
+	defer server.Close()
+
+	s := NewHeadscaleSync(HeadscaleSyncConfig{BaseURL: server.URL, APIKey: "k"}, logr.Discard())
+	if err := s.Sync(context.Background()); err != nil {
+		t.Fatalf("Sync failed: %v", err)
+	}
+
+	st := s.Status()
+	if !st.Healthy {
+		t.Fatalf("Healthy = false, want true")
+	}
+	if st.TotalSyncs != 1 {
+		t.Fatalf("TotalSyncs = %d, want 1", st.TotalSyncs)
+	}
+	if st.TotalFailures != 0 {
+		t.Fatalf("TotalFailures = %d, want 0", st.TotalFailures)
+	}
+	if st.LastSuccess == nil {
+		t.Fatalf("LastSuccess = nil, want timestamp")
+	}
+	if st.DeviceCount != 1 {
+		t.Fatalf("DeviceCount = %d, want 1", st.DeviceCount)
+	}
+}
+
+func TestHeadscaleSync_StatusFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+	}))
+	defer server.Close()
+
+	s := NewHeadscaleSync(HeadscaleSyncConfig{BaseURL: server.URL, APIKey: "bad"}, logr.Discard())
+	if err := s.Sync(context.Background()); err == nil {
+		t.Fatalf("expected sync error")
+	}
+
+	st := s.Status()
+	if st.Healthy {
+		t.Fatalf("Healthy = true, want false")
+	}
+	if st.TotalSyncs != 1 {
+		t.Fatalf("TotalSyncs = %d, want 1", st.TotalSyncs)
+	}
+	if st.TotalFailures != 1 {
+		t.Fatalf("TotalFailures = %d, want 1", st.TotalFailures)
+	}
+	if st.ConsecutiveFailures != 1 {
+		t.Fatalf("ConsecutiveFailures = %d, want 1", st.ConsecutiveFailures)
+	}
+	if st.LastAttempt == nil {
+		t.Fatalf("LastAttempt = nil, want timestamp")
+	}
+	if st.LastError == "" {
+		t.Fatalf("LastError empty, want message")
+	}
+}

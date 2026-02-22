@@ -12,6 +12,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/marcus-qen/legator/internal/api/auth"
 	"github.com/marcus-qen/legator/internal/api/rbac"
+	"github.com/marcus-qen/legator/internal/inventory"
 )
 
 // makeTestJWT creates a minimal JWT for testing (same as auth package helper).
@@ -20,6 +21,71 @@ func makeTestJWT(claims map[string]interface{}) string {
 	payload, _ := json.Marshal(claims)
 	body := base64.RawURLEncoding.EncodeToString(payload)
 	return fmt.Sprintf("%s.%s.test-signature", header, body)
+}
+
+type fakeInventoryProvider struct {
+	devices []inventory.ManagedDevice
+	sync    map[string]any
+}
+
+func (f *fakeInventoryProvider) Devices() []inventory.ManagedDevice {
+	return f.devices
+}
+
+func (f *fakeInventoryProvider) InventoryStatus() map[string]any {
+	return f.sync
+}
+
+func TestInventoryIncludesSyncStatusFromProvider(t *testing.T) {
+	srv := NewServer(ServerConfig{
+		OIDC: auth.OIDCConfig{
+			BypassPaths: []string{"/healthz"},
+		},
+		Policies: []rbac.UserPolicy{
+			{
+				Name:     "viewer",
+				Subjects: []rbac.SubjectMatcher{{Claim: "email", Value: "viewer@example.com"}},
+				Role:     rbac.RoleViewer,
+			},
+		},
+		Inventory: &fakeInventoryProvider{
+			devices: []inventory.ManagedDevice{},
+			sync: map[string]any{
+				"provider": "headscale",
+				"healthy":  true,
+			},
+		},
+	}, nil, logr.Discard())
+
+	token := makeTestJWT(map[string]interface{}{
+		"sub":   "viewer-1",
+		"email": "viewer@example.com",
+		"exp":   float64(time.Now().Add(1 * time.Hour).Unix()),
+	})
+
+	req := httptest.NewRequest("GET", "/api/v1/inventory", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got := body["source"]; got != "inventory-provider" {
+		t.Fatalf("source = %v, want inventory-provider", got)
+	}
+	sync, ok := body["sync"].(map[string]any)
+	if !ok {
+		t.Fatalf("sync field missing or invalid: %#v", body["sync"])
+	}
+	if got := sync["provider"]; got != "headscale" {
+		t.Fatalf("sync.provider = %v, want headscale", got)
+	}
 }
 
 func TestHealthzBypassesAuth(t *testing.T) {

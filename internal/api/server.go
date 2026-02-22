@@ -34,6 +34,11 @@ type InventoryProvider interface {
 	Devices() []inventory.ManagedDevice
 }
 
+// InventoryStatusProvider optionally exposes sync/status metadata for inventory sources.
+type InventoryStatusProvider interface {
+	InventoryStatus() map[string]any
+}
+
 // ServerConfig configures the Legator API server.
 type ServerConfig struct {
 	// ListenAddr is the address to listen on (e.g., ":8090").
@@ -411,14 +416,16 @@ func (s *Server) handleListInventory(w http.ResponseWriter, r *http.Request) {
 	// Preferred source: live inventory provider (Headscale sync loop, etc.).
 	if s.inventory != nil {
 		devices := s.inventory.Devices()
-		if len(devices) > 0 {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"devices": devices,
-				"total":   len(devices),
-				"source":  "inventory-provider",
-			})
-			return
+		resp := map[string]any{
+			"devices": devices,
+			"total":   len(devices),
+			"source":  "inventory-provider",
 		}
+		if statusProvider, ok := s.inventory.(InventoryStatusProvider); ok {
+			resp["sync"] = statusProvider.InventoryStatus()
+		}
+		writeJSON(w, http.StatusOK, resp)
+		return
 	}
 
 	// Fallback source: LegatorEnvironment endpoints.

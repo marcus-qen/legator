@@ -327,6 +327,7 @@ func handleInventoryViaAPI(apiClient *legatorAPIClient, args []string) {
 		Devices []map[string]any `json:"devices"`
 		Total   int              `json:"total"`
 		Source  string           `json:"source"`
+		Sync    map[string]any   `json:"sync"`
 	}
 	if err := apiClient.getJSON("/api/v1/inventory", &resp); err != nil {
 		fatal(err)
@@ -349,6 +350,7 @@ func handleInventoryViaAPI(apiClient *legatorAPIClient, args []string) {
 					fmt.Printf("  Headscale:   %s\n", asString(addr["headscale"]))
 					fmt.Printf("  Online:      %t\n", asBool(conn["online"]))
 					fmt.Printf("  Type:        %s\n", asString(d["type"]))
+					printInventorySyncStatus(resp.Sync)
 				} else {
 					fmt.Printf("  URL:         %s\n", asString(d["url"]))
 					fmt.Printf("  Environment: %s\n", asString(d["environmentRef"]))
@@ -378,6 +380,7 @@ func handleInventoryViaAPI(apiClient *legatorAPIClient, args []string) {
 			fmt.Printf("  %-25s %s  (%s)\n", name, ip, state)
 		}
 		fmt.Printf("\n%d devices (source: %s)\n", resp.Total, resp.Source)
+		printInventorySyncStatus(resp.Sync)
 		return
 	}
 
@@ -385,6 +388,24 @@ func handleInventoryViaAPI(apiClient *legatorAPIClient, args []string) {
 		fmt.Printf("  %-25s %s  (env: %s)\n", asString(d["name"]), asString(d["url"]), asString(d["environmentRef"]))
 	}
 	fmt.Printf("\n%d endpoints (source: %s)\n", resp.Total, resp.Source)
+}
+
+func printInventorySyncStatus(sync map[string]any) {
+	if len(sync) == 0 {
+		return
+	}
+
+	fmt.Println("\nSync status")
+	fmt.Println("───────────")
+	fmt.Printf("  Provider:   %s\n", asString(sync["provider"]))
+	fmt.Printf("  Healthy:    %t\n", asBool(sync["healthy"]))
+	fmt.Printf("  Last sync:  %s\n", asString(sync["lastSuccess"]))
+	if asString(sync["lastError"]) != "" {
+		fmt.Printf("  Last error: %s\n", asString(sync["lastError"]))
+	}
+	if v := sync["consecutiveFailures"]; v != nil {
+		fmt.Printf("  Failures:   %v\n", v)
+	}
 }
 
 func inventoryShow(envs *unstructured.UnstructuredList, target string) {
