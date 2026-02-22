@@ -155,7 +155,7 @@ Usage:
     --client-id <id>                OIDC client ID (default: legator-cli)
     --api-url <url>                 Legator API URL to store with token
     --no-verify                     Skip immediate /api/v1/me verification
-  legator whoami                    Show authenticated identity + RBAC permissions
+  legator whoami [--json]           Show authenticated identity + RBAC permissions
   legator logout                    Remove cached API login token
   legator inventory                 List managed endpoints
   legator inventory show <name>     Show endpoint details

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -8,9 +9,15 @@ import (
 )
 
 func handleWhoAmI(args []string) {
-	if len(args) > 0 {
-		fmt.Fprintln(os.Stderr, "Usage: legator whoami")
-		os.Exit(1)
+	jsonOut := false
+	for _, arg := range args {
+		switch arg {
+		case "--json", "-j":
+			jsonOut = true
+		default:
+			fmt.Fprintln(os.Stderr, "Usage: legator whoami [--json]")
+			os.Exit(1)
+		}
 	}
 
 	apiClient, ok, err := tryAPIClient()
@@ -24,6 +31,15 @@ func handleWhoAmI(args []string) {
 	resp, err := fetchWhoAmI(apiClient)
 	if err != nil {
 		fatal(err)
+	}
+
+	if jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(resp); err != nil {
+			fatal(err)
+		}
+		return
 	}
 
 	fmt.Println("👤 Authenticated identity")
