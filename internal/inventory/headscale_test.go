@@ -159,9 +159,11 @@ func TestHeadscaleSync_DevicesList(t *testing.T) {
 
 func TestHeadscaleSync_StatusSuccess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(HeadscaleNodesResponse{
+		if err := json.NewEncoder(w).Encode(HeadscaleNodesResponse{
 			Nodes: []HeadscaleNode{{ID: "1", Name: "a", GivenName: "a", Online: true, IPAddresses: []string{"100.64.0.1"}}},
-		})
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
 	}))
 	defer server.Close()
 

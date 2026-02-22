@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"text/tabwriter"
 )
 
@@ -88,9 +89,12 @@ func joinCSV(items []string) string {
 	if len(items) == 0 {
 		return ""
 	}
-	out := items[0]
+	var b strings.Builder
+	b.Grow(len(items) * 8)
+	b.WriteString(items[0])
 	for i := 1; i < len(items); i++ {
-		out += ", " + items[i]
+		b.WriteString(", ")
+		b.WriteString(items[i])
 	}
-	return out
+	return b.String()
 }

@@ -16,7 +16,7 @@ import (
 )
 
 // makeTestJWT creates a minimal JWT for testing (same as auth package helper).
-func makeTestJWT(claims map[string]interface{}) string {
+func makeTestJWT(claims map[string]any) string {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
 	payload, _ := json.Marshal(claims)
 	body := base64.RawURLEncoding.EncodeToString(payload)
@@ -57,7 +57,7 @@ func TestInventoryIncludesSyncStatusFromProvider(t *testing.T) {
 		},
 	}, nil, logr.Discard())
 
-	token := makeTestJWT(map[string]interface{}{
+	token := makeTestJWT(map[string]any{
 		"sub":   "viewer-1",
 		"email": "viewer@example.com",
 		"exp":   float64(time.Now().Add(1 * time.Hour).Unix()),
@@ -140,7 +140,7 @@ func TestRBACDeniesViewerFromRunAgent(t *testing.T) {
 		},
 	}, nil, logr.Discard())
 
-	token := makeTestJWT(map[string]interface{}{
+	token := makeTestJWT(map[string]any{
 		"sub":   "viewer-1",
 		"email": "viewer@example.com",
 		"exp":   float64(time.Now().Add(1 * time.Hour).Unix()),
@@ -170,7 +170,7 @@ func TestWhoAmIReturnsIdentityAndPermissions(t *testing.T) {
 		},
 	}, nil, logr.Discard())
 
-	token := makeTestJWT(map[string]interface{}{
+	token := makeTestJWT(map[string]any{
 		"sub":    "operator-1",
 		"email":  "operator@example.com",
 		"name":   "Operator One",
@@ -187,7 +187,7 @@ func TestWhoAmIReturnsIdentityAndPermissions(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
 	}
 
-	var body map[string]interface{}
+	var body map[string]any
 	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -199,12 +199,12 @@ func TestWhoAmIReturnsIdentityAndPermissions(t *testing.T) {
 		t.Fatalf("effectiveRole = %v, want operator", got)
 	}
 
-	perms, ok := body["permissions"].(map[string]interface{})
+	perms, ok := body["permissions"].(map[string]any)
 	if !ok {
 		t.Fatalf("permissions missing or invalid: %#v", body["permissions"])
 	}
 
-	runPerm, ok := perms[string(rbac.ActionRunAgent)].(map[string]interface{})
+	runPerm, ok := perms[string(rbac.ActionRunAgent)].(map[string]any)
 	if !ok {
 		t.Fatalf("run permission missing")
 	}
@@ -212,7 +212,7 @@ func TestWhoAmIReturnsIdentityAndPermissions(t *testing.T) {
 		t.Fatalf("expected agents:run to be allowed for operator")
 	}
 
-	cfgPerm, ok := perms[string(rbac.ActionConfigure)].(map[string]interface{})
+	cfgPerm, ok := perms[string(rbac.ActionConfigure)].(map[string]any)
 	if !ok {
 		t.Fatalf("config permission missing")
 	}
