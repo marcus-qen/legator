@@ -90,6 +90,71 @@ func TestRBACDeniesViewerFromRunAgent(t *testing.T) {
 	}
 }
 
+func TestWhoAmIReturnsIdentityAndPermissions(t *testing.T) {
+	srv := NewServer(ServerConfig{
+		OIDC: auth.OIDCConfig{
+			BypassPaths: []string{"/healthz"},
+		},
+		Policies: []rbac.UserPolicy{
+			{
+				Name:     "operator-policy",
+				Subjects: []rbac.SubjectMatcher{{Claim: "email", Value: "operator@example.com"}},
+				Role:     rbac.RoleOperator,
+			},
+		},
+	}, nil, logr.Discard())
+
+	token := makeTestJWT(map[string]interface{}{
+		"sub":    "operator-1",
+		"email":  "operator@example.com",
+		"name":   "Operator One",
+		"groups": []string{"legator-operator"},
+		"exp":    float64(time.Now().Add(1 * time.Hour).Unix()),
+	})
+
+	req := httptest.NewRequest("GET", "/api/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var body map[string]interface{}
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if got := body["email"]; got != "operator@example.com" {
+		t.Fatalf("email = %v, want operator@example.com", got)
+	}
+	if got := body["effectiveRole"]; got != "operator" {
+		t.Fatalf("effectiveRole = %v, want operator", got)
+	}
+
+	perms, ok := body["permissions"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("permissions missing or invalid: %#v", body["permissions"])
+	}
+
+	runPerm, ok := perms[string(rbac.ActionRunAgent)].(map[string]interface{})
+	if !ok {
+		t.Fatalf("run permission missing")
+	}
+	if allowed, _ := runPerm["allowed"].(bool); !allowed {
+		t.Fatalf("expected agents:run to be allowed for operator")
+	}
+
+	cfgPerm, ok := perms[string(rbac.ActionConfigure)].(map[string]interface{})
+	if !ok {
+		t.Fatalf("config permission missing")
+	}
+	if allowed, _ := cfgPerm["allowed"].(bool); allowed {
+		t.Fatalf("expected config:write to be denied for operator")
+	}
+}
+
 func TestAuditMiddlewareLogsRequests(t *testing.T) {
 	srv := NewServer(ServerConfig{
 		OIDC: auth.OIDCConfig{

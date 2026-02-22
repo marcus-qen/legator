@@ -92,6 +92,8 @@ func main() {
 		handleCheck(os.Args[2:])
 	case "login":
 		handleLogin(os.Args[2:])
+	case "whoami", "me":
+		handleWhoAmI(os.Args[2:])
 	case "inventory", "inv":
 		handleInventory(os.Args[2:])
 	case "approvals", "approval":
@@ -150,6 +152,7 @@ Usage:
     --issuer <url>                  OIDC issuer (default: env or dev-lab Keycloak)
     --client-id <id>                OIDC client ID (default: legator-cli)
     --api-url <url>                 Legator API URL to store with token
+  legator whoami                    Show authenticated identity + RBAC permissions
   legator inventory                 List managed endpoints
   legator inventory show <name>     Show endpoint details
   legator runs list [--agent X]     List recent runs
