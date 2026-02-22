@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -295,6 +296,10 @@ func handleInventory(args []string) {
 		inventoryShow(envs, args[1])
 		return
 	}
+	if len(args) > 0 && args[0] == "status" {
+		fmt.Fprintln(os.Stderr, "Inventory sync status requires API mode (run 'legator login' first).")
+		os.Exit(1)
+	}
 
 	// List all endpoints across environments
 	fmt.Println("📋 Infrastructure Inventory")
@@ -323,6 +328,18 @@ func handleInventory(args []string) {
 }
 
 func handleInventoryViaAPI(apiClient *legatorAPIClient, args []string) {
+	jsonOut := false
+	filtered := make([]string, 0, len(args))
+	for _, arg := range args {
+		switch arg {
+		case "--json", "-j":
+			jsonOut = true
+		default:
+			filtered = append(filtered, arg)
+		}
+	}
+	args = filtered
+
 	var resp struct {
 		Devices []map[string]any `json:"devices"`
 		Total   int              `json:"total"`
@@ -333,6 +350,22 @@ func handleInventoryViaAPI(apiClient *legatorAPIClient, args []string) {
 		fatal(err)
 	}
 
+	if len(args) > 0 && args[0] == "status" {
+		if len(resp.Sync) == 0 {
+			fatal(fmt.Errorf("inventory source %q does not expose sync status", resp.Source))
+		}
+		if jsonOut {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(resp.Sync); err != nil {
+				fatal(err)
+			}
+			return
+		}
+		printInventorySyncStatus(resp.Sync)
+		return
+	}
+
 	if len(args) > 0 && (args[0] == "show" || args[0] == "get") {
 		if len(args) < 2 {
 			fmt.Fprintln(os.Stderr, "Usage: legator inventory show <name>")
@@ -341,6 +374,14 @@ func handleInventoryViaAPI(apiClient *legatorAPIClient, args []string) {
 		target := args[1]
 		for _, d := range resp.Devices {
 			if asString(d["name"]) == target || asString(d["hostname"]) == target {
+				if jsonOut {
+					enc := json.NewEncoder(os.Stdout)
+					enc.SetIndent("", "  ")
+					if err := enc.Encode(d); err != nil {
+						fatal(err)
+					}
+					return
+				}
 				fmt.Printf("📍 %s\n", target)
 				fmt.Printf("  Source:      %s\n", resp.Source)
 				if resp.Source == "inventory-provider" {
@@ -360,6 +401,15 @@ func handleInventoryViaAPI(apiClient *legatorAPIClient, args []string) {
 		}
 		fmt.Fprintf(os.Stderr, "Endpoint %q not found\n", target)
 		os.Exit(1)
+	}
+
+	if jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(resp); err != nil {
+			fatal(err)
+		}
+		return
 	}
 
 	fmt.Println("📋 Infrastructure Inventory")

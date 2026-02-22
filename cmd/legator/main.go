@@ -157,8 +157,9 @@ Usage:
     --no-verify                     Skip immediate /api/v1/me verification
   legator whoami [--json]           Show authenticated identity + RBAC permissions
   legator logout                    Remove cached API login token
-  legator inventory                 List managed endpoints
-  legator inventory show <name>     Show endpoint details
+  legator inventory [--json]        List managed endpoints
+  legator inventory show <name>      Show endpoint details
+  legator inventory status [--json]  Show inventory sync health/freshness
   legator runs list [--agent X]     List recent runs
   legator runs logs <name>          Show run report/audit trail
   legator approvals                 List pending approvals
