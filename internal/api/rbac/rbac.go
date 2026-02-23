@@ -50,10 +50,10 @@ const (
 type MaxAutonomy string
 
 const (
-	MaxAutonomyObserve         MaxAutonomy = "observe"
-	MaxAutonomyRecommend       MaxAutonomy = "recommend"
-	MaxAutonomyAutomateSafe    MaxAutonomy = "automate-safe"
-	MaxAutonomyAutomateAll     MaxAutonomy = "automate-destructive"
+	MaxAutonomyObserve      MaxAutonomy = "observe"
+	MaxAutonomyRecommend    MaxAutonomy = "recommend"
+	MaxAutonomyAutomateSafe MaxAutonomy = "automate-safe"
+	MaxAutonomyAutomateAll  MaxAutonomy = "automate-destructive"
 )
 
 // UserIdentity represents an authenticated user extracted from OIDC claims.
@@ -131,46 +131,55 @@ func NewEngine(policies []UserPolicy) *Engine {
 	return &Engine{policies: policies}
 }
 
+// ResolvePolicy returns the best matching policy for a user using deterministic
+// ordering (highest role rank, then lexicographic policy name).
+func (e *Engine) ResolvePolicy(user *UserIdentity) (*UserPolicy, bool) {
+	if user == nil {
+		return nil, false
+	}
+
+	matched := e.matchingPolicies(user)
+	if len(matched) == 0 {
+		return nil, false
+	}
+
+	best := matched[0]
+	for i := 1; i < len(matched); i++ {
+		candidate := matched[i]
+		if roleRank(candidate.Role) > roleRank(best.Role) {
+			best = candidate
+			continue
+		}
+		if roleRank(candidate.Role) == roleRank(best.Role) && candidate.Name < best.Name {
+			best = candidate
+		}
+	}
+
+	return &best, true
+}
+
 // Authorize checks whether the given user can perform the action.
 func (e *Engine) Authorize(_ context.Context, user *UserIdentity, action Action, resource string) Decision {
 	if user == nil {
 		return Decision{Allowed: false, Reason: "no user identity"}
 	}
 
-	// Find matching policies
-	var matchedPolicies []UserPolicy
-	for _, p := range e.policies {
-		if e.matchesSubject(user, p.Subjects) {
-			matchedPolicies = append(matchedPolicies, p)
-		}
-	}
-
-	if len(matchedPolicies) == 0 {
+	bestPolicy, ok := e.ResolvePolicy(user)
+	if !ok {
 		return Decision{Allowed: false, Reason: fmt.Sprintf("no policy matches user %s", user.Email)}
 	}
 
-	// Find the highest-privilege matching policy
-	var bestPolicy *UserPolicy
-	for i := range matchedPolicies {
-		p := &matchedPolicies[i]
-		if bestPolicy == nil || roleRank(p.Role) > roleRank(bestPolicy.Role) {
-			bestPolicy = p
-		}
-	}
-
-	// Check if the role permits the action
 	if !rolePermits(bestPolicy.Role, action) {
 		return Decision{
 			Allowed: false,
-			Reason: fmt.Sprintf("role %s does not permit action %s", bestPolicy.Role, action),
+			Reason:  fmt.Sprintf("role %s does not permit action %s", bestPolicy.Role, action),
 		}
 	}
 
-	// Check scope (if resource is specified)
-	if resource != "" && !e.inScope(bestPolicy.Scope, resource) {
+	if resource != "" && !inScope(bestPolicy.Scope, resource) {
 		return Decision{
 			Allowed: false,
-			Reason: fmt.Sprintf("resource %s is outside policy scope", resource),
+			Reason:  fmt.Sprintf("resource %s is outside policy scope", resource),
 		}
 	}
 
@@ -179,6 +188,80 @@ func (e *Engine) Authorize(_ context.Context, user *UserIdentity, action Action,
 		Reason:         fmt.Sprintf("permitted by policy %s (role: %s)", bestPolicy.Name, bestPolicy.Role),
 		EffectiveScope: bestPolicy.Scope,
 	}
+}
+
+// ComposeDecision deterministically combines a base RBAC decision with a
+// matching UserPolicy decision, ensuring UserPolicy cannot bypass RBAC.
+func ComposeDecision(
+	baseDecision Decision,
+	basePolicy *UserPolicy,
+	overlayPolicy *UserPolicy,
+	action Action,
+	resource string,
+) Decision {
+	if !baseDecision.Allowed {
+		return baseDecision
+	}
+	if basePolicy == nil {
+		return Decision{Allowed: false, Reason: "base policy resolution failed"}
+	}
+	if overlayPolicy == nil {
+		return baseDecision
+	}
+
+	effectiveRole := clampRole(basePolicy.Role, overlayPolicy.Role)
+	effectiveScope := mergedScope(basePolicy.Scope, overlayPolicy.Scope)
+
+	if !rolePermits(effectiveRole, action) {
+		return Decision{
+			Allowed: false,
+			Reason: fmt.Sprintf(
+				"denied by composed policy: base=%s role=%s, userPolicy=%s role=%s, effectiveRole=%s blocks action %s",
+				basePolicy.Name,
+				basePolicy.Role,
+				overlayPolicy.Name,
+				overlayPolicy.Role,
+				effectiveRole,
+				action,
+			),
+			EffectiveScope: effectiveScope,
+		}
+	}
+
+	if resource != "" && !inScope(overlayPolicy.Scope, resource) {
+		return Decision{
+			Allowed: false,
+			Reason: fmt.Sprintf(
+				"denied by user policy scope: resource %s outside userPolicy %s",
+				resource,
+				overlayPolicy.Name,
+			),
+			EffectiveScope: effectiveScope,
+		}
+	}
+
+	return Decision{
+		Allowed: true,
+		Reason: fmt.Sprintf(
+			"permitted by composed policy: base=%s(role:%s) + userPolicy=%s(role:%s) => effectiveRole=%s",
+			basePolicy.Name,
+			basePolicy.Role,
+			overlayPolicy.Name,
+			overlayPolicy.Role,
+			effectiveRole,
+		),
+		EffectiveScope: effectiveScope,
+	}
+}
+
+func (e *Engine) matchingPolicies(user *UserIdentity) []UserPolicy {
+	matched := make([]UserPolicy, 0, len(e.policies))
+	for _, p := range e.policies {
+		if e.matchesSubject(user, p.Subjects) {
+			matched = append(matched, p)
+		}
+	}
+	return matched
 }
 
 // matchesSubject checks if the user matches any of the subject matchers.
@@ -212,7 +295,7 @@ func (e *Engine) matchesSubject(user *UserIdentity, subjects []SubjectMatcher) b
 }
 
 // inScope checks whether a resource is within the policy scope.
-func (e *Engine) inScope(scope PolicyScope, resource string) bool {
+func inScope(scope PolicyScope, resource string) bool {
 	// If no scope restrictions, everything is in scope
 	if len(scope.Tags) == 0 && len(scope.Namespaces) == 0 && len(scope.Agents) == 0 {
 		return true
@@ -246,6 +329,45 @@ func (e *Engine) inScope(scope PolicyScope, resource string) bool {
 	}
 
 	return false
+}
+
+func clampRole(base Role, overlay Role) Role {
+	if roleRank(overlay) < roleRank(base) {
+		return overlay
+	}
+	return base
+}
+
+func mergedScope(base PolicyScope, overlay PolicyScope) PolicyScope {
+	effective := base
+	if len(overlay.Tags) > 0 {
+		effective.Tags = append([]string(nil), overlay.Tags...)
+	}
+	if len(overlay.Namespaces) > 0 {
+		effective.Namespaces = append([]string(nil), overlay.Namespaces...)
+	}
+	if len(overlay.Agents) > 0 {
+		effective.Agents = append([]string(nil), overlay.Agents...)
+	}
+	if overlay.MaxAutonomy != "" && autonomyRank(overlay.MaxAutonomy) < autonomyRank(base.MaxAutonomy) {
+		effective.MaxAutonomy = overlay.MaxAutonomy
+	}
+	return effective
+}
+
+func autonomyRank(a MaxAutonomy) int {
+	switch a {
+	case MaxAutonomyObserve:
+		return 1
+	case MaxAutonomyRecommend:
+		return 2
+	case MaxAutonomyAutomateSafe:
+		return 3
+	case MaxAutonomyAutomateAll:
+		return 4
+	default:
+		return 0
+	}
 }
 
 // roleRank returns a numeric rank for role comparison (higher = more privilege).
