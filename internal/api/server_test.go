@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -424,6 +425,117 @@ func TestListAnomalies_ReturnsOnlyAnomalyEvents(t *testing.T) {
 	entries, ok := body["anomalies"].([]any)
 	if !ok || len(entries) != 1 {
 		t.Fatalf("unexpected anomalies payload: %#v", body["anomalies"])
+	}
+}
+
+func TestPolicySimulation_ProjectedPolicyRestrictsRole(t *testing.T) {
+	srv := NewServer(ServerConfig{
+		OIDC: auth.OIDCConfig{BypassPaths: []string{"/healthz"}},
+		Policies: []rbac.UserPolicy{
+			{
+				Name:     "operator",
+				Subjects: []rbac.SubjectMatcher{{Claim: "email", Value: "operator@example.com"}},
+				Role:     rbac.RoleOperator,
+			},
+		},
+	}, newTestClient(t), logr.Discard())
+
+	token := makeTestJWT(map[string]any{
+		"sub":    "operator-1",
+		"email":  "operator@example.com",
+		"groups": []string{"legator-operator"},
+		"exp":    float64(time.Now().Add(1 * time.Hour).Unix()),
+	})
+
+	payload := map[string]any{
+		"actions":   []string{"agents:run"},
+		"resources": []string{"watchman-deep"},
+		"proposedPolicy": map[string]any{
+			"name": "restrict-runner",
+			"role": "viewer",
+			"subjects": []map[string]any{
+				{"claim": "email", "value": "operator@example.com"},
+			},
+		},
+	}
+	body, _ := json.Marshal(payload)
+
+	req := httptest.NewRequest("POST", "/api/v1/policy/simulate", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	evals, ok := resp["evaluations"].([]any)
+	if !ok || len(evals) != 1 {
+		t.Fatalf("unexpected evaluations payload: %#v", resp["evaluations"])
+	}
+	entry := evals[0].(map[string]any)
+	current := entry["current"].(map[string]any)
+	projected := entry["projected"].(map[string]any)
+	if allowed, _ := current["allowed"].(bool); !allowed {
+		t.Fatalf("expected current decision to allow run")
+	}
+	if allowed, _ := projected["allowed"].(bool); allowed {
+		t.Fatalf("expected projected decision to deny run")
+	}
+}
+
+func TestPolicySimulation_RateLimitProjection(t *testing.T) {
+	srv := NewServer(ServerConfig{
+		OIDC: auth.OIDCConfig{BypassPaths: []string{"/healthz"}},
+		Policies: []rbac.UserPolicy{
+			{
+				Name:     "operator",
+				Subjects: []rbac.SubjectMatcher{{Claim: "email", Value: "operator@example.com"}},
+				Role:     rbac.RoleOperator,
+			},
+		},
+	}, newTestClient(t), logr.Discard())
+
+	token := makeTestJWT(map[string]any{
+		"sub":   "operator-1",
+		"email": "operator@example.com",
+		"exp":   float64(time.Now().Add(1 * time.Hour).Unix()),
+	})
+
+	payload := map[string]any{
+		"actions":            []string{"agents:run"},
+		"resources":          []string{"watchman-deep"},
+		"runRatePerHour":     999,
+		"requestRatePerHour": 999,
+	}
+	body, _ := json.Marshal(payload)
+
+	req := httptest.NewRequest("POST", "/api/v1/policy/simulate", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	evals := resp["evaluations"].([]any)
+	entry := evals[0].(map[string]any)
+	projected := entry["projected"].(map[string]any)
+	rateLimit := projected["rateLimit"].(map[string]any)
+	if allowed, _ := rateLimit["allowed"].(bool); allowed {
+		t.Fatalf("expected projected rate limit deny")
 	}
 }
 

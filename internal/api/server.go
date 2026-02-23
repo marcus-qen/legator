@@ -154,6 +154,7 @@ func (s *Server) registerRoutes() {
 	// Audit
 	s.mux.HandleFunc("GET /api/v1/audit", s.handleAuditTrail)
 	s.mux.HandleFunc("GET /api/v1/anomalies", s.handleListAnomalies)
+	s.mux.HandleFunc("POST /api/v1/policy/simulate", s.handlePolicySimulation)
 }
 
 func (s *Server) authorize(ctx context.Context, user *rbac.UserIdentity, action rbac.Action, resource string) rbac.Decision {
@@ -242,6 +243,313 @@ func convertUserPolicy(up corev1alpha1.UserPolicy) rbac.UserPolicy {
 			MaxAutonomy: rbac.MaxAutonomy(up.Spec.Scope.MaxAutonomy),
 		},
 	}
+}
+
+var policySimulationActions = map[string]rbac.Action{
+	string(rbac.ActionViewAgents):    rbac.ActionViewAgents,
+	string(rbac.ActionViewRuns):      rbac.ActionViewRuns,
+	string(rbac.ActionViewInventory): rbac.ActionViewInventory,
+	string(rbac.ActionViewAudit):     rbac.ActionViewAudit,
+	string(rbac.ActionRunAgent):      rbac.ActionRunAgent,
+	string(rbac.ActionAbortRun):      rbac.ActionAbortRun,
+	string(rbac.ActionApprove):       rbac.ActionApprove,
+	string(rbac.ActionManageDevice):  rbac.ActionManageDevice,
+	string(rbac.ActionConfigure):     rbac.ActionConfigure,
+	string(rbac.ActionChat):          rbac.ActionChat,
+}
+
+type policySimulationRequest struct {
+	Subject            *policySimulationSubject `json:"subject,omitempty"`
+	Actions            []string                 `json:"actions,omitempty"`
+	Resources          []string                 `json:"resources,omitempty"`
+	ProposedPolicy     *policySimulationPolicy  `json:"proposedPolicy,omitempty"`
+	RequestRatePerHour int                      `json:"requestRatePerHour,omitempty"`
+	RunRatePerHour     int                      `json:"runRatePerHour,omitempty"`
+}
+
+type policySimulationSubject struct {
+	Subject string            `json:"subject,omitempty"`
+	Email   string            `json:"email,omitempty"`
+	Name    string            `json:"name,omitempty"`
+	Groups  []string          `json:"groups,omitempty"`
+	Claims  map[string]string `json:"claims,omitempty"`
+}
+
+type policySimulationPolicy struct {
+	Name     string                    `json:"name,omitempty"`
+	Role     string                    `json:"role"`
+	Subjects []policySimulationMatcher `json:"subjects,omitempty"`
+	Scope    policySimulationScope     `json:"scope,omitempty"`
+}
+
+type policySimulationMatcher struct {
+	Claim string `json:"claim"`
+	Value string `json:"value"`
+}
+
+type policySimulationScope struct {
+	Tags        []string `json:"tags,omitempty"`
+	Namespaces  []string `json:"namespaces,omitempty"`
+	Agents      []string `json:"agents,omitempty"`
+	MaxAutonomy string   `json:"maxAutonomy,omitempty"`
+}
+
+type projectedRateLimit struct {
+	Allowed      bool   `json:"allowed"`
+	Reason       string `json:"reason"`
+	LimitPerHour int    `json:"limitPerHour"`
+	Requested    int    `json:"requestedPerHour"`
+}
+
+type simulationDecisionView struct {
+	Allowed   bool                `json:"allowed"`
+	Reason    string              `json:"reason"`
+	RateLimit *projectedRateLimit `json:"rateLimit,omitempty"`
+}
+
+type policySimulationEvaluation struct {
+	Action    string                 `json:"action"`
+	Resource  string                 `json:"resource,omitempty"`
+	Current   simulationDecisionView `json:"current"`
+	Projected simulationDecisionView `json:"projected"`
+}
+
+type policySimulationResponse struct {
+	Subject     policySimulationSubject      `json:"subject"`
+	BasePolicy  *rbac.UserPolicy             `json:"basePolicy,omitempty"`
+	Current     *rbac.UserPolicy             `json:"currentUserPolicy,omitempty"`
+	Proposed    *rbac.UserPolicy             `json:"proposedUserPolicy,omitempty"`
+	Evaluations []policySimulationEvaluation `json:"evaluations"`
+}
+
+func parsePolicySimulationActions(raw []string) ([]rbac.Action, error) {
+	if len(raw) == 0 {
+		actions := make([]rbac.Action, 0, len(policySimulationActions))
+		for _, action := range policySimulationActions {
+			actions = append(actions, action)
+		}
+		sort.Slice(actions, func(i, j int) bool { return actions[i] < actions[j] })
+		return actions, nil
+	}
+
+	out := make([]rbac.Action, 0, len(raw))
+	for _, item := range raw {
+		action, ok := policySimulationActions[item]
+		if !ok {
+			return nil, fmt.Errorf("unsupported action %q", item)
+		}
+		out = append(out, action)
+	}
+	return out, nil
+}
+
+func parsePolicySimulationResources(raw []string) []string {
+	if len(raw) == 0 {
+		return []string{""}
+	}
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	if len(out) == 0 {
+		return []string{""}
+	}
+	return out
+}
+
+func policySubjectFromIdentity(user *rbac.UserIdentity) policySimulationSubject {
+	subject := policySimulationSubject{
+		Subject: user.Subject,
+		Email:   user.Email,
+		Name:    user.Name,
+		Groups:  append([]string(nil), user.Groups...),
+	}
+	return subject
+}
+
+func roleClamp(base rbac.Role, overlay rbac.Role) rbac.Role {
+	if roleRank(overlay) < roleRank(base) {
+		return overlay
+	}
+	return base
+}
+
+func roleRank(role rbac.Role) int {
+	switch role {
+	case rbac.RoleViewer:
+		return 1
+	case rbac.RoleOperator:
+		return 2
+	case rbac.RoleAdmin:
+		return 3
+	default:
+		return 0
+	}
+}
+
+func projectRateLimit(role rbac.Role, action rbac.Action, requestRatePerHour, runRatePerHour int) *projectedRateLimit {
+	requestLimit := 600
+	runLimit := 30
+	switch role {
+	case rbac.RoleOperator:
+		requestLimit = 1200
+		runLimit = 120
+	case rbac.RoleAdmin:
+		requestLimit = 2400
+		runLimit = 240
+	}
+
+	isRunLike := action == rbac.ActionRunAgent || action == rbac.ActionApprove ||
+		action == rbac.ActionConfigure || action == rbac.ActionManageDevice || action == rbac.ActionAbortRun
+	if isRunLike {
+		requested := runRatePerHour
+		if requested <= 0 {
+			requested = 1
+		}
+		if requested > runLimit {
+			return &projectedRateLimit{
+				Allowed:      false,
+				Reason:       fmt.Sprintf("projected run rate %d/h exceeds %d/h limit for role %s", requested, runLimit, role),
+				LimitPerHour: runLimit,
+				Requested:    requested,
+			}
+		}
+		return &projectedRateLimit{
+			Allowed:      true,
+			Reason:       fmt.Sprintf("projected run rate %d/h within %d/h limit for role %s", requested, runLimit, role),
+			LimitPerHour: runLimit,
+			Requested:    requested,
+		}
+	}
+
+	requested := requestRatePerHour
+	if requested <= 0 {
+		requested = 1
+	}
+	if requested > requestLimit {
+		return &projectedRateLimit{
+			Allowed:      false,
+			Reason:       fmt.Sprintf("projected request rate %d/h exceeds %d/h limit for role %s", requested, requestLimit, role),
+			LimitPerHour: requestLimit,
+			Requested:    requested,
+		}
+	}
+	return &projectedRateLimit{
+		Allowed:      true,
+		Reason:       fmt.Sprintf("projected request rate %d/h within %d/h limit for role %s", requested, requestLimit, role),
+		LimitPerHour: requestLimit,
+		Requested:    requested,
+	}
+}
+
+func convertSimulationPolicy(policy *policySimulationPolicy) (*rbac.UserPolicy, error) {
+	if policy == nil {
+		return nil, nil
+	}
+
+	role := rbac.Role(strings.TrimSpace(policy.Role))
+	switch role {
+	case rbac.RoleViewer, rbac.RoleOperator, rbac.RoleAdmin:
+	default:
+		return nil, fmt.Errorf("invalid proposed role %q", policy.Role)
+	}
+
+	subjects := make([]rbac.SubjectMatcher, 0, len(policy.Subjects))
+	for _, subject := range policy.Subjects {
+		if strings.TrimSpace(subject.Claim) == "" || strings.TrimSpace(subject.Value) == "" {
+			return nil, fmt.Errorf("proposed policy subjects must include claim and value")
+		}
+		subjects = append(subjects, rbac.SubjectMatcher{Claim: subject.Claim, Value: subject.Value})
+	}
+	if len(subjects) == 0 {
+		return nil, fmt.Errorf("proposed policy requires at least one subject matcher")
+	}
+
+	name := strings.TrimSpace(policy.Name)
+	if name == "" {
+		name = "proposed-policy"
+	}
+
+	return &rbac.UserPolicy{
+		Name:     name,
+		Subjects: subjects,
+		Role:     role,
+		Scope: rbac.PolicyScope{
+			Tags:        append([]string(nil), policy.Scope.Tags...),
+			Namespaces:  append([]string(nil), policy.Scope.Namespaces...),
+			Agents:      append([]string(nil), policy.Scope.Agents...),
+			MaxAutonomy: rbac.MaxAutonomy(policy.Scope.MaxAutonomy),
+		},
+	}, nil
+}
+
+func simulationIdentity(caller *rbac.UserIdentity, req policySimulationRequest) *rbac.UserIdentity {
+	if req.Subject == nil {
+		return caller
+	}
+	user := &rbac.UserIdentity{
+		Subject: req.Subject.Subject,
+		Email:   req.Subject.Email,
+		Name:    req.Subject.Name,
+		Groups:  append([]string(nil), req.Subject.Groups...),
+		Claims:  map[string]any{},
+	}
+	for k, v := range req.Subject.Claims {
+		user.Claims[k] = v
+	}
+	if user.Claims == nil {
+		user.Claims = map[string]any{}
+	}
+	if user.Claims["email"] == nil && user.Email != "" {
+		user.Claims["email"] = user.Email
+	}
+	if user.Claims["sub"] == nil && user.Subject != "" {
+		user.Claims["sub"] = user.Subject
+	}
+	if user.Claims["name"] == nil && user.Name != "" {
+		user.Claims["name"] = user.Name
+	}
+	if user.Claims["groups"] == nil && len(user.Groups) > 0 {
+		arr := make([]any, 0, len(user.Groups))
+		for _, group := range user.Groups {
+			arr = append(arr, group)
+		}
+		user.Claims["groups"] = arr
+	}
+	return user
+}
+
+func sameIdentity(a, b *rbac.UserIdentity) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.Email != b.Email || a.Subject != b.Subject || a.Name != b.Name {
+		return false
+	}
+	if len(a.Groups) != len(b.Groups) {
+		return false
+	}
+	for i := range a.Groups {
+		if a.Groups[i] != b.Groups[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func effectiveRole(base *rbac.UserPolicy, overlay *rbac.UserPolicy) rbac.Role {
+	role := rbac.RoleViewer
+	if base != nil {
+		role = base.Role
+	}
+	if overlay != nil {
+		role = roleClamp(role, overlay.Role)
+	}
+	return role
 }
 
 // --- Handlers ---
@@ -764,6 +1072,123 @@ func (s *Server) handleListAnomalies(w http.ResponseWriter, r *http.Request) {
 		"anomalies": entries,
 		"total":     len(entries),
 		"severity":  severityCounts,
+	})
+}
+
+func (s *Server) handlePolicySimulation(w http.ResponseWriter, r *http.Request) {
+	caller := auth.UserFromContext(r.Context())
+	if d := s.authorize(r.Context(), caller, rbac.ActionViewAudit, ""); !d.Allowed {
+		writeForbidden(w, d.Reason)
+		return
+	}
+
+	var req policySimulationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+
+	simUser := simulationIdentity(caller, req)
+	if simUser == nil {
+		writeError(w, http.StatusBadRequest, "simulation subject is required")
+		return
+	}
+
+	if req.Subject != nil && !sameIdentity(caller, simUser) {
+		if d := s.authorize(r.Context(), caller, rbac.ActionConfigure, ""); !d.Allowed {
+			writeForbidden(w, "simulating a different subject requires config:write")
+			return
+		}
+	}
+
+	actions, err := parsePolicySimulationActions(req.Actions)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	resources := parsePolicySimulationResources(req.Resources)
+
+	basePolicy, _ := s.rbacEng.ResolvePolicy(simUser)
+
+	var currentOverlay *rbac.UserPolicy
+	if s.k8s != nil {
+		if policies, loadErr := s.loadDynamicUserPolicies(r.Context()); loadErr == nil {
+			overlayEngine := rbac.NewEngine(policies)
+			if policy, ok := overlayEngine.ResolvePolicy(simUser); ok {
+				currentOverlay = policy
+			}
+		}
+	}
+
+	proposedPolicy, err := convertSimulationPolicy(req.ProposedPolicy)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var proposedOverlay *rbac.UserPolicy
+	if proposedPolicy != nil {
+		engine := rbac.NewEngine([]rbac.UserPolicy{*proposedPolicy})
+		if policy, ok := engine.ResolvePolicy(simUser); ok {
+			proposedOverlay = policy
+		}
+	}
+
+	currentRole := effectiveRole(basePolicy, currentOverlay)
+	projectedRole := effectiveRole(basePolicy, proposedOverlay)
+
+	evaluations := make([]policySimulationEvaluation, 0, len(actions)*len(resources))
+	for _, action := range actions {
+		for _, resource := range resources {
+			currentDecision := s.authorize(r.Context(), simUser, action, resource)
+
+			baseDecision := s.rbacEng.Authorize(r.Context(), simUser, action, resource)
+			projectedDecision := baseDecision
+			if baseDecision.Allowed && basePolicy != nil && proposedOverlay != nil {
+				projectedDecision = rbac.ComposeDecision(baseDecision, basePolicy, proposedOverlay, action, resource)
+			}
+
+			currentRate := projectRateLimit(currentRole, action, req.RequestRatePerHour, req.RunRatePerHour)
+			projectedRate := projectRateLimit(projectedRole, action, req.RequestRatePerHour, req.RunRatePerHour)
+			if !currentDecision.Allowed {
+				currentRate = &projectedRateLimit{
+					Allowed:      false,
+					Reason:       "blocked by authorization decision",
+					LimitPerHour: currentRate.LimitPerHour,
+					Requested:    currentRate.Requested,
+				}
+			}
+			if !projectedDecision.Allowed {
+				projectedRate = &projectedRateLimit{
+					Allowed:      false,
+					Reason:       "blocked by authorization decision",
+					LimitPerHour: projectedRate.LimitPerHour,
+					Requested:    projectedRate.Requested,
+				}
+			}
+
+			evaluations = append(evaluations, policySimulationEvaluation{
+				Action:   string(action),
+				Resource: resource,
+				Current: simulationDecisionView{
+					Allowed:   currentDecision.Allowed,
+					Reason:    currentDecision.Reason,
+					RateLimit: currentRate,
+				},
+				Projected: simulationDecisionView{
+					Allowed:   projectedDecision.Allowed,
+					Reason:    projectedDecision.Reason,
+					RateLimit: projectedRate,
+				},
+			})
+		}
+	}
+
+	writeJSON(w, http.StatusOK, policySimulationResponse{
+		Subject:     policySubjectFromIdentity(simUser),
+		BasePolicy:  basePolicy,
+		Current:     currentOverlay,
+		Proposed:    proposedOverlay,
+		Evaluations: evaluations,
 	})
 }
 

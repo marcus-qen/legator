@@ -98,6 +98,8 @@ func main() {
 		handleWhoAmI(os.Args[2:])
 	case "inventory", "inv":
 		handleInventory(os.Args[2:])
+	case "policy", "pol":
+		handlePolicy(os.Args[2:])
 	case "approvals", "approval":
 		handleApprovals(os.Args[2:])
 	case "approve":
@@ -160,6 +162,7 @@ Usage:
   legator inventory [--json]        List managed endpoints
   legator inventory show <name>      Show endpoint details
   legator inventory status [--json]  Show inventory sync health/freshness
+  legator policy simulate [options]  Dry-run policy outcomes before rollout
   legator runs list [--agent X]     List recent runs
   legator runs logs <name>          Show run report/audit trail
   legator approvals                 List pending approvals
