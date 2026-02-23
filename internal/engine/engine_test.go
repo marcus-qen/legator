@@ -702,4 +702,29 @@ func TestEngine_BlastRadiusActorRolesAffectDecision(t *testing.T) {
 	if d.BlastRadius.Decision != "deny" {
 		t.Fatalf("expected non-admin critical request to be denied by blast policy, got %s", d.BlastRadius.Decision)
 	}
+	if d.Allowed {
+		t.Fatal("expected blast-radius deny decision to block execution")
+	}
+	if d.Status != corev1alpha1.ActionStatusBlocked {
+		t.Fatalf("expected blocked status, got %s", d.Status)
+	}
+}
+
+func TestEngine_BlastRadiusGate_AllowsAdminCritical(t *testing.T) {
+	eng := NewEngine("test-agent", &corev1alpha1.GuardrailsSpec{
+		Autonomy:      corev1alpha1.AutonomyDestructive,
+		MaxIterations: 10,
+	}, map[string]*skill.Action{
+		"danger": {
+			ID:   "danger",
+			Tool: "kubectl.delete",
+			Tier: "destructive-mutation",
+		},
+	}, nil)
+
+	eng.WithActorRoles([]string{"admin"})
+	d := eng.Evaluate("kubectl.delete", "deployment api -n production")
+	if d.BlastRadius.Decision != "allow_with_guards" {
+		t.Fatalf("expected admin critical path to be allow_with_guards, got %s", d.BlastRadius.Decision)
+	}
 }
