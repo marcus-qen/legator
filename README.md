@@ -158,6 +158,48 @@ tiers:
 
 Supports: Anthropic, OpenAI, Ollama, vLLM, Kimi, any OpenAI-compatible endpoint.
 
+## Telegram ChatOps (v0.9.0 P3.1 MVP)
+
+Legator can run a Telegram-first ChatOps bot that routes commands through the existing API authz/safety gates (no direct Kubernetes bypass path).
+
+### Supported MVP commands
+
+- `/status`
+- `/inventory [limit]`
+- `/run <id>`
+- `/approvals`
+- `/approve <id> [reason]`
+- `/deny <id> [reason]`
+
+### Required flags / env
+
+- `--chatops-telegram-bot-token` (`CHATOPS_TELEGRAM_BOT_TOKEN`)
+- `--chatops-telegram-bindings` (`CHATOPS_TELEGRAM_BINDINGS`)
+- `--chatops-telegram-api-base-url` (`CHATOPS_TELEGRAM_API_BASE_URL`) — optional; defaults from `--api-bind-address`
+
+Optional tuning:
+
+- `--chatops-telegram-poll-interval` (default `2s`)
+- `--chatops-telegram-long-poll-timeout` (default `25s`)
+
+### Chat bindings format
+
+`CHATOPS_TELEGRAM_BINDINGS` is a JSON array mapping Telegram chat IDs to API identities:
+
+```json
+[
+  {
+    "chatId": 7525575507,
+    "subject": "telegram:7525575507",
+    "email": "keith@example.com",
+    "name": "Keith",
+    "groups": ["legator-operator"]
+  }
+]
+```
+
+The mapped identity is evaluated by existing RBAC + UserPolicy rules, including `chat:use` and approval permissions.
+
 ## Documentation
 
 | Guide | Description |
