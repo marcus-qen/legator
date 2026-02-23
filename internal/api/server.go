@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -142,6 +143,12 @@ func (s *Server) registerRoutes() {
 	// Inventory
 	s.mux.HandleFunc("GET /api/v1/inventory", s.handleListInventory)
 
+	// MCP read-surface (phase 3.4)
+	s.mux.HandleFunc("GET /api/v1/mcp/run", s.handleMCPRun)
+	s.mux.HandleFunc("GET /api/v1/mcp/check", s.handleMCPCheck)
+	s.mux.HandleFunc("GET /api/v1/mcp/inventory", s.handleMCPInventory)
+	s.mux.HandleFunc("GET /api/v1/mcp/status", s.handleMCPStatus)
+
 	// Approvals
 	s.mux.HandleFunc("GET /api/v1/approvals", s.handleListApprovals)
 	s.mux.HandleFunc("POST /api/v1/approvals/{id}", s.handleDecideApproval)
@@ -222,14 +229,14 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	})
 
 	type agentSummary struct {
-		Name       string `json:"name"`
-		Namespace  string `json:"namespace"`
-		Phase      string `json:"phase"`
-		Autonomy   string `json:"autonomy"`
-		Schedule   string `json:"schedule"`
-		ModelTier  string `json:"modelTier"`
-		Paused     bool   `json:"paused"`
-		EnvRef     string `json:"environmentRef"`
+		Name      string `json:"name"`
+		Namespace string `json:"namespace"`
+		Phase     string `json:"phase"`
+		Autonomy  string `json:"autonomy"`
+		Schedule  string `json:"schedule"`
+		ModelTier string `json:"modelTier"`
+		Paused    bool   `json:"paused"`
+		EnvRef    string `json:"environmentRef"`
 	}
 
 	result := make([]agentSummary, 0, len(agents.Items))
@@ -327,6 +334,60 @@ func (s *Server) handleRunAgent(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type runSummary struct {
+	Name      string `json:"name"`
+	Agent     string `json:"agent"`
+	Phase     string `json:"phase"`
+	Trigger   string `json:"trigger"`
+	CreatedAt string `json:"createdAt"`
+	Duration  string `json:"duration,omitempty"`
+}
+
+func (s *Server) buildRunSummary(run corev1alpha1.LegatorRun) runSummary {
+	status := runSummary{
+		Name:      run.Name,
+		Agent:     run.Spec.AgentRef,
+		Phase:     string(run.Status.Phase),
+		Trigger:   string(run.Spec.Trigger),
+		CreatedAt: run.CreationTimestamp.Format(time.RFC3339),
+	}
+	if run.Status.CompletionTime != nil {
+		d := run.Status.CompletionTime.Sub(run.CreationTimestamp.Time)
+		status.Duration = d.Round(time.Second).String()
+	}
+	return status
+}
+
+func (s *Server) collectRunSummaries(r *http.Request, limit int) ([]runSummary, error) {
+	runs := &corev1alpha1.LegatorRunList{}
+	opts := []client.ListOption{}
+
+	if agent := r.URL.Query().Get("agent"); agent != "" {
+		opts = append(opts, client.MatchingLabels{"legator.io/agent": agent})
+	}
+
+	if err := s.k8s.List(r.Context(), runs, opts...); err != nil {
+		return nil, err
+	}
+
+	sort.Slice(runs.Items, func(i, j int) bool {
+		return runs.Items[i].CreationTimestamp.After(runs.Items[j].CreationTimestamp.Time)
+	})
+
+	if limit <= 0 {
+		limit = 50
+	}
+	if len(runs.Items) > limit {
+		runs.Items = runs.Items[:limit]
+	}
+
+	result := make([]runSummary, 0, len(runs.Items))
+	for _, run := range runs.Items {
+		result = append(result, s.buildRunSummary(run))
+	}
+	return result, nil
+}
+
 func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	user := auth.UserFromContext(r.Context())
 	if d := s.rbacEng.Authorize(r.Context(), user, rbac.ActionViewRuns, ""); !d.Allowed {
@@ -334,59 +395,123 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runs := &corev1alpha1.LegatorRunList{}
-	opts := []client.ListOption{}
-
-	// Optional agent filter
-	if agent := r.URL.Query().Get("agent"); agent != "" {
-		opts = append(opts, client.MatchingLabels{"legator.io/agent": agent})
-	}
-
-	if err := s.k8s.List(r.Context(), runs, opts...); err != nil {
+	result, err := s.collectRunSummaries(r, 50)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list runs: "+err.Error())
 		return
-	}
-
-	// Sort by creation time descending
-	sort.Slice(runs.Items, func(i, j int) bool {
-		return runs.Items[i].CreationTimestamp.After(runs.Items[j].CreationTimestamp.Time)
-	})
-
-	// Limit to 50 most recent
-	limit := 50
-	if len(runs.Items) > limit {
-		runs.Items = runs.Items[:limit]
-	}
-
-	type runSummary struct {
-		Name      string `json:"name"`
-		Agent     string `json:"agent"`
-		Phase     string `json:"phase"`
-		Trigger   string `json:"trigger"`
-		CreatedAt string `json:"createdAt"`
-		Duration  string `json:"duration,omitempty"`
-	}
-
-	result := make([]runSummary, 0, len(runs.Items))
-	for _, run := range runs.Items {
-		summary := runSummary{
-			Name:      run.Name,
-			Agent:     run.Spec.AgentRef,
-			Phase:     string(run.Status.Phase),
-			Trigger:   string(run.Spec.Trigger),
-			CreatedAt: run.CreationTimestamp.Format(time.RFC3339),
-		}
-		if run.Status.CompletionTime != nil {
-			d := run.Status.CompletionTime.Sub(run.CreationTimestamp.Time)
-			summary.Duration = d.Round(time.Second).String()
-		}
-		result = append(result, summary)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"runs":  result,
 		"total": len(result),
 	})
+}
+
+func (s *Server) handleMCPRun(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	if d := s.rbacEng.Authorize(r.Context(), user, rbac.ActionViewRuns, ""); !d.Allowed {
+		writeForbidden(w, d.Reason)
+		return
+	}
+
+	limit := 20
+	if limitRaw := r.URL.Query().Get("limit"); limitRaw != "" {
+		parsed, err := strconv.Atoi(limitRaw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid limit")
+			return
+		}
+		limit = parsed
+	}
+
+	result, err := s.collectRunSummaries(r, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list runs: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"surface": "run",
+		"runs":    result,
+		"total":   len(result),
+	})
+}
+
+func (s *Server) handleMCPStatus(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	if d := s.rbacEng.Authorize(r.Context(), user, rbac.ActionViewRuns, ""); !d.Allowed {
+		writeForbidden(w, d.Reason)
+		return
+	}
+
+	if runName := r.URL.Query().Get("run"); runName != "" {
+		run := &corev1alpha1.LegatorRun{}
+		if err := s.k8s.Get(r.Context(), client.ObjectKey{Name: runName, Namespace: "agents"}, run); err != nil {
+			writeError(w, http.StatusNotFound, "run not found: "+runName)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"surface": "status",
+			"run":     s.buildRunSummary(*run),
+			"name":    run.Name,
+		})
+		return
+	}
+
+	runs, err := s.collectRunSummaries(r, 1)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read runs: "+err.Error())
+		return
+	}
+	if len(runs) == 0 {
+		writeError(w, http.StatusNotFound, "no runs available")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"surface": "status",
+		"run":     runs[0],
+	})
+}
+
+func (s *Server) handleMCPCheck(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	if agentName := r.URL.Query().Get("agent"); agentName != "" {
+		if d := s.rbacEng.Authorize(r.Context(), user, rbac.ActionViewAgents, ""); !d.Allowed {
+			writeForbidden(w, d.Reason)
+			return
+		}
+		agent := &corev1alpha1.LegatorAgent{}
+		if err := s.k8s.Get(r.Context(), client.ObjectKey{Name: agentName, Namespace: "agents"}, agent); err != nil {
+			writeError(w, http.StatusNotFound, "agent not found: "+agentName)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"surface": "check",
+			"agent": map[string]any{
+				"name":      agent.Name,
+				"namespace": agent.Namespace,
+				"phase":     string(agent.Status.Phase),
+				"autonomy":  string(agent.Spec.Guardrails.Autonomy),
+				"paused":    agent.Spec.Paused,
+			},
+		})
+		return
+	}
+
+	if d := s.rbacEng.Authorize(r.Context(), user, rbac.ActionViewRuns, ""); !d.Allowed {
+		writeForbidden(w, d.Reason)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"surface": "check",
+		"status":  "ok",
+	})
+}
+
+func (s *Server) handleMCPInventory(w http.ResponseWriter, r *http.Request) {
+	s.handleListInventory(w, r)
 }
 
 func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
@@ -530,8 +655,8 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 	)
 
 	writeJSON(w, http.StatusOK, map[string]string{
-		"status":   req.Decision + "d",
-		"id":       id,
+		"status":    req.Decision + "d",
+		"id":        id,
 		"decidedBy": user.Email,
 	})
 }
@@ -578,13 +703,13 @@ func (s *Server) handleAuditTrail(w http.ResponseWriter, r *http.Request) {
 	})
 
 	type auditEntry struct {
-		Run       string `json:"run"`
-		Agent     string `json:"agent"`
-		Phase     string `json:"phase"`
-		Trigger   string `json:"trigger"`
-		Time      string `json:"time"`
-		Actions   int    `json:"actions"`
-		Report    string `json:"report,omitempty"`
+		Run     string `json:"run"`
+		Agent   string `json:"agent"`
+		Phase   string `json:"phase"`
+		Trigger string `json:"trigger"`
+		Time    string `json:"time"`
+		Actions int    `json:"actions"`
+		Report  string `json:"report,omitempty"`
 	}
 
 	entries := make([]auditEntry, 0, len(runs.Items))
