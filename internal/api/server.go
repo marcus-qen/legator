@@ -92,10 +92,11 @@ func NewServer(cfg ServerConfig, k8s client.Client, log logr.Logger) *Server {
 // Handler returns the HTTP handler with auth middleware applied.
 func (s *Server) Handler() http.Handler {
 	// Chain: auth -> user rate limit -> handlers, wrapped by audit logging.
-	h := s.validator.Middleware(s.mux)
+	h := http.Handler(s.mux)
 	if s.userLimiter != nil {
 		h = s.userLimiter.middleware(h, s.effectiveRole)
 	}
+	h = s.validator.Middleware(h)
 	return s.auditMiddleware(h)
 }
 
