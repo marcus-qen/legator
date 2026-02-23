@@ -237,3 +237,110 @@ func TestAuditMiddlewareLogsRequests(t *testing.T) {
 		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
 	}
 }
+
+func TestUserRateLimitBlocksSecondRequestForSameUser(t *testing.T) {
+	srv := NewServer(ServerConfig{
+		OIDC: auth.OIDCConfig{BypassPaths: []string{"/healthz"}},
+		Policies: []rbac.UserPolicy{{
+			Name:     "viewer-policy",
+			Subjects: []rbac.SubjectMatcher{{Claim: "email", Value: "viewer@example.com"}},
+			Role:     rbac.RoleViewer,
+		}},
+		UserRateLimit: UserRateLimitConfig{
+			Enabled:                 true,
+			ViewerRequestsPerMinute: 1,
+			ViewerBurst:             1,
+		},
+	}, nil, logr.Discard())
+
+	token := makeTestJWT(map[string]any{
+		"sub":   "viewer-1",
+		"email": "viewer@example.com",
+		"exp":   float64(time.Now().Add(1 * time.Hour).Unix()),
+	})
+
+	req1 := httptest.NewRequest("GET", "/api/v1/me", nil)
+	req1.Header.Set("Authorization", "Bearer "+token)
+	rr1 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr1, req1)
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("first request status = %d, want %d", rr1.Code, http.StatusOK)
+	}
+
+	req2 := httptest.NewRequest("GET", "/api/v1/me", nil)
+	req2.Header.Set("Authorization", "Bearer "+token)
+	rr2 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusTooManyRequests {
+		t.Fatalf("second request status = %d, want %d", rr2.Code, http.StatusTooManyRequests)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(rr2.Body).Decode(&body); err != nil {
+		t.Fatalf("decode 429 body: %v", err)
+	}
+	if body["error"] != "rate_limited" {
+		t.Fatalf("error field = %v, want rate_limited", body["error"])
+	}
+}
+
+func TestUserRateLimitIsolatedPerUser(t *testing.T) {
+	srv := NewServer(ServerConfig{
+		OIDC: auth.OIDCConfig{BypassPaths: []string{"/healthz"}},
+		Policies: []rbac.UserPolicy{{
+			Name:     "viewer-policy-a",
+			Subjects: []rbac.SubjectMatcher{{Claim: "email", Value: "viewer-a@example.com"}},
+			Role:     rbac.RoleViewer,
+		}, {
+			Name:     "viewer-policy-b",
+			Subjects: []rbac.SubjectMatcher{{Claim: "email", Value: "viewer-b@example.com"}},
+			Role:     rbac.RoleViewer,
+		}},
+		UserRateLimit: UserRateLimitConfig{
+			Enabled:                 true,
+			ViewerRequestsPerMinute: 1,
+			ViewerBurst:             1,
+		},
+	}, nil, logr.Discard())
+
+	tokenA := makeTestJWT(map[string]any{"sub": "a", "email": "viewer-a@example.com", "exp": float64(time.Now().Add(1 * time.Hour).Unix())})
+	tokenB := makeTestJWT(map[string]any{"sub": "b", "email": "viewer-b@example.com", "exp": float64(time.Now().Add(1 * time.Hour).Unix())})
+
+	// Consume viewer A quota
+	reqA1 := httptest.NewRequest("GET", "/api/v1/me", nil)
+	reqA1.Header.Set("Authorization", "Bearer "+tokenA)
+	rrA1 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rrA1, reqA1)
+	if rrA1.Code != http.StatusOK {
+		t.Fatalf("viewer A first request status = %d, want %d", rrA1.Code, http.StatusOK)
+	}
+
+	// Viewer B should still pass
+	reqB := httptest.NewRequest("GET", "/api/v1/me", nil)
+	reqB.Header.Set("Authorization", "Bearer "+tokenB)
+	rrB := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rrB, reqB)
+	if rrB.Code != http.StatusOK {
+		t.Fatalf("viewer B request status = %d, want %d", rrB.Code, http.StatusOK)
+	}
+}
+
+func TestUserRateLimitBypassesHealthz(t *testing.T) {
+	srv := NewServer(ServerConfig{
+		OIDC: auth.OIDCConfig{BypassPaths: []string{"/healthz"}},
+		UserRateLimit: UserRateLimitConfig{
+			Enabled:                 true,
+			ViewerRequestsPerMinute: 1,
+			ViewerBurst:             1,
+		},
+	}, nil, logr.Discard())
+
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest("GET", "/healthz", nil)
+		rr := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("healthz request %d status = %d, want %d", i+1, rr.Code, http.StatusOK)
+		}
+	}
+}
