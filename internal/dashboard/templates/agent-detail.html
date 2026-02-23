@@ -2,6 +2,10 @@
 {{define "content"}}
 <h1>{{statusIcon (print .Agent.Status.Phase)}} {{.Agent.Name}}</h1>
 
+{{if .Triggered}}
+<div class="flash flash-success">Ad-hoc run trigger queued.</div>
+{{end}}
+
 <div class="detail-grid">
   <div class="detail-card">
     <h3>Configuration</h3>
@@ -34,6 +38,18 @@
       <dt>Next Run</dt>
       <dd>{{if .Agent.Status.NextRunTime}}{{formatTime .Agent.Status.NextRunTime.Time}}{{else}}—{{end}}</dd>
     </dl>
+  </div>
+  <div class="detail-card">
+    <h3>Trigger Ad-hoc Run</h3>
+    <form method="POST" action="/agents/{{.Agent.Name}}/run" class="run-trigger-form">
+      <label for="target">Target (optional)</label>
+      <input id="target" name="target" type="text" placeholder="e.g. db-prod-01" />
+
+      <label for="task">Task (optional)</label>
+      <textarea id="task" name="task" rows="3" placeholder="Optional task prompt"></textarea>
+
+      <button type="submit" class="btn btn-approve">Run now</button>
+    </form>
   </div>
 </div>
 
