@@ -147,14 +147,6 @@ func (e *Engine) Evaluate(toolName string, target string) *Decision {
 
 	// Step 2.5: Compute blast-radius assessment (deterministic, side-effect free)
 	d.BlastRadius = e.assessBlastRadius(toolName, target, d.Tier)
-	if d.BlastRadius.Decision == blastradius.DecisionDeny {
-		reason := fmt.Sprintf("blast-radius policy denied action: level=%s score=%.2f reasons=%s", d.BlastRadius.Radius.Level, d.BlastRadius.Radius.Score, strings.Join(d.BlastRadius.Reasons, ","))
-		d.Allowed = false
-		d.Status = corev1alpha1.ActionStatusBlocked
-		d.PreFlight.Reason = reason
-		d.BlockReason = reason
-		return d
-	}
 
 	// Step 3: Check hardcoded data protection rules (non-configurable)
 	if blocked, reason := checkDataProtection(toolName, target); blocked {
@@ -203,6 +195,17 @@ func (e *Engine) Evaluate(toolName string, target string) *Decision {
 				d.Tier = mapToolTierToAPITier(classification.Tier)
 			}
 		}
+	}
+
+	// Step 3d: Refresh + enforce blast-radius execution gate after final tier classification.
+	d.BlastRadius = e.assessBlastRadius(toolName, target, d.Tier)
+	if d.BlastRadius.Decision == blastradius.DecisionDeny {
+		reason := fmt.Sprintf("blast-radius policy denied action: level=%s score=%.2f reasons=%s", d.BlastRadius.Radius.Level, d.BlastRadius.Radius.Score, strings.Join(d.BlastRadius.Reasons, ","))
+		d.Allowed = false
+		d.Status = corev1alpha1.ActionStatusBlocked
+		d.PreFlight.Reason = reason
+		d.BlockReason = reason
+		return d
 	}
 
 	// Step 4: Check data resource impact
