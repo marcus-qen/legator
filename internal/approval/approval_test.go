@@ -12,6 +12,7 @@ package approval
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,6 +55,85 @@ func TestSanitizeLabel_Length(t *testing.T) {
 	got := sanitizeLabel(long)
 	if len(got) > 63 {
 		t.Errorf("sanitizeLabel should truncate to 63 chars, got %d", len(got))
+	}
+}
+
+func TestRequiresTypedConfirmation(t *testing.T) {
+	if RequiresTypedConfirmation(corev1alpha1.ActionTierRead) {
+		t.Fatal("read should not require typed confirmation")
+	}
+	if RequiresTypedConfirmation(corev1alpha1.ActionTierServiceMutation) {
+		t.Fatal("service-mutation should not require typed confirmation")
+	}
+	if !RequiresTypedConfirmation(corev1alpha1.ActionTierDestructiveMutation) {
+		t.Fatal("destructive-mutation should require typed confirmation")
+	}
+	if !RequiresTypedConfirmation(corev1alpha1.ActionTierDataMutation) {
+		t.Fatal("data-mutation should require typed confirmation")
+	}
+}
+
+func TestValidateTypedConfirmation(t *testing.T) {
+	now := time.Now()
+	ar := &corev1alpha1.ApprovalRequest{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		AnnotationTypedConfirmationRequired:  "true",
+		AnnotationTypedConfirmationToken:     "CONFIRM-ABCD1234",
+		AnnotationTypedConfirmationExpiresAt: now.Add(5 * time.Minute).Format(time.RFC3339),
+	}}}
+
+	if err := ValidateTypedConfirmation(ar, "", now); err == nil || !strings.Contains(err.Error(), "required") {
+		t.Fatalf("expected required error, got %v", err)
+	}
+	if err := ValidateTypedConfirmation(ar, "CONFIRM-WRONG", now); err == nil || !strings.Contains(err.Error(), "mismatch") {
+		t.Fatalf("expected mismatch error, got %v", err)
+	}
+	if err := ValidateTypedConfirmation(ar, "CONFIRM-ABCD1234", now); err != nil {
+		t.Fatalf("expected valid confirmation, got %v", err)
+	}
+	if err := ValidateTypedConfirmation(ar, "CONFIRM-ABCD1234", now.Add(10*time.Minute)); err == nil || !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("expected expired error, got %v", err)
+	}
+}
+
+func TestManager_RequestApproval_AddsTypedConfirmationMetadata(t *testing.T) {
+	scheme := newScheme()
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&corev1alpha1.ApprovalRequest{}).Build()
+
+	mgr := NewManager(c, logr.Discard())
+	mgr.pollInterval = 20 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	_, _ = mgr.RequestApproval(ctx, ApprovalParams{
+		AgentName: "test-agent",
+		RunName:   "test-run-typed",
+		Namespace: "default",
+		Tool:      "kubectl.delete",
+		Tier:      corev1alpha1.ActionTierDestructiveMutation,
+		Target:    "deployment/api",
+		Timeout:   "2m",
+	})
+
+	list := &corev1alpha1.ApprovalRequestList{}
+	if err := c.List(context.Background(), list); err != nil {
+		t.Fatalf("list approvals: %v", err)
+	}
+	if len(list.Items) == 0 {
+		t.Fatal("expected created approval request")
+	}
+	ar := list.Items[0]
+	if ar.Annotations[AnnotationTypedConfirmationRequired] != "true" {
+		t.Fatalf("expected typed confirmation required annotation, got %q", ar.Annotations[AnnotationTypedConfirmationRequired])
+	}
+	if !strings.HasPrefix(ar.Annotations[AnnotationTypedConfirmationToken], "CONFIRM-") {
+		t.Fatalf("expected typed confirmation token, got %q", ar.Annotations[AnnotationTypedConfirmationToken])
+	}
+	if strings.TrimSpace(ar.Annotations[AnnotationTypedConfirmationExpiresAt]) == "" {
+		t.Fatal("expected typed confirmation expiry annotation")
+	}
+	if !strings.Contains(ar.Spec.Context, "Typed confirmation required") {
+		t.Fatalf("expected approval context to include typed confirmation instruction, got: %q", ar.Spec.Context)
 	}
 }
 

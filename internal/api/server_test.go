@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -10,9 +11,14 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	corev1alpha1 "github.com/marcus-qen/legator/api/v1alpha1"
 	"github.com/marcus-qen/legator/internal/api/auth"
 	"github.com/marcus-qen/legator/internal/api/rbac"
+	"github.com/marcus-qen/legator/internal/approval"
 	"github.com/marcus-qen/legator/internal/inventory"
+	"k8s.io/apimachinery/pkg/runtime"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 // makeTestJWT creates a minimal JWT for testing (same as auth package helper).
@@ -34,6 +40,24 @@ func (f *fakeInventoryProvider) Devices() []inventory.ManagedDevice {
 
 func (f *fakeInventoryProvider) InventoryStatus() map[string]any {
 	return f.sync
+}
+
+func newApprovalTestServer(t *testing.T, objects ...runtime.Object) *Server {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	if err := corev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add scheme: %v", err)
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&corev1alpha1.ApprovalRequest{}).WithRuntimeObjects(objects...).Build()
+
+	return NewServer(ServerConfig{
+		OIDC: auth.OIDCConfig{BypassPaths: []string{"/healthz"}},
+		Policies: []rbac.UserPolicy{{
+			Name:     "operator-policy",
+			Subjects: []rbac.SubjectMatcher{{Claim: "email", Value: "operator@example.com"}},
+			Role:     rbac.RoleOperator,
+		}},
+	}, c, logr.Discard())
 }
 
 func TestInventoryIncludesSyncStatusFromProvider(t *testing.T) {
@@ -218,6 +242,105 @@ func TestWhoAmIReturnsIdentityAndPermissions(t *testing.T) {
 	}
 	if allowed, _ := cfgPerm["allowed"].(bool); allowed {
 		t.Fatalf("expected config:write to be denied for operator")
+	}
+}
+
+func TestApprovalDecision_TypedConfirmationRequired(t *testing.T) {
+	exp := time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339)
+	ar := &corev1alpha1.ApprovalRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "approval-typed-required",
+			Namespace: "agents",
+			Annotations: map[string]string{
+				approval.AnnotationTypedConfirmationRequired:  "true",
+				approval.AnnotationTypedConfirmationToken:     "CONFIRM-AAAA1111",
+				approval.AnnotationTypedConfirmationExpiresAt: exp,
+			},
+		},
+		Status: corev1alpha1.ApprovalRequestStatus{Phase: corev1alpha1.ApprovalPhasePending},
+	}
+	srv := newApprovalTestServer(t, ar)
+
+	token := makeTestJWT(map[string]any{
+		"sub":   "operator-1",
+		"email": "operator@example.com",
+		"exp":   float64(time.Now().Add(1 * time.Hour).Unix()),
+	})
+
+	payload := []byte(`{"decision":"approve","reason":"looks good"}`)
+	req := httptest.NewRequest("POST", "/api/v1/approvals/approval-typed-required", bytes.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestApprovalDecision_TypedConfirmationMismatch(t *testing.T) {
+	exp := time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339)
+	ar := &corev1alpha1.ApprovalRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "approval-typed-mismatch",
+			Namespace: "agents",
+			Annotations: map[string]string{
+				approval.AnnotationTypedConfirmationRequired:  "true",
+				approval.AnnotationTypedConfirmationToken:     "CONFIRM-BBBB2222",
+				approval.AnnotationTypedConfirmationExpiresAt: exp,
+			},
+		},
+		Status: corev1alpha1.ApprovalRequestStatus{Phase: corev1alpha1.ApprovalPhasePending},
+	}
+	srv := newApprovalTestServer(t, ar)
+
+	token := makeTestJWT(map[string]any{
+		"sub":   "operator-1",
+		"email": "operator@example.com",
+		"exp":   float64(time.Now().Add(1 * time.Hour).Unix()),
+	})
+
+	payload := []byte(`{"decision":"approve","reason":"looks good","typedConfirmation":"CONFIRM-WRONG"}`)
+	req := httptest.NewRequest("POST", "/api/v1/approvals/approval-typed-mismatch", bytes.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusForbidden)
+	}
+}
+
+func TestApprovalDecision_TypedConfirmationAccepted(t *testing.T) {
+	exp := time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339)
+	ar := &corev1alpha1.ApprovalRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "approval-typed-ok",
+			Namespace: "agents",
+			Annotations: map[string]string{
+				approval.AnnotationTypedConfirmationRequired:  "true",
+				approval.AnnotationTypedConfirmationToken:     "CONFIRM-CCCC3333",
+				approval.AnnotationTypedConfirmationExpiresAt: exp,
+			},
+		},
+		Status: corev1alpha1.ApprovalRequestStatus{Phase: corev1alpha1.ApprovalPhasePending},
+	}
+	srv := newApprovalTestServer(t, ar)
+
+	token := makeTestJWT(map[string]any{
+		"sub":   "operator-1",
+		"email": "operator@example.com",
+		"exp":   float64(time.Now().Add(1 * time.Hour).Unix()),
+	})
+
+	payload := []byte(`{"decision":"approve","reason":"looks good","typedConfirmation":"CONFIRM-CCCC3333"}`)
+	req := httptest.NewRequest("POST", "/api/v1/approvals/approval-typed-ok", bytes.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
 	}
 }
 
