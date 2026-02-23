@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -68,6 +69,10 @@ type Server struct {
 	log         logr.Logger
 	mux         *http.ServeMux
 	userLimiter *userRateLimiter
+
+	userPolicyCacheMu    sync.RWMutex
+	cachedUserPolicies   []rbac.UserPolicy
+	userPolicyCacheUntil time.Time
 }
 
 // NewServer creates a new API server.
@@ -164,6 +169,94 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/audit", s.handleAuditTrail)
 }
 
+func (s *Server) authorize(ctx context.Context, user *rbac.UserIdentity, action rbac.Action, resource string) rbac.Decision {
+	baseDecision := s.rbacEng.Authorize(ctx, user, action, resource)
+	if !baseDecision.Allowed || s.k8s == nil || user == nil {
+		return baseDecision
+	}
+
+	basePolicy, ok := s.rbacEng.ResolvePolicy(user)
+	if !ok {
+		return baseDecision
+	}
+
+	dynamicPolicies, err := s.loadDynamicUserPolicies(ctx)
+	if err != nil {
+		s.log.Error(err, "Failed to evaluate UserPolicy overlays")
+		return rbac.Decision{
+			Allowed: false,
+			Reason:  fmt.Sprintf("authorization denied: failed to evaluate UserPolicy overlays: %v", err),
+		}
+	}
+	if len(dynamicPolicies) == 0 {
+		return baseDecision
+	}
+
+	overlayEngine := rbac.NewEngine(dynamicPolicies)
+	overlayPolicy, ok := overlayEngine.ResolvePolicy(user)
+	if !ok {
+		return baseDecision
+	}
+
+	return rbac.ComposeDecision(baseDecision, basePolicy, overlayPolicy, action, resource)
+}
+
+func (s *Server) loadDynamicUserPolicies(ctx context.Context) ([]rbac.UserPolicy, error) {
+	const cacheTTL = 10 * time.Second
+
+	now := time.Now()
+	s.userPolicyCacheMu.RLock()
+	if now.Before(s.userPolicyCacheUntil) {
+		cached := append([]rbac.UserPolicy(nil), s.cachedUserPolicies...)
+		s.userPolicyCacheMu.RUnlock()
+		return cached, nil
+	}
+	s.userPolicyCacheMu.RUnlock()
+
+	list := &corev1alpha1.UserPolicyList{}
+	if err := s.k8s.List(ctx, list); err != nil {
+		return nil, err
+	}
+
+	policies := make([]rbac.UserPolicy, 0, len(list.Items))
+	for _, up := range list.Items {
+		policies = append(policies, convertUserPolicy(up))
+	}
+
+	sort.Slice(policies, func(i, j int) bool {
+		return policies[i].Name < policies[j].Name
+	})
+
+	s.userPolicyCacheMu.Lock()
+	s.cachedUserPolicies = append([]rbac.UserPolicy(nil), policies...)
+	s.userPolicyCacheUntil = now.Add(cacheTTL)
+	s.userPolicyCacheMu.Unlock()
+
+	return policies, nil
+}
+
+func convertUserPolicy(up corev1alpha1.UserPolicy) rbac.UserPolicy {
+	subjects := make([]rbac.SubjectMatcher, 0, len(up.Spec.Subjects))
+	for _, sub := range up.Spec.Subjects {
+		subjects = append(subjects, rbac.SubjectMatcher{
+			Claim: sub.Claim,
+			Value: sub.Value,
+		})
+	}
+
+	return rbac.UserPolicy{
+		Name:     up.Name,
+		Subjects: subjects,
+		Role:     rbac.Role(up.Spec.Role),
+		Scope: rbac.PolicyScope{
+			Tags:        append([]string(nil), up.Spec.Scope.Tags...),
+			Namespaces:  append([]string(nil), up.Spec.Scope.Namespaces...),
+			Agents:      append([]string(nil), up.Spec.Scope.Agents...),
+			MaxAutonomy: rbac.MaxAutonomy(up.Spec.Scope.MaxAutonomy),
+		},
+	}
+}
+
 // --- Handlers ---
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
@@ -196,7 +289,7 @@ func (s *Server) handleWhoAmI(w http.ResponseWriter, r *http.Request) {
 
 	perms := make(map[string]permission, len(actions))
 	for _, action := range actions {
-		d := s.rbacEng.Authorize(r.Context(), user, action, "")
+		d := s.authorize(r.Context(), user, action, "")
 		perms[string(action)] = permission{Allowed: d.Allowed, Reason: d.Reason}
 	}
 
@@ -214,7 +307,7 @@ func (s *Server) handleWhoAmI(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	user := auth.UserFromContext(r.Context())
-	if d := s.rbacEng.Authorize(r.Context(), user, rbac.ActionViewAgents, ""); !d.Allowed {
+	if d := s.authorize(r.Context(), user, rbac.ActionViewAgents, ""); !d.Allowed {
 		writeForbidden(w, d.Reason)
 		return
 	}
@@ -264,7 +357,7 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	user := auth.UserFromContext(r.Context())
-	if d := s.rbacEng.Authorize(r.Context(), user, rbac.ActionViewAgents, name); !d.Allowed {
+	if d := s.authorize(r.Context(), user, rbac.ActionViewAgents, name); !d.Allowed {
 		writeForbidden(w, d.Reason)
 		return
 	}
@@ -281,7 +374,7 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRunAgent(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	user := auth.UserFromContext(r.Context())
-	if d := s.rbacEng.Authorize(r.Context(), user, rbac.ActionRunAgent, name); !d.Allowed {
+	if d := s.authorize(r.Context(), user, rbac.ActionRunAgent, name); !d.Allowed {
 		writeForbidden(w, d.Reason)
 		return
 	}
@@ -338,7 +431,7 @@ func (s *Server) handleRunAgent(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	user := auth.UserFromContext(r.Context())
-	if d := s.rbacEng.Authorize(r.Context(), user, rbac.ActionViewRuns, ""); !d.Allowed {
+	if d := s.authorize(r.Context(), user, rbac.ActionViewRuns, ""); !d.Allowed {
 		writeForbidden(w, d.Reason)
 		return
 	}
@@ -401,7 +494,7 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	user := auth.UserFromContext(r.Context())
-	if d := s.rbacEng.Authorize(r.Context(), user, rbac.ActionViewRuns, ""); !d.Allowed {
+	if d := s.authorize(r.Context(), user, rbac.ActionViewRuns, ""); !d.Allowed {
 		writeForbidden(w, d.Reason)
 		return
 	}
@@ -417,7 +510,7 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleListInventory(w http.ResponseWriter, r *http.Request) {
 	user := auth.UserFromContext(r.Context())
-	if d := s.rbacEng.Authorize(r.Context(), user, rbac.ActionViewInventory, ""); !d.Allowed {
+	if d := s.authorize(r.Context(), user, rbac.ActionViewInventory, ""); !d.Allowed {
 		writeForbidden(w, d.Reason)
 		return
 	}
@@ -470,7 +563,7 @@ func (s *Server) handleListInventory(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
 	user := auth.UserFromContext(r.Context())
-	if d := s.rbacEng.Authorize(r.Context(), user, rbac.ActionApprove, ""); !d.Allowed {
+	if d := s.authorize(r.Context(), user, rbac.ActionApprove, ""); !d.Allowed {
 		writeForbidden(w, d.Reason)
 		return
 	}
@@ -491,7 +584,7 @@ func (s *Server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	user := auth.UserFromContext(r.Context())
-	if d := s.rbacEng.Authorize(r.Context(), user, rbac.ActionApprove, ""); !d.Allowed {
+	if d := s.authorize(r.Context(), user, rbac.ActionApprove, ""); !d.Allowed {
 		writeForbidden(w, d.Reason)
 		return
 	}
@@ -563,7 +656,7 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAuditTrail(w http.ResponseWriter, r *http.Request) {
 	user := auth.UserFromContext(r.Context())
-	if d := s.rbacEng.Authorize(r.Context(), user, rbac.ActionViewAudit, ""); !d.Allowed {
+	if d := s.authorize(r.Context(), user, rbac.ActionViewAudit, ""); !d.Allowed {
 		writeForbidden(w, d.Reason)
 		return
 	}
@@ -711,13 +804,13 @@ func (s *Server) effectiveRole(user *rbac.UserIdentity) rbac.Role {
 	if user == nil {
 		return rbac.RoleViewer
 	}
-	if d := s.rbacEng.Authorize(context.Background(), user, rbac.ActionConfigure, ""); d.Allowed {
+	if d := s.authorize(context.Background(), user, rbac.ActionConfigure, ""); d.Allowed {
 		return rbac.RoleAdmin
 	}
-	if d := s.rbacEng.Authorize(context.Background(), user, rbac.ActionRunAgent, ""); d.Allowed {
+	if d := s.authorize(context.Background(), user, rbac.ActionRunAgent, ""); d.Allowed {
 		return rbac.RoleOperator
 	}
-	if d := s.rbacEng.Authorize(context.Background(), user, rbac.ActionApprove, ""); d.Allowed {
+	if d := s.authorize(context.Background(), user, rbac.ActionApprove, ""); d.Allowed {
 		return rbac.RoleOperator
 	}
 	return rbac.RoleViewer

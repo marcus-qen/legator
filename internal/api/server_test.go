@@ -69,6 +69,22 @@ func newApprovalTestServer(t *testing.T, objects ...runtime.Object) *Server {
 	}, c, logr.Discard())
 }
 
+func newUserPolicyClient(t *testing.T, objs ...*corev1alpha1.UserPolicy) *fake.ClientBuilder {
+	t.Helper()
+
+	scheme := runtime.NewScheme()
+	if err := corev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add scheme: %v", err)
+	}
+
+	objects := make([]runtime.Object, 0, len(objs))
+	for _, obj := range objs {
+		objects = append(objects, obj)
+	}
+
+	return fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...)
+}
+
 func TestInventoryIncludesSyncStatusFromProvider(t *testing.T) {
 	srv := NewServer(ServerConfig{
 		OIDC: auth.OIDCConfig{
@@ -251,6 +267,108 @@ func TestWhoAmIReturnsIdentityAndPermissions(t *testing.T) {
 	}
 	if allowed, _ := cfgPerm["allowed"].(bool); allowed {
 		t.Fatalf("expected config:write to be denied for operator")
+	}
+}
+
+func TestWhoAmI_UserPolicyRestrictsOperator(t *testing.T) {
+	k8s := newUserPolicyClient(t, &corev1alpha1.UserPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "restrict-operator"},
+		Spec: corev1alpha1.UserPolicySpec{
+			Subjects: []corev1alpha1.UserPolicySubject{{Claim: "email", Value: "operator@example.com"}},
+			Role:     corev1alpha1.UserPolicyRoleViewer,
+		},
+	}).Build()
+
+	srv := NewServer(ServerConfig{
+		OIDC: auth.OIDCConfig{BypassPaths: []string{"/healthz"}},
+		Policies: []rbac.UserPolicy{
+			{
+				Name:     "rbac-operator",
+				Subjects: []rbac.SubjectMatcher{{Claim: "email", Value: "operator@example.com"}},
+				Role:     rbac.RoleOperator,
+			},
+		},
+	}, k8s, logr.Discard())
+
+	token := makeTestJWT(map[string]any{
+		"sub":   "operator-1",
+		"email": "operator@example.com",
+		"exp":   float64(time.Now().Add(1 * time.Hour).Unix()),
+	})
+
+	req := httptest.NewRequest("GET", "/api/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if got := body["effectiveRole"]; got != "viewer" {
+		t.Fatalf("effectiveRole = %v, want viewer", got)
+	}
+}
+
+func TestWhoAmI_UserPolicyCannotBypassViewer(t *testing.T) {
+	k8s := newUserPolicyClient(t, &corev1alpha1.UserPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "admin-override-attempt"},
+		Spec: corev1alpha1.UserPolicySpec{
+			Subjects: []corev1alpha1.UserPolicySubject{{Claim: "email", Value: "viewer@example.com"}},
+			Role:     corev1alpha1.UserPolicyRoleAdmin,
+		},
+	}).Build()
+
+	srv := NewServer(ServerConfig{
+		OIDC: auth.OIDCConfig{BypassPaths: []string{"/healthz"}},
+		Policies: []rbac.UserPolicy{
+			{
+				Name:     "rbac-viewer",
+				Subjects: []rbac.SubjectMatcher{{Claim: "email", Value: "viewer@example.com"}},
+				Role:     rbac.RoleViewer,
+			},
+		},
+	}, k8s, logr.Discard())
+
+	token := makeTestJWT(map[string]any{
+		"sub":   "viewer-1",
+		"email": "viewer@example.com",
+		"exp":   float64(time.Now().Add(1 * time.Hour).Unix()),
+	})
+
+	req := httptest.NewRequest("GET", "/api/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if got := body["effectiveRole"]; got != "viewer" {
+		t.Fatalf("effectiveRole = %v, want viewer", got)
+	}
+
+	perms, ok := body["permissions"].(map[string]any)
+	if !ok {
+		t.Fatalf("permissions missing or invalid")
+	}
+	cfgPerm, ok := perms[string(rbac.ActionConfigure)].(map[string]any)
+	if !ok {
+		t.Fatalf("config permission missing")
+	}
+	if allowed, _ := cfgPerm["allowed"].(bool); allowed {
+		t.Fatalf("expected config:write denied despite admin userpolicy")
 	}
 }
 
