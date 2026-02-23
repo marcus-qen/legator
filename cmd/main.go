@@ -52,6 +52,7 @@ import (
 	apirbac "github.com/marcus-qen/legator/internal/api/rbac"
 	"github.com/marcus-qen/legator/internal/approval"
 	"github.com/marcus-qen/legator/internal/assembler"
+	connectivitypkg "github.com/marcus-qen/legator/internal/connectivity"
 	"github.com/marcus-qen/legator/internal/controller"
 	"github.com/marcus-qen/legator/internal/events"
 	"github.com/marcus-qen/legator/internal/inventory"
@@ -68,7 +69,6 @@ import (
 	"github.com/marcus-qen/legator/internal/state"
 	"github.com/marcus-qen/legator/internal/telemetry"
 	"github.com/marcus-qen/legator/internal/tools"
-	connectivitypkg "github.com/marcus-qen/legator/internal/connectivity"
 	vaultpkg "github.com/marcus-qen/legator/internal/vault"
 	// +kubebuilder:scaffold:imports
 )
@@ -701,6 +701,13 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "ModelTierConfig")
+		os.Exit(1)
+	}
+	if err := (&controller.UserPolicyReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "UserPolicy")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
