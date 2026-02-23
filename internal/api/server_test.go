@@ -365,7 +365,7 @@ func TestAuditTrailIncludesSafetyOutcomeSummary(t *testing.T) {
 		Spec: corev1alpha1.LegatorRunSpec{
 			AgentRef:       "forge",
 			EnvironmentRef: "prod",
-			Trigger:        corev1alpha1.RunTriggerAdHoc,
+			Trigger:        corev1alpha1.RunTriggerManual,
 		},
 		Status: corev1alpha1.LegatorRunStatus{
 			Phase: corev1alpha1.RunPhaseBlocked,
