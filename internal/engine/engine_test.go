@@ -464,6 +464,12 @@ func TestEngine_ReadAction_AlwaysAllowed(t *testing.T) {
 	if !d.Allowed {
 		t.Errorf("read action should be allowed even with observe autonomy, got blocked: %s", d.BlockReason)
 	}
+	if d.PreFlight.SafetyGateOutcome != "ALLOW" {
+		t.Errorf("safety gate outcome = %q, want ALLOW", d.PreFlight.SafetyGateOutcome)
+	}
+	if d.PreFlight.ApprovalCheck != "NOT_REQUIRED" {
+		t.Errorf("approval check = %q, want NOT_REQUIRED", d.PreFlight.ApprovalCheck)
+	}
 }
 
 func TestEngine_MutationBlocked_ObserveMode(t *testing.T) {
@@ -484,6 +490,9 @@ func TestEngine_MutationBlocked_ObserveMode(t *testing.T) {
 	}
 	if d.PreFlight.AutonomyCheck != "BLOCKED" {
 		t.Errorf("autonomy check should be BLOCKED, got %q", d.PreFlight.AutonomyCheck)
+	}
+	if d.PreFlight.SafetyGateOutcome != "BLOCKED" {
+		t.Errorf("safety gate outcome should be BLOCKED, got %q", d.PreFlight.SafetyGateOutcome)
 	}
 }
 
@@ -540,6 +549,34 @@ func TestEngine_DenyListOverridesAllowList(t *testing.T) {
 	d := eng.Evaluate("kubectl.delete", "pod my-pod -n backstage")
 	if d.Allowed {
 		t.Error("deny list should override allow list")
+	}
+}
+
+func TestEngine_NeedsApprovalSafetyMetadata(t *testing.T) {
+	eng := NewEngine("test-agent", &corev1alpha1.GuardrailsSpec{
+		Autonomy:      corev1alpha1.AutonomyObserve,
+		ApprovalMode:  "required",
+		MaxIterations: 10,
+	}, map[string]*skill.Action{
+		"restart": {
+			ID:   "restart",
+			Tool: "kubectl.rollout",
+			Tier: "service-mutation",
+		},
+	}, nil)
+
+	d := eng.Evaluate("kubectl.rollout", "deployment api -n backstage")
+	if !d.NeedsApproval {
+		t.Fatal("expected action to require approval")
+	}
+	if d.PreFlight.ApprovalCheck != "REQUIRED" {
+		t.Fatalf("approval check = %q, want REQUIRED", d.PreFlight.ApprovalCheck)
+	}
+	if d.PreFlight.ApprovalDecision != "PENDING" {
+		t.Fatalf("approval decision = %q, want PENDING", d.PreFlight.ApprovalDecision)
+	}
+	if d.PreFlight.SafetyGateOutcome != "NEEDS_APPROVAL" {
+		t.Fatalf("safety outcome = %q, want NEEDS_APPROVAL", d.PreFlight.SafetyGateOutcome)
 	}
 }
 

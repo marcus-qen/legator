@@ -94,6 +94,19 @@ type PreFlightResult struct {
 	// +optional
 	AllowListCheck string `json:"allowListCheck,omitempty"`
 
+	// approvalCheck indicates whether approval was required in pre-flight.
+	// +optional
+	ApprovalCheck string `json:"approvalCheck,omitempty"`
+
+	// approvalDecision records the approval outcome when approval was required.
+	// +optional
+	ApprovalDecision string `json:"approvalDecision,omitempty"`
+
+	// safetyGateOutcome is the final pre-execution guardrail outcome.
+	// Typical values: ALLOW, NEEDS_APPROVAL, APPROVED, DENIED, BLOCKED, EXPIRED.
+	// +optional
+	SafetyGateOutcome string `json:"safetyGateOutcome,omitempty"`
+
 	// dataProtection indicates whether hardcoded data protection rules blocked this action.
 	// +optional
 	DataProtection string `json:"dataProtection,omitempty"`

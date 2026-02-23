@@ -315,11 +315,14 @@ func (r *Runner) conversationLoop(
 				Target:    target,
 				Tier:      decision.Tier,
 				PreFlightCheck: &corev1alpha1.PreFlightResult{
-					AutonomyCheck:   decision.PreFlight.AutonomyCheck,
-					DataImpactCheck: decision.PreFlight.DataImpactCheck,
-					AllowListCheck:  decision.PreFlight.AllowListCheck,
-					DataProtection:  decision.PreFlight.DataProtection,
-					Reason:          decision.PreFlight.Reason,
+					AutonomyCheck:     decision.PreFlight.AutonomyCheck,
+					DataImpactCheck:   decision.PreFlight.DataImpactCheck,
+					AllowListCheck:    decision.PreFlight.AllowListCheck,
+					ApprovalCheck:     decision.PreFlight.ApprovalCheck,
+					ApprovalDecision:  decision.PreFlight.ApprovalDecision,
+					SafetyGateOutcome: decision.PreFlight.SafetyGateOutcome,
+					DataProtection:    decision.PreFlight.DataProtection,
+					Reason:            decision.PreFlight.Reason,
 				},
 			}
 			if record.PreFlightCheck != nil {
@@ -349,16 +352,31 @@ func (r *Runner) conversationLoop(
 				if approvalErr != nil || !approvalResult.Approved {
 					// Denied or expired or error
 					reason := decision.BlockReason
+					if record.PreFlightCheck != nil {
+						record.PreFlightCheck.ApprovalCheck = "REQUIRED"
+					}
 					if approvalResult != nil {
 						if approvalResult.Phase == corev1alpha1.ApprovalPhaseDenied {
 							record.Status = corev1alpha1.ActionStatusDenied
 							reason = fmt.Sprintf("approval denied by %s: %s", approvalResult.DecidedBy, approvalResult.Reason)
+							if record.PreFlightCheck != nil {
+								record.PreFlightCheck.ApprovalDecision = "DENIED"
+								record.PreFlightCheck.SafetyGateOutcome = "DENIED"
+							}
 						} else {
 							record.Status = corev1alpha1.ActionStatusBlocked
 							reason = fmt.Sprintf("approval expired or failed: %v", approvalErr)
+							if record.PreFlightCheck != nil {
+								record.PreFlightCheck.ApprovalDecision = "EXPIRED"
+								record.PreFlightCheck.SafetyGateOutcome = "EXPIRED"
+							}
 						}
 					} else {
 						record.Status = corev1alpha1.ActionStatusBlocked
+						if record.PreFlightCheck != nil {
+							record.PreFlightCheck.ApprovalDecision = "ERROR"
+							record.PreFlightCheck.SafetyGateOutcome = "BLOCKED"
+						}
 					}
 					record.Result = reason
 					result.guardrails.ActionsBlocked++
@@ -376,6 +394,11 @@ func (r *Runner) conversationLoop(
 
 				// Approved — execute the tool
 				record.Status = corev1alpha1.ActionStatusApproved
+				if record.PreFlightCheck != nil {
+					record.PreFlightCheck.ApprovalCheck = "REQUIRED"
+					record.PreFlightCheck.ApprovalDecision = "APPROVED"
+					record.PreFlightCheck.SafetyGateOutcome = "APPROVED"
+				}
 				r.log.Info("action APPROVED — executing",
 					"agent", agent.Name,
 					"tool", tc.Name,
@@ -406,6 +429,15 @@ func (r *Runner) conversationLoop(
 				// Action blocked (hard block or no approval manager)
 				record.Status = decision.Status
 				record.Result = decision.BlockReason
+				if record.PreFlightCheck != nil {
+					if decision.NeedsApproval {
+						record.PreFlightCheck.ApprovalCheck = "REQUIRED"
+						record.PreFlightCheck.ApprovalDecision = "NOT_AVAILABLE"
+					}
+					if strings.TrimSpace(record.PreFlightCheck.SafetyGateOutcome) == "" {
+						record.PreFlightCheck.SafetyGateOutcome = "BLOCKED"
+					}
+				}
 				result.guardrails.ActionsBlocked++
 
 				// Metrics: record the block
