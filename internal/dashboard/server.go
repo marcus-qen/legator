@@ -106,11 +106,11 @@ func NewServer(c client.Client, cfg Config, log logr.Logger) (*Server, error) {
 	}
 
 	s := &Server{
-		client:    c,
-		config:    cfg,
-		log:       log,
-		pages:     templates,
-		mux:       http.NewServeMux(),
+		client: c,
+		config: cfg,
+		log:    log,
+		pages:  templates,
+		mux:    http.NewServeMux(),
 	}
 
 	s.registerRoutes()
@@ -216,23 +216,114 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	name := strings.TrimPrefix(r.URL.Path, s.config.BasePath+"/agents/")
-	if name == "" {
+	path := strings.TrimPrefix(r.URL.Path, s.config.BasePath+"/agents/")
+	if path == "" {
 		http.Redirect(w, r, s.config.BasePath+"/agents", http.StatusFound)
 		return
 	}
 
-	agent, runs := s.getAgentDetail(ctx, name)
+	// Explicit ad-hoc run action endpoint: /agents/{name}/run
+	if strings.HasSuffix(path, "/run") {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		agentName := strings.TrimSuffix(path, "/run")
+		if strings.TrimSpace(agentName) == "" || strings.Contains(agentName, "/") {
+			http.NotFound(w, r)
+			return
+		}
+
+		s.handleAgentRunTrigger(w, r, agentName)
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	agent, runs := s.getAgentDetail(ctx, path)
 	if agent == nil {
 		http.NotFound(w, r)
 		return
 	}
 
 	s.render(w, "agent-detail.html", map[string]interface{}{
-		"Agent": agent,
-		"Runs":  runs,
-		"Title": agent.Name,
+		"Agent":     agent,
+		"Runs":      runs,
+		"Title":     agent.Name,
+		"Triggered": r.URL.Query().Get("triggered") == "1",
 	})
+}
+
+func (s *Server) handleAgentRunTrigger(w http.ResponseWriter, r *http.Request, name string) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form", http.StatusBadRequest)
+		return
+	}
+
+	task := strings.TrimSpace(r.FormValue("task"))
+	target := strings.TrimSpace(r.FormValue("target"))
+
+	triggeredBy := ""
+	if user := UserFromContext(r.Context()); user != nil {
+		if user.Email != "" {
+			triggeredBy = user.Email
+		} else if user.PreferredUser != "" {
+			triggeredBy = user.PreferredUser
+		} else if user.Subject != "" {
+			triggeredBy = user.Subject
+		}
+	}
+
+	if err := s.triggerAdHocRun(r.Context(), name, task, target, triggeredBy); err != nil {
+		s.log.Error(err, "Failed to trigger agent run", "agent", name)
+		http.Error(w, "Failed to trigger agent run", http.StatusInternalServerError)
+		return
+	}
+
+	location := s.config.BasePath + "/agents/" + name + "?triggered=1"
+	http.Redirect(w, r, location, http.StatusSeeOther)
+}
+
+func (s *Server) triggerAdHocRun(ctx context.Context, name string, task string, target string, triggeredBy string) error {
+	agent := &corev1alpha1.LegatorAgent{}
+	ns := s.config.Namespace
+	if ns == "" {
+		ns = "agents"
+	}
+	if err := s.client.Get(ctx, client.ObjectKey{Name: name, Namespace: ns}, agent); err != nil {
+		return err
+	}
+
+	annotations := agent.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	annotations["legator.io/run-now"] = "true"
+
+	if task != "" {
+		annotations["legator.io/task"] = task
+	} else {
+		delete(annotations, "legator.io/task")
+	}
+
+	if target != "" {
+		annotations["legator.io/target"] = target
+	} else {
+		delete(annotations, "legator.io/target")
+	}
+
+	if triggeredBy != "" {
+		annotations["legator.io/triggered-by"] = triggeredBy
+	} else {
+		delete(annotations, "legator.io/triggered-by")
+	}
+
+	agent.SetAnnotations(annotations)
+	return s.client.Update(ctx, agent)
 }
 
 func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {

@@ -221,6 +221,47 @@ pre.error { border-left: 4px solid var(--danger); }
 .btn-deny { color: var(--danger); border-color: var(--danger); }
 .btn-deny:hover { background: rgba(248, 81, 73, 0.1); }
 
+/* Run trigger flash */
+.flash {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.flash-success { color: var(--success); background: rgba(63, 185, 80, 0.12); border: 1px solid rgba(63, 185, 80, 0.35); }
+
+/* Run trigger form */
+.run-trigger-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.run-trigger-form label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.run-trigger-form input,
+.run-trigger-form textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: #0d1117;
+  color: var(--text);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: var(--font);
+}
+
+.run-trigger-form textarea {
+  resize: vertical;
+}
+
+.run-trigger-form .btn {
+  width: fit-content;
+}
+
 /* Footer */
 .footer {
   text-align: center;
