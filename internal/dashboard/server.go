@@ -267,15 +267,9 @@ func (s *Server) handleAgentRunTrigger(w http.ResponseWriter, r *http.Request, n
 	task := strings.TrimSpace(r.FormValue("task"))
 	target := strings.TrimSpace(r.FormValue("target"))
 
-	triggeredBy := ""
-	if user := UserFromContext(r.Context()); user != nil {
-		if user.Email != "" {
-			triggeredBy = user.Email
-		} else if user.PreferredUser != "" {
-			triggeredBy = user.PreferredUser
-		} else if user.Subject != "" {
-			triggeredBy = user.Subject
-		}
+	triggeredBy := approvalActorFromContext(r.Context())
+	if triggeredBy == "dashboard-user" {
+		triggeredBy = ""
 	}
 
 	if err := s.triggerAdHocRun(r.Context(), name, task, target, triggeredBy); err != nil {
@@ -360,15 +354,29 @@ func (s *Server) handleRunDetail(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	approvals := s.listApprovals(ctx)
+
+	pendingApprovals := 0
+	for _, approval := range approvals {
+		if approval.Status.Phase == corev1alpha1.ApprovalPhasePending {
+			pendingApprovals++
+		}
+	}
+
 	s.render(w, "approvals.html", map[string]interface{}{
-		"Approvals": approvals,
-		"Title":     "Approvals",
+		"Approvals":       approvals,
+		"PendingApprovals": pendingApprovals,
+		"Title":           "Approvals",
 	})
 }
 
 func (s *Server) handleApprovalAction(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form", http.StatusBadRequest)
 		return
 	}
 
@@ -380,8 +388,13 @@ func (s *Server) handleApprovalAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name, action := parts[0], parts[1]
-	reason := r.FormValue("reason")
+	name := strings.TrimSpace(parts[0])
+	action := strings.TrimSpace(parts[1])
+	reason := strings.TrimSpace(r.FormValue("reason"))
+	if name == "" || action == "" {
+		http.Error(w, "Invalid action", http.StatusBadRequest)
+		return
+	}
 
 	var phase corev1alpha1.ApprovalRequestPhase
 	switch action {
@@ -394,7 +407,8 @@ func (s *Server) handleApprovalAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.updateApproval(ctx, name, phase, "dashboard-user", reason); err != nil {
+	actor := approvalActorFromContext(ctx)
+	if err := s.updateApproval(ctx, name, phase, actor, reason); err != nil {
 		s.log.Error(err, "Failed to update approval", "name", name, "action", action)
 		http.Error(w, "Failed to update approval", http.StatusInternalServerError)
 		return
@@ -637,6 +651,25 @@ func (s *Server) updateApproval(ctx context.Context, name string, phase corev1al
 	approval.Status.Reason = reason
 
 	return s.client.Status().Update(ctx, approval)
+}
+
+func approvalActorFromContext(ctx context.Context) string {
+	user := UserFromContext(ctx)
+	if user == nil {
+		return "dashboard-user"
+	}
+
+	if user.Email != "" {
+		return user.Email
+	}
+	if user.PreferredUser != "" {
+		return user.PreferredUser
+	}
+	if user.Subject != "" {
+		return user.Subject
+	}
+
+	return "dashboard-user"
 }
 
 func (s *Server) listEvents(ctx context.Context) []corev1alpha1.AgentEvent {

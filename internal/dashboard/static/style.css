@@ -89,6 +89,18 @@ h1 { font-size: 24px; margin-bottom: 20px; font-weight: 600; }
 h2 { font-size: 18px; margin: 24px 0 12px; font-weight: 600; }
 h3 { font-size: 15px; margin-bottom: 12px; font-weight: 600; }
 
+/* Utility */
+.subtle {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: -10px 0 12px;
+}
+
+.muted {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 /* Stats Grid */
 .stats-grid {
   display: grid;
@@ -163,6 +175,7 @@ dd { font-size: 13px; }
   padding: 8px 12px;
   font-size: 13px;
   border-bottom: 1px solid var(--border);
+  vertical-align: top;
 }
 
 .data-table tr:last-child td { border-bottom: none; }
@@ -220,6 +233,33 @@ pre.error { border-left: 4px solid var(--danger); }
 .btn-approve:hover { background: rgba(63, 185, 80, 0.1); }
 .btn-deny { color: var(--danger); border-color: var(--danger); }
 .btn-deny:hover { background: rgba(248, 81, 73, 0.1); }
+
+/* Approval actions */
+.approval-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.approval-action-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.approval-reason {
+  border: 1px solid var(--border);
+  background: #0d1117;
+  color: var(--text);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  min-width: 140px;
+}
+
+.approval-status {
+  margin-bottom: 2px;
+}
 
 /* Run trigger flash */
 .flash {

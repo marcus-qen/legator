@@ -2,6 +2,8 @@
 {{define "content"}}
 <h1>Approvals</h1>
 
+<p class="subtle">Pending: {{.PendingApprovals}} / {{len .Approvals}}</p>
+
 {{if not .Approvals}}
 <p class="empty">No approval requests</p>
 {{else}}
@@ -10,33 +12,45 @@
     <tr>
       <th></th>
       <th>Agent</th>
+      <th>Run</th>
       <th>Tool</th>
       <th>Tier</th>
-      <th>Description</th>
+      <th>Details</th>
       <th>Age</th>
-      <th>Actions</th>
+      <th>Decision</th>
     </tr>
   </thead>
   <tbody>
     {{range .Approvals}}
     <tr>
       <td>{{statusIcon (print .Status.Phase)}}</td>
-      <td><a href="/agents/{{.Spec.AgentRef}}">{{.Spec.AgentRef}}</a></td>
+      <td><a href="/agents/{{.Spec.AgentName}}">{{.Spec.AgentName}}</a></td>
+      <td>{{if .Spec.RunName}}{{.Spec.RunName}}{{else}}—{{end}}</td>
       <td><code>{{.Spec.Action.Tool}}</code></td>
       <td>{{.Spec.Action.Tier}}</td>
-      <td>{{truncate .Spec.Action.Description 80}}</td>
+      <td>
+        <div>{{truncate .Spec.Action.Description 90}}</div>
+        {{if .Spec.Action.Target}}<div class="muted">Target: {{.Spec.Action.Target}}</div>{{end}}
+      </td>
       <td>{{timeAgo .CreationTimestamp.Time}}</td>
       <td>
         {{if eq (print .Status.Phase) "Pending"}}
-        <form method="POST" action="/approvals/{{.Name}}/approve" style="display:inline">
-          <button type="submit" class="btn btn-approve">Approve</button>
-        </form>
-        <form method="POST" action="/approvals/{{.Name}}/deny" style="display:inline">
-          <button type="submit" class="btn btn-deny">Deny</button>
-        </form>
+        <div class="approval-actions">
+          <form method="POST" action="/approvals/{{.Name}}/approve" class="approval-action-form" style="display:inline">
+            <input type="text" name="reason" class="approval-reason" placeholder="reason (optional)" />
+            <button type="submit" class="btn btn-approve">Approve</button>
+          </form>
+          <form method="POST" action="/approvals/{{.Name}}/deny" class="approval-action-form" style="display:inline">
+            <input type="text" name="reason" class="approval-reason" placeholder="reason (optional)" />
+            <button type="submit" class="btn btn-deny">Deny</button>
+          </form>
+        </div>
         {{else}}
-          {{.Status.Phase}}
-          {{if .Status.DecidedBy}}by {{.Status.DecidedBy}}{{end}}
+          <div class="approval-status">{{.Status.Phase}}</div>
+          {{if .Status.Reason}}<div class="muted">Reason: {{.Status.Reason}}</div>{{end}}
+          {{if .Status.DecidedBy}}
+            <div class="muted">by {{.Status.DecidedBy}}{{if .Status.DecidedAt}} at {{formatTime .Status.DecidedAt.Time}}{{end}}</div>
+          {{end}}
         {{end}}
       </td>
     </tr>
