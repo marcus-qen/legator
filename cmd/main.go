@@ -47,6 +47,7 @@ import (
 
 	corev1alpha1 "github.com/marcus-qen/legator/api/v1alpha1"
 	"github.com/marcus-qen/legator/internal/a2a"
+	"github.com/marcus-qen/legator/internal/anomaly"
 	"github.com/marcus-qen/legator/internal/api"
 	apiauth "github.com/marcus-qen/legator/internal/api/auth"
 	apirbac "github.com/marcus-qen/legator/internal/api/rbac"
@@ -111,6 +112,13 @@ func main() {
 	var headscaleAPIURL string
 	var headscaleAPIKey string
 	var headscaleSyncInterval time.Duration
+	var anomalyScanInterval time.Duration
+	var anomalyLookback time.Duration
+	var anomalyFrequencyWindow time.Duration
+	var anomalyFrequencyThreshold int
+	var anomalyScopeSpikeMultiplier float64
+	var anomalyMinScopeSpikeDelta int
+	var anomalyTargetDriftMinSamples int
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -167,6 +175,20 @@ func main() {
 		"Headscale API key (enables inventory sync when set with --headscale-api-url).")
 	flag.DurationVar(&headscaleSyncInterval, "headscale-sync-interval", 30*time.Second,
 		"How often to poll Headscale for inventory updates.")
+	flag.DurationVar(&anomalyScanInterval, "anomaly-scan-interval", 2*time.Minute,
+		"How often to evaluate anomaly heuristics against recent runs.")
+	flag.DurationVar(&anomalyLookback, "anomaly-lookback", 24*time.Hour,
+		"Lookback window used for anomaly baseline comparisons.")
+	flag.DurationVar(&anomalyFrequencyWindow, "anomaly-frequency-window", 30*time.Minute,
+		"Window used for run-frequency anomaly checks.")
+	flag.IntVar(&anomalyFrequencyThreshold, "anomaly-frequency-threshold", 6,
+		"Run count threshold inside anomaly-frequency-window before emitting frequency anomalies.")
+	flag.Float64Var(&anomalyScopeSpikeMultiplier, "anomaly-scope-spike-multiplier", 2.5,
+		"Multiplier over baseline action count to classify a scope spike anomaly.")
+	flag.IntVar(&anomalyMinScopeSpikeDelta, "anomaly-min-scope-delta", 5,
+		"Minimum absolute action-count increase required to emit a scope spike anomaly.")
+	flag.IntVar(&anomalyTargetDriftMinSamples, "anomaly-target-drift-min-samples", 5,
+		"Minimum historical run samples required before target-drift anomalies are evaluated.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -743,6 +765,28 @@ func main() {
 			"reason", "headscale-api-url or headscale-api-key not set",
 		)
 	}
+
+	// --- v0.9.0: Wire anomaly detection baseline pipeline ---
+	anomalyDetector := anomaly.NewDetector(mgr.GetClient(), anomaly.Config{
+		Namespace:             "agents",
+		ScanInterval:          anomalyScanInterval,
+		Lookback:              anomalyLookback,
+		FrequencyWindow:       anomalyFrequencyWindow,
+		FrequencyThreshold:    anomalyFrequencyThreshold,
+		ScopeSpikeMultiplier:  anomalyScopeSpikeMultiplier,
+		MinScopeSpikeDelta:    anomalyMinScopeSpikeDelta,
+		TargetDriftMinSamples: anomalyTargetDriftMinSamples,
+	}, ctrl.Log)
+	if err := mgr.Add(anomalyDetector); err != nil {
+		setupLog.Error(err, "Failed to add anomaly detector")
+		os.Exit(1)
+	}
+	setupLog.Info("Anomaly detection baseline registered",
+		"interval", anomalyScanInterval.String(),
+		"lookback", anomalyLookback.String(),
+		"frequencyWindow", anomalyFrequencyWindow.String(),
+		"frequencyThreshold", anomalyFrequencyThreshold,
+	)
 
 	// --- v0.8.0: Wire Legator API server ---
 	if apiListenAddr != "" && apiListenAddr != "0" {
