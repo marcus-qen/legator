@@ -384,6 +384,84 @@ func TestWhoAmI_UserPolicyCannotBypassViewer(t *testing.T) {
 	}
 }
 
+func TestListApprovals_ReturnsAgentsNamespaceOnly(t *testing.T) {
+	k8s := newTestClient(t,
+		&corev1alpha1.ApprovalRequest{
+			ObjectMeta: metav1.ObjectMeta{Name: "approve-in-agents", Namespace: "agents"},
+			Spec: corev1alpha1.ApprovalRequestSpec{
+				AgentName: "watchman",
+				RunName:   "run-1",
+				Action: corev1alpha1.ProposedAction{
+					Tool:        "ssh.exec",
+					Tier:        "destructive",
+					Target:      "castra",
+					Description: "restart service",
+				},
+			},
+		},
+		&corev1alpha1.ApprovalRequest{
+			ObjectMeta: metav1.ObjectMeta{Name: "approve-in-other", Namespace: "other"},
+			Spec: corev1alpha1.ApprovalRequestSpec{
+				AgentName: "watchman",
+				RunName:   "run-2",
+				Action: corev1alpha1.ProposedAction{
+					Tool:        "ssh.exec",
+					Tier:        "destructive",
+					Target:      "principia",
+					Description: "restart service",
+				},
+			},
+		},
+	)
+
+	srv := NewServer(ServerConfig{
+		OIDC: auth.OIDCConfig{BypassPaths: []string{"/healthz"}},
+		Policies: []rbac.UserPolicy{
+			{
+				Name:     "operator",
+				Subjects: []rbac.SubjectMatcher{{Claim: "email", Value: "operator@example.com"}},
+				Role:     rbac.RoleOperator,
+			},
+		},
+	}, k8s, logr.Discard())
+
+	token := makeTestJWT(map[string]any{
+		"sub":   "operator-1",
+		"email": "operator@example.com",
+		"exp":   float64(time.Now().Add(1 * time.Hour).Unix()),
+	})
+
+	req := httptest.NewRequest("GET", "/api/v1/approvals", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var body struct {
+		Approvals []corev1alpha1.ApprovalRequest `json:"approvals"`
+		Total     int                            `json:"total"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if body.Total != 1 {
+		t.Fatalf("total = %d, want 1", body.Total)
+	}
+	if len(body.Approvals) != 1 {
+		t.Fatalf("approvals length = %d, want 1", len(body.Approvals))
+	}
+	if got := body.Approvals[0].Namespace; got != "agents" {
+		t.Fatalf("approval namespace = %q, want agents", got)
+	}
+	if got := body.Approvals[0].Name; got != "approve-in-agents" {
+		t.Fatalf("approval name = %q, want approve-in-agents", got)
+	}
+}
+
 func TestApprovalDecision_TypedConfirmationRequired(t *testing.T) {
 	exp := time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339)
 	ar := &corev1alpha1.ApprovalRequest{
