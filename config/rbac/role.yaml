@@ -12,6 +12,7 @@ rules:
   - legatorruns
   - modeltierconfigs
   - userpolicies
+  - agentevents
   verbs:
   - create
   - delete

@@ -167,6 +167,7 @@ func (s *Server) registerRoutes() {
 
 	// Audit
 	s.mux.HandleFunc("GET /api/v1/audit", s.handleAuditTrail)
+	s.mux.HandleFunc("GET /api/v1/anomalies", s.handleListAnomalies)
 }
 
 func (s *Server) authorize(ctx context.Context, user *rbac.UserIdentity, action rbac.Action, resource string) rbac.Decision {
@@ -757,6 +758,67 @@ func (s *Server) handleAuditTrail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"entries": entries,
 		"total":   len(entries),
+	})
+}
+
+func (s *Server) handleListAnomalies(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	if d := s.authorize(r.Context(), user, rbac.ActionViewAudit, ""); !d.Allowed {
+		writeForbidden(w, d.Reason)
+		return
+	}
+
+	events := &corev1alpha1.AgentEventList{}
+	if err := s.k8s.List(r.Context(), events); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list anomalies: "+err.Error())
+		return
+	}
+
+	type anomalyEntry struct {
+		ID          string            `json:"id"`
+		SourceAgent string            `json:"sourceAgent"`
+		SourceRun   string            `json:"sourceRun,omitempty"`
+		Severity    string            `json:"severity"`
+		Summary     string            `json:"summary"`
+		Detail      string            `json:"detail,omitempty"`
+		Labels      map[string]string `json:"labels,omitempty"`
+		Time        string            `json:"time"`
+	}
+
+	entries := make([]anomalyEntry, 0, len(events.Items))
+	for _, event := range events.Items {
+		if event.Spec.EventType != "anomaly" {
+			continue
+		}
+		entries = append(entries, anomalyEntry{
+			ID:          event.Name,
+			SourceAgent: event.Spec.SourceAgent,
+			SourceRun:   event.Spec.SourceRun,
+			Severity:    string(event.Spec.Severity),
+			Summary:     event.Spec.Summary,
+			Detail:      event.Spec.Detail,
+			Labels:      event.Spec.Labels,
+			Time:        event.CreationTimestamp.Format(time.RFC3339),
+		})
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Time > entries[j].Time
+	})
+
+	severityCounts := map[string]int{
+		"info":     0,
+		"warning":  0,
+		"critical": 0,
+	}
+	for _, entry := range entries {
+		severityCounts[entry.Severity]++
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"anomalies": entries,
+		"total":     len(entries),
+		"severity":  severityCounts,
 	})
 }
 

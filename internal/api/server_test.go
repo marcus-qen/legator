@@ -18,6 +18,7 @@ import (
 	"github.com/marcus-qen/legator/internal/inventory"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -83,6 +84,17 @@ func newUserPolicyClient(t *testing.T, objs ...*corev1alpha1.UserPolicy) *fake.C
 	}
 
 	return fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...)
+}
+
+func newTestClient(t *testing.T, objs ...runtime.Object) client.Client {
+	t.Helper()
+
+	scheme := runtime.NewScheme()
+	if err := corev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add scheme: %v", err)
+	}
+
+	return fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objs...).Build()
 }
 
 func TestInventoryIncludesSyncStatusFromProvider(t *testing.T) {
@@ -543,6 +555,78 @@ func TestAuditTrailIncludesSafetyOutcomeSummary(t *testing.T) {
 	}
 	if got := int(entry["approvalsDenied"].(float64)); got != 1 {
 		t.Fatalf("approvalsDenied = %d, want 1", got)
+	}
+}
+
+func TestListAnomalies_ReturnsOnlyAnomalyEvents(t *testing.T) {
+	k8s := newTestClient(t,
+		&corev1alpha1.AgentEvent{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "anomaly-1",
+				Namespace:         "agents",
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-2 * time.Minute)),
+			},
+			Spec: corev1alpha1.AgentEventSpec{
+				SourceAgent: "watchman",
+				SourceRun:   "run-123",
+				EventType:   "anomaly",
+				Severity:    corev1alpha1.EventSeverityWarning,
+				Summary:     "frequency anomaly",
+				Detail:      "7 manual runs in 30m",
+			},
+		},
+		&corev1alpha1.AgentEvent{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "finding-1",
+				Namespace:         "agents",
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Minute)),
+			},
+			Spec: corev1alpha1.AgentEventSpec{
+				SourceAgent: "watchman",
+				EventType:   "finding",
+				Severity:    corev1alpha1.EventSeverityInfo,
+				Summary:     "normal finding",
+			},
+		},
+	)
+
+	srv := NewServer(ServerConfig{
+		OIDC: auth.OIDCConfig{BypassPaths: []string{"/healthz"}},
+		Policies: []rbac.UserPolicy{
+			{
+				Name:     "viewer",
+				Subjects: []rbac.SubjectMatcher{{Claim: "email", Value: "viewer@example.com"}},
+				Role:     rbac.RoleViewer,
+			},
+		},
+	}, k8s, logr.Discard())
+
+	token := makeTestJWT(map[string]any{
+		"sub":   "viewer-1",
+		"email": "viewer@example.com",
+		"exp":   float64(time.Now().Add(1 * time.Hour).Unix()),
+	})
+
+	req := httptest.NewRequest("GET", "/api/v1/anomalies", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if got := body["total"]; got != float64(1) {
+		t.Fatalf("total = %v, want 1", got)
+	}
+	entries, ok := body["anomalies"].([]any)
+	if !ok || len(entries) != 1 {
+		t.Fatalf("unexpected anomalies payload: %#v", body["anomalies"])
 	}
 }
 
