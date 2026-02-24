@@ -168,8 +168,9 @@ Legator can run a Telegram-first ChatOps bot that routes commands through the ex
 - `/inventory [limit]`
 - `/run <id>`
 - `/approvals`
-- `/approve <id> [reason]`
-- `/deny <id> [reason]`
+- `/approve <id> [reason]` (starts typed-confirmation flow)
+- `/deny <id> [reason]` (starts typed-confirmation flow)
+- `/confirm <id> <code>` (required to execute approve/deny)
 
 ### Required flags / env
 
@@ -181,6 +182,7 @@ Optional tuning:
 
 - `--chatops-telegram-poll-interval` (default `2s`)
 - `--chatops-telegram-long-poll-timeout` (default `25s`)
+- `--chatops-telegram-confirmation-ttl` (default `2m`)
 
 ### Chat bindings format
 

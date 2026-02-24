@@ -117,6 +117,7 @@ func main() {
 	var chatopsTelegramAPIBaseURL string
 	var chatopsTelegramPollInterval time.Duration
 	var chatopsTelegramLongPollTimeout time.Duration
+	var chatopsTelegramConfirmationTTL time.Duration
 	var headscaleAPIURL string
 	var headscaleAPIKey string
 	var headscaleSyncInterval time.Duration
@@ -187,6 +188,8 @@ func main() {
 		"Polling interval between Telegram getUpdates calls.")
 	flag.DurationVar(&chatopsTelegramLongPollTimeout, "chatops-telegram-long-poll-timeout", 25*time.Second,
 		"Long-poll timeout for Telegram getUpdates requests.")
+	flag.DurationVar(&chatopsTelegramConfirmationTTL, "chatops-telegram-confirmation-ttl", 2*time.Minute,
+		"Typed confirmation timeout for Telegram approval/deny workflows.")
 	flag.StringVar(&headscaleAPIURL, "headscale-api-url", os.Getenv("HEADSCALE_API_URL"),
 		"Headscale API base URL (enables inventory sync when set with --headscale-api-key).")
 	flag.StringVar(&headscaleAPIKey, "headscale-api-key", os.Getenv("HEADSCALE_API_KEY"),
@@ -857,6 +860,7 @@ func main() {
 			APIAudience:     apiOIDCAudience,
 			PollInterval:    chatopsTelegramPollInterval,
 			LongPollTimeout: chatopsTelegramLongPollTimeout,
+			ConfirmationTTL: chatopsTelegramConfirmationTTL,
 			UserBindings:    bindings,
 		}, ctrl.Log)
 		if err != nil {
@@ -871,6 +875,7 @@ func main() {
 		setupLog.Info("Telegram ChatOps bot registered",
 			"apiBaseURL", chatopsAPIBaseURL,
 			"bindings", len(bindings),
+			"confirmationTTL", chatopsTelegramConfirmationTTL.String(),
 		)
 	} else {
 		setupLog.Info("Telegram ChatOps bot disabled", "reason", "chatops-telegram-bot-token not set")

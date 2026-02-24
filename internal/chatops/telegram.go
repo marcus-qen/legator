@@ -3,7 +3,9 @@ package chatops
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,12 +14,16 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
 )
 
-const defaultAPIRequestTimeout = 10 * time.Second
+const (
+	defaultAPIRequestTimeout = 10 * time.Second
+	defaultConfirmationTTL   = 2 * time.Minute
+)
 
 // UserBinding maps a Telegram chat to an API identity used for authorization checks.
 type UserBinding struct {
@@ -43,6 +49,7 @@ type TelegramConfig struct {
 
 	PollInterval    time.Duration
 	LongPollTimeout time.Duration
+	ConfirmationTTL time.Duration
 
 	UserBindings []UserBinding
 	HTTPClient   *http.Client
@@ -57,7 +64,20 @@ type TelegramBot struct {
 	bindings map[int64]UserBinding
 	offset   int64
 
+	confirmMu     sync.Mutex
+	confirmations map[string]pendingConfirmation
+
 	sendMessageFn func(context.Context, int64, string) error
+}
+
+type pendingConfirmation struct {
+	ApprovalID string
+	Decision   string
+	Reason     string
+	Code       string
+	Tier       string
+	Target     string
+	ExpiresAt  time.Time
 }
 
 // ParseBindingsJSON decodes CHATOPS_TELEGRAM_BINDINGS style JSON.
@@ -110,6 +130,9 @@ func NewTelegramBot(cfg TelegramConfig, log logr.Logger) (*TelegramBot, error) {
 	if cfg.LongPollTimeout <= 0 {
 		cfg.LongPollTimeout = 25 * time.Second
 	}
+	if cfg.ConfirmationTTL <= 0 {
+		cfg.ConfirmationTTL = defaultConfirmationTTL
+	}
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = &http.Client{Timeout: 30 * time.Second}
 	}
@@ -132,10 +155,11 @@ func NewTelegramBot(cfg TelegramConfig, log logr.Logger) (*TelegramBot, error) {
 	}
 
 	bot := &TelegramBot{
-		cfg:      cfg,
-		log:      log.WithName("chatops-telegram"),
-		client:   cfg.HTTPClient,
-		bindings: bindings,
+		cfg:           cfg,
+		log:           log.WithName("chatops-telegram"),
+		client:        cfg.HTTPClient,
+		bindings:      bindings,
+		confirmations: make(map[string]pendingConfirmation),
 	}
 	bot.sendMessageFn = bot.sendMessage
 	return bot, nil
@@ -230,7 +254,7 @@ func (b *TelegramBot) handleIncomingMessage(ctx context.Context, msg telegramMes
 		return b.sendMessageFn(ctx, msg.Chat.ID, "This chat is not authorized for Legator ChatOps.")
 	}
 
-	response := b.processCommand(ctx, binding, text)
+	response := b.processCommand(ctx, binding, msg.Chat.ID, text)
 	if response == "" {
 		return nil
 	}
@@ -238,7 +262,7 @@ func (b *TelegramBot) handleIncomingMessage(ctx context.Context, msg telegramMes
 	return b.sendMessageFn(ctx, msg.Chat.ID, response)
 }
 
-func (b *TelegramBot) processCommand(ctx context.Context, binding UserBinding, text string) string {
+func (b *TelegramBot) processCommand(ctx context.Context, binding UserBinding, chatID int64, text string) string {
 	if err := b.checkChatPermission(ctx, binding); err != nil {
 		return "Access denied: " + err.Error()
 	}
@@ -251,8 +275,9 @@ func (b *TelegramBot) processCommand(ctx context.Context, binding UserBinding, t
 			"/inventory [limit] — show managed inventory\n" +
 			"/run <id> — lookup a run\n" +
 			"/approvals — list pending approvals\n" +
-			"/approve <id> [reason] — approve a request\n" +
-			"/deny <id> [reason] — deny a request"
+			"/approve <id> [reason] — start approval confirmation flow\n" +
+			"/deny <id> [reason] — start deny confirmation flow\n" +
+			"/confirm <id> <code> — complete a pending approval/deny"
 	case "status":
 		msg, err := b.statusCommand(ctx, binding)
 		if err != nil {
@@ -297,9 +322,18 @@ func (b *TelegramBot) processCommand(ctx context.Context, binding UserBinding, t
 		if reason == "" {
 			reason = fmt.Sprintf("via telegram chatops by %s", binding.Email)
 		}
-		msg, err := b.approvalDecisionCommand(ctx, binding, cmd, args[0], reason)
+		msg, err := b.startApprovalConfirmation(ctx, binding, chatID, cmd, args[0], reason)
 		if err != nil {
 			return fmt.Sprintf("/%s failed: %v", cmd, err)
+		}
+		return msg
+	case "confirm":
+		if len(args) < 2 {
+			return "Usage: /confirm <approval-id> <code>"
+		}
+		msg, err := b.completeApprovalConfirmation(ctx, binding, chatID, args[0], args[1])
+		if err != nil {
+			return fmt.Sprintf("/confirm failed: %v", err)
 		}
 		return msg
 	default:
@@ -508,6 +542,162 @@ func (b *TelegramBot) approvalsCommand(ctx context.Context, binding UserBinding)
 	}
 
 	return "Pending approvals:\n" + strings.Join(pending, "\n"), nil
+}
+
+type approvalSummary struct {
+	Name   string
+	Phase  string
+	Tier   string
+	Tool   string
+	Target string
+}
+
+func (b *TelegramBot) startApprovalConfirmation(ctx context.Context, binding UserBinding, chatID int64, decision, id, reason string) (string, error) {
+	approval, err := b.lookupApproval(ctx, binding, id)
+	if err != nil {
+		return "", err
+	}
+	if approval == nil {
+		return "", fmt.Errorf("approval %s not found", id)
+	}
+	if !strings.EqualFold(approval.Phase, "Pending") {
+		return "", fmt.Errorf("approval %s is not pending (phase: %s)", id, approval.Phase)
+	}
+
+	code, err := generateConfirmationCode()
+	if err != nil {
+		return "", err
+	}
+
+	expiresAt := time.Now().Add(b.cfg.ConfirmationTTL)
+	entry := pendingConfirmation{
+		ApprovalID: id,
+		Decision:   decision,
+		Reason:     reason,
+		Code:       code,
+		Tier:       approval.Tier,
+		Target:     approval.Target,
+		ExpiresAt:  expiresAt,
+	}
+
+	b.confirmMu.Lock()
+	b.pruneExpiredConfirmationsLocked(time.Now())
+	b.confirmations[b.confirmationKey(chatID, id)] = entry
+	b.confirmMu.Unlock()
+
+	return fmt.Sprintf(
+		"Typed confirmation required for /%s %s (tier: %s, target: %s).\nReply within %s with:\n/confirm %s %s",
+		decision,
+		id,
+		safeDefault(approval.Tier, "unknown"),
+		safeDefault(approval.Target, "unknown"),
+		b.cfg.ConfirmationTTL.Round(time.Second).String(),
+		id,
+		code,
+	), nil
+}
+
+func (b *TelegramBot) completeApprovalConfirmation(ctx context.Context, binding UserBinding, chatID int64, id, code string) (string, error) {
+	key := b.confirmationKey(chatID, id)
+	now := time.Now()
+
+	b.confirmMu.Lock()
+	entry, ok := b.confirmations[key]
+	if !ok {
+		b.confirmMu.Unlock()
+		return "", fmt.Errorf("no pending confirmation for %s", id)
+	}
+	if now.After(entry.ExpiresAt) {
+		delete(b.confirmations, key)
+		b.confirmMu.Unlock()
+		return "", fmt.Errorf("confirmation expired for %s; run /%s again", id, entry.Decision)
+	}
+	if !strings.EqualFold(strings.TrimSpace(code), entry.Code) {
+		b.confirmMu.Unlock()
+		return "", errors.New("confirmation code mismatch")
+	}
+	b.confirmMu.Unlock()
+
+	msg, err := b.approvalDecisionCommand(ctx, binding, entry.Decision, id, entry.Reason)
+	if err != nil {
+		return "", err
+	}
+
+	b.confirmMu.Lock()
+	delete(b.confirmations, key)
+	b.confirmMu.Unlock()
+
+	return msg + " (typed confirmation accepted)", nil
+}
+
+func (b *TelegramBot) lookupApproval(ctx context.Context, binding UserBinding, id string) (*approvalSummary, error) {
+	var payload struct {
+		Approvals []struct {
+			Metadata struct {
+				Name string `json:"name"`
+			} `json:"metadata"`
+			Spec struct {
+				Action struct {
+					Tier   string `json:"tier"`
+					Tool   string `json:"tool"`
+					Target string `json:"target"`
+				} `json:"action"`
+			} `json:"spec"`
+			Status struct {
+				Phase string `json:"phase"`
+			} `json:"status"`
+		} `json:"approvals"`
+	}
+
+	status, body, err := b.apiRequest(ctx, binding, http.MethodGet, "/api/v1/approvals", nil, &payload)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, errors.New(apiErrorMessage(status, body))
+	}
+
+	for _, item := range payload.Approvals {
+		if item.Metadata.Name != id {
+			continue
+		}
+		return &approvalSummary{
+			Name:   item.Metadata.Name,
+			Phase:  item.Status.Phase,
+			Tier:   item.Spec.Action.Tier,
+			Tool:   item.Spec.Action.Tool,
+			Target: item.Spec.Action.Target,
+		}, nil
+	}
+	return nil, nil
+}
+
+func (b *TelegramBot) confirmationKey(chatID int64, approvalID string) string {
+	return fmt.Sprintf("%d:%s", chatID, approvalID)
+}
+
+func (b *TelegramBot) pruneExpiredConfirmationsLocked(now time.Time) {
+	for key, value := range b.confirmations {
+		if now.After(value.ExpiresAt) {
+			delete(b.confirmations, key)
+		}
+	}
+}
+
+func generateConfirmationCode() (string, error) {
+	buf := make([]byte, 3)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate confirmation code: %w", err)
+	}
+	return strings.ToUpper(hex.EncodeToString(buf)), nil
+}
+
+func safeDefault(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func (b *TelegramBot) approvalDecisionCommand(ctx context.Context, binding UserBinding, decision, id, reason string) (string, error) {
