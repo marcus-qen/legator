@@ -581,16 +581,18 @@ func (s *Server) decideApprovalViaAPI(ctx context.Context, user *OIDCUser, name,
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+makeDashboardJWT(user))
 
-	client := s.httpClient
-	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
+	httpClient := s.httpClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 10 * time.Second}
 	}
 
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("approval api request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 16*1024))
 	if resp.StatusCode != http.StatusOK {
