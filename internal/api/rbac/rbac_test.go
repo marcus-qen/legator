@@ -165,3 +165,75 @@ func TestAuthorize_GlobPatterns(t *testing.T) {
 		})
 	}
 }
+
+func TestResolvePolicyDeterministic(t *testing.T) {
+	engine := NewEngine([]UserPolicy{
+		{
+			Name:     "operator-policy",
+			Subjects: []SubjectMatcher{{Claim: "email", Value: "keith@example.com"}},
+			Role:     RoleOperator,
+		},
+		{
+			Name:     "admin-policy",
+			Subjects: []SubjectMatcher{{Claim: "email", Value: "keith@example.com"}},
+			Role:     RoleAdmin,
+		},
+	})
+
+	policy, ok := engine.ResolvePolicy(&UserIdentity{Email: "keith@example.com"})
+	if !ok {
+		t.Fatalf("expected a matching policy")
+	}
+	if policy.Name != "admin-policy" {
+		t.Fatalf("policy = %s, want admin-policy", policy.Name)
+	}
+}
+
+func TestComposeDecision_ClampsRole(t *testing.T) {
+	baseDecision := Decision{Allowed: true, Reason: "base allow"}
+	basePolicy := &UserPolicy{Name: "rbac-admin", Role: RoleAdmin}
+	overlay := &UserPolicy{Name: "userpolicy-viewer", Role: RoleViewer}
+
+	d := ComposeDecision(baseDecision, basePolicy, overlay, ActionConfigure, "")
+	if d.Allowed {
+		t.Fatalf("expected deny after role clamp")
+	}
+	if d.Reason == "" {
+		t.Fatalf("expected explainable deny reason")
+	}
+}
+
+func TestComposeDecision_OverlayCannotBypassBaseViewer(t *testing.T) {
+	baseDecision := Decision{Allowed: true, Reason: "base allow"}
+	basePolicy := &UserPolicy{Name: "rbac-viewer", Role: RoleViewer}
+	overlay := &UserPolicy{Name: "userpolicy-admin", Role: RoleAdmin}
+
+	d := ComposeDecision(baseDecision, basePolicy, overlay, ActionConfigure, "")
+	if d.Allowed {
+		t.Fatalf("expected deny: user policy must not bypass base RBAC")
+	}
+}
+
+func TestComposeDecision_OverlayScopeApplies(t *testing.T) {
+	baseDecision := Decision{Allowed: true, Reason: "base allow"}
+	basePolicy := &UserPolicy{
+		Name:  "rbac-operator",
+		Role:  RoleOperator,
+		Scope: PolicyScope{Agents: []string{"*"}},
+	}
+	overlay := &UserPolicy{
+		Name:  "userpolicy-ops",
+		Role:  RoleOperator,
+		Scope: PolicyScope{Agents: []string{"watchman-*"}},
+	}
+
+	allowDecision := ComposeDecision(baseDecision, basePolicy, overlay, ActionRunAgent, "watchman-deep")
+	if !allowDecision.Allowed {
+		t.Fatalf("expected allow for in-scope agent, got: %s", allowDecision.Reason)
+	}
+
+	denyDecision := ComposeDecision(baseDecision, basePolicy, overlay, ActionRunAgent, "forge")
+	if denyDecision.Allowed {
+		t.Fatalf("expected deny for out-of-scope agent")
+	}
+}
