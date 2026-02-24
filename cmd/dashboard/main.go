@@ -42,14 +42,24 @@ func main() {
 	var (
 		listenAddr   string
 		namespace    string
+		apiBaseURL   string
 		oidcIssuer   string
 		oidcClientID string
 		oidcSecret   string
 		oidcRedirect string
 	)
 
+	defaultAPIBaseURL := os.Getenv("DASHBOARD_API_URL")
+	if defaultAPIBaseURL == "" {
+		defaultAPIBaseURL = os.Getenv("LEGATOR_API_URL")
+	}
+	if defaultAPIBaseURL == "" {
+		defaultAPIBaseURL = "http://127.0.0.1:8090"
+	}
+
 	flag.StringVar(&listenAddr, "listen", ":8080", "Dashboard listen address")
 	flag.StringVar(&namespace, "namespace", "", "Filter to specific namespace (empty = all)")
+	flag.StringVar(&apiBaseURL, "api-base-url", defaultAPIBaseURL, "Legator API base URL for dashboard approval actions")
 	flag.StringVar(&oidcIssuer, "oidc-issuer", os.Getenv("OIDC_ISSUER"), "OIDC issuer URL")
 	flag.StringVar(&oidcClientID, "oidc-client-id", os.Getenv("OIDC_CLIENT_ID"), "OIDC client ID")
 	flag.StringVar(&oidcSecret, "oidc-client-secret", os.Getenv("OIDC_CLIENT_SECRET"), "OIDC client secret")
@@ -78,6 +88,7 @@ func main() {
 	dashConfig := dashboard.Config{
 		ListenAddr:       listenAddr,
 		Namespace:        namespace,
+		APIBaseURL:       apiBaseURL,
 		OIDCIssuer:       oidcIssuer,
 		OIDCClientID:     oidcClientID,
 		OIDCClientSecret: oidcSecret,
@@ -95,7 +106,8 @@ func main() {
 
 	log.Info("Starting Legator Dashboard",
 		"addr", listenAddr,
-		"namespace", namespace)
+		"namespace", namespace,
+		"apiBaseURL", apiBaseURL)
 
 	if err := srv.Start(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "Dashboard server error: %v\n", err)

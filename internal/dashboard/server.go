@@ -14,18 +14,23 @@ You may obtain a copy of the License at
 package dashboard
 
 import (
+	"bytes"
 	"context"
 	"embed"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	corev1alpha1 "github.com/marcus-qen/legator/api/v1alpha1"
@@ -48,6 +53,10 @@ type Config struct {
 	// Namespace filters agents to a specific namespace (empty = all).
 	Namespace string
 
+	// APIBaseURL is the Legator API endpoint used for approval decisions from the UI.
+	// Example: http://127.0.0.1:8090
+	APIBaseURL string
+
 	// OIDC configuration
 	OIDCIssuer       string
 	OIDCClientID     string
@@ -57,12 +66,13 @@ type Config struct {
 
 // Server is the dashboard HTTP server.
 type Server struct {
-	client client.Client
-	config Config
-	log    logr.Logger
-	pages  map[string]*template.Template
-	mux    *http.ServeMux
-	oidc   *OIDCMiddleware
+	client     client.Client
+	config     Config
+	log        logr.Logger
+	pages      map[string]*template.Template
+	mux        *http.ServeMux
+	oidc       *OIDCMiddleware
+	httpClient *http.Client
 }
 
 // NewServer creates a new dashboard server.
@@ -106,11 +116,12 @@ func NewServer(c client.Client, cfg Config, log logr.Logger) (*Server, error) {
 	}
 
 	s := &Server{
-		client:    c,
-		config:    cfg,
-		log:       log,
-		pages:     templates,
-		mux:       http.NewServeMux(),
+		client:     c,
+		config:     cfg,
+		log:        log,
+		pages:      templates,
+		mux:        http.NewServeMux(),
+		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 
 	s.registerRoutes()
@@ -292,19 +303,29 @@ func (s *Server) handleApprovalAction(w http.ResponseWriter, r *http.Request) {
 	name, action := parts[0], parts[1]
 	reason := r.FormValue("reason")
 
-	var phase corev1alpha1.ApprovalRequestPhase
-	switch action {
-	case "approve":
-		phase = corev1alpha1.ApprovalPhaseApproved
-	case "deny":
-		phase = corev1alpha1.ApprovalPhaseDenied
-	default:
+	if action != "approve" && action != "deny" {
 		http.Error(w, "Invalid action", http.StatusBadRequest)
 		return
 	}
 
-	if err := s.updateApproval(ctx, name, phase, "dashboard-user", reason); err != nil {
-		s.log.Error(err, "Failed to update approval", "name", name, "action", action)
+	if strings.TrimSpace(s.config.APIBaseURL) == "" {
+		http.Error(w, "Approval actions disabled: dashboard API bridge not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	user := UserFromContext(ctx)
+	if user == nil {
+		http.Error(w, "Unauthenticated", http.StatusUnauthorized)
+		return
+	}
+
+	if err := s.decideApprovalViaAPI(ctx, user, name, action, reason); err != nil {
+		var apiErr *approvalAPIError
+		if errors.As(err, &apiErr) {
+			http.Error(w, apiErr.Error(), apiErr.StatusCode)
+			return
+		}
+		s.log.Error(err, "Failed to update approval via API", "name", name, "action", action)
 		http.Error(w, "Failed to update approval", http.StatusInternalServerError)
 		return
 	}
@@ -528,24 +549,77 @@ func (s *Server) listApprovals(ctx context.Context) []corev1alpha1.ApprovalReque
 	return list.Items
 }
 
-func (s *Server) updateApproval(ctx context.Context, name string, phase corev1alpha1.ApprovalRequestPhase, decidedBy, reason string) error {
-	approval := &corev1alpha1.ApprovalRequest{}
-	ns := s.config.Namespace
-	if ns == "" {
-		ns = "agents"
+type approvalAPIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *approvalAPIError) Error() string {
+	body := strings.TrimSpace(e.Body)
+	if body == "" {
+		return fmt.Sprintf("approval api %d", e.StatusCode)
 	}
-	if err := s.client.Get(ctx, client.ObjectKey{Name: name, Namespace: ns}, approval); err != nil {
-		return err
+	return fmt.Sprintf("approval api %d: %s", e.StatusCode, body)
+}
+
+func (s *Server) decideApprovalViaAPI(ctx context.Context, user *OIDCUser, name, decision, reason string) error {
+	payload := map[string]string{"decision": decision}
+	if strings.TrimSpace(reason) != "" {
+		payload["reason"] = reason
 	}
 
-	now := time.Now()
-	approval.Status.Phase = phase
-	approval.Status.DecidedBy = decidedBy
-	decidedAt := metav1.NewTime(now)
-	approval.Status.DecidedAt = &decidedAt
-	approval.Status.Reason = reason
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("encode approval payload: %w", err)
+	}
 
-	return s.client.Status().Update(ctx, approval)
+	apiURL := strings.TrimRight(s.config.APIBaseURL, "/") + "/api/v1/approvals/" + url.PathEscape(name)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("build approval api request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+makeDashboardJWT(user))
+
+	httpClient := s.httpClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 10 * time.Second}
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("approval api request failed: %w", err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 16*1024))
+	if resp.StatusCode != http.StatusOK {
+		return &approvalAPIError{StatusCode: resp.StatusCode, Body: string(respBody)}
+	}
+	return nil
+}
+
+func makeDashboardJWT(user *OIDCUser) string {
+	claims := map[string]any{
+		"sub":   user.Subject,
+		"email": user.Email,
+		"name":  user.Name,
+		"exp":   time.Now().Add(5 * time.Minute).Unix(),
+		"iat":   time.Now().Unix(),
+	}
+	if len(user.Groups) > 0 {
+		claims["groups"] = user.Groups
+	}
+	if strings.TrimSpace(user.PreferredUser) != "" {
+		claims["preferred_username"] = user.PreferredUser
+	}
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+	payload, _ := json.Marshal(claims)
+	body := base64.RawURLEncoding.EncodeToString(payload)
+	return fmt.Sprintf("%s.%s.dashboard", header, body)
 }
 
 func (s *Server) listEvents(ctx context.Context) []corev1alpha1.AgentEvent {
