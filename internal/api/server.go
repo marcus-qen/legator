@@ -878,9 +878,13 @@ func (s *Server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// List ApprovalRequests with status Pending
+	// Keep approvals listing bounded to the canonical namespace and with a hard timeout
+	// so ChatOps/read-path requests fail fast instead of hanging under API pressure.
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
 	approvals := &corev1alpha1.ApprovalRequestList{}
-	if err := s.k8s.List(r.Context(), approvals); err != nil {
+	if err := s.k8s.List(ctx, approvals, client.InNamespace("agents")); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list approvals: "+err.Error())
 		return
 	}

@@ -2,11 +2,13 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,6 +97,20 @@ func newTestClient(t *testing.T, objs ...runtime.Object) client.Client {
 	}
 
 	return fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objs...).Build()
+}
+
+type blockingApprovalsClient struct {
+	client.Client
+}
+
+func (b *blockingApprovalsClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	switch list.(type) {
+	case *corev1alpha1.ApprovalRequestList:
+		<-ctx.Done()
+		return ctx.Err()
+	default:
+		return b.Client.List(ctx, list, opts...)
+	}
 }
 
 func TestInventoryIncludesSyncStatusFromProvider(t *testing.T) {
@@ -381,6 +397,124 @@ func TestWhoAmI_UserPolicyCannotBypassViewer(t *testing.T) {
 	}
 	if allowed, _ := cfgPerm["allowed"].(bool); allowed {
 		t.Fatalf("expected config:write denied despite admin userpolicy")
+	}
+}
+
+func TestListApprovals_ReturnsAgentsNamespaceOnly(t *testing.T) {
+	k8s := newTestClient(t,
+		&corev1alpha1.ApprovalRequest{
+			ObjectMeta: metav1.ObjectMeta{Name: "approve-in-agents", Namespace: "agents"},
+			Spec: corev1alpha1.ApprovalRequestSpec{
+				AgentName: "watchman",
+				RunName:   "run-1",
+				Action: corev1alpha1.ProposedAction{
+					Tool:        "ssh.exec",
+					Tier:        "destructive",
+					Target:      "castra",
+					Description: "restart service",
+				},
+			},
+		},
+		&corev1alpha1.ApprovalRequest{
+			ObjectMeta: metav1.ObjectMeta{Name: "approve-in-other", Namespace: "other"},
+			Spec: corev1alpha1.ApprovalRequestSpec{
+				AgentName: "watchman",
+				RunName:   "run-2",
+				Action: corev1alpha1.ProposedAction{
+					Tool:        "ssh.exec",
+					Tier:        "destructive",
+					Target:      "principia",
+					Description: "restart service",
+				},
+			},
+		},
+	)
+
+	srv := NewServer(ServerConfig{
+		OIDC: auth.OIDCConfig{BypassPaths: []string{"/healthz"}},
+		Policies: []rbac.UserPolicy{
+			{
+				Name:     "operator",
+				Subjects: []rbac.SubjectMatcher{{Claim: "email", Value: "operator@example.com"}},
+				Role:     rbac.RoleOperator,
+			},
+		},
+	}, k8s, logr.Discard())
+
+	token := makeTestJWT(map[string]any{
+		"sub":   "operator-1",
+		"email": "operator@example.com",
+		"exp":   float64(time.Now().Add(1 * time.Hour).Unix()),
+	})
+
+	req := httptest.NewRequest("GET", "/api/v1/approvals", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var body struct {
+		Approvals []corev1alpha1.ApprovalRequest `json:"approvals"`
+		Total     int                            `json:"total"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if body.Total != 1 {
+		t.Fatalf("total = %d, want 1", body.Total)
+	}
+	if len(body.Approvals) != 1 {
+		t.Fatalf("approvals length = %d, want 1", len(body.Approvals))
+	}
+	if got := body.Approvals[0].Namespace; got != "agents" {
+		t.Fatalf("approval namespace = %q, want agents", got)
+	}
+	if got := body.Approvals[0].Name; got != "approve-in-agents" {
+		t.Fatalf("approval name = %q, want approve-in-agents", got)
+	}
+}
+
+func TestListApprovals_FailsFastOnTimeout(t *testing.T) {
+	baseClient := newTestClient(t)
+	k8s := &blockingApprovalsClient{Client: baseClient}
+
+	srv := NewServer(ServerConfig{
+		OIDC: auth.OIDCConfig{BypassPaths: []string{"/healthz"}},
+		Policies: []rbac.UserPolicy{
+			{
+				Name:     "operator",
+				Subjects: []rbac.SubjectMatcher{{Claim: "email", Value: "operator@example.com"}},
+				Role:     rbac.RoleOperator,
+			},
+		},
+	}, k8s, logr.Discard())
+
+	token := makeTestJWT(map[string]any{
+		"sub":   "operator-1",
+		"email": "operator@example.com",
+		"exp":   float64(time.Now().Add(1 * time.Hour).Unix()),
+	})
+
+	req := httptest.NewRequest("GET", "/api/v1/approvals", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+
+	start := time.Now()
+	srv.Handler().ServeHTTP(rr, req)
+	duration := time.Since(start)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+	if duration > 7*time.Second {
+		t.Fatalf("duration = %s, expected fail-fast timeout", duration)
+	}
+	if !strings.Contains(rr.Body.String(), "context deadline exceeded") {
+		t.Fatalf("expected timeout error, got body: %s", rr.Body.String())
 	}
 }
 

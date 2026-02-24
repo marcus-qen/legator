@@ -19,9 +19,11 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -53,6 +55,7 @@ import (
 	apirbac "github.com/marcus-qen/legator/internal/api/rbac"
 	"github.com/marcus-qen/legator/internal/approval"
 	"github.com/marcus-qen/legator/internal/assembler"
+	"github.com/marcus-qen/legator/internal/chatops"
 	connectivitypkg "github.com/marcus-qen/legator/internal/connectivity"
 	"github.com/marcus-qen/legator/internal/controller"
 	"github.com/marcus-qen/legator/internal/events"
@@ -109,6 +112,11 @@ func main() {
 	var apiAdminGroup string
 	var apiOperatorGroup string
 	var apiViewerGroup string
+	var chatopsTelegramBotToken string
+	var chatopsTelegramBindings string
+	var chatopsTelegramAPIBaseURL string
+	var chatopsTelegramPollInterval time.Duration
+	var chatopsTelegramLongPollTimeout time.Duration
 	var headscaleAPIURL string
 	var headscaleAPIKey string
 	var headscaleSyncInterval time.Duration
@@ -169,6 +177,16 @@ func main() {
 		"OIDC group granted operator role.")
 	flag.StringVar(&apiViewerGroup, "api-viewer-group", envOrDefault("API_VIEWER_GROUP", "legator-viewer"),
 		"OIDC group granted viewer role.")
+	flag.StringVar(&chatopsTelegramBotToken, "chatops-telegram-bot-token", os.Getenv("CHATOPS_TELEGRAM_BOT_TOKEN"),
+		"Telegram bot token for ChatOps MVP. Empty disables ChatOps polling.")
+	flag.StringVar(&chatopsTelegramBindings, "chatops-telegram-bindings", os.Getenv("CHATOPS_TELEGRAM_BINDINGS"),
+		"JSON array mapping Telegram chat IDs to API identities.")
+	flag.StringVar(&chatopsTelegramAPIBaseURL, "chatops-telegram-api-base-url", os.Getenv("CHATOPS_TELEGRAM_API_BASE_URL"),
+		"Legator API base URL used by Telegram ChatOps commands.")
+	flag.DurationVar(&chatopsTelegramPollInterval, "chatops-telegram-poll-interval", 2*time.Second,
+		"Polling interval between Telegram getUpdates calls.")
+	flag.DurationVar(&chatopsTelegramLongPollTimeout, "chatops-telegram-long-poll-timeout", 25*time.Second,
+		"Long-poll timeout for Telegram getUpdates requests.")
 	flag.StringVar(&headscaleAPIURL, "headscale-api-url", os.Getenv("HEADSCALE_API_URL"),
 		"Headscale API base URL (enables inventory sync when set with --headscale-api-key).")
 	flag.StringVar(&headscaleAPIKey, "headscale-api-key", os.Getenv("HEADSCALE_API_KEY"),
@@ -789,7 +807,8 @@ func main() {
 	)
 
 	// --- v0.8.0: Wire Legator API server ---
-	if apiListenAddr != "" && apiListenAddr != "0" {
+	apiEnabled := apiListenAddr != "" && apiListenAddr != "0"
+	if apiEnabled {
 		apiSrv := api.NewServer(api.ServerConfig{
 			ListenAddr: apiListenAddr,
 			OIDC: apiauth.OIDCConfig{
@@ -807,6 +826,54 @@ func main() {
 			os.Exit(1)
 		}
 		setupLog.Info("API server registered", "addr", apiListenAddr)
+	}
+
+	// --- v0.9.0 P3.1: Telegram-first ChatOps MVP ---
+	if chatopsTelegramBotToken != "" {
+		if !apiEnabled {
+			setupLog.Error(errors.New("api disabled"), "Telegram ChatOps requires API server", "api-bind-address", apiListenAddr)
+			os.Exit(1)
+		}
+
+		bindings, err := chatops.ParseBindingsJSON(chatopsTelegramBindings)
+		if err != nil {
+			setupLog.Error(err, "Failed to parse Telegram ChatOps bindings")
+			os.Exit(1)
+		}
+		if len(bindings) == 0 {
+			setupLog.Error(errors.New("no bindings"), "Telegram ChatOps requires at least one chat binding")
+			os.Exit(1)
+		}
+
+		chatopsAPIBaseURL := chatopsTelegramAPIBaseURL
+		if chatopsAPIBaseURL == "" {
+			chatopsAPIBaseURL = inferLocalAPIBaseURL(apiListenAddr)
+		}
+
+		chatopsBot, err := chatops.NewTelegramBot(chatops.TelegramConfig{
+			BotToken:        chatopsTelegramBotToken,
+			APIBaseURL:      chatopsAPIBaseURL,
+			APIIssuer:       apiOIDCIssuer,
+			APIAudience:     apiOIDCAudience,
+			PollInterval:    chatopsTelegramPollInterval,
+			LongPollTimeout: chatopsTelegramLongPollTimeout,
+			UserBindings:    bindings,
+		}, ctrl.Log)
+		if err != nil {
+			setupLog.Error(err, "Failed to initialize Telegram ChatOps bot")
+			os.Exit(1)
+		}
+
+		if err := mgr.Add(chatopsBot); err != nil {
+			setupLog.Error(err, "Failed to add Telegram ChatOps bot to manager")
+			os.Exit(1)
+		}
+		setupLog.Info("Telegram ChatOps bot registered",
+			"apiBaseURL", chatopsAPIBaseURL,
+			"bindings", len(bindings),
+		)
+	} else {
+		setupLog.Info("Telegram ChatOps bot disabled", "reason", "chatops-telegram-bot-token not set")
 	}
 
 	setupLog.Info("Starting manager")
@@ -1185,6 +1252,27 @@ func buildAPIPolicies(adminGroup, operatorGroup, viewerGroup string) []apirbac.U
 			Role:     apirbac.RoleViewer,
 		},
 	}
+}
+
+// inferLocalAPIBaseURL converts an API bind address (e.g. :8090) into a local HTTP URL.
+func inferLocalAPIBaseURL(bindAddr string) string {
+	bindAddr = strings.TrimSpace(bindAddr)
+	if strings.HasPrefix(bindAddr, "http://") || strings.HasPrefix(bindAddr, "https://") {
+		return bindAddr
+	}
+	if strings.HasPrefix(bindAddr, ":") {
+		return "http://127.0.0.1" + bindAddr
+	}
+	if rest, ok := strings.CutPrefix(bindAddr, "0.0.0.0:"); ok {
+		return "http://127.0.0.1:" + rest
+	}
+	if rest, ok := strings.CutPrefix(bindAddr, "[::]:"); ok {
+		return "http://127.0.0.1:" + rest
+	}
+	if strings.Contains(bindAddr, ":") {
+		return "http://" + bindAddr
+	}
+	return "http://127.0.0.1:8090"
 }
 
 // envOrDefault reads an environment variable, returning a default if empty.
