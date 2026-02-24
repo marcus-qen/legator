@@ -65,20 +65,20 @@ type Requirements struct {
 
 // Radius is the quantified blast-radius summary.
 type Radius struct {
-	Level          Level         `json:"level"`
-	Score          float64       `json:"score"`
-	TargetCount    int           `json:"targetCount"`
-	ProdTargetCount int          `json:"prodTargetCount"`
-	CrossDomain    bool          `json:"crossDomain"`
-	MutationDepth  MutationDepth `json:"mutationDepth"`
+	Level           Level         `json:"level"`
+	Score           float64       `json:"score"`
+	TargetCount     int           `json:"targetCount"`
+	ProdTargetCount int           `json:"prodTargetCount"`
+	CrossDomain     bool          `json:"crossDomain"`
+	MutationDepth   MutationDepth `json:"mutationDepth"`
 }
 
 // Input contains the request context to evaluate.
 type Input struct {
-	Tier         corev1alpha1.ActionTier
-	Targets      []Target
+	Tier          corev1alpha1.ActionTier
+	Targets       []Target
 	MutationDepth MutationDepth
-	ActorRoles   []string
+	ActorRoles    []string
 }
 
 // Assessment is the computed blast-radius result.
