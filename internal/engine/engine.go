@@ -37,6 +37,12 @@ import (
 	"github.com/marcus-qen/legator/internal/tools"
 )
 
+const (
+	preflightApprovalRequired     = "REQUIRED"
+	preflightApprovalNotRequired  = "NOT_REQUIRED"
+	preflightNeedsApprovalOutcome = "NEEDS_APPROVAL"
+)
+
 // Decision is the result of the engine evaluating a tool call.
 type Decision struct {
 	// Allowed is true if the action may proceed.
@@ -68,11 +74,11 @@ type Decision struct {
 
 // Engine is the Action Sheet enforcement engine.
 type Engine struct {
-	guardrails       *corev1alpha1.GuardrailsSpec
-	actionRegistry   map[string]*skill.Action
-	dataIndex        *resolver.DataResourceIndex
-	cooldowns        *CooldownTracker
-	protectionEngine *tools.ProtectionEngine
+	guardrails        *corev1alpha1.GuardrailsSpec
+	actionRegistry    map[string]*skill.Action
+	dataIndex         *resolver.DataResourceIndex
+	cooldowns         *CooldownTracker
+	protectionEngine  *tools.ProtectionEngine
 	toolRegistry      *tools.Registry
 	agentName         string
 	blastRadiusScorer blastradius.Scorer
@@ -132,6 +138,9 @@ func (e *Engine) Evaluate(toolName string, target string) *Decision {
 		Allowed: true,
 		Status:  corev1alpha1.ActionStatusExecuted,
 	}
+	d.PreFlight.SafetyGateOutcome = "ALLOW"
+	d.PreFlight.ApprovalCheck = preflightApprovalNotRequired
+	d.PreFlight.ApprovalDecision = preflightApprovalNotRequired
 
 	// Step 1: Match against Action Sheet
 	matched := e.matchAction(toolName, target)
@@ -154,6 +163,7 @@ func (e *Engine) Evaluate(toolName string, target string) *Decision {
 		d.Status = corev1alpha1.ActionStatusBlocked
 		d.Tier = corev1alpha1.ActionTierDataMutation
 		d.PreFlight.DataProtection = "BLOCKED"
+		d.PreFlight.SafetyGateOutcome = "BLOCKED"
 		d.PreFlight.Reason = reason
 		d.BlockReason = reason
 		return d
@@ -169,6 +179,7 @@ func (e *Engine) Evaluate(toolName string, target string) *Decision {
 			d.Allowed = false
 			d.Status = corev1alpha1.ActionStatusBlocked
 			d.PreFlight.DataProtection = "BLOCKED (protection class)"
+			d.PreFlight.SafetyGateOutcome = "BLOCKED"
 			d.PreFlight.Reason = reason
 			d.BlockReason = reason
 			return d
@@ -187,6 +198,7 @@ func (e *Engine) Evaluate(toolName string, target string) *Decision {
 					d.Status = corev1alpha1.ActionStatusBlocked
 					d.Tier = corev1alpha1.ActionTierDataMutation
 					d.PreFlight.DataProtection = "BLOCKED (tool classification)"
+					d.PreFlight.SafetyGateOutcome = "BLOCKED"
 					d.PreFlight.Reason = classification.BlockReason
 					d.BlockReason = classification.BlockReason
 					return d
@@ -214,6 +226,7 @@ func (e *Engine) Evaluate(toolName string, target string) *Decision {
 			d.Allowed = false
 			d.Status = corev1alpha1.ActionStatusBlocked
 			d.PreFlight.DataImpactCheck = "BLOCKED"
+			d.PreFlight.SafetyGateOutcome = "BLOCKED"
 			d.PreFlight.Reason = reason
 			d.BlockReason = reason
 			return d
@@ -228,7 +241,10 @@ func (e *Engine) Evaluate(toolName string, target string) *Decision {
 			d.Allowed = false
 			d.NeedsApproval = true
 			d.Status = corev1alpha1.ActionStatusPendingApproval
-			d.PreFlight.AutonomyCheck = "NEEDS_APPROVAL"
+			d.PreFlight.AutonomyCheck = preflightNeedsApprovalOutcome
+			d.PreFlight.ApprovalCheck = preflightApprovalRequired
+			d.PreFlight.ApprovalDecision = "PENDING"
+			d.PreFlight.SafetyGateOutcome = preflightNeedsApprovalOutcome
 			d.PreFlight.Reason = reason
 			d.BlockReason = reason
 			return d
@@ -236,6 +252,7 @@ func (e *Engine) Evaluate(toolName string, target string) *Decision {
 		d.Allowed = false
 		d.Status = corev1alpha1.ActionStatusBlocked
 		d.PreFlight.AutonomyCheck = "BLOCKED"
+		d.PreFlight.SafetyGateOutcome = "BLOCKED"
 		d.PreFlight.Reason = reason
 		d.BlockReason = reason
 		return d
@@ -247,6 +264,7 @@ func (e *Engine) Evaluate(toolName string, target string) *Decision {
 		d.Allowed = false
 		d.Status = corev1alpha1.ActionStatusBlocked
 		d.PreFlight.AllowListCheck = "BLOCKED (deny list)"
+		d.PreFlight.SafetyGateOutcome = "BLOCKED"
 		d.PreFlight.Reason = reason
 		d.BlockReason = reason
 		return d
@@ -258,6 +276,7 @@ func (e *Engine) Evaluate(toolName string, target string) *Decision {
 			d.Allowed = false
 			d.Status = corev1alpha1.ActionStatusBlocked
 			d.PreFlight.AllowListCheck = "BLOCKED (not in allow list)"
+			d.PreFlight.SafetyGateOutcome = "BLOCKED"
 			d.PreFlight.Reason = reason
 			d.BlockReason = reason
 			return d
@@ -270,6 +289,8 @@ func (e *Engine) Evaluate(toolName string, target string) *Decision {
 		if blocked, reason := e.checkCooldown(matched.ID, target, matched.Cooldown); blocked {
 			d.Allowed = false
 			d.Status = corev1alpha1.ActionStatusSkipped
+			d.PreFlight.SafetyGateOutcome = "SKIPPED"
+			d.PreFlight.Reason = reason
 			d.BlockReason = reason
 			return d
 		}
@@ -280,7 +301,9 @@ func (e *Engine) Evaluate(toolName string, target string) *Decision {
 		// Undeclared mutations are denied
 		d.Allowed = false
 		d.Status = corev1alpha1.ActionStatusBlocked
+		d.PreFlight.SafetyGateOutcome = "BLOCKED"
 		d.BlockReason = fmt.Sprintf("undeclared mutation action %q — not in Action Sheet", toolName)
+		d.PreFlight.Reason = d.BlockReason
 		return d
 	}
 

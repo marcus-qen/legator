@@ -42,6 +42,15 @@ func (f *fakeInventoryProvider) InventoryStatus() map[string]any {
 	return f.sync
 }
 
+func newTestScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	s := runtime.NewScheme()
+	if err := corev1alpha1.AddToScheme(s); err != nil {
+		t.Fatalf("add scheme: %v", err)
+	}
+	return s
+}
+
 func newApprovalTestServer(t *testing.T, objects ...runtime.Object) *Server {
 	t.Helper()
 	scheme := runtime.NewScheme()
@@ -341,6 +350,81 @@ func TestApprovalDecision_TypedConfirmationAccepted(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+}
+
+func TestAuditTrailIncludesSafetyOutcomeSummary(t *testing.T) {
+	scheme := newTestScheme(t)
+	run := &corev1alpha1.LegatorRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "run-1",
+			Namespace:         "agents",
+			Labels:            map[string]string{"legator.io/agent": "forge"},
+			CreationTimestamp: metav1.NewTime(time.Now().Add(-2 * time.Minute)),
+		},
+		Spec: corev1alpha1.LegatorRunSpec{
+			AgentRef:       "forge",
+			EnvironmentRef: "prod",
+			Trigger:        corev1alpha1.RunTriggerManual,
+		},
+		Status: corev1alpha1.LegatorRunStatus{
+			Phase: corev1alpha1.RunPhaseBlocked,
+			Actions: []corev1alpha1.ActionRecord{
+				{Status: corev1alpha1.ActionStatusBlocked, PreFlightCheck: &corev1alpha1.PreFlightResult{SafetyGateOutcome: "BLOCKED"}},
+				{Status: corev1alpha1.ActionStatusDenied, PreFlightCheck: &corev1alpha1.PreFlightResult{ApprovalCheck: "REQUIRED", ApprovalDecision: "DENIED", SafetyGateOutcome: "DENIED"}},
+				{Status: corev1alpha1.ActionStatusApproved, PreFlightCheck: &corev1alpha1.PreFlightResult{ApprovalCheck: "REQUIRED", ApprovalDecision: "APPROVED", SafetyGateOutcome: "APPROVED"}},
+			},
+			Report: "safety summary",
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(run).Build()
+
+	srv := NewServer(ServerConfig{
+		OIDC: auth.OIDCConfig{BypassPaths: []string{"/healthz"}},
+		Policies: []rbac.UserPolicy{{
+			Name:     "viewer-policy",
+			Subjects: []rbac.SubjectMatcher{{Claim: "email", Value: "viewer@example.com"}},
+			Role:     rbac.RoleViewer,
+		}},
+	}, c, logr.Discard())
+
+	token := makeTestJWT(map[string]any{
+		"sub":   "viewer-1",
+		"email": "viewer@example.com",
+		"exp":   float64(time.Now().Add(1 * time.Hour).Unix()),
+	})
+
+	req := httptest.NewRequest("GET", "/api/v1/audit", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	entries, ok := body["entries"].([]any)
+	if !ok || len(entries) != 1 {
+		t.Fatalf("entries malformed: %#v", body["entries"])
+	}
+	entry, ok := entries[0].(map[string]any)
+	if !ok {
+		t.Fatalf("entry malformed: %#v", entries[0])
+	}
+	if got := int(entry["safetyBlocked"].(float64)); got != 2 {
+		t.Fatalf("safetyBlocked = %d, want 2", got)
+	}
+	if got := int(entry["approvalsRequired"].(float64)); got != 2 {
+		t.Fatalf("approvalsRequired = %d, want 2", got)
+	}
+	if got := int(entry["approvalsApproved"].(float64)); got != 1 {
+		t.Fatalf("approvalsApproved = %d, want 1", got)
+	}
+	if got := int(entry["approvalsDenied"].(float64)); got != 1 {
+		t.Fatalf("approvalsDenied = %d, want 1", got)
 	}
 }
 

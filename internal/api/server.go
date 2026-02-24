@@ -60,13 +60,13 @@ type ServerConfig struct {
 
 // Server is the Legator API server.
 type Server struct {
-	config    ServerConfig
-	k8s       client.Client
-	validator *auth.Validator
-	rbacEng   *rbac.Engine
-	inventory InventoryProvider
-	log        logr.Logger
-	mux        *http.ServeMux
+	config      ServerConfig
+	k8s         client.Client
+	validator   *auth.Validator
+	rbacEng     *rbac.Engine
+	inventory   InventoryProvider
+	log         logr.Logger
+	mux         *http.ServeMux
 	userLimiter *userRateLimiter
 }
 
@@ -231,14 +231,14 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	})
 
 	type agentSummary struct {
-		Name       string `json:"name"`
-		Namespace  string `json:"namespace"`
-		Phase      string `json:"phase"`
-		Autonomy   string `json:"autonomy"`
-		Schedule   string `json:"schedule"`
-		ModelTier  string `json:"modelTier"`
-		Paused     bool   `json:"paused"`
-		EnvRef     string `json:"environmentRef"`
+		Name      string `json:"name"`
+		Namespace string `json:"namespace"`
+		Phase     string `json:"phase"`
+		Autonomy  string `json:"autonomy"`
+		Schedule  string `json:"schedule"`
+		ModelTier string `json:"modelTier"`
+		Paused    bool   `json:"paused"`
+		EnvRef    string `json:"environmentRef"`
 	}
 
 	result := make([]agentSummary, 0, len(agents.Items))
@@ -555,8 +555,8 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 	)
 
 	writeJSON(w, http.StatusOK, map[string]string{
-		"status":   req.Decision + "d",
-		"id":       id,
+		"status":    req.Decision + "d",
+		"id":        id,
 		"decidedBy": user.Email,
 	})
 }
@@ -603,24 +603,54 @@ func (s *Server) handleAuditTrail(w http.ResponseWriter, r *http.Request) {
 	})
 
 	type auditEntry struct {
-		Run       string `json:"run"`
-		Agent     string `json:"agent"`
-		Phase     string `json:"phase"`
-		Trigger   string `json:"trigger"`
-		Time      string `json:"time"`
-		Actions   int    `json:"actions"`
-		Report    string `json:"report,omitempty"`
+		Run                string         `json:"run"`
+		Agent              string         `json:"agent"`
+		Phase              string         `json:"phase"`
+		Trigger            string         `json:"trigger"`
+		Time               string         `json:"time"`
+		Actions            int            `json:"actions"`
+		SafetyBlocked      int            `json:"safetyBlocked"`
+		ApprovalsRequired  int            `json:"approvalsRequired"`
+		ApprovalsApproved  int            `json:"approvalsApproved"`
+		ApprovalsDenied    int            `json:"approvalsDenied"`
+		SafetyOutcomeStats map[string]int `json:"safetyOutcomeStats,omitempty"`
+		Report             string         `json:"report,omitempty"`
 	}
 
 	entries := make([]auditEntry, 0, len(runs.Items))
 	for _, run := range runs.Items {
 		entry := auditEntry{
-			Run:     run.Name,
-			Agent:   run.Spec.AgentRef,
-			Phase:   string(run.Status.Phase),
-			Trigger: string(run.Spec.Trigger),
-			Time:    run.CreationTimestamp.Format(time.RFC3339),
-			Actions: len(run.Status.Actions),
+			Run:                run.Name,
+			Agent:              run.Spec.AgentRef,
+			Phase:              string(run.Status.Phase),
+			Trigger:            string(run.Spec.Trigger),
+			Time:               run.CreationTimestamp.Format(time.RFC3339),
+			Actions:            len(run.Status.Actions),
+			SafetyOutcomeStats: map[string]int{},
+		}
+		for _, a := range run.Status.Actions {
+			if a.Status == corev1alpha1.ActionStatusBlocked || a.Status == corev1alpha1.ActionStatusDenied {
+				entry.SafetyBlocked++
+			}
+			if a.PreFlightCheck == nil {
+				continue
+			}
+			if strings.EqualFold(a.PreFlightCheck.ApprovalCheck, "REQUIRED") {
+				entry.ApprovalsRequired++
+			}
+			switch strings.ToUpper(strings.TrimSpace(a.PreFlightCheck.ApprovalDecision)) {
+			case "APPROVED":
+				entry.ApprovalsApproved++
+			case "DENIED":
+				entry.ApprovalsDenied++
+			}
+			outcome := strings.ToUpper(strings.TrimSpace(a.PreFlightCheck.SafetyGateOutcome))
+			if outcome != "" {
+				entry.SafetyOutcomeStats[outcome]++
+			}
+		}
+		if len(entry.SafetyOutcomeStats) == 0 {
+			entry.SafetyOutcomeStats = nil
 		}
 		// Truncate report for list view
 		if len(run.Status.Report) > 200 {
