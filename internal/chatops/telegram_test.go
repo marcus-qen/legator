@@ -311,6 +311,74 @@ func TestConfirmFlowExpires(t *testing.T) {
 	}
 }
 
+func TestConfirmCodeMismatchThenSuccess(t *testing.T) {
+	t.Parallel()
+
+	var approvalCalls int
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/me":
+			_ = json.NewEncoder(w).Encode(map[string]any{"permissions": map[string]any{"chat:use": map[string]any{"allowed": true}}})
+		case r.URL.Path == "/api/v1/approvals" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"approvals": []map[string]any{{
+					"metadata": map[string]any{"name": "req-1"},
+					"spec":     map[string]any{"action": map[string]any{"tier": "destructive", "tool": "ssh.exec", "target": "castra"}},
+					"status":   map[string]any{"phase": "Pending"},
+				}},
+			})
+		case r.URL.Path == "/api/v1/approvals/req-1" && r.Method == http.MethodPost:
+			approvalCalls++
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.Error(w, `{"error":"unexpected endpoint"}`, http.StatusInternalServerError)
+		}
+	}))
+	defer apiSrv.Close()
+
+	bot := mustNewTestBot(t, TelegramConfig{
+		BotToken:   "test-token",
+		APIBaseURL: apiSrv.URL,
+		UserBindings: []UserBinding{
+			{ChatID: 1234, Email: "operator@example.com", Subject: "telegram:1234", Groups: []string{"legator-operator"}},
+		},
+	})
+
+	var sent []string
+	bot.sendMessageFn = func(_ context.Context, _ int64, text string) error {
+		sent = append(sent, text)
+		return nil
+	}
+
+	err := bot.handleIncomingMessage(context.Background(), telegramMessage{Text: "/approve req-1 investigate", Chat: telegramChat{ID: 1234}})
+	if err != nil {
+		t.Fatalf("start approve returned error: %v", err)
+	}
+	correctCode := extractConfirmationCode(t, sent[len(sent)-1], "req-1")
+
+	err = bot.handleIncomingMessage(context.Background(), telegramMessage{Text: "/confirm req-1 WRONGCODE", Chat: telegramChat{ID: 1234}})
+	if err != nil {
+		t.Fatalf("confirm wrong code returned error: %v", err)
+	}
+	if !strings.Contains(sent[len(sent)-1], "code mismatch") {
+		t.Fatalf("expected mismatch response, got %q", sent[len(sent)-1])
+	}
+	if approvalCalls != 0 {
+		t.Fatalf("approvalCalls = %d, want 0 after mismatch", approvalCalls)
+	}
+
+	err = bot.handleIncomingMessage(context.Background(), telegramMessage{Text: "/confirm req-1 " + correctCode, Chat: telegramChat{ID: 1234}})
+	if err != nil {
+		t.Fatalf("confirm correct code returned error: %v", err)
+	}
+	if !strings.Contains(sent[len(sent)-1], "typed confirmation accepted") {
+		t.Fatalf("expected success confirmation response, got %q", sent[len(sent)-1])
+	}
+	if approvalCalls != 1 {
+		t.Fatalf("approvalCalls = %d, want 1", approvalCalls)
+	}
+}
+
 func extractConfirmationCode(t *testing.T, message, approvalID string) string {
 	t.Helper()
 	fields := strings.Fields(message)
