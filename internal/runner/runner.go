@@ -322,6 +322,9 @@ func (r *Runner) conversationLoop(
 					Reason:          decision.PreFlight.Reason,
 				},
 			}
+			if record.PreFlightCheck != nil {
+				record.PreFlightCheck.Reason = appendReason(record.PreFlightCheck.Reason, formatBlastRadius(decision))
+			}
 
 			if decision.NeedsApproval && cfg.ApprovalManager != nil {
 				// Action needs human approval — submit request and wait
@@ -707,6 +710,32 @@ func capMaxTokens(remaining int32) int32 {
 		return perCallCap
 	}
 	return remaining
+}
+
+func appendReason(existing, extra string) string {
+	extra = strings.TrimSpace(extra)
+	if extra == "" {
+		return existing
+	}
+	if strings.TrimSpace(existing) == "" {
+		return extra
+	}
+	return existing + "; " + extra
+}
+
+func formatBlastRadius(decision *engine.Decision) string {
+	if decision == nil {
+		return ""
+	}
+	level := decision.BlastRadius.Radius.Level
+	if level == "" {
+		return ""
+	}
+	reasons := "none"
+	if len(decision.BlastRadius.Reasons) > 0 {
+		reasons = strings.Join(decision.BlastRadius.Reasons, ",")
+	}
+	return fmt.Sprintf("blast-radius=%s score=%.2f reasons=%s decision=%s", level, decision.BlastRadius.Radius.Score, reasons, decision.BlastRadius.Decision)
 }
 
 // extractFindings parses agent output for structured findings.

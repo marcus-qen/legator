@@ -32,6 +32,7 @@ import (
 
 	corev1alpha1 "github.com/marcus-qen/legator/api/v1alpha1"
 	"github.com/marcus-qen/legator/internal/resolver"
+	"github.com/marcus-qen/legator/internal/safety/blastradius"
 	"github.com/marcus-qen/legator/internal/skill"
 	"github.com/marcus-qen/legator/internal/tools"
 )
@@ -60,6 +61,9 @@ type Decision struct {
 
 	// BlockReason is a human-readable explanation when blocked.
 	BlockReason string
+
+	// BlastRadius is the deterministic pre-execution impact assessment.
+	BlastRadius blastradius.Assessment
 }
 
 // Engine is the Action Sheet enforcement engine.
@@ -69,8 +73,10 @@ type Engine struct {
 	dataIndex        *resolver.DataResourceIndex
 	cooldowns        *CooldownTracker
 	protectionEngine *tools.ProtectionEngine
-	toolRegistry     *tools.Registry
-	agentName        string
+	toolRegistry      *tools.Registry
+	agentName         string
+	blastRadiusScorer blastradius.Scorer
+	actorRoles        []string
 }
 
 // NewEngine creates an engine for a specific agent run.
@@ -81,11 +87,13 @@ func NewEngine(
 	dataIndex *resolver.DataResourceIndex,
 ) *Engine {
 	return &Engine{
-		agentName:      agentName,
-		guardrails:     guardrails,
-		actionRegistry: actionRegistry,
-		dataIndex:      dataIndex,
-		cooldowns:      NewCooldownTracker(),
+		agentName:         agentName,
+		guardrails:        guardrails,
+		actionRegistry:    actionRegistry,
+		dataIndex:         dataIndex,
+		cooldowns:         NewCooldownTracker(),
+		blastRadiusScorer: blastradius.NewDeterministicScorer(),
+		actorRoles:        []string{"operator"},
 	}
 }
 
@@ -98,6 +106,22 @@ func (e *Engine) WithProtectionEngine(pe *tools.ProtectionEngine) *Engine {
 // WithToolRegistry adds a tool registry for ClassifiableTool-based action classification.
 func (e *Engine) WithToolRegistry(reg *tools.Registry) *Engine {
 	e.toolRegistry = reg
+	return e
+}
+
+// WithBlastRadiusScorer overrides the default blast-radius scorer.
+func (e *Engine) WithBlastRadiusScorer(scorer blastradius.Scorer) *Engine {
+	e.blastRadiusScorer = scorer
+	return e
+}
+
+// WithActorRoles sets actor roles used by blast-radius policy evaluation.
+func (e *Engine) WithActorRoles(roles []string) *Engine {
+	if len(roles) == 0 {
+		e.actorRoles = []string{"operator"}
+		return e
+	}
+	e.actorRoles = roles
 	return e
 }
 
@@ -120,6 +144,9 @@ func (e *Engine) Evaluate(toolName string, target string) *Decision {
 		// Undeclared action — classify from tool name heuristics
 		d.Tier = classifyFromToolName(toolName)
 	}
+
+	// Step 2.5: Compute blast-radius assessment (deterministic, side-effect free)
+	d.BlastRadius = e.assessBlastRadius(toolName, target, d.Tier)
 
 	// Step 3: Check hardcoded data protection rules (non-configurable)
 	if blocked, reason := checkDataProtection(toolName, target); blocked {
@@ -168,6 +195,17 @@ func (e *Engine) Evaluate(toolName string, target string) *Decision {
 				d.Tier = mapToolTierToAPITier(classification.Tier)
 			}
 		}
+	}
+
+	// Step 3d: Refresh + enforce blast-radius execution gate after final tier classification.
+	d.BlastRadius = e.assessBlastRadius(toolName, target, d.Tier)
+	if d.BlastRadius.Decision == blastradius.DecisionDeny {
+		reason := fmt.Sprintf("blast-radius policy denied action: level=%s score=%.2f reasons=%s", d.BlastRadius.Radius.Level, d.BlastRadius.Radius.Score, strings.Join(d.BlastRadius.Reasons, ","))
+		d.Allowed = false
+		d.Status = corev1alpha1.ActionStatusBlocked
+		d.PreFlight.Reason = reason
+		d.BlockReason = reason
+		return d
 	}
 
 	// Step 4: Check data resource impact
@@ -529,6 +567,62 @@ func mapToolTierToAPITier(tier tools.ActionTier) corev1alpha1.ActionTier {
 		return corev1alpha1.ActionTierDataMutation
 	default:
 		return corev1alpha1.ActionTierServiceMutation
+	}
+}
+
+func (e *Engine) assessBlastRadius(toolName, target string, tier corev1alpha1.ActionTier) blastradius.Assessment {
+	if e.blastRadiusScorer == nil {
+		e.blastRadiusScorer = blastradius.NewDeterministicScorer()
+	}
+
+	domain := inferDomain(toolName)
+	return e.blastRadiusScorer.Assess(blastradius.Input{
+		Tier:          tier,
+		MutationDepth: inferMutationDepth(domain, tier),
+		ActorRoles:    e.actorRoles,
+		Targets: []blastradius.Target{
+			{
+				Kind:        domain,
+				Name:        target,
+				Environment: inferEnvironment(target),
+				Domain:      domain,
+			},
+		},
+	})
+}
+
+func inferMutationDepth(domain string, tier corev1alpha1.ActionTier) blastradius.MutationDepth {
+	switch domain {
+	case "sql":
+		return blastradius.MutationDepthData
+	case "kubernetes", "ssh":
+		return blastradius.MutationDepthService
+	case "http":
+		if tier == corev1alpha1.ActionTierDestructiveMutation || tier == corev1alpha1.ActionTierDataMutation {
+			return blastradius.MutationDepthIdentity
+		}
+		return blastradius.MutationDepthNetwork
+	default:
+		switch tier {
+		case corev1alpha1.ActionTierDataMutation:
+			return blastradius.MutationDepthData
+		case corev1alpha1.ActionTierDestructiveMutation:
+			return blastradius.MutationDepthIdentity
+		default:
+			return blastradius.MutationDepthService
+		}
+	}
+}
+
+func inferEnvironment(target string) string {
+	lower := strings.ToLower(target)
+	switch {
+	case strings.Contains(lower, "prod") || strings.Contains(lower, "production"):
+		return "prod"
+	case strings.Contains(lower, "stage") || strings.Contains(lower, "staging"):
+		return "staging"
+	default:
+		return "dev"
 	}
 }
 

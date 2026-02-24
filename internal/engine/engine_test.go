@@ -660,3 +660,71 @@ func TestInferDomain(t *testing.T) {
 		}
 	}
 }
+
+func TestEngine_BlastRadiusAttachedToDecision(t *testing.T) {
+	eng := NewEngine("test-agent", &corev1alpha1.GuardrailsSpec{
+		Autonomy:      corev1alpha1.AutonomyDestructive,
+		MaxIterations: 10,
+	}, map[string]*skill.Action{
+		"restart": {
+			ID:   "restart",
+			Tool: "kubectl.rollout",
+			Tier: "service-mutation",
+		},
+	}, nil)
+
+	d := eng.Evaluate("kubectl.rollout", "deployment backstage -n production")
+	if d.BlastRadius.Radius.Level == "" {
+		t.Fatal("expected blast radius level to be populated")
+	}
+	if d.BlastRadius.Radius.Score <= 0 {
+		t.Fatalf("expected blast radius score > 0, got %.2f", d.BlastRadius.Radius.Score)
+	}
+}
+
+func TestEngine_BlastRadiusActorRolesAffectDecision(t *testing.T) {
+	eng := NewEngine("test-agent", &corev1alpha1.GuardrailsSpec{
+		Autonomy:      corev1alpha1.AutonomyDestructive,
+		MaxIterations: 10,
+	}, map[string]*skill.Action{
+		"danger": {
+			ID:   "danger",
+			Tool: "sql.execute",
+			Tier: "data-mutation",
+		},
+	}, nil)
+
+	eng.WithActorRoles([]string{"operator"})
+	d := eng.Evaluate("sql.execute", "DROP DATABASE production")
+	if d.BlastRadius.Decision == "" {
+		t.Fatal("expected blast radius decision to be populated")
+	}
+	if d.BlastRadius.Decision != "deny" {
+		t.Fatalf("expected non-admin critical request to be denied by blast policy, got %s", d.BlastRadius.Decision)
+	}
+	if d.Allowed {
+		t.Fatal("expected blast-radius deny decision to block execution")
+	}
+	if d.Status != corev1alpha1.ActionStatusBlocked {
+		t.Fatalf("expected blocked status, got %s", d.Status)
+	}
+}
+
+func TestEngine_BlastRadiusGate_AllowsAdminCritical(t *testing.T) {
+	eng := NewEngine("test-agent", &corev1alpha1.GuardrailsSpec{
+		Autonomy:      corev1alpha1.AutonomyDestructive,
+		MaxIterations: 10,
+	}, map[string]*skill.Action{
+		"danger": {
+			ID:   "danger",
+			Tool: "kubectl.delete",
+			Tier: "destructive-mutation",
+		},
+	}, nil)
+
+	eng.WithActorRoles([]string{"admin"})
+	d := eng.Evaluate("kubectl.delete", "deployment api -n production")
+	if d.BlastRadius.Decision != "allow_with_guards" {
+		t.Fatalf("expected admin critical path to be allow_with_guards, got %s", d.BlastRadius.Decision)
+	}
+}

@@ -11,9 +11,12 @@ You may obtain a copy of the License at
 package runner
 
 import (
+	"strings"
 	"testing"
 
 	corev1alpha1 "github.com/marcus-qen/legator/api/v1alpha1"
+	"github.com/marcus-qen/legator/internal/engine"
+	"github.com/marcus-qen/legator/internal/safety/blastradius"
 )
 
 func TestExtractFindings(t *testing.T) {
@@ -57,5 +60,41 @@ func TestExtractFindings_Empty(t *testing.T) {
 	findings := extractFindings("All good, nothing to report.")
 	if len(findings) != 0 {
 		t.Errorf("expected 0 findings, got %d", len(findings))
+	}
+}
+
+func TestAppendReason(t *testing.T) {
+	if got := appendReason("", "x"); got != "x" {
+		t.Fatalf("appendReason empty base = %q, want %q", got, "x")
+	}
+	if got := appendReason("base", ""); got != "base" {
+		t.Fatalf("appendReason empty extra = %q, want %q", got, "base")
+	}
+	if got := appendReason("base", "extra"); got != "base; extra" {
+		t.Fatalf("appendReason joined = %q, want %q", got, "base; extra")
+	}
+}
+
+func TestFormatBlastRadius(t *testing.T) {
+	d := &engine.Decision{
+		BlastRadius: blastradius.Assessment{
+			Radius: blastradius.Radius{
+				Level: blastradius.LevelHigh,
+				Score: 0.71,
+			},
+			Reasons:  []string{"service-mutation", "prod_target"},
+			Decision: blastradius.DecisionAllowWithGuards,
+		},
+	}
+
+	s := formatBlastRadius(d)
+	if !strings.Contains(s, "blast-radius=high") {
+		t.Fatalf("expected level in summary, got: %s", s)
+	}
+	if !strings.Contains(s, "score=0.71") {
+		t.Fatalf("expected score in summary, got: %s", s)
+	}
+	if !strings.Contains(s, "service-mutation") {
+		t.Fatalf("expected reasons in summary, got: %s", s)
 	}
 }
