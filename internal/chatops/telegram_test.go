@@ -13,7 +13,10 @@ import (
 	"github.com/go-logr/logr"
 )
 
-const telegramWhoAmIPath = "/api/v1/me"
+const (
+	telegramWhoAmIPath    = "/api/v1/me"
+	telegramApprovalsPath = "/api/v1/approvals"
+)
 
 func TestHandleIncomingMessageRejectsUnknownChatWithoutAPICall(t *testing.T) {
 	t.Parallel()
@@ -132,9 +135,9 @@ func TestApproveStartsTypedConfirmationWithoutMutatingAPI(t *testing.T) {
 	var approvalCalls int
 	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/api/v1/me":
+		case r.URL.Path == telegramWhoAmIPath:
 			_ = json.NewEncoder(w).Encode(map[string]any{"permissions": map[string]any{"chat:use": map[string]any{"allowed": true}}})
-		case r.URL.Path == "/api/v1/approvals" && r.Method == http.MethodGet:
+		case r.URL.Path == telegramApprovalsPath && r.Method == http.MethodGet:
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"approvals": []map[string]any{
 					{
@@ -198,7 +201,7 @@ func TestConfirmFlowHonorsForbiddenDecisionPath(t *testing.T) {
 		switch {
 		case r.URL.Path == telegramWhoAmIPath:
 			_ = json.NewEncoder(w).Encode(map[string]any{"permissions": map[string]any{"chat:use": map[string]any{"allowed": true}}})
-		case r.URL.Path == "/api/v1/approvals" && r.Method == http.MethodGet:
+		case r.URL.Path == telegramApprovalsPath && r.Method == http.MethodGet:
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"approvals": []map[string]any{{
 					"metadata": map[string]any{"name": "req-1"},
@@ -259,9 +262,9 @@ func TestConfirmFlowExpires(t *testing.T) {
 	var approvalCalls int
 	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/api/v1/me":
+		case r.URL.Path == telegramWhoAmIPath:
 			_ = json.NewEncoder(w).Encode(map[string]any{"permissions": map[string]any{"chat:use": map[string]any{"allowed": true}}})
-		case r.URL.Path == "/api/v1/approvals" && r.Method == http.MethodGet:
+		case r.URL.Path == telegramApprovalsPath && r.Method == http.MethodGet:
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"approvals": []map[string]any{{
 					"metadata": map[string]any{"name": "req-1"},
@@ -319,9 +322,9 @@ func TestConfirmCodeMismatchThenSuccess(t *testing.T) {
 	var approvalCalls int
 	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/api/v1/me":
+		case r.URL.Path == telegramWhoAmIPath:
 			_ = json.NewEncoder(w).Encode(map[string]any{"permissions": map[string]any{"chat:use": map[string]any{"allowed": true}}})
-		case r.URL.Path == "/api/v1/approvals" && r.Method == http.MethodGet:
+		case r.URL.Path == telegramApprovalsPath && r.Method == http.MethodGet:
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"approvals": []map[string]any{{
 					"metadata": map[string]any{"name": "req-1"},
