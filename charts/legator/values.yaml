@@ -135,6 +135,15 @@ headscale:
   # Keep optional true so controller still starts before ESO first sync.
   optional: true
 
+# OCI registry auth for skill pull/push commands.
+registryAuth:
+  # Inject LEGATOR_REGISTRY_USERNAME + LEGATOR_REGISTRY_PASSWORD from a secret.
+  enabled: false
+  secretName: ""
+  usernameKey: LEGATOR_REGISTRY_USERNAME
+  passwordKey: LEGATOR_REGISTRY_PASSWORD
+  optional: false
+
 # Connectivity — Headscale/Tailscale mesh VPN sidecar for reaching
 # non-Kubernetes targets (servers, databases, network devices).
 connectivity:

@@ -51,8 +51,9 @@ spec:
             - --drain-timeout={{ .Values.shutdown.drainTimeout }}
             - --max-concurrent-cluster={{ .Values.rateLimit.maxConcurrentCluster }}
             - --max-concurrent-per-agent={{ .Values.rateLimit.maxConcurrentPerAgent }}
-          {{- if .Values.headscale.enabled }}
+          {{- if or .Values.headscale.enabled .Values.registryAuth.enabled }}
           env:
+            {{- if .Values.headscale.enabled }}
             - name: HEADSCALE_API_URL
               valueFrom:
                 secretKeyRef:
@@ -65,6 +66,21 @@ spec:
                   name: {{ .Values.headscale.secretName }}
                   key: {{ .Values.headscale.apiKeyKey }}
                   optional: {{ .Values.headscale.optional | default true }}
+            {{- end }}
+            {{- if .Values.registryAuth.enabled }}
+            - name: LEGATOR_REGISTRY_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.registryAuth.secretName }}
+                  key: {{ .Values.registryAuth.usernameKey | default "LEGATOR_REGISTRY_USERNAME" }}
+                  optional: {{ .Values.registryAuth.optional | default false }}
+            - name: LEGATOR_REGISTRY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.registryAuth.secretName }}
+                  key: {{ .Values.registryAuth.passwordKey | default "LEGATOR_REGISTRY_PASSWORD" }}
+                  optional: {{ .Values.registryAuth.optional | default false }}
+            {{- end }}
           {{- end }}
           ports:
             - name: metrics
