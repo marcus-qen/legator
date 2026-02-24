@@ -82,6 +82,15 @@ set +e
 CHATOPS_RC=$?
 set -e
 
+# --- UI guard checks (dashboard tests) ---
+set +e
+(
+  cd "$ROOT_DIR"
+  PATH=/tmp/go/bin:$PATH GOMODCACHE="$GO_MOD_CACHE" GOCACHE="$GO_BUILD_CACHE" go test ./internal/dashboard -run 'TestHandleApprovalActionRequiresAPIBridge|TestHandleApprovalActionForwardsToAPI|TestHandleApprovalActionPropagatesForbidden|TestMakeDashboardJWTIncludesUserClaims'
+) >"$TMP_DIR/dashboard.out" 2>"$TMP_DIR/dashboard.err"
+DASHBOARD_RC=$?
+set -e
+
 # --- UI parity signal (current dashboard mutation path implementation) ---
 if grep -q "decideApprovalViaAPI(ctx" "$ROOT_DIR/internal/dashboard/server.go"; then
   UI_APPROVAL_PATH="api-forwarded"
@@ -101,25 +110,46 @@ def txt(p):
   except Exception:
     return ""
 
+viewer_body = txt("$TMP_DIR/viewer-approve.json")
+cli_err = txt("$TMP_DIR/cli.err")
+
+checks = {
+  "api_me_200": "$SC_ME" == "200",
+  "api_approvals_200": "$SC_APPROVALS" == "200",
+  "api_viewer_approve_403": "$SC_VIEWER_APPROVE" == "403",
+  "cli_nonzero": $CLI_RC != 0,
+  "cli_forbidden_message": "forbidden" in cli_err.lower(),
+  "chatops_tests_pass": $CHATOPS_RC == 0,
+  "dashboard_tests_pass": $DASHBOARD_RC == 0,
+  "ui_path_api_forwarded": "$UI_APPROVAL_PATH" == "api-forwarded",
+}
+
 result = {
   "api": {
     "me_status": "$SC_ME",
     "approvals_status": "$SC_APPROVALS",
     "viewer_approve_status": "$SC_VIEWER_APPROVE",
-    "viewer_approve_body": txt("$TMP_DIR/viewer-approve.json"),
+    "viewer_approve_body": viewer_body,
   },
   "cli": {
     "viewer_approve_rc": $CLI_RC,
-    "stderr": txt("$TMP_DIR/cli.err"),
+    "stderr": cli_err,
   },
   "chatops": {
     "test_rc": $CHATOPS_RC,
     "stdout": txt("$TMP_DIR/chatops.out"),
     "stderr": txt("$TMP_DIR/chatops.err"),
   },
+  "dashboard": {
+    "test_rc": $DASHBOARD_RC,
+    "stdout": txt("$TMP_DIR/dashboard.out"),
+    "stderr": txt("$TMP_DIR/dashboard.err"),
+  },
   "ui": {
     "approval_action_path": "$UI_APPROVAL_PATH"
-  }
+  },
+  "checks": checks,
+  "pass": all(checks.values()),
 }
 print(json.dumps(result, indent=2))
 PY
