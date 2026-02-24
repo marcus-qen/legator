@@ -34,4 +34,7 @@ resources:
 - legatoragent_admin_role.yaml
 - legatoragent_editor_role.yaml
 - legatoragent_viewer_role.yaml
+- userpolicy_admin_role.yaml
+- userpolicy_editor_role.yaml
+- userpolicy_viewer_role.yaml
 

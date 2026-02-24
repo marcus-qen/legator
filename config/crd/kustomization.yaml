@@ -9,6 +9,7 @@ resources:
 - bases/legator.io_agentevents.yaml
 - bases/legator.io_agentstates.yaml
 - bases/legator.io_approvalrequests.yaml
+- bases/legator.io_userpolicies.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

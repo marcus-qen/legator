@@ -13,6 +13,7 @@ rules:
       - legatorenvironments
       - modeltierconfigs
       - legatorruns
+      - userpolicies
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["legator.io"]
     resources:
@@ -20,12 +21,15 @@ rules:
       - legatorenvironments/status
       - modeltierconfigs/status
       - legatorruns/status
+      - userpolicies/status
     verbs: ["get", "update", "patch"]
   - apiGroups: ["legator.io"]
     resources:
       - legatoragents/finalizers
       - legatorenvironments/finalizers
       - legatorruns/finalizers
+      - modeltierconfigs/finalizers
+      - userpolicies/finalizers
     verbs: ["update"]
   # Secrets — read only (for credential resolution)
   - apiGroups: [""]

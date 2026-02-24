@@ -11,6 +11,7 @@ rules:
   - legatorenvironments
   - legatorruns
   - modeltierconfigs
+  - userpolicies
   verbs:
   - create
   - delete
@@ -26,6 +27,7 @@ rules:
   - legatorenvironments/finalizers
   - legatorruns/finalizers
   - modeltierconfigs/finalizers
+  - userpolicies/finalizers
   verbs:
   - update
 - apiGroups:
@@ -35,6 +37,7 @@ rules:
   - legatorenvironments/status
   - legatorruns/status
   - modeltierconfigs/status
+  - userpolicies/status
   verbs:
   - get
   - patch
