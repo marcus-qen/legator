@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.9.0] — 2026-02-24
+
+### Theme: Defense in Depth
+
+v0.9.0-rc1 hardens operator workflows across API, CLI, dashboard, and Telegram ChatOps.
+
+### Added
+
+- Telegram ChatOps MVP command surface (`/status`, `/inventory`, `/run`, `/approvals`)
+- ChatOps typed-confirmation mutation flow (`/approve`/`/deny` -> `/confirm` with TTL)
+- Cross-surface parity probe harness (`hack/p3.3-parity-suite.sh`) with machine-readable checks
+- UserPolicy + unified policy evaluator + anomaly baseline pipeline + policy simulation endpoint/CLI
+
+### Changed
+
+- Dashboard approval mutation path now forwards through API authz/safety semantics
+- API approvals read path bounded to `agents` namespace with fail-fast timeout
+- Manager RBAC extended for `approvalrequests` and `agentstates` resources
+
+### Security / Safety
+
+- Blast radius gate + safety outcomes in audit
+- Per-user API rate limiting
+- Typed confirmation guardrails on high-risk approval decisions
+- Viewer mutation attempts consistently denied across API/CLI/UI/ChatOps parity checks
+
 ## [v0.7.0] — 2026-02-21
 
 ### Theme: Wire It Up
