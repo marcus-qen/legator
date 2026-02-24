@@ -15,6 +15,8 @@ rules:
       - legatorruns
       - userpolicies
       - agentevents
+      - approvalrequests
+      - agentstates
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["legator.io"]
     resources:
@@ -23,6 +25,8 @@ rules:
       - modeltierconfigs/status
       - legatorruns/status
       - userpolicies/status
+      - approvalrequests/status
+      - agentstates/status
     verbs: ["get", "update", "patch"]
   - apiGroups: ["legator.io"]
     resources:
@@ -31,6 +35,8 @@ rules:
       - legatorruns/finalizers
       - modeltierconfigs/finalizers
       - userpolicies/finalizers
+      - approvalrequests/finalizers
+      - agentstates/finalizers
     verbs: ["update"]
   # Secrets — read only (for credential resolution)
   - apiGroups: [""]
