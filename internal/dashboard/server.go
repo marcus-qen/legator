@@ -529,8 +529,8 @@ func (s *Server) handleCockpitApprovals(w http.ResponseWriter, r *http.Request) 
 <form method="POST" action="/approvals/%s/deny" style="display:inline"><input type="hidden" name="reason" value="cockpit-denied"><button class="btn btn-deny">Deny</button></form>
 </td></tr>`,
 			template.HTMLEscapeString(approval.Name),
-			template.HTMLEscapeString(approval.Spec.RequestedBy),
-			template.HTMLEscapeString(approval.Spec.RunRef),
+			template.HTMLEscapeString(approval.Spec.AgentName),
+			template.HTMLEscapeString(approval.Spec.RunName),
 			template.HTMLEscapeString(timeAgo(approval.CreationTimestamp.Time)),
 			url.PathEscape(approval.Name),
 			url.PathEscape(approval.Name),
