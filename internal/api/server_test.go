@@ -335,7 +335,7 @@ func TestUserRateLimitBypassesHealthz(t *testing.T) {
 		},
 	}, nil, logr.Discard())
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		req := httptest.NewRequest("GET", "/healthz", nil)
 		rr := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rr, req)
