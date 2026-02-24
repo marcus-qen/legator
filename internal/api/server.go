@@ -26,6 +26,7 @@ import (
 	corev1alpha1 "github.com/marcus-qen/legator/api/v1alpha1"
 	"github.com/marcus-qen/legator/internal/api/auth"
 	"github.com/marcus-qen/legator/internal/api/rbac"
+	"github.com/marcus-qen/legator/internal/approval"
 	"github.com/marcus-qen/legator/internal/inventory"
 )
 
@@ -496,8 +497,9 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Decision string `json:"decision"` // "approve" or "deny"
-		Reason   string `json:"reason"`
+		Decision          string `json:"decision"` // "approve" or "deny"
+		Reason            string `json:"reason"`
+		TypedConfirmation string `json:"typedConfirmation,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
@@ -510,22 +512,37 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the approval request
-	approval := &corev1alpha1.ApprovalRequest{}
-	if err := s.k8s.Get(r.Context(), client.ObjectKey{Name: id, Namespace: "agents"}, approval); err != nil {
+	ar := &corev1alpha1.ApprovalRequest{}
+	if err := s.k8s.Get(r.Context(), client.ObjectKey{Name: id, Namespace: "agents"}, ar); err != nil {
 		writeError(w, http.StatusNotFound, "approval not found: "+id)
 		return
 	}
 
+	if req.Decision == "approve" {
+		if err := approval.ValidateTypedConfirmation(ar, req.TypedConfirmation, time.Now()); err != nil {
+			if strings.Contains(err.Error(), "required") {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if strings.Contains(err.Error(), "expired") {
+				writeError(w, http.StatusConflict, err.Error())
+				return
+			}
+			writeForbidden(w, err.Error())
+			return
+		}
+	}
+
 	// Update status
 	if req.Decision == "approve" {
-		approval.Status.Phase = corev1alpha1.ApprovalPhaseApproved
+		ar.Status.Phase = corev1alpha1.ApprovalPhaseApproved
 	} else {
-		approval.Status.Phase = corev1alpha1.ApprovalPhaseDenied
+		ar.Status.Phase = corev1alpha1.ApprovalPhaseDenied
 	}
-	approval.Status.DecidedBy = user.Email
-	approval.Status.Reason = req.Reason
+	ar.Status.DecidedBy = user.Email
+	ar.Status.Reason = req.Reason
 
-	if err := s.k8s.Status().Update(r.Context(), approval); err != nil {
+	if err := s.k8s.Status().Update(r.Context(), ar); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update approval: "+err.Error())
 		return
 	}

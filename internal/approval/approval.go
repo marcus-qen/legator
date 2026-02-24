@@ -24,7 +24,10 @@ package approval
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -56,6 +59,15 @@ type Manager struct {
 	pollInterval time.Duration
 }
 
+const (
+	// AnnotationTypedConfirmationRequired indicates that approval requires typed confirmation.
+	AnnotationTypedConfirmationRequired = "legator.io/typed-confirmation-required"
+	// AnnotationTypedConfirmationToken stores expected typed confirmation value.
+	AnnotationTypedConfirmationToken = "legator.io/typed-confirmation-token"
+	// AnnotationTypedConfirmationExpiresAt stores RFC3339 expiry timestamp for confirmation token.
+	AnnotationTypedConfirmationExpiresAt = "legator.io/typed-confirmation-expires-at"
+)
+
 // NewManager creates an approval manager.
 func NewManager(c client.Client, log logr.Logger) *Manager {
 	return &Manager{
@@ -70,16 +82,33 @@ func NewManager(c client.Client, log logr.Logger) *Manager {
 // The context should carry the run's deadline — if the run timeout expires,
 // the approval is abandoned.
 func (m *Manager) RequestApproval(ctx context.Context, req ApprovalParams) (*Result, error) {
+	timeout := parseApprovalTimeout(req.Timeout)
+	deadline := time.Now().Add(timeout)
+	contextText := req.Context
+
+	annotations := map[string]string{}
+	if RequiresTypedConfirmation(req.Tier) {
+		token, err := generateTypedConfirmationToken()
+		if err != nil {
+			return nil, fmt.Errorf("generate typed confirmation token: %w", err)
+		}
+		annotations[AnnotationTypedConfirmationRequired] = "true"
+		annotations[AnnotationTypedConfirmationToken] = token
+		annotations[AnnotationTypedConfirmationExpiresAt] = deadline.UTC().Format(time.RFC3339)
+		contextText = appendContextInstruction(contextText, fmt.Sprintf("Typed confirmation required. Re-enter token exactly: %s", token))
+	}
+
 	// Create the ApprovalRequest CRD
 	ar := &corev1alpha1.ApprovalRequest{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: fmt.Sprintf("%s-approval-", req.AgentName),
 			Namespace:    req.Namespace,
 			Labels: map[string]string{
-				"legator.io/agent":  req.AgentName,
-				"legator.io/run":    req.RunName,
-				"legator.io/tool":   sanitizeLabel(req.Tool),
+				"legator.io/agent": req.AgentName,
+				"legator.io/run":   req.RunName,
+				"legator.io/tool":  sanitizeLabel(req.Tool),
 			},
+			Annotations: annotations,
 		},
 		Spec: corev1alpha1.ApprovalRequestSpec{
 			AgentName: req.AgentName,
@@ -91,6 +120,7 @@ func (m *Manager) RequestApproval(ctx context.Context, req ApprovalParams) (*Res
 				Description: req.Description,
 				Args:        req.Args,
 			},
+			Context:  contextText,
 			Timeout:  req.Timeout,
 			Channels: req.Channels,
 		},
@@ -108,17 +138,8 @@ func (m *Manager) RequestApproval(ctx context.Context, req ApprovalParams) (*Res
 		"tool", req.Tool,
 		"target", req.Target,
 		"timeout", req.Timeout,
+		"typedConfirmationRequired", annotations[AnnotationTypedConfirmationRequired] == "true",
 	)
-
-	// Parse timeout
-	timeout := 30 * time.Minute // default
-	if req.Timeout != "" {
-		if d, err := time.ParseDuration(req.Timeout); err == nil {
-			timeout = d
-		}
-	}
-
-	deadline := time.Now().Add(timeout)
 
 	// Poll for decision
 	ticker := time.NewTicker(m.pollInterval)
@@ -209,9 +230,83 @@ type ApprovalParams struct {
 	Tier        corev1alpha1.ActionTier
 	Target      string
 	Description string
+	Context     string
 	Args        map[string]string
 	Timeout     string
 	Channels    []string
+}
+
+// RequiresTypedConfirmation returns true for high-risk action tiers.
+func RequiresTypedConfirmation(tier corev1alpha1.ActionTier) bool {
+	return tier == corev1alpha1.ActionTierDestructiveMutation || tier == corev1alpha1.ActionTierDataMutation
+}
+
+// IsTypedConfirmationRequired returns true when an approval has typed-confirmation metadata.
+func IsTypedConfirmationRequired(ar *corev1alpha1.ApprovalRequest) bool {
+	if ar == nil || ar.Annotations == nil {
+		return false
+	}
+	return strings.EqualFold(ar.Annotations[AnnotationTypedConfirmationRequired], "true")
+}
+
+// ValidateTypedConfirmation checks provided typed confirmation against approval metadata.
+func ValidateTypedConfirmation(ar *corev1alpha1.ApprovalRequest, provided string, now time.Time) error {
+	if !IsTypedConfirmationRequired(ar) {
+		return nil
+	}
+	provided = strings.TrimSpace(provided)
+	if provided == "" {
+		return fmt.Errorf("typed confirmation required")
+	}
+	expected := strings.TrimSpace(ar.Annotations[AnnotationTypedConfirmationToken])
+	if expected == "" {
+		return fmt.Errorf("typed confirmation token missing on approval request")
+	}
+	if provided != expected {
+		return fmt.Errorf("typed confirmation mismatch")
+	}
+	if expRaw := strings.TrimSpace(ar.Annotations[AnnotationTypedConfirmationExpiresAt]); expRaw != "" {
+		exp, err := time.Parse(time.RFC3339, expRaw)
+		if err != nil {
+			return fmt.Errorf("typed confirmation expiry metadata invalid")
+		}
+		if now.After(exp) {
+			return fmt.Errorf("typed confirmation expired")
+		}
+	}
+	return nil
+}
+
+func parseApprovalTimeout(raw string) time.Duration {
+	timeout := 30 * time.Minute
+	if strings.TrimSpace(raw) == "" {
+		return timeout
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return timeout
+	}
+	return d
+}
+
+func generateTypedConfirmationToken() (string, error) {
+	buf := make([]byte, 4)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return "CONFIRM-" + strings.ToUpper(hex.EncodeToString(buf)), nil
+}
+
+func appendContextInstruction(base, instruction string) string {
+	base = strings.TrimSpace(base)
+	instruction = strings.TrimSpace(instruction)
+	if instruction == "" {
+		return base
+	}
+	if base == "" {
+		return instruction
+	}
+	return base + "\n\n" + instruction
 }
 
 // sanitizeLabel makes a string safe for use as a Kubernetes label value.
