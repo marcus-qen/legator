@@ -43,6 +43,8 @@ type policySimulationCLIPolicyScope struct {
 	Agents     []string `json:"agents,omitempty"`
 }
 
+const policyFlagJSON = "--json"
+
 type policySimulationCLIResponse struct {
 	Subject struct {
 		Subject string   `json:"subject"`
@@ -103,6 +105,7 @@ func handlePolicy(args []string) {
 	}
 }
 
+//nolint:gocyclo // CLI flag parsing is intentionally linear for readability.
 func handlePolicySimulate(args []string) {
 	apiClient, ok, err := tryAPIClient()
 	if err != nil {
@@ -193,7 +196,7 @@ func handlePolicySimulate(args []string) {
 			scopeNamespaces = append(scopeNamespaces, next())
 		case "--scope-tag":
 			scopeTags = append(scopeTags, next())
-		case "--json", "-j":
+		case policyFlagJSON, "-j":
 			jsonOut = true
 		default:
 			fatal(fmt.Errorf("unknown flag: %s", arg))
@@ -225,7 +228,10 @@ func handlePolicySimulate(args []string) {
 			} else {
 				me, meErr := fetchWhoAmI(apiClient)
 				if meErr != nil {
-					fatal(fmt.Errorf("proposed policy requires --proposed-subject claim=value (or resolvable subject email): %w", meErr))
+					fatal(fmt.Errorf(
+						"proposed policy requires --proposed-subject claim=value (or resolvable subject email): %w",
+						meErr,
+					))
 				}
 				if me.Email == "" {
 					fatal(fmt.Errorf("proposed policy requires --proposed-subject claim=value when email is unavailable"))
@@ -286,7 +292,12 @@ func handlePolicySimulate(args []string) {
 			if !eval.Projected.RateLimit.Allowed {
 				rateAllow = "block"
 			}
-			rate = fmt.Sprintf("%s (%d/%dh)", rateAllow, eval.Projected.RateLimit.Requested, eval.Projected.RateLimit.LimitPerHour)
+			rate = fmt.Sprintf(
+				"%s (%d/%dh)",
+				rateAllow,
+				eval.Projected.RateLimit.Requested,
+				eval.Projected.RateLimit.LimitPerHour,
+			)
 		}
 		resource := eval.Resource
 		if resource == "" {

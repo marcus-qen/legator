@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -342,7 +343,7 @@ func parsePolicySimulationActions(raw []string) ([]rbac.Action, error) {
 		for _, action := range policySimulationActions {
 			actions = append(actions, action)
 		}
-		sort.Slice(actions, func(i, j int) bool { return actions[i] < actions[j] })
+		slices.Sort(actions)
 		return actions, nil
 	}
 
