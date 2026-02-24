@@ -37,6 +37,12 @@ import (
 	"github.com/marcus-qen/legator/internal/tools"
 )
 
+const (
+	preflightApprovalRequired     = "REQUIRED"
+	preflightApprovalNotRequired  = "NOT_REQUIRED"
+	preflightNeedsApprovalOutcome = "NEEDS_APPROVAL"
+)
+
 // Decision is the result of the engine evaluating a tool call.
 type Decision struct {
 	// Allowed is true if the action may proceed.
@@ -133,8 +139,8 @@ func (e *Engine) Evaluate(toolName string, target string) *Decision {
 		Status:  corev1alpha1.ActionStatusExecuted,
 	}
 	d.PreFlight.SafetyGateOutcome = "ALLOW"
-	d.PreFlight.ApprovalCheck = "NOT_REQUIRED"
-	d.PreFlight.ApprovalDecision = "NOT_REQUIRED"
+	d.PreFlight.ApprovalCheck = preflightApprovalNotRequired
+	d.PreFlight.ApprovalDecision = preflightApprovalNotRequired
 
 	// Step 1: Match against Action Sheet
 	matched := e.matchAction(toolName, target)
@@ -235,10 +241,10 @@ func (e *Engine) Evaluate(toolName string, target string) *Decision {
 			d.Allowed = false
 			d.NeedsApproval = true
 			d.Status = corev1alpha1.ActionStatusPendingApproval
-			d.PreFlight.AutonomyCheck = "NEEDS_APPROVAL"
-			d.PreFlight.ApprovalCheck = "REQUIRED"
+			d.PreFlight.AutonomyCheck = preflightNeedsApprovalOutcome
+			d.PreFlight.ApprovalCheck = preflightApprovalRequired
 			d.PreFlight.ApprovalDecision = "PENDING"
-			d.PreFlight.SafetyGateOutcome = "NEEDS_APPROVAL"
+			d.PreFlight.SafetyGateOutcome = preflightNeedsApprovalOutcome
 			d.PreFlight.Reason = reason
 			d.BlockReason = reason
 			return d

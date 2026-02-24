@@ -45,6 +45,8 @@ import (
 	"github.com/marcus-qen/legator/internal/tools"
 )
 
+const preflightApprovalRequired = "REQUIRED"
+
 // Runner executes a single agent run from start to finish.
 type Runner struct {
 	client    client.Client
@@ -353,7 +355,7 @@ func (r *Runner) conversationLoop(
 					// Denied or expired or error
 					reason := decision.BlockReason
 					if record.PreFlightCheck != nil {
-						record.PreFlightCheck.ApprovalCheck = "REQUIRED"
+						record.PreFlightCheck.ApprovalCheck = preflightApprovalRequired
 					}
 					if approvalResult != nil {
 						if approvalResult.Phase == corev1alpha1.ApprovalPhaseDenied {
@@ -395,7 +397,7 @@ func (r *Runner) conversationLoop(
 				// Approved — execute the tool
 				record.Status = corev1alpha1.ActionStatusApproved
 				if record.PreFlightCheck != nil {
-					record.PreFlightCheck.ApprovalCheck = "REQUIRED"
+					record.PreFlightCheck.ApprovalCheck = preflightApprovalRequired
 					record.PreFlightCheck.ApprovalDecision = "APPROVED"
 					record.PreFlightCheck.SafetyGateOutcome = "APPROVED"
 				}
@@ -431,7 +433,7 @@ func (r *Runner) conversationLoop(
 				record.Result = decision.BlockReason
 				if record.PreFlightCheck != nil {
 					if decision.NeedsApproval {
-						record.PreFlightCheck.ApprovalCheck = "REQUIRED"
+						record.PreFlightCheck.ApprovalCheck = preflightApprovalRequired
 						record.PreFlightCheck.ApprovalDecision = "NOT_AVAILABLE"
 					}
 					if strings.TrimSpace(record.PreFlightCheck.SafetyGateOutcome) == "" {
