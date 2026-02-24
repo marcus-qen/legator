@@ -109,7 +109,7 @@ func hasSignal(signals []anomalySignal, typ string) bool {
 
 func newRun(name string, created time.Time, actions int) *corev1alpha1.LegatorRun {
 	actionRecords := make([]corev1alpha1.ActionRecord, 0, actions)
-	for i := 0; i < actions; i++ {
+	for i := range actions {
 		actionRecords = append(actionRecords, corev1alpha1.ActionRecord{
 			Seq:       int32(i + 1),
 			Timestamp: metav1.NewTime(created.Add(time.Duration(i) * time.Second)),

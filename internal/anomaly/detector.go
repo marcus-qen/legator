@@ -13,6 +13,7 @@ package anomaly
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"sort"
 	"strings"
@@ -449,9 +450,7 @@ func (d *Detector) recordAnomalyEvent(ctx context.Context, run corev1alpha1.Lega
 		"legator.io/anomaly-type": signal.Type,
 		"legator.io/anomaly-key":  key,
 	}
-	for k, v := range signal.Labels {
-		labels[k] = v
-	}
+	maps.Copy(labels, signal.Labels)
 
 	event := &corev1alpha1.AgentEvent{
 		ObjectMeta: metav1.ObjectMeta{
