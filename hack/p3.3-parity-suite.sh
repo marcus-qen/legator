@@ -49,11 +49,12 @@ HOME_DIR="$TMP_DIR/home"
 mkdir -p "$HOME_DIR/.config/legator"
 python3 - <<PY > "$HOME_DIR/.config/legator/token.json"
 import json, datetime
+now = datetime.datetime.now(datetime.timezone.utc)
 print(json.dumps({
   "access_token": """$VIEWER_TOKEN""",
   "token_type": "Bearer",
-  "issued_at": datetime.datetime.utcnow().isoformat()+"Z",
-  "expires_at": (datetime.datetime.utcnow()+datetime.timedelta(hours=1)).isoformat()+"Z",
+  "issued_at": now.isoformat().replace('+00:00','Z'),
+  "expires_at": (now+datetime.timedelta(hours=1)).isoformat().replace('+00:00','Z'),
   "api_url": "$API_URL",
   "oidc_issuer": "parity-suite",
   "oidc_client_id": "parity-suite"
@@ -82,7 +83,9 @@ CHATOPS_RC=$?
 set -e
 
 # --- UI parity signal (current dashboard mutation path implementation) ---
-if grep -q "handleApprovalAction" "$ROOT_DIR/internal/dashboard/server.go" && grep -q "updateApproval(ctx" "$ROOT_DIR/internal/dashboard/server.go"; then
+if grep -q "decideApprovalViaAPI(ctx" "$ROOT_DIR/internal/dashboard/server.go"; then
+  UI_APPROVAL_PATH="api-forwarded"
+elif grep -q "updateApproval(ctx" "$ROOT_DIR/internal/dashboard/server.go"; then
   UI_APPROVAL_PATH="direct-k8s-update"
 else
   UI_APPROVAL_PATH="unknown"
