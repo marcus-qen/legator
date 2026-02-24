@@ -12,6 +12,8 @@ import (
 	"github.com/go-logr/logr"
 )
 
+const telegramWhoAmIPath = "/api/v1/me"
+
 func TestHandleIncomingMessageRejectsUnknownChatWithoutAPICall(t *testing.T) {
 	t.Parallel()
 
@@ -69,7 +71,7 @@ func TestProcessCommandDeniesWhenChatPermissionMissing(t *testing.T) {
 		mu.Unlock()
 
 		switch r.URL.Path {
-		case "/api/v1/me":
+		case telegramWhoAmIPath:
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"permissions": map[string]any{
 					"chat:use": map[string]any{
@@ -118,7 +120,7 @@ func TestProcessCommandDeniesWhenChatPermissionMissing(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(apiCalls) != 1 || apiCalls[0] != "/api/v1/me" {
+	if len(apiCalls) != 1 || apiCalls[0] != telegramWhoAmIPath {
 		t.Fatalf("api calls = %#v, want only /api/v1/me", apiCalls)
 	}
 }
@@ -134,7 +136,7 @@ func TestApprovalDecisionGoesThroughAPIAndHonorsForbidden(t *testing.T) {
 
 	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/api/v1/me":
+		case r.URL.Path == telegramWhoAmIPath:
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"permissions": map[string]any{
 					"chat:use": map[string]any{"allowed": true},

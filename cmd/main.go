@@ -1263,11 +1263,11 @@ func inferLocalAPIBaseURL(bindAddr string) string {
 	if strings.HasPrefix(bindAddr, ":") {
 		return "http://127.0.0.1" + bindAddr
 	}
-	if strings.HasPrefix(bindAddr, "0.0.0.0:") {
-		return "http://127.0.0.1:" + strings.TrimPrefix(bindAddr, "0.0.0.0:")
+	if rest, ok := strings.CutPrefix(bindAddr, "0.0.0.0:"); ok {
+		return "http://127.0.0.1:" + rest
 	}
-	if strings.HasPrefix(bindAddr, "[::]:") {
-		return "http://127.0.0.1:" + strings.TrimPrefix(bindAddr, "[::]:")
+	if rest, ok := strings.CutPrefix(bindAddr, "[::]:"); ok {
+		return "http://127.0.0.1:" + rest
 	}
 	if strings.Contains(bindAddr, ":") {
 		return "http://" + bindAddr

@@ -184,7 +184,9 @@ func (b *TelegramBot) pollOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("telegram getUpdates: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -563,7 +565,9 @@ func (b *TelegramBot) apiRequest(
 	if err != nil {
 		return 0, nil, fmt.Errorf("api request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -623,7 +627,9 @@ func (b *TelegramBot) sendMessage(ctx context.Context, chatID int64, text string
 	if err != nil {
 		return fmt.Errorf("send telegram message: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
