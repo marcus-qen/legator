@@ -23,8 +23,8 @@ for f in "${required[@]}"; do
   echo "  ok: $f"
 done
 
-grep -q "v0.9.0-rc1" CHANGELOG.md || { echo "  missing changelog v0.9.0-rc1 section" >&2; exit 1; }
-echo "  ok: changelog contains v0.9.0-rc1"
+grep -q "\[v0.9.0\]" CHANGELOG.md || { echo "  missing changelog v0.9.0 section" >&2; exit 1; }
+echo "  ok: changelog contains v0.9.0"
 echo
 
 echo "[2/4] Command/API/dashboard test bundles"

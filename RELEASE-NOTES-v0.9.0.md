@@ -30,7 +30,7 @@ v0.9.0 hardens human operations by making safety decisions explicit, testable, a
 - Live parity artifact reports all checks true and `pass: true`
 - Live approvals-read runtime issue was root-caused to RBAC and fixed/deployed with green re-validation
 
-## Candidate status
+## Release status
 
-- **v0.9.0-rc1:** Ready
-- **Final tag:** pending explicit approver GO
+- **v0.9.0:** Approved for tag and publish
+- **Approver signal:** Keith explicit "go ahead"

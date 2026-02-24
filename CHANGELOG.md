@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v0.9.0-rc1] — 2026-02-24
+## [v0.9.0] — 2026-02-24
 
 ### Theme: Defense in Depth
 
