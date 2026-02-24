@@ -285,6 +285,7 @@ jobs:
             --set image.repository=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} \
             --set image.tag=${{ github.ref_name }} \
             --set leaderElection.enabled=false \
+            --skip-crds \
             --wait --timeout 120s
 
       - name: Verify controller running
