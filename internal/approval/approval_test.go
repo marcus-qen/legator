@@ -24,6 +24,8 @@ import (
 	corev1alpha1 "github.com/marcus-qen/legator/api/v1alpha1"
 )
 
+const typedConfirmationRequiredValue = "true"
+
 func newScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	corev1alpha1.AddToScheme(s)
@@ -76,7 +78,7 @@ func TestRequiresTypedConfirmation(t *testing.T) {
 func TestValidateTypedConfirmation(t *testing.T) {
 	now := time.Now()
 	ar := &corev1alpha1.ApprovalRequest{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-		AnnotationTypedConfirmationRequired:  "true",
+		AnnotationTypedConfirmationRequired:  typedConfirmationRequiredValue,
 		AnnotationTypedConfirmationToken:     "CONFIRM-ABCD1234",
 		AnnotationTypedConfirmationExpiresAt: now.Add(5 * time.Minute).Format(time.RFC3339),
 	}}}
@@ -123,7 +125,7 @@ func TestManager_RequestApproval_AddsTypedConfirmationMetadata(t *testing.T) {
 		t.Fatal("expected created approval request")
 	}
 	ar := list.Items[0]
-	if ar.Annotations[AnnotationTypedConfirmationRequired] != "true" {
+	if ar.Annotations[AnnotationTypedConfirmationRequired] != typedConfirmationRequiredValue {
 		t.Fatalf("expected typed confirmation required annotation, got %q", ar.Annotations[AnnotationTypedConfirmationRequired])
 	}
 	if !strings.HasPrefix(ar.Annotations[AnnotationTypedConfirmationToken], "CONFIRM-") {

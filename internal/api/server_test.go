@@ -16,8 +16,8 @@ import (
 	"github.com/marcus-qen/legator/internal/api/rbac"
 	"github.com/marcus-qen/legator/internal/approval"
 	"github.com/marcus-qen/legator/internal/inventory"
-	"k8s.io/apimachinery/pkg/runtime"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
