@@ -107,6 +107,15 @@ var (
 			Help: "Number of agent runs currently executing.",
 		},
 	)
+
+	// APIRateLimitBlocksTotal counts API requests blocked by per-user rate limiting.
+	APIRateLimitBlocksTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "legator_api_rate_limit_blocks_total",
+			Help: "Total API requests blocked by per-user rate limiting.",
+		},
+		[]string{"role", "surface"},
+	)
 )
 
 func init() {
@@ -120,6 +129,7 @@ func init() {
 		EscalationsTotal,
 		ScheduleLagSeconds,
 		ActiveRuns,
+		APIRateLimitBlocksTotal,
 	)
 }
 
@@ -149,4 +159,9 @@ func RecordEscalation(agent, reason string) {
 // RecordScheduleLag records the scheduling delay for an agent.
 func RecordScheduleLag(agent string, lag time.Duration) {
 	ScheduleLagSeconds.WithLabelValues(agent).Set(lag.Seconds())
+}
+
+// RecordAPIRateLimitBlock records a per-user API rate-limit rejection.
+func RecordAPIRateLimitBlock(role, surface string) {
+	APIRateLimitBlocksTotal.WithLabelValues(role, surface).Inc()
 }

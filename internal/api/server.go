@@ -52,6 +52,9 @@ type ServerConfig struct {
 
 	// Inventory is an optional real-time device inventory source (e.g., Headscale).
 	Inventory InventoryProvider
+
+	// UserRateLimit configures per-user request throttling middleware.
+	UserRateLimit UserRateLimitConfig
 }
 
 // Server is the Legator API server.
@@ -61,20 +64,25 @@ type Server struct {
 	validator *auth.Validator
 	rbacEng   *rbac.Engine
 	inventory InventoryProvider
-	log       logr.Logger
-	mux       *http.ServeMux
+	log        logr.Logger
+	mux        *http.ServeMux
+	userLimiter *userRateLimiter
 }
 
 // NewServer creates a new API server.
 func NewServer(cfg ServerConfig, k8s client.Client, log logr.Logger) *Server {
+	limiterCfg := normalizeUserRateLimitConfig(cfg.UserRateLimit)
+	limiterCfg.BypassPaths = mergeBypassPaths(limiterCfg.BypassPaths, cfg.OIDC.BypassPaths)
+
 	s := &Server{
-		config:    cfg,
-		k8s:       k8s,
-		validator: auth.NewValidator(cfg.OIDC, log.WithName("auth")),
-		rbacEng:   rbac.NewEngine(cfg.Policies),
-		inventory: cfg.Inventory,
-		log:       log.WithName("api"),
-		mux:       http.NewServeMux(),
+		config:      cfg,
+		k8s:         k8s,
+		validator:   auth.NewValidator(cfg.OIDC, log.WithName("auth")),
+		rbacEng:     rbac.NewEngine(cfg.Policies),
+		inventory:   cfg.Inventory,
+		log:         log.WithName("api"),
+		mux:         http.NewServeMux(),
+		userLimiter: newUserRateLimiter(limiterCfg),
 	}
 
 	s.registerRoutes()
@@ -83,8 +91,13 @@ func NewServer(cfg ServerConfig, k8s client.Client, log logr.Logger) *Server {
 
 // Handler returns the HTTP handler with auth middleware applied.
 func (s *Server) Handler() http.Handler {
-	// Wrap with OIDC middleware + audit logging
-	return s.auditMiddleware(s.validator.Middleware(s.mux))
+	// Chain: auth -> user rate limit -> handlers, wrapped by audit logging.
+	h := http.Handler(s.mux)
+	if s.userLimiter != nil {
+		h = s.userLimiter.middleware(h, s.effectiveRole)
+	}
+	h = s.validator.Middleware(h)
+	return s.auditMiddleware(h)
 }
 
 // Start starts the API server and blocks until context cancellation or server error.
@@ -186,12 +199,7 @@ func (s *Server) handleWhoAmI(w http.ResponseWriter, r *http.Request) {
 		perms[string(action)] = permission{Allowed: d.Allowed, Reason: d.Reason}
 	}
 
-	effectiveRole := "viewer"
-	if perms[string(rbac.ActionConfigure)].Allowed {
-		effectiveRole = "admin"
-	} else if perms[string(rbac.ActionRunAgent)].Allowed || perms[string(rbac.ActionApprove)].Allowed {
-		effectiveRole = "operator"
-	}
+	effectiveRole := string(s.effectiveRole(user))
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"subject":       user.Subject,
@@ -650,6 +658,38 @@ type statusResponseWriter struct {
 func (w *statusResponseWriter) WriteHeader(code int) {
 	w.statusCode = code
 	w.ResponseWriter.WriteHeader(code)
+}
+
+func (s *Server) effectiveRole(user *rbac.UserIdentity) rbac.Role {
+	if user == nil {
+		return rbac.RoleViewer
+	}
+	if d := s.rbacEng.Authorize(context.Background(), user, rbac.ActionConfigure, ""); d.Allowed {
+		return rbac.RoleAdmin
+	}
+	if d := s.rbacEng.Authorize(context.Background(), user, rbac.ActionRunAgent, ""); d.Allowed {
+		return rbac.RoleOperator
+	}
+	if d := s.rbacEng.Authorize(context.Background(), user, rbac.ActionApprove, ""); d.Allowed {
+		return rbac.RoleOperator
+	}
+	return rbac.RoleViewer
+}
+
+func mergeBypassPaths(a, b []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(a)+len(b))
+	for _, p := range append(a, b...) {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	return out
 }
 
 // --- Helpers ---
