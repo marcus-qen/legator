@@ -13,6 +13,8 @@ rules:
   - modeltierconfigs
   - userpolicies
   - agentevents
+  - approvalrequests
+  - agentstates
   verbs:
   - create
   - delete
@@ -29,6 +31,8 @@ rules:
   - legatorruns/finalizers
   - modeltierconfigs/finalizers
   - userpolicies/finalizers
+  - approvalrequests/finalizers
+  - agentstates/finalizers
   verbs:
   - update
 - apiGroups:
@@ -39,6 +43,8 @@ rules:
   - legatorruns/status
   - modeltierconfigs/status
   - userpolicies/status
+  - approvalrequests/status
+  - agentstates/status
   verbs:
   - get
   - patch
