@@ -39,6 +39,23 @@
   </div>
 </div>
 
+<h2>Secure Tunnel & Credential Lane</h2>
+<table class="data-table">
+  <thead>
+    <tr>
+      <th>Run</th>
+      <th>Tunnel Provider</th>
+      <th>Tunnel Status</th>
+      <th>Target</th>
+      <th>SSH Credential</th>
+      <th>Updated</th>
+    </tr>
+  </thead>
+  <tbody hx-get="/api/cockpit/connectivity" hx-trigger="load, every 5s" hx-swap="innerHTML">
+    <tr><td colspan="6" class="empty">Loading connectivity lane...</td></tr>
+  </tbody>
+</table>
+
 <h2>Approval Inbox</h2>
 <table class="data-table">
   <thead>

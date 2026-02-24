@@ -172,6 +172,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc(base+"/api/cockpit/topology", s.handleCockpitTopology)
 	s.mux.HandleFunc(base+"/api/cockpit/approvals", s.handleCockpitApprovals)
 	s.mux.HandleFunc(base+"/api/cockpit/timeline", s.handleCockpitTimeline)
+	s.mux.HandleFunc(base+"/api/cockpit/connectivity", s.handleCockpitConnectivity)
 }
 
 // ServeHTTP implements http.Handler.
@@ -539,6 +540,36 @@ func (s *Server) handleCockpitApprovals(w http.ResponseWriter, r *http.Request) 
 
 	if pending == 0 {
 		fmt.Fprint(w, `<tr><td colspan="5" class="empty">No pending approval requests</td></tr>`)
+	}
+}
+
+func (s *Server) handleCockpitConnectivity(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	rows, err := s.fetchCockpitConnectivityViaAPI(ctx, UserFromContext(ctx), 12)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err != nil {
+		fmt.Fprintf(w, `<tr><td colspan="6" class="empty">Connectivity feed unavailable: %s</td></tr>`, template.HTMLEscapeString(err.Error()))
+		return
+	}
+	if len(rows) == 0 {
+		fmt.Fprint(w, `<tr><td colspan="6" class="empty">No mission connectivity data yet</td></tr>`)
+		return
+	}
+
+	for _, row := range rows {
+		credential := row.Credential.Mode
+		if strings.TrimSpace(row.Credential.ExpiresAt) != "" {
+			credential = credential + " (exp " + row.Credential.ExpiresAt + ")"
+		}
+		fmt.Fprintf(w, `<tr><td><a href="/runs/%s"><code>%s</code></a></td><td>%s</td><td><code>%s</code></td><td>%s</td><td>%s</td><td>%s</td></tr>`,
+			url.PathEscape(row.Run),
+			template.HTMLEscapeString(row.Run),
+			template.HTMLEscapeString(row.Tunnel.Provider),
+			template.HTMLEscapeString(row.Tunnel.Status),
+			template.HTMLEscapeString(truncateStr(row.Tunnel.Target, 38)),
+			template.HTMLEscapeString(credential),
+			template.HTMLEscapeString(timeAgo(row.LastTransitionTime())),
+		)
 	}
 }
 
@@ -916,6 +947,30 @@ type inventoryDevice struct {
 	Status string `json:"status,omitempty"`
 }
 
+type cockpitConnectivityRun struct {
+	Run        string `json:"run"`
+	Agent      string `json:"agent"`
+	Phase      string `json:"phase"`
+	Environment string `json:"environment"`
+	Tunnel     struct {
+		Status           string `json:"status"`
+		Provider         string `json:"provider"`
+		Target           string `json:"target"`
+		LastTransitionAt string `json:"lastTransitionAt"`
+	} `json:"tunnel"`
+	Credential struct {
+		Mode      string `json:"mode"`
+		ExpiresAt string `json:"expiresAt"`
+	} `json:"credential"`
+}
+
+func (r cockpitConnectivityRun) LastTransitionTime() time.Time {
+	if ts, err := time.Parse(time.RFC3339, strings.TrimSpace(r.Tunnel.LastTransitionAt)); err == nil {
+		return ts
+	}
+	return time.Now()
+}
+
 func (s *Server) fetchInventoryViaAPI(ctx context.Context, user *OIDCUser) ([]inventoryDevice, error) {
 	if strings.TrimSpace(s.config.APIBaseURL) == "" || user == nil {
 		return nil, errors.New("api bridge unavailable")
@@ -950,6 +1005,45 @@ func (s *Server) fetchInventoryViaAPI(ctx context.Context, user *OIDCUser) ([]in
 		return nil, err
 	}
 	return payload.Devices, nil
+}
+
+func (s *Server) fetchCockpitConnectivityViaAPI(ctx context.Context, user *OIDCUser, limit int) ([]cockpitConnectivityRun, error) {
+	if strings.TrimSpace(s.config.APIBaseURL) == "" || user == nil {
+		return nil, errors.New("api bridge unavailable")
+	}
+	if limit <= 0 {
+		limit = 12
+	}
+
+	apiURL := fmt.Sprintf("%s/api/v1/cockpit/connectivity?limit=%d", strings.TrimRight(s.config.APIBaseURL, "/"), limit)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+makeDashboardJWT(user))
+
+	httpClient := s.httpClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 10 * time.Second}
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("connectivity api status %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Runs []cockpitConnectivityRun `json:"runs"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	return payload.Runs, nil
 }
 
 func (s *Server) buildTimelineEntries(ctx context.Context, limit int) []timelineEntry {

@@ -16,8 +16,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -158,6 +160,7 @@ func (s *Server) registerRoutes() {
 	// Runs
 	s.mux.HandleFunc("GET /api/v1/runs", s.handleListRuns)
 	s.mux.HandleFunc("GET /api/v1/runs/{id}", s.handleGetRun)
+	s.mux.HandleFunc("GET /api/v1/cockpit/connectivity", s.handleCockpitConnectivity)
 
 	// Inventory
 	s.mux.HandleFunc("GET /api/v1/inventory", s.handleListInventory)
@@ -816,6 +819,340 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, run)
+}
+
+type cockpitTunnelSnapshot struct {
+	Status           string `json:"status"`
+	Provider         string `json:"provider"`
+	ControlServer    string `json:"controlServer,omitempty"`
+	RouteID          string `json:"routeId"`
+	Target           string `json:"target,omitempty"`
+	AllowedPorts     []int  `json:"allowedPorts,omitempty"`
+	LeaseTTLSeconds  int64  `json:"leaseTtlSeconds,omitempty"`
+	StartedAt        string `json:"startedAt,omitempty"`
+	ExpiresAt        string `json:"expiresAt,omitempty"`
+	LastTransitionAt string `json:"lastTransitionAt,omitempty"`
+}
+
+type cockpitCredentialSnapshot struct {
+	Mode       string `json:"mode"`
+	Issuer     string `json:"issuer,omitempty"`
+	TTLSeconds int64  `json:"ttlSeconds,omitempty"`
+	ExpiresAt  string `json:"expiresAt,omitempty"`
+}
+
+type cockpitConnectivitySnapshot struct {
+	Run         string                    `json:"run"`
+	Agent       string                    `json:"agent"`
+	Environment string                    `json:"environment"`
+	Phase       string                    `json:"phase"`
+	Tunnel      cockpitTunnelSnapshot     `json:"tunnel"`
+	Credential  cockpitCredentialSnapshot `json:"credential"`
+}
+
+func (s *Server) handleCockpitConnectivity(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	if d := s.authorize(r.Context(), user, rbac.ActionViewRuns, ""); !d.Allowed {
+		writeForbidden(w, d.Reason)
+		return
+	}
+
+	runs := &corev1alpha1.LegatorRunList{}
+	listOpts := []client.ListOption{}
+	if agent := strings.TrimSpace(r.URL.Query().Get("agent")); agent != "" {
+		listOpts = append(listOpts, client.MatchingLabels{"legator.io/agent": agent})
+	}
+	if err := s.k8s.List(r.Context(), runs, listOpts...); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list runs: "+err.Error())
+		return
+	}
+
+	sort.Slice(runs.Items, func(i, j int) bool {
+		return runs.Items[i].CreationTimestamp.After(runs.Items[j].CreationTimestamp.Time)
+	})
+
+	limit := 20
+	if q := strings.TrimSpace(r.URL.Query().Get("limit")); q != "" {
+		if n, err := strconv.Atoi(q); err == nil {
+			switch {
+			case n <= 0:
+				limit = 20
+			case n > 100:
+				limit = 100
+			default:
+				limit = n
+			}
+		}
+	}
+	if len(runs.Items) > limit {
+		runs.Items = runs.Items[:limit]
+	}
+
+	envCache := map[string]*corev1alpha1.LegatorEnvironment{}
+	now := time.Now().UTC()
+	result := make([]cockpitConnectivitySnapshot, 0, len(runs.Items))
+
+	for _, run := range runs.Items {
+		envName := strings.TrimSpace(run.Spec.EnvironmentRef)
+		var env *corev1alpha1.LegatorEnvironment
+		if envName != "" {
+			if cached, ok := envCache[envName]; ok {
+				env = cached
+			} else {
+				candidate := &corev1alpha1.LegatorEnvironment{}
+				if err := s.k8s.Get(r.Context(), client.ObjectKey{Name: envName, Namespace: "agents"}, candidate); err == nil {
+					env = candidate
+					envCache[envName] = candidate
+				} else {
+					envCache[envName] = nil
+				}
+			}
+		}
+
+		result = append(result, buildCockpitConnectivitySnapshot(run, env, now))
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"runs":        result,
+		"total":       len(result),
+		"generatedAt": now.Format(time.RFC3339),
+	})
+}
+
+func buildCockpitConnectivitySnapshot(run corev1alpha1.LegatorRun, env *corev1alpha1.LegatorEnvironment, now time.Time) cockpitConnectivitySnapshot {
+	startedAt := run.CreationTimestamp.Time.UTC()
+	if run.Status.StartTime != nil {
+		startedAt = run.Status.StartTime.Time.UTC()
+	}
+
+	provider := "direct"
+	controlServer := ""
+	allowedPorts := []int{}
+	leaseTTL := int64(0)
+	if env != nil && env.Spec.Connectivity != nil {
+		spec := env.Spec.Connectivity
+		if strings.TrimSpace(spec.Type) != "" {
+			provider = strings.TrimSpace(spec.Type)
+		}
+		if spec.Headscale != nil {
+			controlServer = strings.TrimSpace(spec.Headscale.ControlServer)
+		}
+		allowedPorts = collectAllowedPorts(env.Spec.Endpoints)
+		if provider == "headscale" || provider == "tailscale" {
+			leaseTTL = int64((15 * time.Minute).Seconds())
+		}
+	}
+
+	credentialMode, credentialIssuer, credentialTTL := inferCredentialProfile(env)
+	credentialExpiresAt := ""
+	if credentialTTL > 0 {
+		credentialExpiresAt = startedAt.Add(credentialTTL).Format(time.RFC3339)
+	}
+
+	tunnelStatus := resolveTunnelStatus(run, startedAt, now)
+	tunnelExpiresAt := ""
+	if run.Status.CompletionTime != nil {
+		tunnelExpiresAt = run.Status.CompletionTime.Time.UTC().Format(time.RFC3339)
+	} else if leaseTTL > 0 {
+		tunnelExpiresAt = startedAt.Add(time.Duration(leaseTTL) * time.Second).Format(time.RFC3339)
+	}
+
+	lastTransition := startedAt
+	if run.Status.CompletionTime != nil {
+		lastTransition = run.Status.CompletionTime.Time.UTC()
+	}
+
+	return cockpitConnectivitySnapshot{
+		Run:         run.Name,
+		Agent:       run.Spec.AgentRef,
+		Environment: run.Spec.EnvironmentRef,
+		Phase:       string(run.Status.Phase),
+		Tunnel: cockpitTunnelSnapshot{
+			Status:           tunnelStatus,
+			Provider:         provider,
+			ControlServer:    controlServer,
+			RouteID:          fmt.Sprintf("run/%s", run.Name),
+			Target:           inferRunTarget(run),
+			AllowedPorts:     allowedPorts,
+			LeaseTTLSeconds:  leaseTTL,
+			StartedAt:        startedAt.Format(time.RFC3339),
+			ExpiresAt:        tunnelExpiresAt,
+			LastTransitionAt: lastTransition.Format(time.RFC3339),
+		},
+		Credential: cockpitCredentialSnapshot{
+			Mode:       credentialMode,
+			Issuer:     credentialIssuer,
+			TTLSeconds: int64(credentialTTL.Seconds()),
+			ExpiresAt:  credentialExpiresAt,
+		},
+	}
+}
+
+func resolveTunnelStatus(run corev1alpha1.LegatorRun, startedAt, now time.Time) string {
+	switch run.Status.Phase {
+	case corev1alpha1.RunPhasePending:
+		return "requested"
+	case corev1alpha1.RunPhaseRunning:
+		if now.Sub(startedAt) < 10*time.Second {
+			return "establishing"
+		}
+		return "active"
+	case corev1alpha1.RunPhaseFailed:
+		return "failed"
+	case corev1alpha1.RunPhaseSucceeded, corev1alpha1.RunPhaseBlocked, corev1alpha1.RunPhaseEscalated:
+		return "expired"
+	default:
+		return "requested"
+	}
+}
+
+func inferRunTarget(run corev1alpha1.LegatorRun) string {
+	for i := len(run.Status.Actions) - 1; i >= 0; i-- {
+		target := strings.TrimSpace(run.Status.Actions[i].Target)
+		if target != "" {
+			return target
+		}
+	}
+	return string(run.Spec.Trigger)
+}
+
+func collectAllowedPorts(endpoints map[string]corev1alpha1.EndpointSpec) []int {
+	if len(endpoints) == 0 {
+		return nil
+	}
+	seen := map[int]struct{}{}
+	ports := make([]int, 0, len(endpoints))
+	for _, ep := range endpoints {
+		if p := endpointPort(ep.URL); p > 0 {
+			if _, ok := seen[p]; !ok {
+				seen[p] = struct{}{}
+				ports = append(ports, p)
+			}
+		}
+	}
+	sort.Ints(ports)
+	return ports
+}
+
+func endpointPort(raw string) int {
+	v := strings.TrimSpace(raw)
+	if v == "" {
+		return 0
+	}
+	if !strings.Contains(v, "://") {
+		v = "https://" + v
+	}
+	u, err := url.Parse(v)
+	if err != nil {
+		return 0
+	}
+	if p := u.Port(); p != "" {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return 0
+		}
+		return n
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http":
+		return 80
+	case "ssh":
+		return 22
+	default:
+		return 443
+	}
+}
+
+func inferCredentialProfile(env *corev1alpha1.LegatorEnvironment) (mode, issuer string, ttl time.Duration) {
+	mode = "none"
+	if env == nil || len(env.Spec.Credentials) == 0 {
+		return mode, "", 0
+	}
+
+	keys := make([]string, 0, len(env.Spec.Credentials))
+	for key := range env.Spec.Credentials {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	fallbackMode := "none"
+	fallbackIssuer := ""
+	for _, key := range keys {
+		cred := env.Spec.Credentials[key]
+		credType := strings.TrimSpace(cred.Type)
+
+		switch credType {
+		case "vault-ssh-ca":
+			mode = "vault-signed-cert"
+			issuer = credentialIssuer(cred, key)
+			ttl = parseDurationOrDefault(cred.Vault, 5*time.Minute)
+			return
+		case "vault-kv":
+			keyOrPath := strings.ToLower(key + " " + credentialIssuer(cred, key))
+			if strings.Contains(keyOrPath, "otp") {
+				mode = "otp"
+				issuer = credentialIssuer(cred, key)
+				ttl = parseDurationOrDefault(cred.Vault, 2*time.Minute)
+				return
+			}
+			if fallbackMode == "none" {
+				fallbackMode = "vault-kv"
+				fallbackIssuer = credentialIssuer(cred, key)
+			}
+		default:
+			if fallbackMode == "none" {
+				fallbackMode = "static-key-legacy"
+				fallbackIssuer = credentialIssuer(cred, key)
+			}
+		}
+	}
+
+	if fallbackMode != "none" {
+		return fallbackMode, fallbackIssuer, 0
+	}
+	return mode, "", 0
+}
+
+func credentialIssuer(cred corev1alpha1.CredentialRef, name string) string {
+	if cred.Vault != nil {
+		parts := make([]string, 0, 3)
+		if mount := strings.TrimSpace(cred.Vault.Mount); mount != "" {
+			parts = append(parts, mount)
+		}
+		if role := strings.TrimSpace(cred.Vault.Role); role != "" {
+			parts = append(parts, "role="+role)
+		}
+		if path := strings.TrimSpace(cred.Vault.Path); path != "" {
+			parts = append(parts, "path="+path)
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, " ")
+		}
+	}
+	if secret := strings.TrimSpace(cred.SecretRef); secret != "" {
+		return "secret/" + secret
+	}
+	if typ := strings.TrimSpace(cred.Type); typ != "" {
+		return typ
+	}
+	return name
+}
+
+func parseDurationOrDefault(v *corev1alpha1.VaultCredentialSpec, def time.Duration) time.Duration {
+	if v == nil {
+		return def
+	}
+	if strings.TrimSpace(v.TTL) == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v.TTL)
+	if err != nil {
+		return def
+	}
+	if d <= 0 {
+		return def
+	}
+	return d
 }
 
 func (s *Server) handleListInventory(w http.ResponseWriter, r *http.Request) {

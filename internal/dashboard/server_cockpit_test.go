@@ -111,3 +111,37 @@ func TestGateOutcomeMapping(t *testing.T) {
 		}
 	}
 }
+
+func TestFetchCockpitConnectivityViaAPI(t *testing.T) {
+	t.Parallel()
+
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/cockpit/connectivity" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"runs":[{"run":"watchman-light-run-1","agent":"watchman-light","phase":"Running","environment":"lab-env","tunnel":{"status":"active","provider":"headscale","target":"10.0.0.5","lastTransitionAt":"2026-02-24T23:00:00Z"},"credential":{"mode":"vault-signed-cert","expiresAt":"2026-02-24T23:05:00Z"}}]}`))
+	}))
+	defer apiSrv.Close()
+
+	srv := &Server{
+		config:     Config{BasePath: "", APIBaseURL: apiSrv.URL},
+		log:        logr.Discard(),
+		httpClient: apiSrv.Client(),
+	}
+
+	rows, err := srv.fetchCockpitConnectivityViaAPI(context.Background(), &OIDCUser{Subject: "u1", Email: "ops@example.com"}, 5)
+	if err != nil {
+		t.Fatalf("fetchCockpitConnectivityViaAPI: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1", len(rows))
+	}
+	if rows[0].Tunnel.Status != "active" {
+		t.Fatalf("tunnel status = %q, want active", rows[0].Tunnel.Status)
+	}
+	if rows[0].Credential.Mode != "vault-signed-cert" {
+		t.Fatalf("credential mode = %q, want vault-signed-cert", rows[0].Credential.Mode)
+	}
+}
