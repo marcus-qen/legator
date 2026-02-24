@@ -86,6 +86,7 @@ func NewServer(c client.Client, cfg Config, log logr.Logger) (*Server, error) {
 		"pct":           pct,
 		"durationMs":    durationMs,
 		"tokensStr":     tokensStr,
+		"gateOutcome":   gateOutcome,
 	}
 
 	// Parse layout as the base template, then clone for each page.
@@ -96,7 +97,7 @@ func NewServer(c client.Client, cfg Config, log logr.Logger) (*Server, error) {
 	}
 
 	pages := []string{
-		"index.html", "agents.html", "agent-detail.html",
+		"index.html", "cockpit.html", "agents.html", "agent-detail.html",
 		"runs.html", "run-detail.html",
 		"approvals.html", "events.html",
 	}
@@ -154,6 +155,8 @@ func (s *Server) registerRoutes() {
 
 	// Pages
 	s.mux.HandleFunc(base+"/", s.handleIndex)
+	s.mux.HandleFunc(base+"/cockpit", s.handleCockpit)
+	s.mux.HandleFunc(base+"/cockpit/missions", s.handleMissionLaunch)
 	s.mux.HandleFunc(base+"/agents", s.handleAgents)
 	s.mux.HandleFunc(base+"/agents/", s.handleAgentDetail)
 	s.mux.HandleFunc(base+"/runs", s.handleRuns)
@@ -166,6 +169,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc(base+"/api/agents-table", s.handleAgentsTable)
 	s.mux.HandleFunc(base+"/api/runs-table", s.handleRunsTable)
 	s.mux.HandleFunc(base+"/api/approvals-count", s.handleApprovalsCount)
+	s.mux.HandleFunc(base+"/api/cockpit/topology", s.handleCockpitTopology)
+	s.mux.HandleFunc(base+"/api/cockpit/approvals", s.handleCockpitApprovals)
+	s.mux.HandleFunc(base+"/api/cockpit/timeline", s.handleCockpitTimeline)
 }
 
 // ServeHTTP implements http.Handler.
@@ -214,6 +220,80 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	data := s.buildOverviewData(ctx)
 	s.render(w, "index.html", data)
+}
+
+func (s *Server) handleCockpit(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	agents := s.listAgents(ctx)
+	data := map[string]any{
+		"Title":  "Cockpit",
+		"Agents": agents,
+	}
+	s.render(w, "cockpit.html", data)
+}
+
+func (s *Server) handleMissionLaunch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if strings.TrimSpace(s.config.APIBaseURL) == "" {
+		http.Error(w, "Mission launch disabled: dashboard API bridge not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	user := UserFromContext(r.Context())
+	if user == nil {
+		http.Error(w, "Unauthenticated", http.StatusUnauthorized)
+		return
+	}
+
+	agentName := strings.TrimSpace(r.FormValue("agent"))
+	intent := strings.TrimSpace(r.FormValue("intent"))
+	target := strings.TrimSpace(r.FormValue("target"))
+	safetyMode := strings.TrimSpace(r.FormValue("safetyMode"))
+	if agentName == "" {
+		http.Error(w, "agent is required", http.StatusBadRequest)
+		return
+	}
+	if intent == "" {
+		intent = "Operator-triggered mission from cockpit"
+	}
+
+	autonomy := "observe"
+	switch safetyMode {
+	case "", "observe", "read-only":
+		autonomy = "observe"
+	case "recommend":
+		autonomy = "recommend"
+	case "automate-safe":
+		autonomy = "automate-safe"
+	}
+
+	launchStart := time.Now()
+	if err := s.launchMissionViaAPI(r.Context(), user, agentName, intent, target, autonomy); err != nil {
+		var apiErr *approvalAPIError
+		if errors.As(err, &apiErr) {
+			http.Error(w, apiErr.Error(), apiErr.StatusCode)
+			return
+		}
+		s.log.Error(err, "Failed to launch mission via API", "agent", agentName)
+		http.Error(w, "Failed to launch mission", http.StatusInternalServerError)
+		return
+	}
+
+	runID := s.awaitRunForAgent(r.Context(), agentName, launchStart, 5*time.Second)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if runID == "" {
+		fmt.Fprint(w, `<div class="mission-result warn">Mission accepted. Waiting for run ID...</div>`)
+		return
+	}
+	fmt.Fprintf(w, `<div class="mission-result ok">Mission launched for <code>%s</code>. Run ID: <a href="/runs/%s"><code>%s</code></a></div>`,
+		template.HTMLEscapeString(agentName),
+		url.PathEscape(runID),
+		template.HTMLEscapeString(runID),
+	)
 }
 
 func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
@@ -330,7 +410,11 @@ func (s *Server) handleApprovalAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Redirect(w, r, s.config.BasePath+"/approvals", http.StatusSeeOther)
+	redirectTo := s.config.BasePath + "/approvals"
+	if strings.Contains(r.Referer(), "/cockpit") {
+		redirectTo = s.config.BasePath + "/cockpit"
+	}
+	http.Redirect(w, r, redirectTo, http.StatusSeeOther)
 }
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
@@ -340,6 +424,146 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		"Events": events,
 		"Title":  "Events",
 	})
+}
+
+type topologyNode struct {
+	Name   string
+	Kind   string
+	Status string
+	Detail string
+}
+
+type timelineEntry struct {
+	RunName     string
+	Agent       string
+	Tool        string
+	Target      string
+	Tier        string
+	GateOutcome string
+	Time        time.Time
+}
+
+func (s *Server) handleCockpitTopology(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	nodes := make([]topologyNode, 0)
+
+	devices, err := s.fetchInventoryViaAPI(ctx, UserFromContext(ctx))
+	if err == nil {
+		for _, device := range devices {
+			status := strings.TrimSpace(device.Status)
+			if status == "" {
+				status = "unknown"
+			}
+			detail := strings.TrimSpace(device.IP)
+			if detail == "" {
+				detail = strings.TrimSpace(device.URL)
+			}
+			if detail == "" {
+				detail = "no address"
+			}
+			nodes = append(nodes, topologyNode{
+				Name:   device.Name,
+				Kind:   "endpoint",
+				Status: status,
+				Detail: detail,
+			})
+		}
+	}
+
+	agents := s.listAgents(ctx)
+	for _, agent := range agents {
+		status := strings.TrimSpace(string(agent.Status.Phase))
+		if status == "" {
+			status = "Unknown"
+		}
+		detail := strings.TrimSpace(agent.Spec.EnvironmentRef)
+		if detail == "" {
+			detail = "default env"
+		}
+		nodes = append(nodes, topologyNode{
+			Name:   agent.Name,
+			Kind:   "agent",
+			Status: status,
+			Detail: detail,
+		})
+	}
+
+	sort.Slice(nodes, func(i, j int) bool {
+		if nodes[i].Kind == nodes[j].Kind {
+			return nodes[i].Name < nodes[j].Name
+		}
+		return nodes[i].Kind < nodes[j].Kind
+	})
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if len(nodes) == 0 {
+		fmt.Fprint(w, `<div class="empty">No topology data yet</div>`)
+		return
+	}
+
+	fmt.Fprint(w, `<div class="topology-grid">`)
+	for _, node := range nodes {
+		fmt.Fprintf(w, `<div class="topology-node"><div class="topology-title">%s</div><div class="topology-meta">%s • %s</div><div class="topology-detail">%s</div></div>`,
+			template.HTMLEscapeString(node.Name),
+			template.HTMLEscapeString(node.Kind),
+			template.HTMLEscapeString(node.Status),
+			template.HTMLEscapeString(node.Detail),
+		)
+	}
+	fmt.Fprint(w, `</div>`)
+}
+
+func (s *Server) handleCockpitApprovals(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	approvals := s.listApprovals(ctx)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	pending := 0
+	for _, approval := range approvals {
+		if approval.Status.Phase != corev1alpha1.ApprovalPhasePending {
+			continue
+		}
+		pending++
+		fmt.Fprintf(w, `<tr><td><code>%s</code></td><td>%s</td><td><code>%s</code></td><td>%s</td><td>
+<form method="POST" action="/approvals/%s/approve" style="display:inline"><input type="hidden" name="reason" value="cockpit-approved"><button class="btn btn-approve">Approve</button></form>
+<form method="POST" action="/approvals/%s/deny" style="display:inline"><input type="hidden" name="reason" value="cockpit-denied"><button class="btn btn-deny">Deny</button></form>
+</td></tr>`,
+			template.HTMLEscapeString(approval.Name),
+			template.HTMLEscapeString(approval.Spec.RequestedBy),
+			template.HTMLEscapeString(approval.Spec.RunRef),
+			template.HTMLEscapeString(timeAgo(approval.CreationTimestamp.Time)),
+			url.PathEscape(approval.Name),
+			url.PathEscape(approval.Name),
+		)
+	}
+
+	if pending == 0 {
+		fmt.Fprint(w, `<tr><td colspan="5" class="empty">No pending approval requests</td></tr>`)
+	}
+}
+
+func (s *Server) handleCockpitTimeline(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	entries := s.buildTimelineEntries(ctx, 20)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	if len(entries) == 0 {
+		fmt.Fprint(w, `<tr><td colspan="7" class="empty">No run timeline data yet</td></tr>`)
+		return
+	}
+
+	for _, entry := range entries {
+		fmt.Fprintf(w, `<tr><td><a href="/runs/%s"><code>%s</code></a></td><td>%s</td><td><code>%s</code></td><td>%s</td><td><code>%s</code></td><td>%s</td><td>%s</td></tr>`,
+			url.PathEscape(entry.RunName),
+			template.HTMLEscapeString(entry.RunName),
+			template.HTMLEscapeString(entry.Agent),
+			template.HTMLEscapeString(entry.Tool),
+			template.HTMLEscapeString(truncateStr(entry.Target, 44)),
+			template.HTMLEscapeString(entry.Tier),
+			template.HTMLEscapeString(entry.GateOutcome),
+			template.HTMLEscapeString(timeAgo(entry.Time)),
+		)
+	}
 }
 
 // --- htmx API Handlers ---
@@ -620,6 +844,182 @@ func makeDashboardJWT(user *OIDCUser) string {
 	payload, _ := json.Marshal(claims)
 	body := base64.RawURLEncoding.EncodeToString(payload)
 	return fmt.Sprintf("%s.%s.dashboard", header, body)
+}
+
+func (s *Server) launchMissionViaAPI(ctx context.Context, user *OIDCUser, agentName, intent, target, autonomy string) error {
+	payload := map[string]string{
+		"task": intent,
+	}
+	if strings.TrimSpace(target) != "" {
+		payload["target"] = target
+	}
+	if strings.TrimSpace(autonomy) != "" {
+		payload["autonomy"] = autonomy
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("encode mission payload: %w", err)
+	}
+
+	apiURL := strings.TrimRight(s.config.APIBaseURL, "/") + "/api/v1/agents/" + url.PathEscape(agentName) + "/run"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("build mission api request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+makeDashboardJWT(user))
+
+	httpClient := s.httpClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 10 * time.Second}
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("mission api request failed: %w", err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 16*1024))
+	if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusOK {
+		return &approvalAPIError{StatusCode: resp.StatusCode, Body: string(respBody)}
+	}
+	return nil
+}
+
+func (s *Server) awaitRunForAgent(ctx context.Context, agentName string, since time.Time, timeout time.Duration) string {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return ""
+		default:
+		}
+
+		runs := s.listRuns(ctx, agentName, 5)
+		for _, run := range runs {
+			if run.CreationTimestamp.Time.After(since.Add(-2 * time.Second)) {
+				return run.Name
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return ""
+}
+
+type inventoryDevice struct {
+	Name   string `json:"name"`
+	IP     string `json:"ip,omitempty"`
+	URL    string `json:"url,omitempty"`
+	Status string `json:"status,omitempty"`
+}
+
+func (s *Server) fetchInventoryViaAPI(ctx context.Context, user *OIDCUser) ([]inventoryDevice, error) {
+	if strings.TrimSpace(s.config.APIBaseURL) == "" || user == nil {
+		return nil, errors.New("api bridge unavailable")
+	}
+
+	apiURL := strings.TrimRight(s.config.APIBaseURL, "/") + "/api/v1/inventory"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+makeDashboardJWT(user))
+
+	httpClient := s.httpClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 10 * time.Second}
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("inventory api status %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Devices []inventoryDevice `json:"devices"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	return payload.Devices, nil
+}
+
+func (s *Server) buildTimelineEntries(ctx context.Context, limit int) []timelineEntry {
+	runs := s.listRuns(ctx, "", 12)
+	entries := make([]timelineEntry, 0, limit)
+
+	for _, run := range runs {
+		if len(run.Status.Actions) == 0 {
+			entries = append(entries, timelineEntry{
+				RunName:     run.Name,
+				Agent:       run.Spec.AgentRef,
+				Tool:        "run",
+				Target:      string(run.Spec.Trigger),
+				Tier:        "n/a",
+				GateOutcome: gateOutcome(strings.ToLower(string(run.Status.Phase))),
+				Time:        run.CreationTimestamp.Time,
+			})
+			if len(entries) >= limit {
+				break
+			}
+			continue
+		}
+
+		for _, action := range run.Status.Actions {
+			entry := timelineEntry{
+				RunName:     run.Name,
+				Agent:       run.Spec.AgentRef,
+				Tool:        action.Tool,
+				Target:      action.Target,
+				Tier:        string(action.Tier),
+				GateOutcome: gateOutcome(string(action.Status)),
+				Time:        action.Timestamp.Time,
+			}
+			if entry.Time.IsZero() {
+				entry.Time = run.CreationTimestamp.Time
+			}
+			entries = append(entries, entry)
+			if len(entries) >= limit {
+				break
+			}
+		}
+		if len(entries) >= limit {
+			break
+		}
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Time.After(entries[j].Time)
+	})
+	if len(entries) > limit {
+		entries = entries[:limit]
+	}
+	return entries
+}
+
+func gateOutcome(status string) string {
+	switch strings.TrimSpace(status) {
+	case "approved":
+		return "approved"
+	case "denied":
+		return "denied"
+	case "pending-approval", "pending", "running":
+		return "pending"
+	case "blocked", "failed", "skipped", "escalated":
+		return "blocked"
+	case "executed", "succeeded":
+		return "allowed"
+	default:
+		return "allowed"
+	}
 }
 
 func (s *Server) listEvents(ctx context.Context) []corev1alpha1.AgentEvent {

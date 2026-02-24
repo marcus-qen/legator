@@ -1,0 +1,75 @@
+{{template "layout" .}}
+{{define "content"}}
+<h1>Command Centre Cockpit</h1>
+
+<div class="detail-grid">
+  <div class="detail-card">
+    <h3>Mission Launch</h3>
+    <form class="mission-form" method="POST" action="/cockpit/missions" hx-post="/cockpit/missions" hx-target="#mission-result" hx-swap="innerHTML">
+      <label>Agent
+        <select name="agent" required>
+          {{range .Agents}}
+          <option value="{{.Name}}">{{.Name}}</option>
+          {{end}}
+        </select>
+      </label>
+      <label>Target
+        <input type="text" name="target" placeholder="cluster, host, namespace...">
+      </label>
+      <label>Intent
+        <input type="text" name="intent" placeholder="What should this mission do?" required>
+      </label>
+      <label>Safety Mode
+        <select name="safetyMode">
+          <option value="observe">Read-only (observe)</option>
+          <option value="recommend">Recommend</option>
+          <option value="automate-safe">Automate-safe</option>
+        </select>
+      </label>
+      <button class="btn" type="submit">Launch Mission</button>
+    </form>
+    <div id="mission-result" class="mission-result-slot"></div>
+  </div>
+
+  <div class="detail-card">
+    <h3>Estate / Network Map</h3>
+    <div id="topology-panel" hx-get="/api/cockpit/topology" hx-trigger="load, every 10s" hx-swap="innerHTML">
+      <p class="empty">Loading topology...</p>
+    </div>
+  </div>
+</div>
+
+<h2>Approval Inbox</h2>
+<table class="data-table">
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Requested By</th>
+      <th>Run</th>
+      <th>Age</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody hx-get="/api/cockpit/approvals" hx-trigger="load, every 5s" hx-swap="innerHTML">
+    <tr><td colspan="5" class="empty">Loading approvals...</td></tr>
+  </tbody>
+</table>
+
+<h2>Run Replay Timeline</h2>
+<table class="data-table">
+  <thead>
+    <tr>
+      <th>Run</th>
+      <th>Agent</th>
+      <th>Tool</th>
+      <th>Target</th>
+      <th>Classification</th>
+      <th>Gate Outcome</th>
+      <th>Age</th>
+    </tr>
+  </thead>
+  <tbody hx-get="/api/cockpit/timeline" hx-trigger="load, every 5s" hx-swap="innerHTML">
+    <tr><td colspan="7" class="empty">Loading timeline...</td></tr>
+  </tbody>
+</table>
+{{end}}

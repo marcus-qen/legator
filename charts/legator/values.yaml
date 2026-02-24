@@ -193,11 +193,22 @@ securityContext:
       - ALL
   readOnlyRootFilesystem: true
 
+# --- API Surface ---
+api:
+  enabled: true
+  port: 8090
+  service:
+    enabled: true
+    type: ClusterIP
+    port: 8090
+
 # --- Dashboard ---
 dashboard:
   enabled: false
   replicas: 1
   port: 8080
+  # Optional explicit API URL override. Empty = auto (http://<release>-api:<api.port>)
+  apiBaseURL: ""
 
   image:
     repository: ghcr.io/marcus-qen/legator-dashboard

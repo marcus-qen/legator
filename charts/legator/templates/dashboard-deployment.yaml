@@ -34,6 +34,7 @@ spec:
           imagePullPolicy: {{ .Values.dashboard.image.pullPolicy | default "IfNotPresent" }}
           args:
             - --listen=:{{ .Values.dashboard.port | default 8080 }}
+            - --api-base-url={{ .Values.dashboard.apiBaseURL | default (printf "http://%s-api:%v" (include "legator.fullname" .) (.Values.api.port | default 8090)) }}
             {{- if .Values.dashboard.namespace }}
             - --namespace={{ .Values.dashboard.namespace }}
             {{- end }}

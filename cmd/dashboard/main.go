@@ -59,7 +59,7 @@ func main() {
 
 	flag.StringVar(&listenAddr, "listen", ":8080", "Dashboard listen address")
 	flag.StringVar(&namespace, "namespace", "", "Filter to specific namespace (empty = all)")
-	flag.StringVar(&apiBaseURL, "api-base-url", defaultAPIBaseURL, "Legator API base URL for dashboard approval actions")
+	flag.StringVar(&apiBaseURL, "api-base-url", defaultAPIBaseURL, "Legator API base URL for dashboard mutations and cockpit data")
 	flag.StringVar(&oidcIssuer, "oidc-issuer", os.Getenv("OIDC_ISSUER"), "OIDC issuer URL")
 	flag.StringVar(&oidcClientID, "oidc-client-id", os.Getenv("OIDC_CLIENT_ID"), "OIDC client ID")
 	flag.StringVar(&oidcSecret, "oidc-client-secret", os.Getenv("OIDC_CLIENT_SECRET"), "OIDC client secret")

@@ -89,6 +89,11 @@ spec:
             - name: health
               containerPort: {{ .Values.healthProbe.port }}
               protocol: TCP
+            {{- if .Values.api.enabled }}
+            - name: api
+              containerPort: {{ .Values.api.port | default 8090 }}
+              protocol: TCP
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz

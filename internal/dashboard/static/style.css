@@ -204,6 +204,75 @@ pre.error { border-left: 4px solid var(--danger); }
 
 .blocked { color: var(--danger); font-size: 12px; }
 
+/* Cockpit */
+.mission-form {
+  display: grid;
+  gap: 10px;
+}
+
+.mission-form label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.mission-form input,
+.mission-form select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #0b0f14;
+  color: var(--text);
+  padding: 8px 10px;
+}
+
+.mission-result-slot {
+  margin-top: 10px;
+  min-height: 24px;
+}
+
+.mission-result {
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.mission-result.ok {
+  border-color: var(--success);
+}
+
+.mission-result.warn {
+  border-color: var(--warning);
+}
+
+.topology-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.topology-node {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  background: #0f141b;
+}
+
+.topology-title {
+  font-weight: 600;
+}
+
+.topology-meta {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.topology-detail {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
 /* Buttons */
 .btn {
   display: inline-block;

@@ -1,0 +1,20 @@
+{{- if and .Values.api.enabled .Values.api.service.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "legator.fullname" . }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "legator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  type: {{ .Values.api.service.type | default "ClusterIP" }}
+  ports:
+    - name: http
+      port: {{ .Values.api.service.port | default (.Values.api.port | default 8090) }}
+      targetPort: api
+      protocol: TCP
+  selector:
+    {{- include "legator.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+{{- end }}
