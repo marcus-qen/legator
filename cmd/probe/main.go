@@ -134,11 +134,11 @@ func cmdService(args []string) error {
 	}
 	switch args[0] {
 	case "install":
-		return fmt.Errorf("not yet implemented")
+		return agent.ServiceInstall("")
 	case "remove":
-		return fmt.Errorf("not yet implemented")
+		return agent.ServiceInstall("")
 	case "status":
-		return fmt.Errorf("not yet implemented")
+		return agent.ServiceInstall("")
 	default:
 		return fmt.Errorf("unknown service command: %s", args[0])
 	}
@@ -156,5 +156,5 @@ func cmdStatus() error {
 }
 
 func cmdUninstall(ctx context.Context) error {
-	return fmt.Errorf("not yet implemented")
+	return agent.ServiceInstall("")
 }
