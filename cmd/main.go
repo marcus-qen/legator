@@ -34,6 +34,7 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/dynamic"
@@ -746,12 +747,19 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "ModelTierConfig")
 		os.Exit(1)
 	}
-	if err := (&controller.UserPolicyReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "UserPolicy")
+	if enable, err := isUserPolicyCRDAvailable(context.Background(), mgr.GetClient()); err != nil {
+		setupLog.Error(err, "Failed to probe UserPolicy CRD availability")
 		os.Exit(1)
+	} else if enable {
+		if err := (&controller.UserPolicyReconciler{
+			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to create controller", "controller", "UserPolicy")
+			os.Exit(1)
+		}
+	} else {
+		setupLog.Info("UserPolicy CRD not installed; skipping UserPolicy controller registration")
 	}
 	// +kubebuilder:scaffold:builder
 
@@ -1228,6 +1236,17 @@ func buildNotificationRouter(log logr.Logger) *notify.Router {
 	limiter := notify.NewRateLimiter(maxPerHour)
 
 	return notify.NewRouter(routes, limiter, log)
+}
+
+func isUserPolicyCRDAvailable(ctx context.Context, c client.Client) (bool, error) {
+	list := &corev1alpha1.UserPolicyList{}
+	if err := c.List(ctx, list, client.Limit(1)); err != nil {
+		if apimeta.IsNoMatchError(err) || strings.Contains(strings.ToLower(err.Error()), "no matches for kind \"userpolicy\"") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // truncateReport shortens a report string to maxLen, adding "..." if truncated.

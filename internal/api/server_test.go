@@ -18,8 +18,10 @@ import (
 	"github.com/marcus-qen/legator/internal/api/rbac"
 	"github.com/marcus-qen/legator/internal/approval"
 	"github.com/marcus-qen/legator/internal/inventory"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -110,6 +112,22 @@ func (b *blockingApprovalsClient) List(ctx context.Context, list client.ObjectLi
 		return ctx.Err()
 	default:
 		return b.Client.List(ctx, list, opts...)
+	}
+}
+
+type missingUserPolicyClient struct {
+	client.Client
+}
+
+func (m *missingUserPolicyClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	switch list.(type) {
+	case *corev1alpha1.UserPolicyList:
+		return &apimeta.NoKindMatchError{
+			GroupKind:        schema.GroupKind{Group: "legator.io", Kind: "UserPolicy"},
+			SearchedVersions: []string{"v1alpha1"},
+		}
+	default:
+		return m.Client.List(ctx, list, opts...)
 	}
 }
 
@@ -295,6 +313,58 @@ func TestWhoAmIReturnsIdentityAndPermissions(t *testing.T) {
 	}
 	if allowed, _ := cfgPerm["allowed"].(bool); allowed {
 		t.Fatalf("expected config:write to be denied for operator")
+	}
+}
+
+func TestWhoAmI_MissingUserPolicyCRDFallsBackToBaseRBAC(t *testing.T) {
+	baseClient := newTestClient(t)
+
+	srv := NewServer(ServerConfig{
+		OIDC: auth.OIDCConfig{BypassPaths: []string{"/healthz"}},
+		Policies: []rbac.UserPolicy{
+			{
+				Name:     "operator-policy",
+				Subjects: []rbac.SubjectMatcher{{Claim: "email", Value: "operator@example.com"}},
+				Role:     rbac.RoleOperator,
+			},
+		},
+	}, &missingUserPolicyClient{Client: baseClient}, logr.Discard())
+
+	token := makeTestJWT(map[string]any{
+		"sub":   "operator-1",
+		"email": "operator@example.com",
+		"exp":   float64(time.Now().Add(1 * time.Hour).Unix()),
+	})
+
+	req := httptest.NewRequest("GET", "/api/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if got := body["effectiveRole"]; got != "operator" {
+		t.Fatalf("effectiveRole = %v, want operator", got)
+	}
+
+	perms, ok := body["permissions"].(map[string]any)
+	if !ok {
+		t.Fatalf("permissions missing or invalid: %#v", body["permissions"])
+	}
+
+	runPerm, ok := perms[string(rbac.ActionRunAgent)].(map[string]any)
+	if !ok {
+		t.Fatalf("run permission missing")
+	}
+	if allowed, _ := runPerm["allowed"].(bool); !allowed {
+		t.Fatalf("expected agents:run to be allowed when UserPolicy CRD is absent")
 	}
 }
 

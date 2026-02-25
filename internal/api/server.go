@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	corev1alpha1 "github.com/marcus-qen/legator/api/v1alpha1"
@@ -221,6 +222,10 @@ func (s *Server) loadDynamicUserPolicies(ctx context.Context) ([]rbac.UserPolicy
 
 	list := &corev1alpha1.UserPolicyList{}
 	if err := s.k8s.List(ctx, list); err != nil {
+		if apimeta.IsNoMatchError(err) || strings.Contains(strings.ToLower(err.Error()), "no matches for kind \"userpolicy\"") {
+			s.log.Info("UserPolicy CRD not detected; skipping dynamic UserPolicy overlays")
+			return nil, nil
+		}
 		return nil, err
 	}
 
