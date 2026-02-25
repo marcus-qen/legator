@@ -18,6 +18,7 @@ import (
 
 	"github.com/marcus-qen/legator/internal/controlplane/api"
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
+	"github.com/marcus-qen/legator/internal/controlplane/llm"
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
@@ -85,7 +86,47 @@ func main() {
 	tokenStore := api.NewTokenStore()
 	auditLog := audit.NewLog(10000) // 10k event ring buffer
 	cmdTracker := cmdtracker.New(2 * time.Minute) // 2-min timeout for command results
-	hub := cpws.NewHub(logger.Named("ws"), func(probeID string, env protocol.Envelope) {
+	var hub *cpws.Hub
+
+	// LLM provider (configured via env vars)
+	var taskRunner *llm.TaskRunner
+	if modelProvider := os.Getenv("LEGATOR_LLM_PROVIDER"); modelProvider != "" {
+		providerCfg := llm.ProviderConfig{
+			Name:    modelProvider,
+			BaseURL: os.Getenv("LEGATOR_LLM_BASE_URL"),
+			APIKey:  os.Getenv("LEGATOR_LLM_API_KEY"),
+			Model:   os.Getenv("LEGATOR_LLM_MODEL"),
+		}
+		provider := llm.NewOpenAIProvider(providerCfg)
+		logger.Info("LLM provider configured",
+			zap.String("provider", providerCfg.Name),
+			zap.String("model", providerCfg.Model),
+		)
+		// taskRunner is created after hub is available (see below)
+		// Dispatch function: send command and wait for result
+		dispatch := func(probeID string, cmd *protocol.CommandPayload) (*protocol.CommandResultPayload, error) {
+			pending := cmdTracker.Track(cmd.RequestID, probeID, cmd.Command, cmd.Level)
+			if err := hub.SendTo(probeID, protocol.MsgCommand, *cmd); err != nil {
+				cmdTracker.Cancel(cmd.RequestID)
+				return nil, err
+			}
+			// Wait up to cmd.Timeout + 5s grace
+			timeout := cmd.Timeout + 5*time.Second
+			if timeout < 10*time.Second {
+				timeout = 35 * time.Second
+			}
+			select {
+			case result := <-pending.Result:
+				return result, nil
+			case <-time.After(timeout):
+				cmdTracker.Cancel(cmd.RequestID)
+				return nil, fmt.Errorf("timeout waiting for probe response")
+			}
+		}
+		taskRunner = llm.NewTaskRunner(provider, dispatch, logger.Named("task"))
+	}
+
+	hub = cpws.NewHub(logger.Named("ws"), func(probeID string, env protocol.Envelope) {
 		handleProbeMessage(fleetMgr, auditLog, cmdTracker, logger, probeID, env)
 	})
 
@@ -212,6 +253,42 @@ func main() {
 		events := auditLog.Query(audit.Filter{ProbeID: probeID, Limit: limit})
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"events": events, "total": auditLog.Count()})
+	})
+
+	// Task execution (LLM-powered)
+	mux.HandleFunc("POST /api/v1/probes/{id}/task", func(w http.ResponseWriter, r *http.Request) {
+		if taskRunner == nil {
+			http.Error(w, `{"error":"no LLM provider configured. Set LEGATOR_LLM_PROVIDER, LEGATOR_LLM_BASE_URL, LEGATOR_LLM_API_KEY, LEGATOR_LLM_MODEL"}`, http.StatusServiceUnavailable)
+			return
+		}
+
+		id := r.PathValue("id")
+		ps, ok := fleetMgr.Get(id)
+		if !ok {
+			http.Error(w, `{"error":"probe not found"}`, http.StatusNotFound)
+			return
+		}
+
+		var req struct {
+			Task string `json:"task"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Task == "" {
+			http.Error(w, `{"error":"task is required"}`, http.StatusBadRequest)
+			return
+		}
+
+		logger.Info("task submitted",
+			zap.String("probe", id),
+			zap.String("task", req.Task),
+		)
+
+		result, err := taskRunner.Run(r.Context(), id, req.Task, ps.Inventory, ps.PolicyLevel)
+		if err != nil {
+			logger.Warn("task execution error", zap.String("probe", id), zap.Error(err))
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(result)
 	})
 
 	// Pending commands

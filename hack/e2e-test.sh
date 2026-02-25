@@ -165,7 +165,19 @@ else
   fail "Expected 0 pending, got $IN_FLIGHT"
 fi
 
-# 11. Summary
+# 11. Task endpoint returns 503 without LLM config
+echo ""
+echo "11. Checking task endpoint (no LLM configured)..."
+TASK_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$CP_URL/api/v1/probes/$PROBE_ID/task" \
+  -H "Content-Type: application/json" \
+  -d '{"task":"check uptime"}')
+if [[ "$TASK_CODE" == "503" ]]; then
+  pass "Task endpoint returns 503 when no LLM configured"
+else
+  fail "Expected 503 for task without LLM, got $TASK_CODE"
+fi
+
+# 12. Summary
 echo ""
 echo "=========================="
 echo "Results: $PASSED passed, $FAILED failed"
