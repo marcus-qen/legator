@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/marcus-qen/legator/internal/controlplane/api"
+	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
 	"github.com/marcus-qen/legator/internal/protocol"
@@ -39,8 +40,9 @@ func main() {
 	// Core components
 	fleetMgr := fleet.NewManager(logger.Named("fleet"))
 	tokenStore := api.NewTokenStore()
+	auditLog := audit.NewLog(10000) // 10k event ring buffer
 	hub := cpws.NewHub(logger.Named("ws"), func(probeID string, env protocol.Envelope) {
-		handleProbeMessage(fleetMgr, logger, probeID, env)
+		handleProbeMessage(fleetMgr, auditLog, logger, probeID, env)
 	})
 
 	// Start offline checker
@@ -100,8 +102,8 @@ func main() {
 	})
 
 	// Registration
-	mux.HandleFunc("POST /api/v1/register", api.HandleRegister(tokenStore, fleetMgr, logger.Named("register")))
-	mux.HandleFunc("POST /api/v1/tokens", api.HandleGenerateToken(tokenStore, logger.Named("tokens")))
+	mux.HandleFunc("POST /api/v1/register", api.HandleRegisterWithAudit(tokenStore, fleetMgr, auditLog, logger.Named("register")))
+	mux.HandleFunc("POST /api/v1/tokens", api.HandleGenerateTokenWithAudit(tokenStore, auditLog, logger.Named("tokens")))
 
 	// Fleet summary
 	mux.HandleFunc("GET /api/v1/fleet/summary", func(w http.ResponseWriter, r *http.Request) {
@@ -120,8 +122,11 @@ func main() {
 
 	// Audit log (stub for now)
 	mux.HandleFunc("GET /api/v1/audit", func(w http.ResponseWriter, r *http.Request) {
+		probeID := r.URL.Query().Get("probe_id")
+		limit := 50
+		events := auditLog.Query(audit.Filter{ProbeID: probeID, Limit: limit})
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `{"events":[]}`)
+		json.NewEncoder(w).Encode(map[string]any{"events": events, "total": auditLog.Count()})
 	})
 
 	// WebSocket endpoint for probes
@@ -172,7 +177,7 @@ func main() {
 	}
 }
 
-func handleProbeMessage(fm *fleet.Manager, logger *zap.Logger, probeID string, env protocol.Envelope) {
+func handleProbeMessage(fm *fleet.Manager, al *audit.Log, logger *zap.Logger, probeID string, env protocol.Envelope) {
 	switch env.Type {
 	case protocol.MsgHeartbeat:
 		data, _ := json.Marshal(env.Payload)
@@ -182,6 +187,7 @@ func handleProbeMessage(fm *fleet.Manager, logger *zap.Logger, probeID string, e
 			// Auto-register on first heartbeat from unknown probe
 			fm.Register(probeID, "", "", "")
 			fm.Heartbeat(probeID, &hb)
+			al.Emit(audit.EventProbeRegistered, probeID, "system", "Auto-registered via heartbeat")
 		}
 
 	case protocol.MsgInventory:
@@ -190,6 +196,8 @@ func handleProbeMessage(fm *fleet.Manager, logger *zap.Logger, probeID string, e
 		json.Unmarshal(data, &inv)
 		if err := fm.UpdateInventory(probeID, &inv); err != nil {
 			logger.Warn("inventory update failed", zap.String("probe", probeID), zap.Error(err))
+		} else {
+			al.Emit(audit.EventInventoryUpdate, probeID, probeID, "Inventory updated")
 		}
 
 	case protocol.MsgCommandResult:
@@ -201,6 +209,13 @@ func handleProbeMessage(fm *fleet.Manager, logger *zap.Logger, probeID string, e
 			zap.String("request_id", result.RequestID),
 			zap.Int("exit_code", result.ExitCode),
 		)
+		al.Record(audit.Event{
+			Type:    audit.EventCommandResult,
+			ProbeID: probeID,
+			Actor:   probeID,
+			Summary: "Command completed: " + result.RequestID,
+			Detail:  map[string]any{"exit_code": result.ExitCode, "duration_ms": result.Duration},
+		})
 		// TODO: route result to requesting user/chat session
 
 	default:

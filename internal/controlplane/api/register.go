@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"go.uber.org/zap"
 )
@@ -150,4 +151,54 @@ func generateAPIKey() string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	return "lgk_" + hex.EncodeToString(b)
+}
+
+// HandleRegisterWithAudit wraps HandleRegister with audit logging.
+func HandleRegisterWithAudit(ts *TokenStore, fm *fleet.Manager, al *audit.Log, logger *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req RegisterRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+			return
+		}
+
+		if !ts.Consume(req.Token) {
+			http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
+			return
+		}
+
+		probeID := "prb-" + uuid.New().String()[:8]
+		apiKey := generateAPIKey()
+
+		fm.Register(probeID, req.Hostname, req.OS, req.Arch)
+
+		al.Record(audit.Event{
+			Type:    audit.EventProbeRegistered,
+			ProbeID: probeID,
+			Actor:   "system",
+			Summary: "Probe registered: " + req.Hostname,
+			Detail:  map[string]string{"os": req.OS, "arch": req.Arch, "hostname": req.Hostname},
+		})
+
+		logger.Info("probe registered",
+			zap.String("probe_id", probeID),
+			zap.String("hostname", req.Hostname),
+		)
+
+		resp := RegisterResponse{ProbeID: probeID, APIKey: apiKey, PolicyID: "default-observe"}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(resp)
+	}
+}
+
+// HandleGenerateTokenWithAudit wraps HandleGenerateToken with audit logging.
+func HandleGenerateTokenWithAudit(ts *TokenStore, al *audit.Log, logger *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := ts.Generate()
+		al.Emit(audit.EventTokenGenerated, "", "api", "Registration token generated")
+		logger.Info("token generated", zap.String("expires", token.Expires.Format("2006-01-02T15:04:05Z")))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(token)
+	}
 }
