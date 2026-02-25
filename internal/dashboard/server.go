@@ -548,26 +548,45 @@ func (s *Server) handleCockpitConnectivity(w http.ResponseWriter, r *http.Reques
 	rows, err := s.fetchCockpitConnectivityViaAPI(ctx, UserFromContext(ctx), 12)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err != nil {
-		fmt.Fprintf(w, `<tr><td colspan="6" class="empty">Connectivity feed unavailable: %s</td></tr>`, template.HTMLEscapeString(err.Error()))
+		fmt.Fprintf(w, `<tr><td colspan="8" class="empty">Connectivity feed unavailable: %s</td></tr>`, template.HTMLEscapeString(err.Error()))
 		return
 	}
 	if len(rows) == 0 {
-		fmt.Fprint(w, `<tr><td colspan="6" class="empty">No mission connectivity data yet</td></tr>`)
+		fmt.Fprint(w, `<tr><td colspan="8" class="empty">No mission connectivity data yet</td></tr>`)
 		return
 	}
 
+	now := time.Now()
 	for _, row := range rows {
-		credential := row.Credential.Mode
-		if strings.TrimSpace(row.Credential.ExpiresAt) != "" {
-			credential = credential + " (exp " + row.Credential.ExpiresAt + ")"
+		tunnelTTL := ttlRemaining(row.tunnelExpiryTime(), now)
+		if tunnelTTL == "—" && row.Tunnel.LeaseTTLSeconds > 0 {
+			tunnelTTL = fmt.Sprintf("%ds", row.Tunnel.LeaseTTLSeconds)
 		}
-		fmt.Fprintf(w, `<tr><td><a href="/runs/%s"><code>%s</code></a></td><td>%s</td><td><code>%s</code></td><td>%s</td><td>%s</td><td>%s</td></tr>`,
+
+		credMode := row.Credential.Mode
+		if credMode == "" {
+			credMode = "none"
+		}
+		credText := credMode
+		if issuer := strings.TrimSpace(row.Credential.Issuer); issuer != "" {
+			credText = credText + " · " + issuer
+		}
+		credTTL := ttlRemaining(row.credentialExpiryTime(), now)
+		if credTTL == "—" && row.Credential.TTLSeconds > 0 {
+			credTTL = fmt.Sprintf("%ds", row.Credential.TTLSeconds)
+		}
+
+		fmt.Fprintf(w, `<tr><td><a href="/runs/%s"><code>%s</code></a></td><td><code>%s</code></td><td><span class="status-pill %s">%s</span></td><td>%s</td><td>%s</td><td><span class="credential-pill %s">%s</span></td><td>%s</td><td>%s</td></tr>`,
 			url.PathEscape(row.Run),
 			template.HTMLEscapeString(row.Run),
 			template.HTMLEscapeString(row.Tunnel.Provider),
+			template.HTMLEscapeString(tunnelStatusClass(row.Tunnel.Status)),
 			template.HTMLEscapeString(row.Tunnel.Status),
-			template.HTMLEscapeString(truncateStr(row.Tunnel.Target, 38)),
-			template.HTMLEscapeString(credential),
+			template.HTMLEscapeString(truncateStr(row.Tunnel.Target, 36)),
+			template.HTMLEscapeString(tunnelTTL),
+			template.HTMLEscapeString(credentialClass(credMode)),
+			template.HTMLEscapeString(truncateStr(credText, 64)),
+			template.HTMLEscapeString(credTTL),
 			template.HTMLEscapeString(timeAgo(row.LastTransitionTime())),
 		)
 	}
@@ -948,19 +967,23 @@ type inventoryDevice struct {
 }
 
 type cockpitConnectivityRun struct {
-	Run        string `json:"run"`
-	Agent      string `json:"agent"`
-	Phase      string `json:"phase"`
+	Run         string `json:"run"`
+	Agent       string `json:"agent"`
+	Phase       string `json:"phase"`
 	Environment string `json:"environment"`
-	Tunnel     struct {
+	Tunnel      struct {
 		Status           string `json:"status"`
 		Provider         string `json:"provider"`
 		Target           string `json:"target"`
+		LeaseTTLSeconds  int64  `json:"leaseTtlSeconds"`
+		ExpiresAt        string `json:"expiresAt"`
 		LastTransitionAt string `json:"lastTransitionAt"`
 	} `json:"tunnel"`
 	Credential struct {
-		Mode      string `json:"mode"`
-		ExpiresAt string `json:"expiresAt"`
+		Mode       string `json:"mode"`
+		Issuer     string `json:"issuer"`
+		TTLSeconds int64  `json:"ttlSeconds"`
+		ExpiresAt  string `json:"expiresAt"`
 	} `json:"credential"`
 }
 
@@ -969,6 +992,20 @@ func (r cockpitConnectivityRun) LastTransitionTime() time.Time {
 		return ts
 	}
 	return time.Now()
+}
+
+func (r cockpitConnectivityRun) tunnelExpiryTime() time.Time {
+	if ts, err := time.Parse(time.RFC3339, strings.TrimSpace(r.Tunnel.ExpiresAt)); err == nil {
+		return ts
+	}
+	return time.Time{}
+}
+
+func (r cockpitConnectivityRun) credentialExpiryTime() time.Time {
+	if ts, err := time.Parse(time.RFC3339, strings.TrimSpace(r.Credential.ExpiresAt)); err == nil {
+		return ts
+	}
+	return time.Time{}
 }
 
 func (s *Server) fetchInventoryViaAPI(ctx context.Context, user *OIDCUser) ([]inventoryDevice, error) {
@@ -1181,6 +1218,51 @@ func truncateStr(s string, max int) string {
 		return s
 	}
 	return s[:max] + "…"
+}
+
+func tunnelStatusClass(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "active", "approved", "allowed":
+		return "status-active"
+	case "establishing", "pending", "requested":
+		return "status-pending"
+	case "expired":
+		return "status-expired"
+	case "failed", "blocked", "denied":
+		return "status-failed"
+	default:
+		return "status-unknown"
+	}
+}
+
+func credentialClass(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "vault-signed-cert":
+		return "credential-strong"
+	case "otp":
+		return "credential-otp"
+	case "static-key-legacy":
+		return "credential-legacy"
+	default:
+		return "credential-none"
+	}
+}
+
+func ttlRemaining(expiry, now time.Time) string {
+	if expiry.IsZero() {
+		return "—"
+	}
+	d := expiry.Sub(now)
+	if d <= 0 {
+		return "expired"
+	}
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	return fmt.Sprintf("%dh", int(d.Hours()))
 }
 
 func statusIcon(phase string) string {

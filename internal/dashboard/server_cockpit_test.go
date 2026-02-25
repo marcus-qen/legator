@@ -121,7 +121,7 @@ func TestFetchCockpitConnectivityViaAPI(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"runs":[{"run":"watchman-light-run-1","agent":"watchman-light","phase":"Running","environment":"lab-env","tunnel":{"status":"active","provider":"headscale","target":"10.0.0.5","lastTransitionAt":"2026-02-24T23:00:00Z"},"credential":{"mode":"vault-signed-cert","expiresAt":"2026-02-24T23:05:00Z"}}]}`))
+		_, _ = w.Write([]byte(`{"runs":[{"run":"watchman-light-run-1","agent":"watchman-light","phase":"Running","environment":"lab-env","tunnel":{"status":"active","provider":"headscale","target":"10.0.0.5","leaseTtlSeconds":900,"lastTransitionAt":"2026-02-24T23:00:00Z"},"credential":{"mode":"vault-signed-cert","issuer":"ssh-client-signer role=legator-ssh","ttlSeconds":300,"expiresAt":"2026-02-24T23:05:00Z"}}]}`))
 	}))
 	defer apiSrv.Close()
 
@@ -143,5 +143,27 @@ func TestFetchCockpitConnectivityViaAPI(t *testing.T) {
 	}
 	if rows[0].Credential.Mode != "vault-signed-cert" {
 		t.Fatalf("credential mode = %q, want vault-signed-cert", rows[0].Credential.Mode)
+	}
+	if rows[0].Credential.TTLSeconds != 300 {
+		t.Fatalf("credential ttl = %d, want 300", rows[0].Credential.TTLSeconds)
+	}
+}
+
+func TestConnectivityVisualHelpers(t *testing.T) {
+	t.Parallel()
+
+	if got := tunnelStatusClass("active"); got != "status-active" {
+		t.Fatalf("tunnelStatusClass(active)=%q", got)
+	}
+	if got := credentialClass("static-key-legacy"); got != "credential-legacy" {
+		t.Fatalf("credentialClass(static-key-legacy)=%q", got)
+	}
+
+	now := time.Now()
+	if got := ttlRemaining(now.Add(90*time.Second), now); got != "1m" {
+		t.Fatalf("ttlRemaining 90s=%q want 1m", got)
+	}
+	if got := ttlRemaining(now.Add(-1*time.Second), now); got != "expired" {
+		t.Fatalf("ttlRemaining expired=%q want expired", got)
 	}
 }

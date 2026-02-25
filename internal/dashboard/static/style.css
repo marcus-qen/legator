@@ -273,6 +273,28 @@ pre.error { border-left: 4px solid var(--danger); }
   font-size: 12px;
 }
 
+.status-pill,
+.credential-pill {
+  display: inline-block;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  background: #0f141b;
+}
+
+.status-active { border-color: var(--success); color: var(--success); }
+.status-pending { border-color: var(--warning); color: var(--warning); }
+.status-expired { border-color: var(--text-muted); color: var(--text-muted); }
+.status-failed { border-color: var(--danger); color: var(--danger); }
+.status-unknown { border-color: var(--border); color: var(--text-muted); }
+
+.credential-strong { border-color: var(--success); color: var(--success); }
+.credential-otp { border-color: var(--info); color: var(--info); }
+.credential-legacy { border-color: var(--warning); color: var(--warning); }
+.credential-none { border-color: var(--text-muted); color: var(--text-muted); }
+
 /* Buttons */
 .btn {
   display: inline-block;
