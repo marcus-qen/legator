@@ -60,7 +60,7 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84
         with:
-          version: v2
+          version: v2.1
 
   e2e:
     name: E2E tests
@@ -81,6 +81,9 @@ jobs:
         with:
           name: legator-binaries
           path: bin
+
+      - name: Make binaries executable
+        run: chmod +x bin/control-plane bin/probe
 
       - name: Run e2e tests
         run: ./hack/e2e-test.sh
