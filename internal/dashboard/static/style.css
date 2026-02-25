@@ -19,6 +19,27 @@
   --shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --mono: 'SF Mono', 'Fira Code', monospace;
+
+  --font-size-base: 14px;
+  --line-height-base: 1.5;
+  --container-max-width: 1700px;
+  --container-pad-y: 20px;
+  --container-pad-x: 24px;
+  --container-pad-bottom: 28px;
+  --h1-size: 28px;
+  --h2-size: 19px;
+  --h3-size: 16px;
+  --card-padding: 14px;
+  --grid-gap: 14px;
+  --section-gap: 18px;
+  --hint-font-size: 13px;
+  --table-head-pad-y: 10px;
+  --table-head-pad-x: 12px;
+  --table-cell-pad-y: 8px;
+  --table-cell-pad-x: 12px;
+  --table-cell-font-size: 13px;
+  --panel-min-height: 180px;
+  --panel-default-height: 320px;
 }
 
 :root[data-theme="dark"] {
@@ -39,14 +60,35 @@
   --shadow: 0 12px 28px rgba(2, 8, 20, 0.35);
 }
 
+:root[data-density="compact"] {
+  --font-size-base: 13px;
+  --line-height-base: 1.4;
+  --container-pad-y: 14px;
+  --container-pad-x: 18px;
+  --container-pad-bottom: 20px;
+  --h1-size: 24px;
+  --h2-size: 17px;
+  --h3-size: 15px;
+  --card-padding: 10px;
+  --grid-gap: 10px;
+  --section-gap: 14px;
+  --hint-font-size: 12px;
+  --table-head-pad-y: 7px;
+  --table-head-pad-x: 10px;
+  --table-cell-pad-y: 6px;
+  --table-cell-pad-x: 10px;
+  --table-cell-font-size: 12px;
+  --panel-default-height: 270px;
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
 }
 
 a { color: var(--link); text-decoration: none; }
@@ -98,6 +140,8 @@ code {
   margin-left: auto;
   display: flex;
   align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 #approval-badge:not(:empty) {
@@ -111,14 +155,14 @@ code {
 
 /* Layout */
 .container {
-  width: min(96vw, 1700px);
+  width: min(96vw, var(--container-max-width));
   margin: 0 auto;
-  padding: 20px 24px 28px;
+  padding: var(--container-pad-y) var(--container-pad-x) var(--container-pad-bottom);
 }
 
-h1 { font-size: 28px; margin-bottom: 14px; font-weight: 700; }
-h2 { font-size: 19px; margin: 22px 0 8px; font-weight: 650; }
-h3 { font-size: 16px; margin-bottom: 8px; font-weight: 650; }
+h1 { font-size: var(--h1-size); margin-bottom: 14px; font-weight: 700; }
+h2 { font-size: var(--h2-size); margin: 22px 0 8px; font-weight: 650; }
+h3 { font-size: var(--h3-size); margin-bottom: 8px; font-weight: 650; }
 
 .lead {
   color: var(--text);
@@ -128,7 +172,7 @@ h3 { font-size: 16px; margin-bottom: 8px; font-weight: 650; }
 .section-help,
 .panel-hint {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--hint-font-size);
   margin-bottom: 10px;
 }
 
@@ -136,7 +180,7 @@ h3 { font-size: 16px; margin-bottom: 8px; font-weight: 650; }
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 14px;
+  gap: var(--grid-gap);
   margin-bottom: 20px;
 }
 
@@ -168,20 +212,25 @@ h3 { font-size: 16px; margin-bottom: 8px; font-weight: 650; }
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
   align-items: start;
-  gap: 14px;
-  margin-bottom: 18px;
+  gap: var(--grid-gap);
+  margin-bottom: var(--section-gap);
 }
 
 .detail-card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 14px;
+  padding: var(--card-padding);
   box-shadow: var(--shadow);
 }
 
+.cockpit-page {
+  display: grid;
+  gap: var(--section-gap);
+}
+
 .cockpit-intro {
-  margin-bottom: 14px;
+  margin-bottom: 0;
 }
 
 .cockpit-steps {
@@ -189,11 +238,25 @@ h3 { font-size: 16px; margin-bottom: 8px; font-weight: 650; }
   display: grid;
   gap: 4px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--hint-font-size);
+}
+
+.resize-note {
+  margin-top: 10px;
 }
 
 .cockpit-hero {
   grid-template-columns: minmax(340px, 1fr) minmax(420px, 1.35fr);
+}
+
+.cockpit-section {
+  display: grid;
+  gap: 6px;
+}
+
+.cockpit-section h2,
+.checklist-card h2 {
+  margin: 0;
 }
 
 dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; }
@@ -213,7 +276,7 @@ dd { font-size: 13px; }
 
 .data-table th {
   text-align: left;
-  padding: 10px 12px;
+  padding: var(--table-head-pad-y) var(--table-head-pad-x);
   font-size: 11px;
   color: var(--text-muted);
   font-weight: 700;
@@ -224,8 +287,8 @@ dd { font-size: 13px; }
 }
 
 .data-table td {
-  padding: 8px 12px;
-  font-size: 13px;
+  padding: var(--table-cell-pad-y) var(--table-cell-pad-x);
+  font-size: var(--table-cell-font-size);
   border-bottom: 1px solid var(--border);
 }
 
@@ -271,13 +334,13 @@ pre.error { border-left: 4px solid var(--danger); }
 /* Cockpit */
 .mission-form {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .mission-form label {
   display: grid;
   gap: 4px;
-  font-size: 13px;
+  font-size: var(--hint-font-size);
   color: var(--text-muted);
 }
 
@@ -300,7 +363,7 @@ pre.error { border-left: 4px solid var(--danger); }
   border-radius: 8px;
   border: 1px solid var(--border);
   padding: 10px 12px;
-  font-size: 13px;
+  font-size: var(--table-cell-font-size);
   background: var(--surface-2);
 }
 
@@ -312,10 +375,84 @@ pre.error { border-left: 4px solid var(--danger); }
   border-color: var(--warning);
 }
 
-#topology-panel {
-  max-height: 420px;
+.panel-resize-frame {
+  height: var(--panel-default-height);
+  min-height: var(--panel-min-height);
+  max-height: 75vh;
+  resize: vertical;
   overflow: auto;
-  padding-right: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.panel-resize-inline {
+  max-height: 70vh;
+}
+
+.panel-resize-frame .data-table {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.panel-resize-frame .data-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+#topology-panel {
+  min-height: 120px;
+  height: 100%;
+  overflow: auto;
+  padding: 8px;
+}
+
+.checklist-card {
+  display: grid;
+  gap: 10px;
+}
+
+.checklist-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.checklist-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.checklist-summary {
+  font-weight: 600;
+}
+
+.checklist-frame .data-table td {
+  vertical-align: top;
+}
+
+.checklist-step-help {
+  color: var(--text-muted);
+  font-size: var(--hint-font-size);
+  margin-top: 4px;
+}
+
+.checklist-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.checklist-state {
+  font-weight: 600;
+  text-transform: uppercase;
 }
 
 .topology-grid {
@@ -384,7 +521,7 @@ pre.error { border-left: 4px solid var(--danger); }
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--hint-font-size);
   cursor: pointer;
 }
 
@@ -422,10 +559,6 @@ pre.error { border-left: 4px solid var(--danger); }
 @media (max-width: 1200px) {
   .cockpit-hero {
     grid-template-columns: 1fr;
-  }
-
-  #topology-panel {
-    max-height: none;
   }
 }
 

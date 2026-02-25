@@ -22,6 +22,9 @@
       <a href="/events">Events</a>
     </div>
     <div class="nav-actions">
+      <button id="density-toggle" class="btn btn-ghost" type="button" title="Toggle compact density" aria-label="Toggle compact density">
+        ⇵ Density
+      </button>
       <button id="theme-toggle" class="btn btn-ghost" type="button" title="Toggle light/dark theme" aria-label="Toggle light/dark theme">
         🌗 Theme
       </button>
@@ -35,28 +38,51 @@
   </footer>
   <script>
     (function () {
-      var STORAGE_KEY = 'legator.theme';
+      var THEME_STORAGE_KEY = 'legator.theme';
+      var DENSITY_STORAGE_KEY = 'legator.density';
       var root = document.documentElement;
-      var btn = document.getElementById('theme-toggle');
+      var themeButton = document.getElementById('theme-toggle');
+      var densityButton = document.getElementById('density-toggle');
 
       function applyTheme(theme) {
         var safe = theme === 'dark' ? 'dark' : 'light';
         root.setAttribute('data-theme', safe);
-        if (btn) {
-          btn.textContent = safe === 'dark' ? '☀️ Light' : '🌙 Dark';
-          btn.setAttribute('aria-label', safe === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
-          btn.title = safe === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
+        if (themeButton) {
+          themeButton.textContent = safe === 'dark' ? '☀️ Light' : '🌙 Dark';
+          themeButton.setAttribute('aria-label', safe === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
+          themeButton.title = safe === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
         }
       }
 
-      var initial = localStorage.getItem(STORAGE_KEY) || 'light';
-      applyTheme(initial);
+      function applyDensity(density) {
+        var safe = density === 'compact' ? 'compact' : 'comfortable';
+        root.setAttribute('data-density', safe);
+        if (densityButton) {
+          densityButton.textContent = safe === 'compact' ? '↕ Comfortable' : '↕ Compact';
+          densityButton.setAttribute('aria-label', safe === 'compact' ? 'Switch to comfortable density' : 'Switch to compact density');
+          densityButton.title = safe === 'compact' ? 'Switch to comfortable density' : 'Switch to compact density';
+        }
+      }
 
-      if (btn) {
-        btn.addEventListener('click', function () {
+      var initialTheme = localStorage.getItem(THEME_STORAGE_KEY) || 'light';
+      applyTheme(initialTheme);
+
+      var initialDensity = localStorage.getItem(DENSITY_STORAGE_KEY) || 'comfortable';
+      applyDensity(initialDensity);
+
+      if (themeButton) {
+        themeButton.addEventListener('click', function () {
           var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-          localStorage.setItem(STORAGE_KEY, next);
+          localStorage.setItem(THEME_STORAGE_KEY, next);
           applyTheme(next);
+        });
+      }
+
+      if (densityButton) {
+        densityButton.addEventListener('click', function () {
+          var next = root.getAttribute('data-density') === 'compact' ? 'comfortable' : 'compact';
+          localStorage.setItem(DENSITY_STORAGE_KEY, next);
+          applyDensity(next);
         });
       }
     })();

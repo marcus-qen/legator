@@ -1,113 +1,383 @@
 {{template "layout" .}}
 {{define "content"}}
-<h1>Command Centre Cockpit</h1>
+<div class="cockpit-page">
+  <h1>Command Centre Cockpit</h1>
 
-<div class="detail-card cockpit-intro">
-  <p class="lead">This cockpit is your operator loop: launch → observe → approve (if needed) → replay decisions.</p>
-  <ol class="cockpit-steps">
-    <li><strong>Mission Launch:</strong> run a read-only mission first to validate target + intent.</li>
-    <li><strong>Tunnel & Credential Lane:</strong> confirm route, tunnel state, and credential mode/TTL look sane.</li>
-    <li><strong>Approval Inbox:</strong> approve/deny guarded actions and confirm they leave the queue.</li>
-    <li><strong>Run Replay Timeline:</strong> verify tool, classification, and gate outcome for each action.</li>
-  </ol>
-</div>
-
-<div class="detail-grid cockpit-hero">
-  <div class="detail-card">
-    <h3>Mission Launch</h3>
-    <p class="panel-hint">What to test: launch one read-only mission with a clear target and intent. You should get a run ID in the result box.</p>
-    <form class="mission-form" method="POST" action="/cockpit/missions" hx-post="/cockpit/missions" hx-target="#mission-result" hx-swap="innerHTML">
-      <label>Agent
-        <select name="agent" required>
-          {{range .Agents}}
-          <option value="{{.Name}}">{{.Name}}</option>
-          {{end}}
-        </select>
-      </label>
-      <label>Target
-        <input type="text" name="target" placeholder="cluster, host, namespace...">
-      </label>
-      <label>Intent
-        <input type="text" name="intent" placeholder="e.g. Check pod health + ingress reachability" required>
-      </label>
-      <label>Safety Mode
-        <select name="safetyMode">
-          <option value="observe">Read-only (observe)</option>
-          <option value="recommend">Recommend</option>
-          <option value="automate-safe">Automate-safe</option>
-        </select>
-      </label>
-      <button class="btn btn-primary" type="submit">Launch Mission</button>
-    </form>
-    <div id="mission-result" class="mission-result-slot"></div>
+  <div class="detail-card cockpit-intro">
+    <p class="lead">This cockpit is your operator loop: launch → observe → approve (if needed) → replay decisions.</p>
+    <ol class="cockpit-steps">
+      <li><strong>Mission Launch:</strong> run a read-only mission first to validate target + intent.</li>
+      <li><strong>Tunnel & Credential Lane:</strong> confirm route, tunnel state, and credential mode/TTL look sane.</li>
+      <li><strong>Approval Inbox:</strong> approve/deny guarded actions and confirm they leave the queue.</li>
+      <li><strong>Run Replay Timeline:</strong> verify tool, classification, and gate outcome for each action.</li>
+    </ol>
+    <p class="panel-hint resize-note">Tip: toggle <strong>compact density</strong> in the navbar for tighter data views. Drag panel corners to resize and lock your preferred heights.</p>
   </div>
 
-  <div class="detail-card">
-    <h3>Estate / Network Map</h3>
-    <p class="panel-hint">What to test: agents should appear healthy and mapped to the expected environment. Use this as your quick sanity check before running mutations.</p>
-    <div id="topology-panel" hx-get="/api/cockpit/topology" hx-trigger="load, every 10s" hx-swap="innerHTML">
-      <p class="empty">Loading topology...</p>
+  <div class="detail-grid cockpit-hero">
+    <div class="detail-card">
+      <h3>Mission Launch</h3>
+      <p class="panel-hint">What to test: launch one read-only mission with a clear target and intent. You should get a run ID in the result box.</p>
+      <form class="mission-form" method="POST" action="/cockpit/missions" hx-post="/cockpit/missions" hx-target="#mission-result" hx-swap="innerHTML">
+        <label>Agent
+          <select name="agent" required>
+            {{range .Agents}}
+            <option value="{{.Name}}">{{.Name}}</option>
+            {{end}}
+          </select>
+        </label>
+        <label>Target
+          <input type="text" name="target" placeholder="cluster, host, namespace...">
+        </label>
+        <label>Intent
+          <input type="text" name="intent" placeholder="e.g. Check pod health + ingress reachability" required>
+        </label>
+        <label>Safety Mode
+          <select name="safetyMode">
+            <option value="observe">Read-only (observe)</option>
+            <option value="recommend">Recommend</option>
+            <option value="automate-safe">Automate-safe</option>
+          </select>
+        </label>
+        <button class="btn btn-primary" type="submit">Launch Mission</button>
+      </form>
+      <div id="mission-result" class="mission-result-slot"></div>
+    </div>
+
+    <div class="detail-card">
+      <h3>Estate / Network Map</h3>
+      <p class="panel-hint">What to test: agents should appear healthy and mapped to the expected environment. Use this as your quick sanity check before running mutations.</p>
+      <div class="panel-resize-frame panel-resize-inline" data-panel-key="topology" data-default-height="300">
+        <div id="topology-panel" hx-get="/api/cockpit/topology" hx-trigger="load, every 10s" hx-swap="innerHTML">
+          <p class="empty">Loading topology...</p>
+        </div>
+      </div>
     </div>
   </div>
+
+  <section class="detail-card checklist-card">
+    <div class="checklist-header">
+      <div>
+        <h2>Operator Checklist</h2>
+        <p class="section-help">Structured smoke checks for this cockpit slice. Mark each step pass/fail as you run it. State is local to your browser.</p>
+      </div>
+      <div class="checklist-controls">
+        <span id="checklist-summary" class="status-pill checklist-summary status-pending">0 / 5 passed · 0 failed · 5 pending</span>
+        <button id="checklist-reset" class="btn btn-ghost" type="button">Reset checklist</button>
+      </div>
+    </div>
+    <div class="panel-resize-frame checklist-frame" data-panel-key="operator-checklist" data-default-height="260">
+      <table class="data-table checklist-table">
+        <thead>
+          <tr>
+            <th>Step</th>
+            <th>Status</th>
+            <th>Result</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr data-check-id="mission-launch">
+            <td>
+              <strong>Launch a read-only mission</strong>
+              <div class="checklist-step-help">Use <code>observe</code> mode and confirm the mission result includes a run ID.</div>
+            </td>
+            <td><span class="status-pill checklist-state status-pending" data-check-status>pending</span></td>
+            <td class="checklist-actions">
+              <button class="btn btn-approve" type="button" data-check-action="pass">Pass</button>
+              <button class="btn btn-deny" type="button" data-check-action="fail">Fail</button>
+              <button class="btn btn-ghost" type="button" data-check-action="reset">Reset</button>
+            </td>
+          </tr>
+          <tr data-check-id="connectivity-lane">
+            <td>
+              <strong>Verify tunnel + credential lane is sane</strong>
+              <div class="checklist-step-help">Look for active tunnel status, expected target/provider, and non-expired credential TTL.</div>
+            </td>
+            <td><span class="status-pill checklist-state status-pending" data-check-status>pending</span></td>
+            <td class="checklist-actions">
+              <button class="btn btn-approve" type="button" data-check-action="pass">Pass</button>
+              <button class="btn btn-deny" type="button" data-check-action="fail">Fail</button>
+              <button class="btn btn-ghost" type="button" data-check-action="reset">Reset</button>
+            </td>
+          </tr>
+          <tr data-check-id="approval-inbox">
+            <td>
+              <strong>Exercise approval inbox</strong>
+              <div class="checklist-step-help">Approve or deny one queued item and verify the queue updates immediately.</div>
+            </td>
+            <td><span class="status-pill checklist-state status-pending" data-check-status>pending</span></td>
+            <td class="checklist-actions">
+              <button class="btn btn-approve" type="button" data-check-action="pass">Pass</button>
+              <button class="btn btn-deny" type="button" data-check-action="fail">Fail</button>
+              <button class="btn btn-ghost" type="button" data-check-action="reset">Reset</button>
+            </td>
+          </tr>
+          <tr data-check-id="timeline-audit">
+            <td>
+              <strong>Validate replay attribution</strong>
+              <div class="checklist-step-help">Timeline should show tool/classification/gate outcome plus tunnel path and credential mode.</div>
+            </td>
+            <td><span class="status-pill checklist-state status-pending" data-check-status>pending</span></td>
+            <td class="checklist-actions">
+              <button class="btn btn-approve" type="button" data-check-action="pass">Pass</button>
+              <button class="btn btn-deny" type="button" data-check-action="fail">Fail</button>
+              <button class="btn btn-ghost" type="button" data-check-action="reset">Reset</button>
+            </td>
+          </tr>
+          <tr data-check-id="layout-controls">
+            <td>
+              <strong>Check density + resize controls</strong>
+              <div class="checklist-step-help">Toggle compact mode, resize at least one panel, refresh the page, and confirm both preferences persist.</div>
+            </td>
+            <td><span class="status-pill checklist-state status-pending" data-check-status>pending</span></td>
+            <td class="checklist-actions">
+              <button class="btn btn-approve" type="button" data-check-action="pass">Pass</button>
+              <button class="btn btn-deny" type="button" data-check-action="fail">Fail</button>
+              <button class="btn btn-ghost" type="button" data-check-action="reset">Reset</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="cockpit-section">
+    <h2>Secure Tunnel & Credential Lane</h2>
+    <p class="section-help">Confirms how a run is connected and authenticated. Watch for <strong>expired/failed</strong> tunnel states, risky credential mode, or short TTLs.</p>
+    <div class="panel-resize-frame" data-panel-key="connectivity" data-default-height="320">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Run</th>
+            <th>Tunnel Provider</th>
+            <th>Tunnel Status</th>
+            <th>Target</th>
+            <th>Tunnel TTL</th>
+            <th>Credential Mode</th>
+            <th>Issuer</th>
+            <th>Credential TTL</th>
+            <th>Risk</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody hx-get="/api/cockpit/connectivity" hx-trigger="load, every 5s" hx-swap="innerHTML">
+          <tr><td colspan="10" class="empty">Loading connectivity lane...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="cockpit-section">
+    <h2>Approval Inbox</h2>
+    <p class="section-help">Actions that need human sign-off appear here. Test by approving/denying and confirming the item status changes immediately.</p>
+    <div class="panel-resize-frame" data-panel-key="approvals" data-default-height="250">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Agent</th>
+            <th>Run</th>
+            <th>Age</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody hx-get="/api/cockpit/approvals" hx-trigger="load, every 5s" hx-swap="innerHTML">
+          <tr><td colspan="5" class="empty">Loading approvals...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="cockpit-section">
+    <h2>Run Replay Timeline</h2>
+    <p class="section-help">Audit trail of what happened: intent -> classification -> gate outcome. Use this to verify policy behavior and explain each decision.</p>
+    <div class="panel-resize-frame" data-panel-key="timeline" data-default-height="300">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Run</th>
+            <th>Agent</th>
+            <th>Tool</th>
+            <th>Target</th>
+            <th>Classification</th>
+            <th>Gate Outcome</th>
+            <th>Tunnel Path</th>
+            <th>Credential Mode</th>
+            <th>Age</th>
+          </tr>
+        </thead>
+        <tbody hx-get="/api/cockpit/timeline" hx-trigger="load, every 5s" hx-swap="innerHTML">
+          <tr><td colspan="9" class="empty">Loading timeline...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
 </div>
 
-<h2>Secure Tunnel & Credential Lane</h2>
-<p class="section-help">Confirms how a run is connected and authenticated. Watch for <strong>expired/failed</strong> tunnel states, risky credential mode, or short TTLs.</p>
-<table class="data-table">
-  <thead>
-    <tr>
-      <th>Run</th>
-      <th>Tunnel Provider</th>
-      <th>Tunnel Status</th>
-      <th>Target</th>
-      <th>Tunnel TTL</th>
-      <th>Credential Mode</th>
-      <th>Issuer</th>
-      <th>Credential TTL</th>
-      <th>Risk</th>
-      <th>Updated</th>
-    </tr>
-  </thead>
-  <tbody hx-get="/api/cockpit/connectivity" hx-trigger="load, every 5s" hx-swap="innerHTML">
-    <tr><td colspan="10" class="empty">Loading connectivity lane...</td></tr>
-  </tbody>
-</table>
+<script>
+  (function () {
+    var page = document.querySelector('.cockpit-page');
+    if (!page) {
+      return;
+    }
 
-<h2>Approval Inbox</h2>
-<p class="section-help">Actions that need human sign-off appear here. Test by approving/denying and confirming the item status changes immediately.</p>
-<table class="data-table">
-  <thead>
-    <tr>
-      <th>ID</th>
-      <th>Agent</th>
-      <th>Run</th>
-      <th>Age</th>
-      <th>Actions</th>
-    </tr>
-  </thead>
-  <tbody hx-get="/api/cockpit/approvals" hx-trigger="load, every 5s" hx-swap="innerHTML">
-    <tr><td colspan="5" class="empty">Loading approvals...</td></tr>
-  </tbody>
-</table>
+    var panelStorageKey = 'legator.cockpit.panelHeights.v1';
+    var checklistStorageKey = 'legator.cockpit.checklist.v1';
+    var panels = Array.prototype.slice.call(document.querySelectorAll('[data-panel-key]'));
 
-<h2>Run Replay Timeline</h2>
-<p class="section-help">Audit trail of what happened: intent -> classification -> gate outcome. Use this to verify policy behavior and explain each decision.</p>
-<table class="data-table">
-  <thead>
-    <tr>
-      <th>Run</th>
-      <th>Agent</th>
-      <th>Tool</th>
-      <th>Target</th>
-      <th>Classification</th>
-      <th>Gate Outcome</th>
-      <th>Tunnel Path</th>
-      <th>Credential Mode</th>
-      <th>Age</th>
-    </tr>
-  </thead>
-  <tbody hx-get="/api/cockpit/timeline" hx-trigger="load, every 5s" hx-swap="innerHTML">
-    <tr><td colspan="9" class="empty">Loading timeline...</td></tr>
-  </tbody>
-</table>
+    function readObject(key) {
+      try {
+        var raw = localStorage.getItem(key);
+        if (!raw) {
+          return {};
+        }
+        var parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch (err) {
+        return {};
+      }
+    }
+
+    function writeObject(key, value) {
+      try {
+        localStorage.setItem(key, JSON.stringify(value));
+      } catch (err) {
+        // localStorage disabled/blocked; ignore.
+      }
+    }
+
+    function persistPanelHeights() {
+      var next = {};
+      panels.forEach(function (panel) {
+        var key = panel.getAttribute('data-panel-key');
+        if (!key) {
+          return;
+        }
+        next[key] = Math.max(120, Math.round(panel.getBoundingClientRect().height));
+      });
+      writeObject(panelStorageKey, next);
+    }
+
+    function applyPanelHeights() {
+      var saved = readObject(panelStorageKey);
+      panels.forEach(function (panel) {
+        var key = panel.getAttribute('data-panel-key');
+        if (!key) {
+          return;
+        }
+        var preferred = Number(saved[key]);
+        if (!preferred) {
+          preferred = Number(panel.getAttribute('data-default-height'));
+        }
+        if (preferred) {
+          panel.style.height = Math.max(120, preferred) + 'px';
+        }
+      });
+    }
+
+    applyPanelHeights();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      var resizeSaveTimer;
+      var observer = new ResizeObserver(function () {
+        window.clearTimeout(resizeSaveTimer);
+        resizeSaveTimer = window.setTimeout(persistPanelHeights, 180);
+      });
+      panels.forEach(function (panel) {
+        observer.observe(panel);
+      });
+    } else {
+      panels.forEach(function (panel) {
+        panel.addEventListener('mouseup', persistPanelHeights);
+        panel.addEventListener('touchend', persistPanelHeights, { passive: true });
+      });
+    }
+
+    var checklistRows = Array.prototype.slice.call(document.querySelectorAll('[data-check-id]'));
+    var checklistSummary = document.getElementById('checklist-summary');
+    var checklistReset = document.getElementById('checklist-reset');
+
+    function statusMeta(state) {
+      if (state === 'pass') {
+        return { label: 'pass', className: 'status-active' };
+      }
+      if (state === 'fail') {
+        return { label: 'fail', className: 'status-failed' };
+      }
+      return { label: 'pending', className: 'status-pending' };
+    }
+
+    function renderChecklist() {
+      var state = readObject(checklistStorageKey);
+      var passed = 0;
+      var failed = 0;
+      var pending = 0;
+
+      checklistRows.forEach(function (row) {
+        var id = row.getAttribute('data-check-id');
+        var badge = row.querySelector('[data-check-status]');
+        var meta = statusMeta(state[id]);
+
+        if (meta.label === 'pass') {
+          passed += 1;
+        } else if (meta.label === 'fail') {
+          failed += 1;
+        } else {
+          pending += 1;
+        }
+
+        if (badge) {
+          badge.textContent = meta.label;
+          badge.classList.remove('status-active', 'status-failed', 'status-pending');
+          badge.classList.add(meta.className);
+        }
+      });
+
+      if (checklistSummary) {
+        checklistSummary.textContent = passed + ' / ' + checklistRows.length + ' passed · ' + failed + ' failed · ' + pending + ' pending';
+        checklistSummary.classList.remove('status-active', 'status-failed', 'status-pending');
+        if (failed > 0) {
+          checklistSummary.classList.add('status-failed');
+        } else if (pending === 0) {
+          checklistSummary.classList.add('status-active');
+        } else {
+          checklistSummary.classList.add('status-pending');
+        }
+      }
+    }
+
+    page.addEventListener('click', function (event) {
+      var button = event.target.closest('[data-check-action]');
+      if (!button) {
+        return;
+      }
+      var row = button.closest('[data-check-id]');
+      if (!row) {
+        return;
+      }
+
+      var id = row.getAttribute('data-check-id');
+      var action = button.getAttribute('data-check-action');
+      var state = readObject(checklistStorageKey);
+
+      if (action === 'pass' || action === 'fail') {
+        state[id] = action;
+      } else {
+        delete state[id];
+      }
+
+      writeObject(checklistStorageKey, state);
+      renderChecklist();
+    });
+
+    if (checklistReset) {
+      checklistReset.addEventListener('click', function () {
+        writeObject(checklistStorageKey, {});
+        renderChecklist();
+      });
+    }
+
+    renderChecklist();
+  })();
+</script>
 {{end}}
