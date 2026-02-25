@@ -1,12 +1,4 @@
 // Legator Probe Agent — lightweight binary deployed to target infrastructure.
-//
-// Subcommands:
-//   probe init       Register with control plane using a token
-//   probe run        Start the agent loop (what the systemd service runs)
-//   probe service    Install/remove/status of the system service
-//   probe status     Local status check
-//   probe uninstall  Clean removal (deregister + delete files)
-//   probe version    Version info
 package main
 
 import (
@@ -15,6 +7,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/marcus-qen/legator/internal/probe/agent"
+	"go.uber.org/zap"
 )
 
 var (
@@ -37,7 +32,7 @@ func main() {
 	case "init":
 		err = cmdInit(ctx, os.Args[2:])
 	case "run":
-		err = cmdRun(ctx)
+		err = cmdRun(ctx, os.Args[2:])
 	case "service":
 		err = cmdService(os.Args[2:])
 	case "status":
@@ -73,7 +68,6 @@ Commands:
   help       Show this help`)
 }
 
-// cmdInit registers this probe with the control plane.
 func cmdInit(ctx context.Context, args []string) error {
 	var server, token string
 	for i := 0; i < len(args); i++ {
@@ -94,50 +88,73 @@ func cmdInit(ctx context.Context, args []string) error {
 		return fmt.Errorf("--server and --token are required\n\nUsage: probe init --server https://cp.example.com --token prb_xxx")
 	}
 
-	fmt.Printf("Registering with %s...\n", server)
-	// TODO: WebSocket connect, send RegisterPayload, receive RegisteredPayload,
-	//       write config to /etc/probe/config.yaml
-	return fmt.Errorf("not yet implemented")
-}
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
 
-// cmdRun starts the main agent loop — WebSocket connection, heartbeat, command execution.
-func cmdRun(ctx context.Context) error {
-	// TODO: Load config, connect WebSocket, run heartbeat+inventory loop,
-	//       listen for commands, enforce local policy, execute, return results.
-	fmt.Println("Starting probe agent...")
-	<-ctx.Done()
-	fmt.Println("Shutting down.")
+	fmt.Printf("Registering with %s...\n", server)
+	cfg, err := agent.Register(ctx, server, token, logger)
+	if err != nil {
+		return err
+	}
+
+	if err := cfg.Save(""); err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+
+	fmt.Printf("✅ Registered as probe %s\n", cfg.ProbeID)
+	fmt.Printf("   Config saved to %s\n", agent.ConfigPath(""))
 	return nil
 }
 
-// cmdService manages the systemd service.
+func cmdRun(ctx context.Context, args []string) error {
+	// Parse optional --config-dir
+	configDir := ""
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--config-dir" && i+1 < len(args) {
+			configDir = args[i+1]
+			i++
+		}
+	}
+
+	cfg, err := agent.LoadConfig(configDir)
+	if err != nil {
+		return fmt.Errorf("load config: %w (run 'probe init' first)", err)
+	}
+
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
+
+	a := agent.New(cfg, logger)
+	return a.Run(ctx)
+}
+
 func cmdService(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: probe service <install|remove|status>")
 	}
 	switch args[0] {
 	case "install":
-		// TODO: Write systemd unit, enable, start
 		return fmt.Errorf("not yet implemented")
 	case "remove":
-		// TODO: Stop, disable, remove unit
 		return fmt.Errorf("not yet implemented")
 	case "status":
-		// TODO: Check systemd unit status
 		return fmt.Errorf("not yet implemented")
 	default:
 		return fmt.Errorf("unknown service command: %s", args[0])
 	}
 }
 
-// cmdStatus shows local probe status.
 func cmdStatus() error {
-	// TODO: Read config, show probe ID, server, connection state, last heartbeat
-	return fmt.Errorf("not yet implemented")
+	cfg, err := agent.LoadConfig("")
+	if err != nil {
+		return fmt.Errorf("not configured: %w", err)
+	}
+	fmt.Printf("Probe ID:  %s\n", cfg.ProbeID)
+	fmt.Printf("Server:    %s\n", cfg.ServerURL)
+	fmt.Printf("Policy ID: %s\n", cfg.PolicyID)
+	return nil
 }
 
-// cmdUninstall deregisters and removes all probe files.
 func cmdUninstall(ctx context.Context) error {
-	// TODO: Deregister with control plane, stop service, remove files
 	return fmt.Errorf("not yet implemented")
 }

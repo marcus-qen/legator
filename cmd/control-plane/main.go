@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/marcus-qen/legator/internal/controlplane/api"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
 	"github.com/marcus-qen/legator/internal/protocol"
@@ -37,6 +38,7 @@ func main() {
 
 	// Core components
 	fleetMgr := fleet.NewManager(logger.Named("fleet"))
+	tokenStore := api.NewTokenStore()
 	hub := cpws.NewHub(logger.Named("ws"), func(probeID string, env protocol.Envelope) {
 		handleProbeMessage(fleetMgr, logger, probeID, env)
 	})
@@ -96,6 +98,10 @@ func main() {
 			"request_id": cmd.RequestID,
 		})
 	})
+
+	// Registration
+	mux.HandleFunc("POST /api/v1/register", api.HandleRegister(tokenStore, fleetMgr, logger.Named("register")))
+	mux.HandleFunc("POST /api/v1/tokens", api.HandleGenerateToken(tokenStore, logger.Named("tokens")))
 
 	// Fleet summary
 	mux.HandleFunc("GET /api/v1/fleet/summary", func(w http.ResponseWriter, r *http.Request) {
