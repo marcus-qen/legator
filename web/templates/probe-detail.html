@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Legator · Probe {{.Probe.ID}}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar detail-topbar">
+        <a href="/" class="back-link">← Back to Fleet</a>
+        <h1>{{if .Probe.Inventory}}{{.Probe.Inventory.Hostname}}{{else}}{{.Probe.Hostname}}{{end}}</h1>
+        <p>
+          <span>Probe ID: {{.Probe.ID}}</span>
+          <span class="separator">•</span>
+          <span class="status-pill status-{{statusClass .Probe.Status}}">{{humanizeStatus .Probe.Status}}</span>
+          <span class="separator">•</span>
+          <span>Policy: {{.Probe.PolicyLevel}}</span>
+        </p>
+        <p>
+          Last seen {{formatLastSeen .Probe.LastSeen}} · Uptime {{.Uptime}}
+        </p>
+      </header>
+
+      <main class="detail-grid">
+        <section class="panel inventory-panel">
+          <h2>Inventory</h2>
+
+          <dl class="metadata-grid">
+            <div>
+              <dt>Hostname</dt>
+              <dd>{{if .Probe.Inventory}}{{.Probe.Inventory.Hostname}}{{else}}{{.Probe.Hostname}}{{end}}</dd>
+            </div>
+            <div>
+              <dt>OS</dt>
+              <dd>{{if .Probe.Inventory}}{{.Probe.Inventory.OS}}{{else}}{{.Probe.OS}}{{end}}</dd>
+            </div>
+            <div>
+              <dt>Arch</dt>
+              <dd>{{if .Probe.Inventory}}{{.Probe.Inventory.Arch}}{{else}}{{.Probe.Arch}}{{end}}</dd>
+            </div>
+            <div>
+              <dt>Kernel</dt>
+              <dd>{{if .Probe.Inventory}}{{.Probe.Inventory.Kernel}}{{else}}-{{end}}</dd>
+            </div>
+            <div>
+              <dt>CPU</dt>
+              <dd>{{if .Probe.Inventory}}{{.Probe.Inventory.CPUs}}{{else}}-{{end}} cores</dd>
+            </div>
+            <div>
+              <dt>RAM</dt>
+              <dd>{{if .Probe.Inventory}}{{humanBytes .Probe.Inventory.MemTotal}}{{else}}-{{end}}</dd>
+            </div>
+            <div>
+              <dt>Disk</dt>
+              <dd>{{if .Probe.Inventory}}{{humanBytes .Probe.Inventory.DiskTotal}}{{else}}-{{end}}</dd>
+            </div>
+          </dl>
+
+          <section class="detail-section">
+            <h3>Network interfaces ({{if .Probe.Inventory}}{{len .Probe.Inventory.Interfaces}}{{else}}0{{end}})</h3>
+            {{with .Probe.Inventory}}
+              {{if .Interfaces}}
+                <ul class="kv-list">
+                  {{range .Interfaces}}
+                    <li>
+                      <div>
+                        <strong>{{.Name}}</strong>
+                        {{if .MAC}} · {{.MAC}}{{end}}
+                      </div>
+                      <div>{{.State}}</div>
+                      <ul>
+                        {{range .Addrs}}
+                          <li>{{.}}</li>
+                        {{end}}
+                      </ul>
+                    </li>
+                  {{end}}
+                </ul>
+              {{else}}
+                <p class="empty-state">No interfaces reported yet.</p>
+              {{end}}
+            {{else}}
+              <p class="empty-state">No interfaces reported yet.</p>
+            {{end}}
+          </section>
+
+          <section class="detail-section">
+            <h3>Services ({{if .Probe.Inventory}}{{len .Probe.Inventory.Services}}{{else}}0{{end}})</h3>
+            {{with .Probe.Inventory}}
+              {{if .Services}}
+                <ul class="kv-list">
+                  {{range .Services}}
+                    <li>
+                      <span>{{.Name}}</span>
+                      <span>{{.State}} · enabled={{.Enabled}}</span>
+                    </li>
+                  {{end}}
+                </ul>
+              {{else}}
+                <p class="empty-state">No services reported yet.</p>
+              {{end}}
+            {{else}}
+              <p class="empty-state">No services reported yet.</p>
+            {{end}}
+          </section>
+
+          <section class="detail-section">
+            <h3>Packages ({{if .Probe.Inventory}}{{len .Probe.Inventory.Packages}}{{else}}0{{end}})</h3>
+            {{with .Probe.Inventory}}
+              {{if .Packages}}
+                <ul class="kv-list">
+                  {{range .Packages}}
+                    <li>{{.Name}} <span class="muted">{{.Version}} ({{.Manager}})</span></li>
+                  {{end}}
+                </ul>
+              {{else}}
+                <p class="empty-state">No packages reported yet.</p>
+              {{end}}
+            {{else}}
+              <p class="empty-state">No packages reported yet.</p>
+            {{end}}
+          </section>
+
+          <section class="detail-section">
+            <h3>Users ({{if .Probe.Inventory}}{{len .Probe.Inventory.Users}}{{else}}0{{end}})</h3>
+            {{with .Probe.Inventory}}
+              {{if .Users}}
+                <ul class="kv-list">
+                  {{range .Users}}
+                    <li>
+                      <span>{{.Name}} (UID {{.UID}})</span>
+                      <span class="muted">{{range .Groups}}{{.}} {{end}}</span>
+                    </li>
+                  {{end}}
+                </ul>
+              {{else}}
+                <p class="empty-state">No users reported yet.</p>
+              {{end}}
+            {{else}}
+              <p class="empty-state">No users reported yet.</p>
+            {{end}}
+          </section>
+        </section>
+
+        <aside class="panel chat-panel">
+          <h2>Chat</h2>
+          <div class="chat-placeholder">Chat coming soon</div>
+        </aside>
+      </main>
+    </div>
+  </body>
+</html>

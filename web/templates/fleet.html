@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Legator Fleet</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <h1>Legator Control Plane</h1>
+        <p>Fleet overview and probe management</p>
+      </header>
+
+      <section class="summary-bar" aria-label="fleet summary">
+        <div class="summary-pill">
+          <span>Online</span>
+          <strong id="online-count">{{.Summary.Online}}</strong>
+        </div>
+        <div class="summary-pill">
+          <span>Offline</span>
+          <strong id="offline-count">{{.Summary.Offline}}</strong>
+        </div>
+        <div class="summary-pill">
+          <span>Degraded</span>
+          <strong id="degraded-count">{{.Summary.Degraded}}</strong>
+        </div>
+        <div class="summary-pill total">
+          <span>Total</span>
+          <strong id="total-count">{{.Summary.Total}}</strong>
+        </div>
+      </section>
+
+      <section class="panel" aria-label="fleet table">
+        <div class="panel-header">
+          <h2>Fleet</h2>
+          <span class="panel-subtitle">Auto-refreshes every 10 seconds</span>
+        </div>
+        <div class="table-wrap">
+          <table class="fleet-table">
+            <thead>
+              <tr>
+                <th>Hostname</th>
+                <th>Probe ID</th>
+                <th>Status</th>
+                <th>OS</th>
+                <th>Arch</th>
+                <th>CPUs</th>
+                <th>Last seen</th>
+                <th>Policy</th>
+              </tr>
+            </thead>
+            <tbody id="fleet-table-body">
+              {{if .Probes}}
+                {{range .Probes}}
+                  <tr class="probe-row" data-probe-id="{{.ID}}" tabindex="0">
+                    <td>{{if .Hostname}}{{.Hostname}}{{else}}-{{end}}</td>
+                    <td>{{.ID}}</td>
+                    <td>
+                      <span class="status-badge status-{{statusClass .Status}}">
+                        {{humanizeStatus .Status}}
+                      </span>
+                    </td>
+                    <td>{{if .OS}}{{.OS}}{{else}}-{{end}}</td>
+                    <td>{{if .Arch}}{{.Arch}}{{else}}-{{end}}</td>
+                    <td>{{if .Inventory}}{{.Inventory.CPUs}}{{else}}-{{end}}</td>
+                    <td>{{formatLastSeen .LastSeen}}</td>
+                    <td>{{.PolicyLevel}}</td>
+                  </tr>
+                {{end}}
+              {{else}}
+                <tr>
+                  <td colspan="8" class="empty-state">No probes registered yet.</td>
+                </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <template id="fleet-row-template">
+      <tr class="probe-row" data-probe-id="">
+        <td class="hostname"></td>
+        <td class="probe-id"></td>
+        <td>
+          <span class="status-badge"></span>
+        </td>
+        <td class="os"></td>
+        <td class="arch"></td>
+        <td class="cpus"></td>
+        <td class="last-seen"></td>
+        <td class="policy"></td>
+      </tr>
+    </template>
+
+    <script>
+      const POLL_INTERVAL_MS = 10000;
+
+      function statusToClass(status) {
+        const normalized = (status || "pending").toLowerCase();
+        if (normalized === "online") return "status-online";
+        if (normalized === "degraded") return "status-degraded";
+        if (normalized === "offline") return "status-offline";
+        return "status-pending";
+      }
+
+      function formatLastSeen(value) {
+        if (!value) return "—";
+        const ts = new Date(value);
+        if (isNaN(ts.getTime())) return value;
+
+        const now = new Date();
+        const diff = Math.max(0, Math.floor((now - ts) / 1000));
+        const hours = Math.floor(diff / 3600);
+        const mins = Math.floor((diff % 3600) / 60);
+        const secs = diff % 60;
+
+        if (diff < 60) return `${diff}s ago`;
+        if (diff < 3600) return `${mins}m ${secs}s ago`;
+        if (diff < 86400) return `${hours}h ${mins}m ago`;
+
+        const days = Math.floor(diff / 86400);
+        const remHours = Math.floor((diff % 86400) / 3600);
+        return `${days}d ${remHours}h ago`;
+      }
+
+      function normalizeStatus(status) {
+        return (status || "pending").toLowerCase();
+      }
+
+      function renderRow(probe) {
+        const template = document.getElementById('fleet-row-template');
+        const row = template.content.firstElementChild.cloneNode(true);
+
+        row.dataset.probeId = probe.id;
+        row.querySelector('.hostname').textContent = probe.hostname || '-';
+        row.querySelector('.probe-id').textContent = probe.id || '-';
+
+        const statusBadge = row.querySelector('.status-badge');
+        const normalized = normalizeStatus(probe.status);
+        statusBadge.classList.add(statusToClass(normalized));
+        statusBadge.textContent = normalized;
+
+        row.querySelector('.os').textContent = probe.os || '-';
+        row.querySelector('.arch').textContent = probe.arch || '-';
+        row.querySelector('.cpus').textContent = probe.inventory && typeof probe.inventory.cpus === 'number' ? probe.inventory.cpus : '-';
+        row.querySelector('.last-seen').textContent = formatLastSeen(probe.last_seen);
+        row.querySelector('.policy').textContent = probe.policy_level || 'observe';
+
+        row.addEventListener('click', () => {
+          window.location.href = `/probe/${encodeURIComponent(probe.id)}`;
+        });
+        row.addEventListener('keypress', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            window.location.href = `/probe/${encodeURIComponent(probe.id)}`;
+          }
+        });
+
+        return row;
+      }
+
+      function renderFleetTable(probes) {
+        const tableBody = document.getElementById('fleet-table-body');
+
+        tableBody.innerHTML = '';
+        if (!Array.isArray(probes) || probes.length === 0) {
+          const empty = document.createElement('tr');
+          const cell = document.createElement('td');
+          cell.colSpan = 8;
+          cell.className = 'empty-state';
+          cell.textContent = 'No probes registered yet.';
+          empty.appendChild(cell);
+          tableBody.appendChild(empty);
+        } else {
+          probes.forEach((probe) => {
+            tableBody.appendChild(renderRow(probe));
+          });
+        }
+
+        let online = 0;
+        let offline = 0;
+        let degraded = 0;
+
+        probes.forEach((probe) => {
+          const normalized = normalizeStatus(probe.status);
+          if (normalized === 'online') online += 1;
+          else if (normalized === 'offline') offline += 1;
+          else if (normalized === 'degraded') degraded += 1;
+        });
+
+        document.getElementById('online-count').textContent = String(online);
+        document.getElementById('offline-count').textContent = String(offline);
+        document.getElementById('degraded-count').textContent = String(degraded);
+        document.getElementById('total-count').textContent = String(Array.isArray(probes) ? probes.length : 0);
+      }
+
+      function refreshFleet() {
+        fetch('/api/v1/probes', { cache: 'no-store' })
+          .then((res) => {
+            if (!res.ok) {
+              throw new Error(`status ${res.status}`);
+            }
+            return res.json();
+          })
+          .then((probes) => {
+            renderFleetTable(probes);
+          })
+          .catch((error) => {
+            console.error('Failed to refresh fleet data:', error);
+          });
+      }
+
+      function attachRowNavigation() {
+        document.querySelectorAll('.probe-row[data-probe-id]').forEach((row) => {
+          const probeId = row.dataset.probeId;
+          if (!probeId) return;
+
+          row.addEventListener('click', () => {
+            window.location.href = `/probe/${encodeURIComponent(probeId)}`;
+          });
+          row.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              window.location.href = `/probe/${encodeURIComponent(probeId)}`;
+            }
+          });
+        });
+      }
+
+      attachRowNavigation();
+      refreshFleet();
+      setInterval(refreshFleet, POLL_INTERVAL_MS);
+    </script>
+  </body>
+</html>

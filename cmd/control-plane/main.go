@@ -5,9 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -25,6 +30,35 @@ var (
 	date    = "unknown"
 )
 
+// Template types for fleet UI
+type FleetSummary struct {
+	Online   int
+	Offline  int
+	Degraded int
+	Total    int
+}
+
+type FleetPageData struct {
+	Probes  []*fleet.ProbeState
+	Summary FleetSummary
+	Version string
+	Commit  string
+}
+
+type ProbePageData struct {
+	Probe  *fleet.ProbeState
+	Uptime string
+}
+
+func templateFuncs() template.FuncMap {
+	return template.FuncMap{
+		"statusClass":    templateStatusClass,
+		"humanizeStatus": templateHumanizeStatus,
+		"formatLastSeen": formatLastSeen,
+		"humanBytes":     humanBytes,
+	}
+}
+
 func main() {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
@@ -32,6 +66,14 @@ func main() {
 	cfg, err := loadConfig()
 	if err != nil {
 		logger.Fatal("failed to load config", zap.Error(err))
+	}
+
+	// Load templates — look relative to binary, fall back to working dir
+	tmplDir := filepath.Join("web", "templates")
+	tmpl, err := template.New("").Funcs(templateFuncs()).ParseGlob(filepath.Join(tmplDir, "*.html"))
+	if err != nil {
+		logger.Warn("failed to load templates, UI will show fallback", zap.Error(err))
+		tmpl = nil
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -120,7 +162,7 @@ func main() {
 		fmt.Fprintln(w, `{"approvals":[]}`)
 	})
 
-	// Audit log (stub for now)
+	// Audit log
 	mux.HandleFunc("GET /api/v1/audit", func(w http.ResponseWriter, r *http.Request) {
 		probeID := r.URL.Query().Get("probe_id")
 		limit := 50
@@ -132,20 +174,88 @@ func main() {
 	// WebSocket endpoint for probes
 	mux.HandleFunc("GET /ws/probe", hub.HandleProbeWS)
 
-	// Web UI placeholder
+	// Static assets
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join("web", "static")))))
+
+	// Fleet UI (root)
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, `<!DOCTYPE html>
+		if tmpl == nil {
+			// Fallback when templates aren't available
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprintf(w, `<!DOCTYPE html>
 <html><head><title>Legator Control Plane</title></head>
 <body>
 <h1>Legator Control Plane</h1>
 <p>Version: %s (%s)</p>
 <p><a href="/api/v1/probes">Fleet API</a> | <a href="/api/v1/fleet/summary">Summary</a></p>
 </body></html>`, version, commit)
+			return
+		}
+
+		probes := fleetMgr.List()
+		sort.Slice(probes, func(i, j int) bool {
+			lhs := strings.ToLower(probes[i].Hostname)
+			if lhs == "" {
+				lhs = probes[i].ID
+			}
+			rhs := strings.ToLower(probes[j].Hostname)
+			if rhs == "" {
+				rhs = probes[j].ID
+			}
+			return lhs < rhs
+		})
+
+		counts := fleetMgr.Count()
+		data := FleetPageData{
+			Probes: probes,
+			Summary: FleetSummary{
+				Online:   counts["online"],
+				Offline:  counts["offline"],
+				Degraded: counts["degraded"],
+				Total:    len(probes),
+			},
+			Version: version,
+			Commit:  commit,
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := tmpl.ExecuteTemplate(w, "fleet.html", data); err != nil {
+			logger.Error("failed to render fleet page", zap.Error(err))
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
+	})
+
+	// Probe detail UI
+	mux.HandleFunc("GET /probe/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		ps, ok := fleetMgr.Get(id)
+		if !ok {
+			ps = &fleet.ProbeState{
+				ID:          id,
+				Status:      "offline",
+				PolicyLevel: protocol.CapObserve,
+			}
+		}
+
+		if tmpl == nil {
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprintf(w, `<h1>Probe: %s</h1><p>Status: %s</p>`, id, ps.Status)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		data := ProbePageData{
+			Probe:  ps,
+			Uptime: calculateUptime(ps.Registered),
+		}
+		if err := tmpl.ExecuteTemplate(w, "probe-detail.html", data); err != nil {
+			logger.Error("failed to render probe detail", zap.String("probe", id), zap.Error(err))
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
 	})
 
 	srv := &http.Server{
@@ -237,6 +347,84 @@ func offlineChecker(ctx context.Context, fm *fleet.Manager) {
 			fm.MarkOffline(60 * time.Second)
 		}
 	}
+}
+
+// Template helper functions
+
+func formatLastSeen(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
+func templateStatusClass(status string) string {
+	switch strings.ToLower(status) {
+	case "online":
+		return "online"
+	case "offline":
+		return "offline"
+	case "degraded":
+		return "degraded"
+	default:
+		return "pending"
+	}
+}
+
+func templateHumanizeStatus(status string) string {
+	s := strings.ToLower(status)
+	if s == "" {
+		return "pending"
+	}
+	return s
+}
+
+func humanBytes(v uint64) string {
+	if v == 0 {
+		return "0 B"
+	}
+	units := []string{"B", "KiB", "MiB", "GiB", "TiB"}
+	value := float64(v)
+	unit := 0
+	for unit < len(units)-1 && value >= 1024 {
+		value /= 1024
+		unit++
+	}
+	if unit == 0 {
+		return fmt.Sprintf("%.0f %s", value, units[unit])
+	}
+	return fmt.Sprintf("%.1f %s", value, units[unit])
+}
+
+func calculateUptime(start time.Time) string {
+	if start.IsZero() {
+		return "n/a"
+	}
+	secs := int64(time.Since(start).Seconds())
+	if secs < 60 {
+		return strconv.FormatInt(secs, 10) + "s"
+	}
+	mins := secs / 60
+	secs %= 60
+	hours := mins / 60
+	mins %= 60
+	days := hours / 24
+	hours %= 24
+
+	var parts []string
+	if days > 0 {
+		parts = append(parts, fmt.Sprintf("%dd", days))
+	}
+	if hours > 0 {
+		parts = append(parts, fmt.Sprintf("%dh", hours))
+	}
+	if mins > 0 {
+		parts = append(parts, fmt.Sprintf("%dm", mins))
+	}
+	if len(parts) == 0 {
+		parts = append(parts, fmt.Sprintf("%ds", secs))
+	}
+	return strings.Join(parts, " ")
 }
 
 type Config struct {
