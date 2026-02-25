@@ -177,7 +177,71 @@ else
   fail "Expected 503 for task without LLM, got $TASK_CODE"
 fi
 
-# 12. Summary
+
+# 12. Approval queue — dangerous command should be held
+echo ""
+echo "12. Testing approval queue (dangerous command)..."
+DANGER_RESULT=$(curl -sf -X POST "$CP_URL/api/v1/probes/$PROBE_ID/command" \
+  -H "Content-Type: application/json" \
+  -d '{"command":"rm","args":["-rf","/tmp/test"],"level":"remediate","timeout":5000000000}')
+
+DANGER_STATUS=$(echo "$DANGER_RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status', ''))" 2>/dev/null || echo "")
+APPROVAL_ID=$(echo "$DANGER_RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('approval_id', ''))" 2>/dev/null || echo "")
+
+if [[ "$DANGER_STATUS" == "pending_approval" ]] && [[ -n "$APPROVAL_ID" ]]; then
+  pass "Dangerous command held for approval (id=$APPROVAL_ID)"
+else
+  fail "Expected pending_approval, got: $DANGER_RESULT"
+fi
+
+# 13. Approval queue — list pending
+echo ""
+echo "13. Checking pending approvals..."
+PENDING_APPROVALS=$(curl -sf "$CP_URL/api/v1/approvals?status=pending")
+PENDING_COUNT=$(echo "$PENDING_APPROVALS" | python3 -c "import sys,json; print(json.load(sys.stdin).get('pending_count', 0))" 2>/dev/null || echo "0")
+if [[ "$PENDING_COUNT" -ge 1 ]]; then
+  pass "Pending approval count: $PENDING_COUNT"
+else
+  fail "Expected at least 1 pending approval, got $PENDING_COUNT"
+fi
+
+# 14. Approval queue — deny the request
+echo ""
+echo "14. Denying approval request..."
+DENY_RESULT=$(curl -sf -X POST "$CP_URL/api/v1/approvals/$APPROVAL_ID/decide" \
+  -H "Content-Type: application/json" \
+  -d '{"decision":"denied","decided_by":"e2e-test"}')
+
+DENY_STATUS=$(echo "$DENY_RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status', ''))" 2>/dev/null || echo "")
+if [[ "$DENY_STATUS" == "denied" ]]; then
+  pass "Approval request denied"
+else
+  fail "Expected denied, got: $DENY_RESULT"
+fi
+
+# 15. Fleet summary includes approval count
+echo ""
+echo "15. Checking fleet summary includes approvals..."
+SUMMARY=$(curl -sf "$CP_URL/api/v1/fleet/summary")
+HAS_APPROVALS=$(echo "$SUMMARY" | python3 -c "import sys,json; d=json.load(sys.stdin); print('yes' if 'pending_approvals' in d else 'no')" 2>/dev/null || echo "no")
+if [[ "$HAS_APPROVALS" == "yes" ]]; then
+  pass "Fleet summary includes pending_approvals field"
+else
+  fail "Fleet summary missing pending_approvals"
+fi
+
+# 16. Audit log has entries
+echo ""
+echo "16. Checking audit log..."
+AUDIT=$(curl -sf "$CP_URL/api/v1/audit?limit=5")
+AUDIT_TOTAL=$(echo "$AUDIT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('total', 0))" 2>/dev/null || echo "0")
+if [[ "$AUDIT_TOTAL" -ge 3 ]]; then
+  pass "Audit log has $AUDIT_TOTAL entries"
+else
+  fail "Expected at least 3 audit entries, got $AUDIT_TOTAL"
+fi
+
+# 17. Summary
 echo ""
 echo "=========================="
 echo "Results: $PASSED passed, $FAILED failed"

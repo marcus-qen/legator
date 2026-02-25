@@ -17,10 +17,11 @@ import (
 	"time"
 
 	"github.com/marcus-qen/legator/internal/controlplane/api"
-	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
-	"github.com/marcus-qen/legator/internal/controlplane/llm"
+	"github.com/marcus-qen/legator/internal/controlplane/approval"
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
+	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
+	"github.com/marcus-qen/legator/internal/controlplane/llm"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
 	"github.com/marcus-qen/legator/internal/protocol"
 	"go.uber.org/zap"
@@ -70,7 +71,7 @@ func main() {
 		logger.Fatal("failed to load config", zap.Error(err))
 	}
 
-	// Load templates — look relative to binary, fall back to working dir
+	// Load templates
 	tmplDir := filepath.Join("web", "templates")
 	tmpl, err := template.New("").Funcs(templateFuncs()).ParseGlob(filepath.Join(tmplDir, "*.html"))
 	if err != nil {
@@ -84,8 +85,62 @@ func main() {
 	// Core components
 	fleetMgr := fleet.NewManager(logger.Named("fleet"))
 	tokenStore := api.NewTokenStore()
-	auditLog := audit.NewLog(10000) // 10k event ring buffer
-	cmdTracker := cmdtracker.New(2 * time.Minute) // 2-min timeout for command results
+	cmdTracker := cmdtracker.New(2 * time.Minute)
+
+	// Audit log: prefer SQLite-backed, fall back to in-memory
+	var auditLog *audit.Log
+	var auditStore *audit.Store
+	auditDBPath := filepath.Join(cfg.DataDir, "audit.db")
+	if err := os.MkdirAll(cfg.DataDir, 0750); err != nil {
+		logger.Warn("cannot create data dir, audit log will be in-memory only",
+			zap.String("dir", cfg.DataDir), zap.Error(err))
+		auditLog = audit.NewLog(10000)
+	} else {
+		store, err := audit.NewStore(auditDBPath, 10000)
+		if err != nil {
+			logger.Warn("cannot open audit database, falling back to in-memory",
+				zap.String("path", auditDBPath), zap.Error(err))
+			auditLog = audit.NewLog(10000)
+		} else {
+			auditStore = store
+			logger.Info("audit store opened", zap.String("path", auditDBPath))
+			defer auditStore.Close()
+		}
+	}
+
+	// Helper: emit audit event (works with either store or log)
+	emitAudit := func(typ audit.EventType, probeID, actor, summary string) {
+		if auditStore != nil {
+			auditStore.Emit(typ, probeID, actor, summary)
+		} else {
+			auditLog.Emit(typ, probeID, actor, summary)
+		}
+	}
+	recordAudit := func(evt audit.Event) {
+		if auditStore != nil {
+			auditStore.Record(evt)
+		} else {
+			auditLog.Record(evt)
+		}
+	}
+	queryAudit := func(f audit.Filter) []audit.Event {
+		if auditStore != nil {
+			return auditStore.Query(f)
+		}
+		return auditLog.Query(f)
+	}
+	countAudit := func() int {
+		if auditStore != nil {
+			return auditStore.Count()
+		}
+		return auditLog.Count()
+	}
+
+	// Approval queue: 15-minute TTL, 500 max pending
+	approvalQueue := approval.NewQueue(15*time.Minute, 500)
+	approvalQueue.StartReaper(30*time.Second, ctx.Done())
+	logger.Info("approval queue started", zap.Duration("ttl", 15*time.Minute))
+
 	var hub *cpws.Hub
 
 	// LLM provider (configured via env vars)
@@ -102,15 +157,13 @@ func main() {
 			zap.String("provider", providerCfg.Name),
 			zap.String("model", providerCfg.Model),
 		)
-		// taskRunner is created after hub is available (see below)
-		// Dispatch function: send command and wait for result
+
 		dispatch := func(probeID string, cmd *protocol.CommandPayload) (*protocol.CommandResultPayload, error) {
 			pending := cmdTracker.Track(cmd.RequestID, probeID, cmd.Command, cmd.Level)
 			if err := hub.SendTo(probeID, protocol.MsgCommand, *cmd); err != nil {
 				cmdTracker.Cancel(cmd.RequestID)
 				return nil, err
 			}
-			// Wait up to cmd.Timeout + 5s grace
 			timeout := cmd.Timeout + 5*time.Second
 			if timeout < 10*time.Second {
 				timeout = 35 * time.Second
@@ -127,7 +180,7 @@ func main() {
 	}
 
 	hub = cpws.NewHub(logger.Named("ws"), func(probeID string, env protocol.Envelope) {
-		handleProbeMessage(fleetMgr, auditLog, cmdTracker, logger, probeID, env)
+		handleProbeMessage(fleetMgr, emitAudit, recordAudit, cmdTracker, logger, probeID, env)
 	})
 
 	// Start offline checker
@@ -135,7 +188,7 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// Health + version
+	// ── Health + version ─────────────────────────────────────
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "ok")
@@ -146,7 +199,7 @@ func main() {
 		})
 	})
 
-	// Fleet API
+	// ── Fleet API ────────────────────────────────────────────
 	mux.HandleFunc("GET /api/v1/probes", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(fleetMgr.List())
@@ -174,16 +227,33 @@ func main() {
 			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
 			return
 		}
-
-		// Generate request ID if not provided
 		if cmd.RequestID == "" {
 			cmd.RequestID = fmt.Sprintf("cmd-%d", time.Now().UnixNano()%100000)
 		}
 
-		// Check if caller wants to wait for result (?wait=true)
+		// Check if this command needs approval
+		if approval.NeedsApproval(&cmd, ps.PolicyLevel) {
+			req, err := approvalQueue.Submit(id, &cmd, "Manual command dispatch", approval.ClassifyRisk(&cmd), "api")
+			if err != nil {
+				http.Error(w, fmt.Sprintf(`{"error":"approval queue: %s"}`, err.Error()), http.StatusServiceUnavailable)
+				return
+			}
+			emitAudit(audit.EventApprovalRequest, id, "api",
+				fmt.Sprintf("Approval required for: %s (risk: %s)", cmd.Command, approval.ClassifyRisk(&cmd)))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":      "pending_approval",
+				"approval_id": req.ID,
+				"risk_level":  req.RiskLevel,
+				"expires_at":  req.ExpiresAt,
+				"message":     "Command requires human approval. Use POST /api/v1/approvals/{id}/decide to approve or deny.",
+			})
+			return
+		}
+
 		wantWait := r.URL.Query().Get("wait") == "true" || r.URL.Query().Get("wait") == "1"
 
-		// Track the command before dispatching
 		var pending *cmdtracker.PendingCommand
 		if wantWait {
 			pending = cmdTracker.Track(cmd.RequestID, id, cmd.Command, ps.PolicyLevel)
@@ -197,8 +267,9 @@ func main() {
 			return
 		}
 
+		emitAudit(audit.EventCommandSent, id, "api", fmt.Sprintf("Command dispatched: %s", cmd.Command))
+
 		if !wantWait {
-			// Fire-and-forget mode (backwards compatible)
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"status":     "dispatched",
@@ -207,7 +278,6 @@ func main() {
 			return
 		}
 
-		// Synchronous mode: wait for probe result
 		timeout := 30 * time.Second
 		if cmd.Timeout > 0 {
 			timeout = cmd.Timeout + 5*time.Second
@@ -227,35 +297,119 @@ func main() {
 		}
 	})
 
-	// Registration
-	mux.HandleFunc("POST /api/v1/register", api.HandleRegisterWithAudit(tokenStore, fleetMgr, auditLog, logger.Named("register")))
-	mux.HandleFunc("POST /api/v1/tokens", api.HandleGenerateTokenWithAudit(tokenStore, auditLog, logger.Named("tokens")))
+	// ── Registration ─────────────────────────────────────────
+	// Build audit recorder for register handlers
+	var auditRecorder api.AuditRecorder
+	if auditStore != nil {
+		auditRecorder = auditStore
+	} else {
+		auditRecorder = auditLog
+	}
+	mux.HandleFunc("POST /api/v1/register", api.HandleRegisterWithAudit(tokenStore, fleetMgr, auditRecorder, logger.Named("register")))
+	mux.HandleFunc("POST /api/v1/tokens", api.HandleGenerateTokenWithAudit(tokenStore, auditRecorder, logger.Named("tokens")))
 
-	// Fleet summary
+	// ── Fleet summary ────────────────────────────────────────
 	mux.HandleFunc("GET /api/v1/fleet/summary", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"counts":    fleetMgr.Count(),
-			"connected": hub.Connected(),
+			"counts":           fleetMgr.Count(),
+			"connected":        hub.Connected(),
+			"pending_approvals": approvalQueue.PendingCount(),
 		})
 	})
 
-	// Approval queue (stub for now)
+	// ── Approval queue API ───────────────────────────────────
 	mux.HandleFunc("GET /api/v1/approvals", func(w http.ResponseWriter, r *http.Request) {
+		limitStr := r.URL.Query().Get("limit")
+		limit := 50
+		if v, err := strconv.Atoi(limitStr); err == nil && v > 0 {
+			limit = v
+		}
+
+		status := r.URL.Query().Get("status")
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `{"approvals":[]}`)
+
+		if status == "pending" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"approvals":     approvalQueue.Pending(),
+				"pending_count": approvalQueue.PendingCount(),
+			})
+			return
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"approvals":     approvalQueue.All(limit),
+			"pending_count": approvalQueue.PendingCount(),
+		})
 	})
 
-	// Audit log
+	mux.HandleFunc("GET /api/v1/approvals/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		req, ok := approvalQueue.Get(id)
+		if !ok {
+			http.Error(w, `{"error":"approval request not found"}`, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(req)
+	})
+
+	mux.HandleFunc("POST /api/v1/approvals/{id}/decide", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+
+		var body struct {
+			Decision  string `json:"decision"`  // "approved" or "denied"
+			DecidedBy string `json:"decided_by"` // who is deciding
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+			return
+		}
+		if body.Decision == "" || body.DecidedBy == "" {
+			http.Error(w, `{"error":"decision and decided_by are required"}`, http.StatusBadRequest)
+			return
+		}
+
+		req, err := approvalQueue.Decide(id, approval.Decision(body.Decision), body.DecidedBy)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadRequest)
+			return
+		}
+
+		emitAudit(audit.EventApprovalDecided, req.ProbeID, body.DecidedBy,
+			fmt.Sprintf("Approval %s for: %s", body.Decision, req.Command.Command))
+
+		// If approved, dispatch the command now
+		if req.Decision == approval.DecisionApproved {
+			if err := hub.SendTo(req.ProbeID, protocol.MsgCommand, *req.Command); err != nil {
+				http.Error(w, fmt.Sprintf(`{"error":"approved but dispatch failed: %s"}`, err.Error()), http.StatusBadGateway)
+				return
+			}
+			emitAudit(audit.EventCommandSent, req.ProbeID, body.DecidedBy,
+				fmt.Sprintf("Approved command dispatched: %s", req.Command.Command))
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":  string(req.Decision),
+			"request": req,
+		})
+	})
+
+	// ── Audit log ────────────────────────────────────────────
 	mux.HandleFunc("GET /api/v1/audit", func(w http.ResponseWriter, r *http.Request) {
 		probeID := r.URL.Query().Get("probe_id")
+		limitStr := r.URL.Query().Get("limit")
 		limit := 50
-		events := auditLog.Query(audit.Filter{ProbeID: probeID, Limit: limit})
+		if v, err := strconv.Atoi(limitStr); err == nil && v > 0 {
+			limit = v
+		}
+		events := queryAudit(audit.Filter{ProbeID: probeID, Limit: limit})
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"events": events, "total": auditLog.Count()})
+		_ = json.NewEncoder(w).Encode(map[string]any{"events": events, "total": countAudit()})
 	})
 
-	// Task execution (LLM-powered)
+	// ── Task execution (LLM-powered) ─────────────────────────
 	mux.HandleFunc("POST /api/v1/probes/{id}/task", func(w http.ResponseWriter, r *http.Request) {
 		if taskRunner == nil {
 			http.Error(w, `{"error":"no LLM provider configured. Set LEGATOR_LLM_PROVIDER, LEGATOR_LLM_BASE_URL, LEGATOR_LLM_API_KEY, LEGATOR_LLM_MODEL"}`, http.StatusServiceUnavailable)
@@ -282,6 +436,8 @@ func main() {
 			zap.String("task", req.Task),
 		)
 
+		emitAudit(audit.EventCommandSent, id, "llm-task", fmt.Sprintf("Task submitted: %s", req.Task))
+
 		result, err := taskRunner.Run(r.Context(), id, req.Task, ps.Inventory, ps.PolicyLevel)
 		if err != nil {
 			logger.Warn("task execution error", zap.String("probe", id), zap.Error(err))
@@ -291,7 +447,7 @@ func main() {
 		_ = json.NewEncoder(w).Encode(result)
 	})
 
-	// Pending commands
+	// ── Pending commands ─────────────────────────────────────
 	mux.HandleFunc("GET /api/v1/commands/pending", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -300,27 +456,26 @@ func main() {
 		})
 	})
 
-	// WebSocket endpoint for probes
+	// ── WebSocket endpoint for probes ────────────────────────
 	mux.HandleFunc("GET /ws/probe", hub.HandleProbeWS)
 
-	// Static assets
+	// ── Static assets ────────────────────────────────────────
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join("web", "static")))))
 
-	// Fleet UI (root)
+	// ── Fleet UI (root) ──────────────────────────────────────
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}
 		if tmpl == nil {
-			// Fallback when templates aren't available
 			w.Header().Set("Content-Type", "text/html")
 			fmt.Fprintf(w, `<!DOCTYPE html>
 <html><head><title>Legator Control Plane</title></head>
 <body>
 <h1>Legator Control Plane</h1>
 <p>Version: %s (%s)</p>
-<p><a href="/api/v1/probes">Fleet API</a> | <a href="/api/v1/fleet/summary">Summary</a></p>
+<p><a href="/api/v1/probes">Fleet API</a> | <a href="/api/v1/fleet/summary">Summary</a> | <a href="/api/v1/approvals?status=pending">Approvals</a></p>
 </body></html>`, version, commit)
 			return
 		}
@@ -358,7 +513,7 @@ func main() {
 		}
 	})
 
-	// Probe detail UI
+	// ── Probe detail UI ──────────────────────────────────────
 	mux.HandleFunc("GET /probe/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		ps, ok := fleetMgr.Get(id)
@@ -398,6 +553,7 @@ func main() {
 	logger.Info("starting control plane",
 		zap.String("addr", cfg.ListenAddr),
 		zap.String("version", version),
+		zap.Bool("audit_persistent", auditStore != nil),
 	)
 
 	go func() {
@@ -416,7 +572,15 @@ func main() {
 	}
 }
 
-func handleProbeMessage(fm *fleet.Manager, al *audit.Log, ct *cmdtracker.Tracker, logger *zap.Logger, probeID string, env protocol.Envelope) {
+func handleProbeMessage(
+	fm *fleet.Manager,
+	emitAudit func(audit.EventType, string, string, string),
+	recordAudit func(audit.Event),
+	ct *cmdtracker.Tracker,
+	logger *zap.Logger,
+	probeID string,
+	env protocol.Envelope,
+) {
 	switch env.Type {
 	case protocol.MsgHeartbeat:
 		data, _ := json.Marshal(env.Payload)
@@ -426,10 +590,9 @@ func handleProbeMessage(fm *fleet.Manager, al *audit.Log, ct *cmdtracker.Tracker
 			return
 		}
 		if err := fm.Heartbeat(probeID, &hb); err != nil {
-			// Auto-register on first heartbeat from unknown probe
 			fm.Register(probeID, "", "", "")
 			_ = fm.Heartbeat(probeID, &hb)
-			al.Emit(audit.EventProbeRegistered, probeID, "system", "Auto-registered via heartbeat")
+			emitAudit(audit.EventProbeRegistered, probeID, "system", "Auto-registered via heartbeat")
 		}
 
 	case protocol.MsgInventory:
@@ -442,7 +605,7 @@ func handleProbeMessage(fm *fleet.Manager, al *audit.Log, ct *cmdtracker.Tracker
 		if err := fm.UpdateInventory(probeID, &inv); err != nil {
 			logger.Warn("inventory update failed", zap.String("probe", probeID), zap.Error(err))
 		} else {
-			al.Emit(audit.EventInventoryUpdate, probeID, probeID, "Inventory updated")
+			emitAudit(audit.EventInventoryUpdate, probeID, probeID, "Inventory updated")
 		}
 
 	case protocol.MsgCommandResult:
@@ -457,14 +620,13 @@ func handleProbeMessage(fm *fleet.Manager, al *audit.Log, ct *cmdtracker.Tracker
 			zap.String("request_id", result.RequestID),
 			zap.Int("exit_code", result.ExitCode),
 		)
-		al.Record(audit.Event{
+		recordAudit(audit.Event{
 			Type:    audit.EventCommandResult,
 			ProbeID: probeID,
 			Actor:   probeID,
 			Summary: "Command completed: " + result.RequestID,
 			Detail:  map[string]any{"exit_code": result.ExitCode, "duration_ms": result.Duration},
 		})
-		// Route result to waiting HTTP caller (if any)
 		if err := ct.Complete(result.RequestID, &result); err != nil {
 			logger.Debug("no waiting caller for result", zap.String("request_id", result.RequestID))
 		}

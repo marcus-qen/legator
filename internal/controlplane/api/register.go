@@ -18,6 +18,12 @@ import (
 	"go.uber.org/zap"
 )
 
+// AuditRecorder is satisfied by both *audit.Log and *audit.Store.
+type AuditRecorder interface {
+	Record(evt audit.Event)
+	Emit(typ audit.EventType, probeID, actor, summary string)
+}
+
 // Token represents a single-use registration token.
 type Token struct {
 	Value   string    `json:"token"`
@@ -156,7 +162,7 @@ func generateAPIKey() string {
 }
 
 // HandleRegisterWithAudit wraps HandleRegister with audit logging.
-func HandleRegisterWithAudit(ts *TokenStore, fm *fleet.Manager, al *audit.Log, logger *zap.Logger) http.HandlerFunc {
+func HandleRegisterWithAudit(ts *TokenStore, fm *fleet.Manager, al AuditRecorder, logger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req RegisterRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -195,7 +201,7 @@ func HandleRegisterWithAudit(ts *TokenStore, fm *fleet.Manager, al *audit.Log, l
 }
 
 // HandleGenerateTokenWithAudit wraps HandleGenerateToken with audit logging.
-func HandleGenerateTokenWithAudit(ts *TokenStore, al *audit.Log, logger *zap.Logger) http.HandlerFunc {
+func HandleGenerateTokenWithAudit(ts *TokenStore, al AuditRecorder, logger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := ts.Generate()
 		al.Emit(audit.EventTokenGenerated, "", "api", "Registration token generated")
