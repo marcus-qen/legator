@@ -1,8 +1,0 @@
-## Append samples of your project ##
-resources:
-- core_v1alpha1_legatoragent.yaml
-- core_v1alpha1_legatorenvironment.yaml
-- core_v1alpha1_legatorrun.yaml
-- core_v1alpha1_modeltierconfig.yaml
-- core_v1alpha1_userpolicy.yaml
-# +kubebuilder:scaffold:manifestskustomizesamples

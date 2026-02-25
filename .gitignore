@@ -1,15 +1,8 @@
-# Binaries
+# Build output
 bin/
-testbin/
+*.exe
 
 # Go
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-*.test
-*.out
 vendor/
 
 # IDE
@@ -23,14 +16,7 @@ vendor/
 .DS_Store
 Thumbs.db
 
-# Docker
-*.tar
-
-# Coverage
-cover.out
-coverage.html
-/main
-/dashboard
-/legator-controller
-/legator-cli
-/legator
+# Probe local state (never commit)
+/etc/probe/
+/var/lib/probe/
+/var/log/probe/
