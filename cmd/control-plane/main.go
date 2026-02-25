@@ -98,7 +98,7 @@ func main() {
 		fmt.Fprintln(w, "ok")
 	})
 	mux.HandleFunc("GET /version", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"version": version, "commit": commit, "date": date,
 		})
 	})
@@ -106,7 +106,7 @@ func main() {
 	// Fleet API
 	mux.HandleFunc("GET /api/v1/probes", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(fleetMgr.List())
+		_ = json.NewEncoder(w).Encode(fleetMgr.List())
 	})
 	mux.HandleFunc("GET /api/v1/probes/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
@@ -116,7 +116,7 @@ func main() {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(ps)
+		_ = json.NewEncoder(w).Encode(ps)
 	})
 	mux.HandleFunc("POST /api/v1/probes/{id}/command", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
@@ -137,7 +137,7 @@ func main() {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status":     "dispatched",
 			"request_id": cmd.RequestID,
 		})
@@ -150,7 +150,7 @@ func main() {
 	// Fleet summary
 	mux.HandleFunc("GET /api/v1/fleet/summary", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"counts":    fleetMgr.Count(),
 			"connected": hub.Connected(),
 		})
@@ -168,7 +168,7 @@ func main() {
 		limit := 50
 		events := auditLog.Query(audit.Filter{ProbeID: probeID, Limit: limit})
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"events": events, "total": auditLog.Count()})
+		_ = json.NewEncoder(w).Encode(map[string]any{"events": events, "total": auditLog.Count()})
 	})
 
 	// WebSocket endpoint for probes

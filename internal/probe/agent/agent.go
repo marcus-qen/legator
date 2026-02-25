@@ -131,7 +131,7 @@ func (a *Agent) handleMessage(env protocol.Envelope) {
 		}, a.logger.Named("exec"))
 
 	case protocol.MsgPing:
-		a.client.Send(protocol.MsgPong, nil)
+		_ = a.client.Send(protocol.MsgPong, nil)
 
 	default:
 		a.logger.Debug("unhandled message", zap.String("type", string(env.Type)))

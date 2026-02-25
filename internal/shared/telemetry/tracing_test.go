@@ -48,7 +48,7 @@ func TestStartRunSpan(t *testing.T) {
 	exporter := setupTestTracer(t)
 
 	ctx := context.Background()
-	ctx, span := StartRunSpan(ctx, "watchman-light", "scheduled")
+	_, span := StartRunSpan(ctx, "watchman-light", "scheduled")
 	span.End()
 
 	spans := exporter.GetSpans()

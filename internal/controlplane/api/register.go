@@ -36,7 +36,7 @@ type TokenStore struct {
 // NewTokenStore creates a token store with a random HMAC secret.
 func NewTokenStore() *TokenStore {
 	secret := make([]byte, 32)
-	rand.Read(secret)
+	_, _ = rand.Read(secret)
 	return &TokenStore{
 		tokens: make(map[string]*Token),
 		secret: secret,
