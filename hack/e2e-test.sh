@@ -138,7 +138,34 @@ fi
 
 sleep 2
 
-# 9. Summary
+# 9. Synchronous command (wait for result)
+echo ""
+echo "9. Sending synchronous command (?wait=true)..."
+SYNC_RESULT=$(curl -sf -X POST "$CP_URL/api/v1/probes/$PROBE_ID/command?wait=true" \
+  -H "Content-Type: application/json" \
+  -d '{"command":"echo","args":["sync-hello"],"level":"observe","timeout":5000000000}')
+
+SYNC_EXIT=$(echo "$SYNC_RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('exit_code', -1))" 2>/dev/null || echo "-1")
+SYNC_OUT=$(echo "$SYNC_RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('stdout', ''))" 2>/dev/null || echo "")
+
+if [[ "$SYNC_EXIT" == "0" ]] && echo "$SYNC_OUT" | grep -q "sync-hello"; then
+  pass "Synchronous command returned result (exit=$SYNC_EXIT)"
+else
+  fail "Sync command failed: exit=$SYNC_EXIT out=$SYNC_OUT full=$SYNC_RESULT"
+fi
+
+# 10. Pending commands should be 0
+echo ""
+echo "10. Checking no pending commands..."
+PENDING=$(curl -sf "$CP_URL/api/v1/commands/pending")
+IN_FLIGHT=$(echo "$PENDING" | python3 -c "import sys,json; print(json.load(sys.stdin).get('in_flight', -1))" 2>/dev/null || echo "-1")
+if [[ "$IN_FLIGHT" == "0" ]]; then
+  pass "No pending commands (all resolved)"
+else
+  fail "Expected 0 pending, got $IN_FLIGHT"
+fi
+
+# 11. Summary
 echo ""
 echo "=========================="
 echo "Results: $PASSED passed, $FAILED failed"

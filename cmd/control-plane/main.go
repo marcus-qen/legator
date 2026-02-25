@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/marcus-qen/legator/internal/controlplane/api"
+	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
@@ -83,8 +84,9 @@ func main() {
 	fleetMgr := fleet.NewManager(logger.Named("fleet"))
 	tokenStore := api.NewTokenStore()
 	auditLog := audit.NewLog(10000) // 10k event ring buffer
+	cmdTracker := cmdtracker.New(2 * time.Minute) // 2-min timeout for command results
 	hub := cpws.NewHub(logger.Named("ws"), func(probeID string, env protocol.Envelope) {
-		handleProbeMessage(fleetMgr, auditLog, logger, probeID, env)
+		handleProbeMessage(fleetMgr, auditLog, cmdTracker, logger, probeID, env)
 	})
 
 	// Start offline checker
@@ -120,7 +122,8 @@ func main() {
 	})
 	mux.HandleFunc("POST /api/v1/probes/{id}/command", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
-		if _, ok := fleetMgr.Get(id); !ok {
+		ps, ok := fleetMgr.Get(id)
+		if !ok {
 			http.Error(w, `{"error":"probe not found"}`, http.StatusNotFound)
 			return
 		}
@@ -131,16 +134,56 @@ func main() {
 			return
 		}
 
+		// Generate request ID if not provided
+		if cmd.RequestID == "" {
+			cmd.RequestID = fmt.Sprintf("cmd-%d", time.Now().UnixNano()%100000)
+		}
+
+		// Check if caller wants to wait for result (?wait=true)
+		wantWait := r.URL.Query().Get("wait") == "true" || r.URL.Query().Get("wait") == "1"
+
+		// Track the command before dispatching
+		var pending *cmdtracker.PendingCommand
+		if wantWait {
+			pending = cmdTracker.Track(cmd.RequestID, id, cmd.Command, ps.PolicyLevel)
+		}
+
 		if err := hub.SendTo(id, protocol.MsgCommand, cmd); err != nil {
+			if pending != nil {
+				cmdTracker.Cancel(cmd.RequestID)
+			}
 			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadGateway)
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"status":     "dispatched",
-			"request_id": cmd.RequestID,
-		})
+		if !wantWait {
+			// Fire-and-forget mode (backwards compatible)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"status":     "dispatched",
+				"request_id": cmd.RequestID,
+			})
+			return
+		}
+
+		// Synchronous mode: wait for probe result
+		timeout := 30 * time.Second
+		if cmd.Timeout > 0 {
+			timeout = cmd.Timeout + 5*time.Second
+		}
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+
+		select {
+		case result := <-pending.Result:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(result)
+		case <-timer.C:
+			cmdTracker.Cancel(cmd.RequestID)
+			http.Error(w, `{"error":"timeout waiting for probe response"}`, http.StatusGatewayTimeout)
+		case <-r.Context().Done():
+			cmdTracker.Cancel(cmd.RequestID)
+		}
 	})
 
 	// Registration
@@ -169,6 +212,15 @@ func main() {
 		events := auditLog.Query(audit.Filter{ProbeID: probeID, Limit: limit})
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"events": events, "total": auditLog.Count()})
+	})
+
+	// Pending commands
+	mux.HandleFunc("GET /api/v1/commands/pending", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"pending":   cmdTracker.ListPending(),
+			"in_flight": cmdTracker.InFlight(),
+		})
 	})
 
 	// WebSocket endpoint for probes
@@ -287,7 +339,7 @@ func main() {
 	}
 }
 
-func handleProbeMessage(fm *fleet.Manager, al *audit.Log, logger *zap.Logger, probeID string, env protocol.Envelope) {
+func handleProbeMessage(fm *fleet.Manager, al *audit.Log, ct *cmdtracker.Tracker, logger *zap.Logger, probeID string, env protocol.Envelope) {
 	switch env.Type {
 	case protocol.MsgHeartbeat:
 		data, _ := json.Marshal(env.Payload)
@@ -335,7 +387,10 @@ func handleProbeMessage(fm *fleet.Manager, al *audit.Log, logger *zap.Logger, pr
 			Summary: "Command completed: " + result.RequestID,
 			Detail:  map[string]any{"exit_code": result.ExitCode, "duration_ms": result.Duration},
 		})
-		// TODO: route result to requesting user/chat session
+		// Route result to waiting HTTP caller (if any)
+		if err := ct.Complete(result.RequestID, &result); err != nil {
+			logger.Debug("no waiting caller for result", zap.String("request_id", result.RequestID))
+		}
 
 	default:
 		logger.Debug("unhandled message type",
