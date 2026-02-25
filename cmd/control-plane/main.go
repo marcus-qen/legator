@@ -158,7 +158,32 @@ func main() {
 			zap.String("model", providerCfg.Model),
 		)
 
+		approvalWait := 2 * time.Minute
+		if raw := os.Getenv("LEGATOR_TASK_APPROVAL_WAIT"); raw != "" {
+			if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+				approvalWait = d
+			}
+		}
+
 		dispatch := func(probeID string, cmd *protocol.CommandPayload) (*protocol.CommandResultPayload, error) {
+			if ps, ok := fleetMgr.Get(probeID); ok && approval.NeedsApproval(cmd, ps.PolicyLevel) {
+				risk := approval.ClassifyRisk(cmd)
+				req, err := approvalQueue.Submit(probeID, cmd, "LLM task command", risk, "llm-task")
+				if err != nil {
+					return nil, fmt.Errorf("approval queue unavailable: %w", err)
+				}
+				emitAudit(audit.EventApprovalRequest, probeID, "llm-task", fmt.Sprintf("LLM command pending approval: %s (risk: %s)", cmd.Command, risk))
+
+				decided, err := approvalQueue.WaitForDecision(req.ID, approvalWait)
+				if err != nil {
+					return nil, fmt.Errorf("approval required (id=%s): %w", req.ID, err)
+				}
+				emitAudit(audit.EventApprovalDecided, probeID, decided.DecidedBy, fmt.Sprintf("LLM approval %s for: %s", decided.Decision, cmd.Command))
+				if decided.Decision != approval.DecisionApproved {
+					return nil, fmt.Errorf("command not approved (id=%s, decision=%s)", decided.ID, decided.Decision)
+				}
+			}
+
 			pending := cmdTracker.Track(cmd.RequestID, probeID, cmd.Command, cmd.Level)
 			if err := hub.SendTo(probeID, protocol.MsgCommand, *cmd); err != nil {
 				cmdTracker.Cancel(cmd.RequestID)
@@ -312,8 +337,8 @@ func main() {
 	mux.HandleFunc("GET /api/v1/fleet/summary", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"counts":           fleetMgr.Count(),
-			"connected":        hub.Connected(),
+			"counts":            fleetMgr.Count(),
+			"connected":         hub.Connected(),
 			"pending_approvals": approvalQueue.PendingCount(),
 		})
 	})
@@ -358,7 +383,7 @@ func main() {
 		id := r.PathValue("id")
 
 		var body struct {
-			Decision  string `json:"decision"`  // "approved" or "denied"
+			Decision  string `json:"decision"`   // "approved" or "denied"
 			DecidedBy string `json:"decided_by"` // who is deciding
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {

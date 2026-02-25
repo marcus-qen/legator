@@ -6,6 +6,7 @@ package approval
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,17 +26,17 @@ const (
 
 // Request is a pending approval item.
 type Request struct {
-	ID          string                    `json:"id"`
-	ProbeID     string                    `json:"probe_id"`
-	Command     *protocol.CommandPayload  `json:"command"`
-	Reason      string                    `json:"reason"`       // why the action was requested
-	RiskLevel   string                    `json:"risk_level"`   // low/medium/high/critical
-	Requester   string                    `json:"requester"`    // who/what initiated (e.g. "llm-task", "api")
-	Decision    Decision                  `json:"decision"`
-	DecidedBy   string                    `json:"decided_by,omitempty"`
-	DecidedAt   time.Time                 `json:"decided_at,omitempty"`
-	CreatedAt   time.Time                 `json:"created_at"`
-	ExpiresAt   time.Time                 `json:"expires_at"`
+	ID        string                   `json:"id"`
+	ProbeID   string                   `json:"probe_id"`
+	Command   *protocol.CommandPayload `json:"command"`
+	Reason    string                   `json:"reason"`     // why the action was requested
+	RiskLevel string                   `json:"risk_level"` // low/medium/high/critical
+	Requester string                   `json:"requester"`  // who/what initiated (e.g. "llm-task", "api")
+	Decision  Decision                 `json:"decision"`
+	DecidedBy string                   `json:"decided_by,omitempty"`
+	DecidedAt time.Time                `json:"decided_at,omitempty"`
+	CreatedAt time.Time                `json:"created_at"`
+	ExpiresAt time.Time                `json:"expires_at"`
 }
 
 // Queue manages pending approval requests.
@@ -246,29 +247,73 @@ func sortRequestsByTime(reqs []*Request) {
 	}
 }
 
-// ClassifyRisk returns a risk level based on the command and capability level.
+// ClassifyRisk returns a risk level based on command intent.
+// Heuristic rules are intentionally conservative: anything that mutates system
+// state is high (approval required); clearly destructive actions are critical.
 func ClassifyRisk(cmd *protocol.CommandPayload) string {
-	if cmd.Level == protocol.CapRemediate {
-		// Check for known dangerous commands
-		dangerous := []string{"rm", "mkfs", "dd", "fdisk", "shutdown", "reboot", "init", "systemctl stop", "iptables"}
-		for _, d := range dangerous {
-			if cmd.Command == d || (len(cmd.Args) > 0 && cmd.Command+" "+cmd.Args[0] == d) {
-				return "critical"
-			}
-		}
-		return "high"
-	}
-	if cmd.Level == protocol.CapDiagnose {
+	line := strings.TrimSpace(strings.ToLower(strings.Join(append([]string{cmd.Command}, cmd.Args...), " ")))
+	if line == "" {
 		return "medium"
 	}
-	return "low"
+
+	if line == "rm" || strings.HasPrefix(line, "rm -") || line == "dd" || strings.HasPrefix(line, "dd if=") {
+		return "critical"
+	}
+	criticalPrefixes := []string{
+		"mkfs", "fdisk", "parted", "shutdown", "reboot", "init 0", "init 6",
+		"poweroff", "iptables", "nft flush", "userdel",
+	}
+	for _, p := range criticalPrefixes {
+		if strings.HasPrefix(line, p) {
+			return "critical"
+		}
+	}
+
+	highPrefixes := []string{
+		"systemctl restart", "systemctl stop", "systemctl start", "service ",
+		"apt install", "apt remove", "apt upgrade", "apt-get install", "apt-get remove", "apt-get upgrade",
+		"yum install", "yum remove", "dnf install", "dnf remove",
+		"pip install", "npm install", "npm uninstall",
+		"chmod", "chown", "mv ", "cp ", "tee ", "sed -i", "truncate",
+	}
+	for _, p := range highPrefixes {
+		if strings.HasPrefix(line, p) {
+			return "high"
+		}
+	}
+
+	mediumPrefixes := []string{
+		"journalctl", "dmesg", "ss ", "netstat", "lsof", "du ", "find ",
+		"grep ", "awk ", "ps ", "top", "systemctl status", "ip ", "route",
+	}
+	for _, p := range mediumPrefixes {
+		if strings.HasPrefix(line, p) {
+			return "medium"
+		}
+	}
+
+	lowPrefixes := []string{
+		"ls", "cat", "head", "tail", "pwd", "whoami", "id", "uname", "hostname", "uptime", "df", "free", "echo ", "echo",
+	}
+	for _, p := range lowPrefixes {
+		if strings.HasPrefix(line, p) {
+			return "low"
+		}
+	}
+
+	// Fallback by declared level if command is unknown.
+	switch cmd.Level {
+	case protocol.CapObserve:
+		return "low"
+	case protocol.CapDiagnose:
+		return "medium"
+	default:
+		return "high"
+	}
 }
 
-// NeedsApproval returns true if a command at the given capability level
-// requires human approval before dispatch.
+// NeedsApproval returns true if a command requires human approval before dispatch.
 func NeedsApproval(cmd *protocol.CommandPayload, probeLevel protocol.CapabilityLevel) bool {
-	// If the command requires remediate and the probe is at remediate level,
-	// it still needs approval for anything classified high/critical
 	risk := ClassifyRisk(cmd)
 	return risk == "high" || risk == "critical"
 }

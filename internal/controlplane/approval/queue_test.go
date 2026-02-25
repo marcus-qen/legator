@@ -146,7 +146,7 @@ func TestClassifyRisk(t *testing.T) {
 		expected string
 	}{
 		{"ls", protocol.CapObserve, "low"},
-		{"df", protocol.CapDiagnose, "medium"},
+		{"df", protocol.CapDiagnose, "low"},
 		{"systemctl restart nginx", protocol.CapRemediate, "high"},
 		{"rm", protocol.CapRemediate, "critical"},
 		{"reboot", protocol.CapRemediate, "critical"},
@@ -179,5 +179,45 @@ func TestNeedsApproval(t *testing.T) {
 	cmd = makeCmd("rm", protocol.CapRemediate)
 	if !NeedsApproval(cmd, protocol.CapRemediate) {
 		t.Error("critical commands should need approval")
+	}
+}
+
+func TestWaitForDecisionApproved(t *testing.T) {
+	q := NewQueue(5*time.Minute, 100)
+	cmd := makeCmd("systemctl restart nginx", protocol.CapRemediate)
+
+	req, _ := q.Submit("probe-1", cmd, "restart", "high", "llm-task")
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_, _ = q.Decide(req.ID, DecisionApproved, "keith")
+	}()
+
+	decided, err := q.WaitForDecision(req.ID, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decided.Decision != DecisionApproved {
+		t.Fatalf("expected approved, got %s", decided.Decision)
+	}
+}
+
+func TestWaitForDecisionTimeout(t *testing.T) {
+	q := NewQueue(5*time.Minute, 100)
+	cmd := makeCmd("systemctl restart nginx", protocol.CapRemediate)
+
+	req, _ := q.Submit("probe-1", cmd, "restart", "high", "llm-task")
+
+	_, err := q.WaitForDecision(req.ID, 50*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+
+	current, ok := q.Get(req.ID)
+	if !ok {
+		t.Fatal("request disappeared")
+	}
+	if current.Decision != DecisionPending {
+		t.Fatalf("expected still pending after timeout, got %s", current.Decision)
 	}
 }
