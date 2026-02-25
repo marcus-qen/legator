@@ -18,7 +18,7 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Run tests
-        run: /usr/local/go/bin/go test ./...
+        run: go test ./...
 
   build:
     name: Build binaries
