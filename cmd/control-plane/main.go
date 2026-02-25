@@ -61,7 +61,7 @@ func templateFuncs() template.FuncMap {
 
 func main() {
 	logger, _ := zap.NewProduction()
-	defer logger.Sync()
+	defer func() { _ = logger.Sync() }()
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -292,18 +292,24 @@ func handleProbeMessage(fm *fleet.Manager, al *audit.Log, logger *zap.Logger, pr
 	case protocol.MsgHeartbeat:
 		data, _ := json.Marshal(env.Payload)
 		var hb protocol.HeartbeatPayload
-		json.Unmarshal(data, &hb)
+		if err := json.Unmarshal(data, &hb); err != nil {
+			logger.Warn("bad heartbeat payload", zap.String("probe", probeID), zap.Error(err))
+			return
+		}
 		if err := fm.Heartbeat(probeID, &hb); err != nil {
 			// Auto-register on first heartbeat from unknown probe
 			fm.Register(probeID, "", "", "")
-			fm.Heartbeat(probeID, &hb)
+			_ = fm.Heartbeat(probeID, &hb)
 			al.Emit(audit.EventProbeRegistered, probeID, "system", "Auto-registered via heartbeat")
 		}
 
 	case protocol.MsgInventory:
 		data, _ := json.Marshal(env.Payload)
 		var inv protocol.InventoryPayload
-		json.Unmarshal(data, &inv)
+		if err := json.Unmarshal(data, &inv); err != nil {
+			logger.Warn("bad inventory payload", zap.String("probe", probeID), zap.Error(err))
+			return
+		}
 		if err := fm.UpdateInventory(probeID, &inv); err != nil {
 			logger.Warn("inventory update failed", zap.String("probe", probeID), zap.Error(err))
 		} else {
@@ -313,7 +319,10 @@ func handleProbeMessage(fm *fleet.Manager, al *audit.Log, logger *zap.Logger, pr
 	case protocol.MsgCommandResult:
 		data, _ := json.Marshal(env.Payload)
 		var result protocol.CommandResultPayload
-		json.Unmarshal(data, &result)
+		if err := json.Unmarshal(data, &result); err != nil {
+			logger.Warn("bad command result payload", zap.String("probe", probeID), zap.Error(err))
+			return
+		}
 		logger.Info("command result received",
 			zap.String("probe", probeID),
 			zap.String("request_id", result.RequestID),

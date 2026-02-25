@@ -62,7 +62,7 @@ func Register(ctx context.Context, serverURL, token string, logger *zap.Logger) 
 		var errResp struct {
 			Error string `json:"error"`
 		}
-		json.NewDecoder(resp.Body).Decode(&errResp)
+		_ = json.NewDecoder(resp.Body).Decode(&errResp)
 		return nil, fmt.Errorf("registration failed (%d): %s", resp.StatusCode, errResp.Error)
 	}
 

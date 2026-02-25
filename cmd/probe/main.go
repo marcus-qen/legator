@@ -89,7 +89,7 @@ func cmdInit(ctx context.Context, args []string) error {
 	}
 
 	logger, _ := zap.NewProduction()
-	defer logger.Sync()
+	defer func() { _ = logger.Sync() }()
 
 	fmt.Printf("Registering with %s...\n", server)
 	cfg, err := agent.Register(ctx, server, token, logger)
@@ -122,7 +122,7 @@ func cmdRun(ctx context.Context, args []string) error {
 	}
 
 	logger, _ := zap.NewProduction()
-	defer logger.Sync()
+	defer func() { _ = logger.Sync() }()
 
 	a := agent.New(cfg, logger)
 	return a.Run(ctx)

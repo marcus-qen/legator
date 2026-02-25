@@ -132,7 +132,7 @@ func HandleRegister(ts *TokenStore, fm *fleet.Manager, logger *zap.Logger) http.
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}
 }
 
@@ -143,13 +143,15 @@ func HandleGenerateToken(ts *TokenStore, logger *zap.Logger) http.HandlerFunc {
 		token := ts.Generate()
 		logger.Info("token generated", zap.String("expires", token.Expires.Format(time.RFC3339)))
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(token)
+		_ = json.NewEncoder(w).Encode(token)
 	}
 }
 
 func generateAPIKey() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		return "lgk_" + hex.EncodeToString([]byte("fallback-key"))
+	}
 	return "lgk_" + hex.EncodeToString(b)
 }
 
@@ -188,7 +190,7 @@ func HandleRegisterWithAudit(ts *TokenStore, fm *fleet.Manager, al *audit.Log, l
 		resp := RegisterResponse{ProbeID: probeID, APIKey: apiKey, PolicyID: "default-observe"}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}
 }
 
@@ -199,6 +201,6 @@ func HandleGenerateTokenWithAudit(ts *TokenStore, al *audit.Log, logger *zap.Log
 		al.Emit(audit.EventTokenGenerated, "", "api", "Registration token generated")
 		logger.Info("token generated", zap.String("expires", token.Expires.Format("2006-01-02T15:04:05Z")))
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(token)
+		_ = json.NewEncoder(w).Encode(token)
 	}
 }
