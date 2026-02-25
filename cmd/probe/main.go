@@ -136,9 +136,9 @@ func cmdService(args []string) error {
 	case "install":
 		return agent.ServiceInstall("")
 	case "remove":
-		return agent.ServiceInstall("")
+		return agent.ServiceRemove()
 	case "status":
-		return agent.ServiceInstall("")
+		return agent.ServiceStatus()
 	default:
 		return fmt.Errorf("unknown service command: %s", args[0])
 	}
@@ -156,5 +156,16 @@ func cmdStatus() error {
 }
 
 func cmdUninstall(ctx context.Context) error {
-	return agent.ServiceInstall("")
+	// Stop and remove service first
+	_ = agent.ServiceRemove()
+
+	// Remove config and data
+	for _, dir := range []string{agent.DefaultConfigDir, agent.DefaultDataDir, agent.DefaultLogDir} {
+		if err := os.RemoveAll(dir); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not remove %s: %v\n", dir, err)
+		}
+	}
+
+	fmt.Println("\u2705 Probe uninstalled")
+	return nil
 }
