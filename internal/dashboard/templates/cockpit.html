@@ -2,9 +2,20 @@
 {{define "content"}}
 <h1>Command Centre Cockpit</h1>
 
-<div class="detail-grid">
+<div class="detail-card cockpit-intro">
+  <p class="lead">This cockpit is your operator loop: launch → observe → approve (if needed) → replay decisions.</p>
+  <ol class="cockpit-steps">
+    <li><strong>Mission Launch:</strong> run a read-only mission first to validate target + intent.</li>
+    <li><strong>Tunnel & Credential Lane:</strong> confirm route, tunnel state, and credential mode/TTL look sane.</li>
+    <li><strong>Approval Inbox:</strong> approve/deny guarded actions and confirm they leave the queue.</li>
+    <li><strong>Run Replay Timeline:</strong> verify tool, classification, and gate outcome for each action.</li>
+  </ol>
+</div>
+
+<div class="detail-grid cockpit-hero">
   <div class="detail-card">
     <h3>Mission Launch</h3>
+    <p class="panel-hint">What to test: launch one read-only mission with a clear target and intent. You should get a run ID in the result box.</p>
     <form class="mission-form" method="POST" action="/cockpit/missions" hx-post="/cockpit/missions" hx-target="#mission-result" hx-swap="innerHTML">
       <label>Agent
         <select name="agent" required>
@@ -17,7 +28,7 @@
         <input type="text" name="target" placeholder="cluster, host, namespace...">
       </label>
       <label>Intent
-        <input type="text" name="intent" placeholder="What should this mission do?" required>
+        <input type="text" name="intent" placeholder="e.g. Check pod health + ingress reachability" required>
       </label>
       <label>Safety Mode
         <select name="safetyMode">
@@ -26,13 +37,14 @@
           <option value="automate-safe">Automate-safe</option>
         </select>
       </label>
-      <button class="btn" type="submit">Launch Mission</button>
+      <button class="btn btn-primary" type="submit">Launch Mission</button>
     </form>
     <div id="mission-result" class="mission-result-slot"></div>
   </div>
 
   <div class="detail-card">
     <h3>Estate / Network Map</h3>
+    <p class="panel-hint">What to test: agents should appear healthy and mapped to the expected environment. Use this as your quick sanity check before running mutations.</p>
     <div id="topology-panel" hx-get="/api/cockpit/topology" hx-trigger="load, every 10s" hx-swap="innerHTML">
       <p class="empty">Loading topology...</p>
     </div>
@@ -40,6 +52,7 @@
 </div>
 
 <h2>Secure Tunnel & Credential Lane</h2>
+<p class="section-help">Confirms how a run is connected and authenticated. Watch for <strong>expired/failed</strong> tunnel states, risky credential mode, or short TTLs.</p>
 <table class="data-table">
   <thead>
     <tr>
@@ -61,6 +74,7 @@
 </table>
 
 <h2>Approval Inbox</h2>
+<p class="section-help">Actions that need human sign-off appear here. Test by approving/denying and confirming the item status changes immediately.</p>
 <table class="data-table">
   <thead>
     <tr>
@@ -77,6 +91,7 @@
 </table>
 
 <h2>Run Replay Timeline</h2>
+<p class="section-help">Audit trail of what happened: intent -> classification -> gate outcome. Use this to verify policy behavior and explain each decision.</p>
 <table class="data-table">
   <thead>
     <tr>

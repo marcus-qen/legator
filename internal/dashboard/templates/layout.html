@@ -21,6 +21,11 @@
       </a>
       <a href="/events">Events</a>
     </div>
+    <div class="nav-actions">
+      <button id="theme-toggle" class="btn btn-ghost" type="button" title="Toggle light/dark theme" aria-label="Toggle light/dark theme">
+        🌗 Theme
+      </button>
+    </div>
   </nav>
   <main class="container">
     {{template "content" .}}
@@ -28,5 +33,33 @@
   <footer class="footer">
     <p>Legator — one who delegates</p>
   </footer>
+  <script>
+    (function () {
+      var STORAGE_KEY = 'legator.theme';
+      var root = document.documentElement;
+      var btn = document.getElementById('theme-toggle');
+
+      function applyTheme(theme) {
+        var safe = theme === 'dark' ? 'dark' : 'light';
+        root.setAttribute('data-theme', safe);
+        if (btn) {
+          btn.textContent = safe === 'dark' ? '☀️ Light' : '🌙 Dark';
+          btn.setAttribute('aria-label', safe === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
+          btn.title = safe === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
+        }
+      }
+
+      var initial = localStorage.getItem(STORAGE_KEY) || 'light';
+      applyTheme(initial);
+
+      if (btn) {
+        btn.addEventListener('click', function () {
+          var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+          localStorage.setItem(STORAGE_KEY, next);
+          applyTheme(next);
+        });
+      }
+    })();
+  </script>
 </body>
 </html>{{end}}
