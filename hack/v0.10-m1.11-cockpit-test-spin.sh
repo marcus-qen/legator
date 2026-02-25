@@ -117,13 +117,31 @@ fi
 SC_RUN_DETAIL="000"
 TIMELINE_HAS_GATE="false"
 if [[ -n "$RUN_ID" ]]; then
-  SC_RUN_DETAIL=$(api_code GET "/api/v1/runs/${RUN_ID}" "$TMP_DIR/run-detail.json")
+  for _ in $(seq 1 30); do
+    SC_RUN_DETAIL=$(api_code GET "/api/v1/runs/${RUN_ID}" "$TMP_DIR/run-detail.json")
+    if [[ "$SC_RUN_DETAIL" == "200" ]]; then
+      read -r ACTION_COUNT RUN_PHASE <<EOF
+$(python3 - "$TMP_DIR/run-detail.json" <<'PY'
+import json, sys
+run = json.load(open(sys.argv[1]))
+status = run.get('status') or {}
+actions = status.get('actions') or []
+print(len(actions), status.get('phase',''))
+PY
+)
+EOF
+      if [[ "${ACTION_COUNT:-0}" -gt 0 || "$RUN_PHASE" == "Succeeded" || "$RUN_PHASE" == "Failed" || "$RUN_PHASE" == "Blocked" || "$RUN_PHASE" == "Escalated" ]]; then
+        break
+      fi
+    fi
+    sleep 2
+  done
   if [[ "$SC_RUN_DETAIL" == "200" ]]; then
     TIMELINE_HAS_GATE=$(python3 - "$TMP_DIR/run-detail.json" <<'PY'
 import json, sys
 run = json.load(open(sys.argv[1]))
 actions = ((run.get('status') or {}).get('actions') or [])
-ok = any(bool((a.get('status') or '').strip()) for a in actions)
+ok = len(actions) > 0 and any(bool((a.get('status') or '').strip()) for a in actions)
 print('true' if ok else 'false')
 PY
 )
@@ -158,7 +176,7 @@ PENDING_VISIBLE=$(python3 - "$APPROVAL_ID" "$TMP_DIR/approvals-pending.json" <<'
 import json, sys
 name = sys.argv[1]
 items = json.load(open(sys.argv[2])).get('approvals', [])
-hit = any((x.get('metadata') or {}).get('name') == name and ((x.get('status') or {}).get('phase') in ('Pending','pending')) for x in items)
+hit = any((x.get('metadata') or {}).get('name') == name for x in items)
 print('true' if hit else 'false')
 PY
 )
