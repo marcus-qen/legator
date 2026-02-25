@@ -48,13 +48,15 @@
       <th>Tunnel Status</th>
       <th>Target</th>
       <th>Tunnel TTL</th>
-      <th>SSH Credential</th>
+      <th>Credential Mode</th>
+      <th>Issuer</th>
       <th>Credential TTL</th>
+      <th>Risk</th>
       <th>Updated</th>
     </tr>
   </thead>
   <tbody hx-get="/api/cockpit/connectivity" hx-trigger="load, every 5s" hx-swap="innerHTML">
-    <tr><td colspan="8" class="empty">Loading connectivity lane...</td></tr>
+    <tr><td colspan="10" class="empty">Loading connectivity lane...</td></tr>
   </tbody>
 </table>
 

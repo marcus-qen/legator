@@ -548,11 +548,11 @@ func (s *Server) handleCockpitConnectivity(w http.ResponseWriter, r *http.Reques
 	rows, err := s.fetchCockpitConnectivityViaAPI(ctx, UserFromContext(ctx), 12)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err != nil {
-		fmt.Fprintf(w, `<tr><td colspan="8" class="empty">Connectivity feed unavailable: %s</td></tr>`, template.HTMLEscapeString(err.Error()))
+		fmt.Fprintf(w, `<tr><td colspan="10" class="empty">Connectivity feed unavailable: %s</td></tr>`, template.HTMLEscapeString(err.Error()))
 		return
 	}
 	if len(rows) == 0 {
-		fmt.Fprint(w, `<tr><td colspan="8" class="empty">No mission connectivity data yet</td></tr>`)
+		fmt.Fprint(w, `<tr><td colspan="10" class="empty">No mission connectivity data yet</td></tr>`)
 		return
 	}
 
@@ -563,30 +563,34 @@ func (s *Server) handleCockpitConnectivity(w http.ResponseWriter, r *http.Reques
 			tunnelTTL = fmt.Sprintf("%ds", row.Tunnel.LeaseTTLSeconds)
 		}
 
-		credMode := row.Credential.Mode
+		credMode := strings.TrimSpace(row.Credential.Mode)
 		if credMode == "" {
 			credMode = "none"
 		}
-		credText := credMode
-		if issuer := strings.TrimSpace(row.Credential.Issuer); issuer != "" {
-			credText = credText + " · " + issuer
+		issuer := strings.TrimSpace(row.Credential.Issuer)
+		if issuer == "" {
+			issuer = "—"
 		}
 		credTTL := ttlRemaining(row.credentialExpiryTime(), now)
 		if credTTL == "—" && row.Credential.TTLSeconds > 0 {
 			credTTL = fmt.Sprintf("%ds", row.Credential.TTLSeconds)
 		}
+		riskLabel, riskClass := credentialRisk(credMode, credTTL)
 
-		fmt.Fprintf(w, `<tr><td><a href="/runs/%s"><code>%s</code></a></td><td><code>%s</code></td><td><span class="status-pill %s">%s</span></td><td>%s</td><td>%s</td><td><span class="credential-pill %s">%s</span></td><td>%s</td><td>%s</td></tr>`,
+		fmt.Fprintf(w, `<tr><td><a href="/runs/%s"><code>%s</code></a></td><td><code>%s</code></td><td><span class="status-pill %s">%s</span></td><td>%s</td><td>%s</td><td><span class="credential-pill %s">%s</span></td><td><code>%s</code></td><td>%s</td><td><span class="risk-pill %s">%s</span></td><td>%s</td></tr>`,
 			url.PathEscape(row.Run),
 			template.HTMLEscapeString(row.Run),
 			template.HTMLEscapeString(row.Tunnel.Provider),
 			template.HTMLEscapeString(tunnelStatusClass(row.Tunnel.Status)),
 			template.HTMLEscapeString(row.Tunnel.Status),
-			template.HTMLEscapeString(truncateStr(row.Tunnel.Target, 36)),
+			template.HTMLEscapeString(truncateStr(row.Tunnel.Target, 30)),
 			template.HTMLEscapeString(tunnelTTL),
 			template.HTMLEscapeString(credentialClass(credMode)),
-			template.HTMLEscapeString(truncateStr(credText, 64)),
+			template.HTMLEscapeString(credMode),
+			template.HTMLEscapeString(truncateStr(issuer, 36)),
 			template.HTMLEscapeString(credTTL),
+			template.HTMLEscapeString(riskClass),
+			template.HTMLEscapeString(riskLabel),
 			template.HTMLEscapeString(timeAgo(row.LastTransitionTime())),
 		)
 	}
@@ -1245,6 +1249,31 @@ func credentialClass(mode string) string {
 		return "credential-legacy"
 	default:
 		return "credential-none"
+	}
+}
+
+func credentialRisk(mode, ttl string) (label, class string) {
+	m := strings.ToLower(strings.TrimSpace(mode))
+	t := strings.ToLower(strings.TrimSpace(ttl))
+
+	if t == "expired" {
+		return "high", "risk-high"
+	}
+	switch m {
+	case "vault-signed-cert":
+		if strings.HasSuffix(t, "s") || t == "1m" {
+			return "medium", "risk-medium"
+		}
+		return "low", "risk-low"
+	case "otp":
+		if strings.HasSuffix(t, "s") || t == "1m" {
+			return "high", "risk-high"
+		}
+		return "medium", "risk-medium"
+	case "static-key-legacy":
+		return "high", "risk-high"
+	default:
+		return "unknown", "risk-unknown"
 	}
 }
 

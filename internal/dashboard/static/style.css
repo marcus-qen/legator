@@ -274,7 +274,8 @@ pre.error { border-left: 4px solid var(--danger); }
 }
 
 .status-pill,
-.credential-pill {
+.credential-pill,
+.risk-pill {
   display: inline-block;
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -294,6 +295,11 @@ pre.error { border-left: 4px solid var(--danger); }
 .credential-otp { border-color: var(--info); color: var(--info); }
 .credential-legacy { border-color: var(--warning); color: var(--warning); }
 .credential-none { border-color: var(--text-muted); color: var(--text-muted); }
+
+.risk-low { border-color: var(--success); color: var(--success); }
+.risk-medium { border-color: var(--warning); color: var(--warning); }
+.risk-high { border-color: var(--danger); color: var(--danger); }
+.risk-unknown { border-color: var(--text-muted); color: var(--text-muted); }
 
 /* Buttons */
 .btn {

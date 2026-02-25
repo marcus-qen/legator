@@ -166,4 +166,17 @@ func TestConnectivityVisualHelpers(t *testing.T) {
 	if got := ttlRemaining(now.Add(-1*time.Second), now); got != "expired" {
 		t.Fatalf("ttlRemaining expired=%q want expired", got)
 	}
+
+	label, class := credentialRisk("vault-signed-cert", "12m")
+	if label != "low" || class != "risk-low" {
+		t.Fatalf("credentialRisk(vault-signed-cert,12m)=%s/%s", label, class)
+	}
+	label, class = credentialRisk("otp", "45s")
+	if label != "high" || class != "risk-high" {
+		t.Fatalf("credentialRisk(otp,45s)=%s/%s", label, class)
+	}
+	label, class = credentialRisk("static-key-legacy", "—")
+	if label != "high" || class != "risk-high" {
+		t.Fatalf("credentialRisk(static-key-legacy)=%s/%s", label, class)
+	}
 }
