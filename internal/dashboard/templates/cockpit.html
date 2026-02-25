@@ -86,11 +86,13 @@
       <th>Target</th>
       <th>Classification</th>
       <th>Gate Outcome</th>
+      <th>Tunnel Path</th>
+      <th>Credential Mode</th>
       <th>Age</th>
     </tr>
   </thead>
   <tbody hx-get="/api/cockpit/timeline" hx-trigger="load, every 5s" hx-swap="innerHTML">
-    <tr><td colspan="7" class="empty">Loading timeline...</td></tr>
+    <tr><td colspan="9" class="empty">Loading timeline...</td></tr>
   </tbody>
 </table>
 {{end}}

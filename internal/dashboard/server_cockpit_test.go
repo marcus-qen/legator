@@ -121,7 +121,7 @@ func TestFetchCockpitConnectivityViaAPI(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"runs":[{"run":"watchman-light-run-1","agent":"watchman-light","phase":"Running","environment":"lab-env","tunnel":{"status":"active","provider":"headscale","target":"10.0.0.5","leaseTtlSeconds":900,"lastTransitionAt":"2026-02-24T23:00:00Z"},"credential":{"mode":"vault-signed-cert","issuer":"ssh-client-signer role=legator-ssh","ttlSeconds":300,"expiresAt":"2026-02-24T23:05:00Z"}}]}`))
+		_, _ = w.Write([]byte(`{"runs":[{"run":"watchman-light-run-1","agent":"watchman-light","phase":"Running","environment":"lab-env","tunnel":{"status":"active","provider":"headscale","routeId":"run/watchman-light-run-1","target":"10.0.0.5","leaseTtlSeconds":900,"lastTransitionAt":"2026-02-24T23:00:00Z"},"credential":{"mode":"vault-signed-cert","issuer":"ssh-client-signer role=legator-ssh","ttlSeconds":300,"expiresAt":"2026-02-24T23:05:00Z"}}]}`))
 	}))
 	defer apiSrv.Close()
 
@@ -146,6 +146,9 @@ func TestFetchCockpitConnectivityViaAPI(t *testing.T) {
 	}
 	if rows[0].Credential.TTLSeconds != 300 {
 		t.Fatalf("credential ttl = %d, want 300", rows[0].Credential.TTLSeconds)
+	}
+	if rows[0].Tunnel.RouteID != "run/watchman-light-run-1" {
+		t.Fatalf("route id = %q", rows[0].Tunnel.RouteID)
 	}
 }
 
@@ -178,5 +181,20 @@ func TestConnectivityVisualHelpers(t *testing.T) {
 	label, class = credentialRisk("static-key-legacy", "—")
 	if label != "high" || class != "risk-high" {
 		t.Fatalf("credentialRisk(static-key-legacy)=%s/%s", label, class)
+	}
+
+	byRun := map[string]cockpitConnectivityRun{"run-1": {}}
+	entry := byRun["run-1"]
+	entry.Tunnel.RouteID = "run/run-1"
+	entry.Credential.Mode = "otp"
+	byRun["run-1"] = entry
+
+	tPath, cMode := timelineAttribution("run-1", byRun)
+	if tPath != "run/run-1" || cMode != "otp" {
+		t.Fatalf("timelineAttribution got %q/%q", tPath, cMode)
+	}
+	missingPath, missingMode := timelineAttribution("missing", byRun)
+	if missingPath != "—" || missingMode != "none" {
+		t.Fatalf("timelineAttribution fallback got %q/%q", missingPath, missingMode)
 	}
 }

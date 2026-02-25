@@ -602,19 +602,33 @@ func (s *Server) handleCockpitTimeline(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	if len(entries) == 0 {
-		fmt.Fprint(w, `<tr><td colspan="7" class="empty">No run timeline data yet</td></tr>`)
+		fmt.Fprint(w, `<tr><td colspan="9" class="empty">No run timeline data yet</td></tr>`)
 		return
 	}
 
+	connectivityByRun := map[string]cockpitConnectivityRun{}
+	if rows, err := s.fetchCockpitConnectivityViaAPI(ctx, UserFromContext(ctx), 64); err == nil {
+		for _, row := range rows {
+			if _, exists := connectivityByRun[row.Run]; exists {
+				continue
+			}
+			connectivityByRun[row.Run] = row
+		}
+	}
+
 	for _, entry := range entries {
-		fmt.Fprintf(w, `<tr><td><a href="/runs/%s"><code>%s</code></a></td><td>%s</td><td><code>%s</code></td><td>%s</td><td><code>%s</code></td><td>%s</td><td>%s</td></tr>`,
+		tunnelPath, credMode := timelineAttribution(entry.RunName, connectivityByRun)
+		fmt.Fprintf(w, `<tr><td><a href="/runs/%s"><code>%s</code></a></td><td>%s</td><td><code>%s</code></td><td>%s</td><td><code>%s</code></td><td>%s</td><td><code>%s</code></td><td><span class="credential-pill %s">%s</span></td><td>%s</td></tr>`,
 			url.PathEscape(entry.RunName),
 			template.HTMLEscapeString(entry.RunName),
 			template.HTMLEscapeString(entry.Agent),
 			template.HTMLEscapeString(entry.Tool),
-			template.HTMLEscapeString(truncateStr(entry.Target, 44)),
+			template.HTMLEscapeString(truncateStr(entry.Target, 34)),
 			template.HTMLEscapeString(entry.Tier),
 			template.HTMLEscapeString(entry.GateOutcome),
+			template.HTMLEscapeString(truncateStr(tunnelPath, 34)),
+			template.HTMLEscapeString(credentialClass(credMode)),
+			template.HTMLEscapeString(credMode),
 			template.HTMLEscapeString(timeAgo(entry.Time)),
 		)
 	}
@@ -978,6 +992,7 @@ type cockpitConnectivityRun struct {
 	Tunnel      struct {
 		Status           string `json:"status"`
 		Provider         string `json:"provider"`
+		RouteID          string `json:"routeId"`
 		Target           string `json:"target"`
 		LeaseTTLSeconds  int64  `json:"leaseTtlSeconds"`
 		ExpiresAt        string `json:"expiresAt"`
@@ -1275,6 +1290,22 @@ func credentialRisk(mode, ttl string) (label, class string) {
 	default:
 		return "unknown", "risk-unknown"
 	}
+}
+
+func timelineAttribution(runName string, byRun map[string]cockpitConnectivityRun) (tunnelPath, credentialMode string) {
+	row, ok := byRun[runName]
+	if !ok {
+		return "—", "none"
+	}
+	tunnelPath = strings.TrimSpace(row.Tunnel.RouteID)
+	if tunnelPath == "" {
+		tunnelPath = "run/" + runName
+	}
+	credentialMode = strings.TrimSpace(row.Credential.Mode)
+	if credentialMode == "" {
+		credentialMode = "none"
+	}
+	return tunnelPath, credentialMode
 }
 
 func ttlRemaining(expiry, now time.Time) string {
