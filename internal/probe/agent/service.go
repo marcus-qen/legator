@@ -33,7 +33,7 @@ LimitNOFILE=65536
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/lib/probe /var/log/probe
+ReadWritePaths=/var/lib/legator /var/log/legator
 PrivateTmp=yes
 
 # Logging

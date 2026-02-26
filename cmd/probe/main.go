@@ -101,7 +101,7 @@ Commands:
   help       Show this help
 
 Global flags:
-  --config-dir <path>   Config directory (default /etc/probe)`)
+  --config-dir <path>   Config directory (default /etc/legator)`)
 }
 
 // parseConfigDir extracts --config-dir from args, returning the dir and remaining args.

@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	DefaultConfigDir = "/etc/probe"
-	DefaultDataDir   = "/var/lib/probe"
-	DefaultLogDir    = "/var/log/probe"
+	DefaultConfigDir = "/etc/legator"
+	DefaultDataDir   = "/var/lib/legator"
+	DefaultLogDir    = "/var/log/legator"
 )
 
 // Config holds the probe's persistent configuration.

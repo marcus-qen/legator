@@ -5,9 +5,9 @@ set -euo pipefail
 
 VERSION="${LEGATOR_VERSION:-latest}"
 INSTALL_DIR="/usr/local/bin"
-CONFIG_DIR="/etc/probe"
-DATA_DIR="/var/lib/probe"
-LOG_DIR="/var/log/probe"
+CONFIG_DIR="/etc/legator"
+DATA_DIR="/var/lib/legator"
+LOG_DIR="/var/log/legator"
 SERVICE_USER="legator"
 
 SERVER=""
@@ -31,7 +31,7 @@ Required:
 Options:
   --arch <arch>             Override arch (amd64|arm64)
   --version <version>       Binary version (default: latest)
-  --config-dir <path>       Config directory (default: /etc/probe)
+  --config-dir <path>       Config directory (default: /etc/legator)
   --no-start                Install but do not start the service
   --github-release          Download from GitHub Releases instead of CP
   --help, -h                Show this help
