@@ -37,6 +37,25 @@
         align-items: center;
       }
 
+
+      .probe-context {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+        padding: 0.75rem;
+        background: var(--surface, #161b22);
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        font-size: 0.82rem;
+        color: var(--muted);
+      }
+      .probe-context .ctx-item { display: flex; flex-direction: column; gap: 0.15rem; }
+      .probe-context .ctx-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.6; }
+      .probe-context .ctx-value { color: var(--fg, #e6edf3); font-family: monospace; font-size: 0.85rem; }
+      .probe-context .ctx-value.online { color: var(--green, #3fb950); }
+      .probe-context .ctx-value.offline { color: var(--red, #f85149); }
+
       .chat-layout {
         flex: 1;
         display: flex;
@@ -259,7 +278,26 @@
           font-size: 0.95rem;
         }
 
-        .chat-layout {
+  
+      .probe-context {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+        padding: 0.75rem;
+        background: var(--surface, #161b22);
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        font-size: 0.82rem;
+        color: var(--muted);
+      }
+      .probe-context .ctx-item { display: flex; flex-direction: column; gap: 0.15rem; }
+      .probe-context .ctx-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.6; }
+      .probe-context .ctx-value { color: var(--fg, #e6edf3); font-family: monospace; font-size: 0.85rem; }
+      .probe-context .ctx-value.online { color: var(--green, #3fb950); }
+      .probe-context .ctx-value.offline { color: var(--red, #f85149); }
+
+      .chat-layout {
           padding: 0.55rem;
         }
       }
@@ -616,6 +654,32 @@
         });
 
         setTyping(false);
+
+        // Fetch probe context panel
+        async function loadProbeContext() {
+          try {
+            const resp = await fetch('/api/v1/probes/' + encodeURIComponent(probeID));
+            if (!resp.ok) return;
+            const p = await resp.json();
+            const ctx = document.getElementById('probe-context');
+            ctx.style.display = '';
+            document.getElementById('ctx-hostname').textContent = p.hostname || '—';
+            const statusEl = document.getElementById('ctx-status');
+            statusEl.textContent = p.status || '—';
+            statusEl.className = 'ctx-value ' + (p.status || '');
+            const inv = p.inventory || {};
+            document.getElementById('ctx-os').textContent = (inv.os || p.os || '—') + ' / ' + (inv.arch || p.arch || '—');
+            document.getElementById('ctx-kernel').textContent = inv.kernel || '—';
+            document.getElementById('ctx-cpus').textContent = inv.cpus || '—';
+            const memMB = inv.mem_total_bytes ? Math.round(inv.mem_total_bytes / 1048576) : null;
+            document.getElementById('ctx-mem').textContent = memMB ? memMB + ' MB' : '—';
+            document.getElementById('ctx-policy').textContent = p.policy_level || '—';
+            document.getElementById('ctx-lastseen').textContent = p.last_seen ? new Date(p.last_seen).toLocaleTimeString() : '—';
+          } catch {}
+        }
+        loadProbeContext();
+        setInterval(loadProbeContext, 15000);
+
         connectChatSocket();
         startPolling();
       })();

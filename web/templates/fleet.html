@@ -31,6 +31,14 @@
       table { width: 100%; border-collapse: collapse; }
       th { text-align: left; padding: 10px 16px; font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #21262d; background: #0d1117; position: sticky; top: 0; }
       td { padding: 10px 16px; border-bottom: 1px solid #21262d; font-size: 13px; }
+      .btn-chat {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 32px; height: 28px; border-radius: 6px;
+        background: #21262d; border: 1px solid #30363d;
+        text-decoration: none; font-size: 14px;
+        transition: background 0.15s, border-color 0.15s;
+      }
+      .btn-chat:hover { background: #30363d; border-color: #58a6ff; }
       tr.probe-row { cursor: pointer; transition: background 0.15s; }
       tr.probe-row:hover { background: #1c2128; }
       tr.probe-row.highlight { background: #1c2128; transition: background 1s; }
@@ -100,6 +108,7 @@
                   <th>Health</th>
                   <th>Tags</th>
                   <th>Last Seen</th>
+                  <th style="width:70px">Actions</th>
                 </tr>
               </thead>
               <tbody id="fleet-body">
@@ -113,9 +122,10 @@
                   <td>{{if .Health}}<div class="health-bar"><span class="health-fill {{if ge .Health.Score 80}}health-green{{else if ge .Health.Score 50}}health-yellow{{else}}health-red{{end}}" style="width:{{.Health.Score}}px"></span><span>{{.Health.Score}}</span></div>{{else}}<span style="color:#484f58">—</span>{{end}}</td>
                   <td>{{range .Tags}}<span class="pill">{{.}}</span>{{end}}</td>
                   <td>{{formatLastSeen .LastSeen}}</td>
+                  <td><a href="/probe/{{.ID}}/chat" onclick="event.stopPropagation()" class="btn-chat" title="Chat with probe">💬</a></td>
                 </tr>
                 {{end}}{{else}}
-                <tr><td colspan="8" class="empty-state">No probes registered yet.</td></tr>
+                <tr><td colspan="9" class="empty-state">No probes registered yet.</td></tr>
                 {{end}}
               </tbody>
             </table>
@@ -170,7 +180,7 @@
           let on=0, off=0, deg=0;
           tb.innerHTML = '';
           if (!probes||!probes.length) {
-            tb.innerHTML = '<tr><td colspan="8" class="empty-state">No probes registered yet.</td></tr>';
+            tb.innerHTML = '<tr><td colspan="9" class="empty-state">No probes registered yet.</td></tr>';
             return;
           }
           probes.forEach(p => {
@@ -190,7 +200,8 @@
               +'<td>'+(p.policy_level||'observe')+'</td>'
               +'<td>'+hbar+'</td>'
               +'<td>'+tags+'</td>'
-              +'<td>'+ago(p.last_seen)+'</td>';
+              +'<td>'+ago(p.last_seen)+'</td>'
+              +'<td><a href="/probe/'+encodeURIComponent(p.id)+'/chat" onclick="event.stopPropagation()" class="btn-chat" title="Chat with probe">💬</a></td>';
             tb.appendChild(tr);
           });
           update('cnt-online',on); update('cnt-offline',off);
