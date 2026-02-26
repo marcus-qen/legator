@@ -380,7 +380,20 @@ func main() {
 		logger.Info("chat wired to LLM provider")
 	}
 
-	policyStore := policy.NewStore()
+	// Policy store: persistent when data dir available
+	var policyStore policy.PolicyManager
+	var policyPersistent *policy.PersistentStore
+	policyDBPath := filepath.Join(cfg.DataDir, "policy.db")
+	if ps, err := policy.NewPersistentStore(policyDBPath); err != nil {
+		logger.Warn("cannot open policy database, falling back to in-memory",
+			zap.String("path", policyDBPath), zap.Error(err))
+		policyStore = policy.NewStore()
+	} else {
+		policyPersistent = ps
+		policyStore = ps
+		logger.Info("policy store opened", zap.String("path", policyDBPath))
+		defer policyPersistent.Close()
+	}
 
 	mux := http.NewServeMux()
 

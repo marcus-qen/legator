@@ -22,6 +22,16 @@ type Template struct {
 	UpdatedAt   time.Time                `json:"updated_at"`
 }
 
+
+// PolicyManager is the interface used by handlers for policy CRUD.
+type PolicyManager interface {
+	List() []*Template
+	Get(id string) (*Template, bool)
+	Create(name, description string, level protocol.CapabilityLevel, allowed, blocked, paths []string) *Template
+	Update(id string, name, description string, level protocol.CapabilityLevel, allowed, blocked, paths []string) (*Template, error)
+	Delete(id string) error
+}
+
 // Store manages policy templates.
 type Store struct {
 	templates map[string]*Template // keyed by ID
