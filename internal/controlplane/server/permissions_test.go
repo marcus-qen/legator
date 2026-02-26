@@ -103,6 +103,7 @@ func TestPermissionsAdminCanAccessAllScopes(t *testing.T) {
 		{name: "approval write", method: http.MethodPost, path: "/api/v1/approvals/missing/decide", body: `{"decision":"approved","decided_by":"admin"}`},
 		{name: "audit read", method: http.MethodGet, path: "/api/v1/audit"},
 		{name: "webhook manage", method: http.MethodGet, path: "/api/v1/webhooks"},
+		{name: "webhook deliveries", method: http.MethodGet, path: "/api/v1/webhooks/deliveries"},
 		{name: "fleet write", method: http.MethodDelete, path: "/api/v1/probes/missing"},
 	}
 
@@ -128,5 +129,25 @@ func TestPermissionsCommandExecCannotDeleteProbe(t *testing.T) {
 	deleteProbe := makeRequest(t, srv, http.MethodDelete, "/api/v1/probes/probe-1", token, "")
 	if deleteProbe.Code != http.StatusForbidden {
 		t.Fatalf("expected delete probe to be forbidden, got %d body=%s", deleteProbe.Code, deleteProbe.Body.String())
+	}
+}
+
+func TestPermissionsWebhookManageCanReadDeliveries(t *testing.T) {
+	srv := newAuthTestServer(t)
+	token := createAPIKey(t, srv, "webhook-manage", auth.PermWebhookManage)
+
+	rr := makeRequest(t, srv, http.MethodGet, "/api/v1/webhooks/deliveries", token, "")
+	if rr.Code == http.StatusUnauthorized || rr.Code == http.StatusForbidden {
+		t.Fatalf("expected webhook manage to access deliveries, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestPermissionsFleetReadCannotReadWebhookDeliveries(t *testing.T) {
+	srv := newAuthTestServer(t)
+	token := createAPIKey(t, srv, "fleet-read", auth.PermFleetRead)
+
+	rr := makeRequest(t, srv, http.MethodGet, "/api/v1/webhooks/deliveries", token, "")
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }

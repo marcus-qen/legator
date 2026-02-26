@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/marcus-qen/legator/internal/controlplane/metrics"
 )
 
 func TestNotifier_RegisterRemoveList(t *testing.T) {
@@ -257,6 +259,87 @@ func TestNotifier_HTTPHandlers_TestEndpoint(t *testing.T) {
 	}
 }
 
+func TestNotifier_HTTPHandlers_DeliveryHistoryEndpoint(t *testing.T) {
+	n := NewNotifier()
+	received := make(chan struct{}, 1)
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received <- struct{}{}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer target.Close()
+
+	n.Register(WebhookConfig{ID: "delivery-id", URL: target.URL + "/path?token=secret", Events: []string{"probe.offline"}, Enabled: true})
+	n.Notify("probe.offline", "probe-1", "summary", map[string]string{"status": "down"})
+
+	if !awaitSignal(t, received, 2*time.Second) {
+		t.Fatal("timed out waiting for webhook delivery")
+	}
+	waitForDeliveries(t, n, 1, 2*time.Second)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/webhooks/deliveries", n.ListDeliveries)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/webhooks/deliveries?limit=1", nil)
+	resp := httptest.NewRecorder()
+	mux.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("history status = %d, want %d", resp.Code, http.StatusOK)
+	}
+
+	var payload struct {
+		Deliveries []DeliveryRecord `json:"deliveries"`
+		Count      int              `json:"count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode history response: %v", err)
+	}
+	if payload.Count != 1 || len(payload.Deliveries) != 1 {
+		t.Fatalf("unexpected history payload: %+v", payload)
+	}
+
+	delivery := payload.Deliveries[0]
+	if delivery.EventType != "probe.offline" {
+		t.Fatalf("event_type = %q, want probe.offline", delivery.EventType)
+	}
+	if !strings.HasSuffix(delivery.TargetURL, "/***") {
+		t.Fatalf("target_url should be masked, got %q", delivery.TargetURL)
+	}
+	if delivery.StatusCode != http.StatusAccepted {
+		t.Fatalf("status_code = %d, want %d", delivery.StatusCode, http.StatusAccepted)
+	}
+	if delivery.DurationMS < 0 {
+		t.Fatalf("duration_ms should be non-negative, got %d", delivery.DurationMS)
+	}
+	if delivery.Timestamp.IsZero() {
+		t.Fatal("timestamp should be set")
+	}
+}
+
+func TestNotifier_MetricsObserver_RecordsWebhookDelivery(t *testing.T) {
+	n := NewNotifier()
+	collector := metrics.NewCollector(&metricsTestFleet{}, &metricsTestHub{}, &metricsTestApprovals{}, &metricsTestAudit{})
+	n.SetDeliveryObserver(collector)
+
+	received := make(chan struct{}, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received <- struct{}{}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+
+	n.Register(WebhookConfig{ID: "metrics-id", URL: target.URL, Events: []string{"probe.offline"}, Enabled: true})
+	n.Notify("probe.offline", "probe-2", "summary", nil)
+
+	if !awaitSignal(t, received, 2*time.Second) {
+		t.Fatal("timed out waiting for webhook delivery")
+	}
+
+	waitForMetric(t, collector, `legator_webhooks_sent_total{event_type="probe.offline",status="success"} 1`, 2*time.Second)
+	waitForMetric(t, collector, `legator_webhook_duration_seconds_count{event_type="probe.offline"} 1`, 2*time.Second)
+}
+
 func awaitSignal(t *testing.T, ch <-chan struct{}, timeout time.Duration) bool {
 	t.Helper()
 	select {
@@ -277,3 +360,53 @@ func awaitSignalValue[T any](t *testing.T, ch <-chan T, out *T, timeout time.Dur
 		return false
 	}
 }
+
+func waitForDeliveries(t *testing.T, n *Notifier, want int, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if len(n.Deliveries(want)) >= want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("timed out waiting for %d delivery records", want)
+}
+
+func waitForMetric(t *testing.T, c *metrics.Collector, needle string, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
+		resp := httptest.NewRecorder()
+		c.Handler().ServeHTTP(resp, req)
+
+		if strings.Contains(resp.Body.String(), needle) {
+			return
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("timed out waiting for metric %q", needle)
+}
+
+type metricsTestFleet struct{}
+
+func (m *metricsTestFleet) Count() map[string]int     { return map[string]int{} }
+func (m *metricsTestFleet) TagCounts() map[string]int { return map[string]int{} }
+
+type metricsTestHub struct{}
+
+func (m *metricsTestHub) Connected() int { return 0 }
+
+type metricsTestApprovals struct{}
+
+func (m *metricsTestApprovals) PendingCount() int { return 0 }
+
+type metricsTestAudit struct{}
+
+func (m *metricsTestAudit) Count() int { return 0 }

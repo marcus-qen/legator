@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,6 +13,22 @@ import (
 // ListWebhooks handles GET /api/v1/webhooks.
 func (n *Notifier) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, n.List())
+}
+
+// ListDeliveries handles GET /api/v1/webhooks/deliveries.
+func (n *Notifier) ListDeliveries(w http.ResponseWriter, r *http.Request) {
+	limit := 20
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	deliveries := n.Deliveries(limit)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"deliveries": deliveries,
+		"count":      len(deliveries),
+	})
 }
 
 // RegisterWebhook handles POST /api/v1/webhooks.
@@ -70,7 +87,7 @@ func (n *Notifier) TestWebhook(w http.ResponseWriter, r *http.Request) {
 		Detail:    map[string]string{"id": cfg.ID},
 	}
 
-	if err := n.sendPayloadWithRetries(cfg, testPayload); err != nil {
+	if _, err := n.sendPayloadWithRetries(cfg, testPayload); err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}

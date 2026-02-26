@@ -56,6 +56,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		s.approvalQueue,
 		s.metricsAuditCounter(),
 	)
+	s.webhookNotifier.SetDeliveryObserver(metricsCollector)
 	mux.HandleFunc("GET /api/v1/metrics", s.withPermission(auth.PermFleetRead, metricsCollector.Handler()))
 
 	// Approvals
@@ -81,6 +82,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Webhooks
 	mux.HandleFunc("GET /api/v1/webhooks", s.withPermission(auth.PermWebhookManage, s.webhookNotifier.ListWebhooks))
+	mux.HandleFunc("GET /api/v1/webhooks/deliveries", s.withPermission(auth.PermWebhookManage, s.webhookNotifier.ListDeliveries))
 	mux.HandleFunc("POST /api/v1/webhooks", s.withPermission(auth.PermWebhookManage, s.webhookNotifier.RegisterWebhook))
 	mux.HandleFunc("GET /api/v1/webhooks/{id}", s.withPermission(auth.PermWebhookManage, s.webhookNotifier.GetWebhook))
 	mux.HandleFunc("DELETE /api/v1/webhooks/{id}", s.withPermission(auth.PermWebhookManage, s.webhookNotifier.DeleteWebhook))
