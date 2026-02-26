@@ -10,7 +10,7 @@ Conversational management. Policy-driven guardrails. Audited change tracking. No
 
 Legator is a single control-plane application that:
 
-- **Deploys "probe agents"** onto your servers, VMs, containers, or cloud accounts
+- **Deploys probe agents** onto your servers, VMs, containers, or cloud accounts
 - **Shows you everything** — health, inventory, activity, risk level per host
 - **Lets you talk to each probe** in persistent two-way chat ("restart nginx on web-03")
 - **Enforces strict guardrails** — read-only by default, graduated autonomy, human approval for changes
@@ -20,7 +20,7 @@ The LLM never touches your servers directly. The probe never reasons independent
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────┐
 │                  Control Plane                       │
 │  Web UI · REST API · WebSocket Server · LLM Brain   │
@@ -35,20 +35,33 @@ The LLM never touches your servers directly. The probe never reasons independent
       └───────┘  └───────┘  └───────┘
 ```
 
-- **Control plane**: standalone Go binary, runs anywhere (bare metal, VM, container)
-- **Probe**: static Go binary (~15-20MB), zero dependencies, systemd service
-- **Connection**: persistent WebSocket, heartbeat every 30s, auto-reconnect
+- **Control plane**: standalone Go binary (14MB), runs anywhere
+- **Probe**: static Go binary (7MB), zero dependencies, systemd service
+- **legatorctl**: CLI for fleet management from the terminal
+- **Connection**: persistent WebSocket, heartbeat every 30s, auto-reconnect with jitter
 
 ## Quick Start
 
 ### 1. Start the control plane
 
 ```bash
+# Minimal — in-memory state, auto-generated signing key
 ./control-plane
-# Listening on :8080
+
+# Production — persistent SQLite, custom signing key, auth enabled
+LEGATOR_DATA_DIR=/var/lib/legator \
+LEGATOR_SIGNING_KEY=$(openssl rand -hex 32) \
+LEGATOR_AUTH=true \
+./control-plane
 ```
 
-### 2. Install a probe
+### 2. Generate a registration token
+
+```bash
+curl -sf -X POST http://localhost:8080/api/v1/tokens | jq .token
+```
+
+### 3. Install a probe
 
 ```bash
 curl -sSL https://your-server:8080/install.sh | sudo bash -s -- \
@@ -56,67 +69,34 @@ curl -sSL https://your-server:8080/install.sh | sudo bash -s -- \
   --token <registration-token>
 ```
 
-That's it. The probe registers, runs an inventory scan, and starts reporting.
+Or manually:
 
-### 3. Talk to your infrastructure
-
-Open the web UI, click a probe, and start a conversation:
-
-> "What's using all the disk on this server?"
-> "Show me failed services in the last hour"
-> "Draft a plan to upgrade nginx to the latest version"
-
-## Guardrails
-
-Three capability levels, enforced at **both** control plane and probe:
-
-| Level | What it can do | Human approval? |
-|-------|---------------|-----------------|
-| **Observe** | Inventory, logs, file reads, process listing | No |
-| **Diagnose** | Observe + analysis commands, config reads | No |
-| **Remediate** | Diagnose + writes, restarts, patches | **Yes** |
-
-Defence in depth: a compromised control plane cannot instruct a probe to exceed its configured capability level.
-
-## Supported Targets
-
-| Target | Method | Status |
-|--------|--------|--------|
-| Linux (bare metal / VM) | Installed probe (systemd) | **MVP** |
-| Linux (remote) | SSH from control plane | Planned |
-| Windows | Installed probe (Windows service) | Planned |
-| Kubernetes | DaemonSet / operator | Planned |
-| Network devices | SSH/API | Planned |
-| Cloud accounts | AWS/Azure/GCP API | Planned |
-
-## Project Structure
-
+```bash
+./probe run --server http://your-server:8080 --token <token>
 ```
-cmd/
-  control-plane/    # Control plane binary
-  probe/            # Probe agent binary
-internal/
-  controlplane/     # API, policy, WebSocket, fleet management, audit
-  probe/            # Agent loop, inventory, executor, connection
-  shared/           # Reusable: guardrails, rate limiting, security, telemetry
-  protocol/         # Wire protocol (shared types between CP and probe)
-install/            # One-liner install script
-web/                # UI templates and static assets
-docs/               # Documentation
-test/               # Integration and E2E tests
-```
+
+The probe registers, runs an inventory scan, and starts reporting.
 
 ## Building
 
 ```bash
-make                  # Build both binaries
-make build-probe-all  # Cross-compile probe for linux/amd64, linux/arm64, darwin/arm64
-make test             # Run tests
+make all            # Build control-plane, probe, legatorctl
+make test           # Run unit tests
+make e2e            # Full end-to-end flow (27 checks)
+make build-all      # Cross-compile release binaries
 ```
 
 ## Status
 
-**Early development.** The K8s-native agent runtime (v0.1–v0.9.2) has been archived to `archive/k8s-runtime`. The universal control plane is being built from the ground up, reusing the guardrail engine, policy evaluator, and audit trail.
+✅ **Working control plane + probe runtime.**
+
+The K8s-native runtime (v0.1–v0.9.2) is archived on `archive/k8s-runtime`. Current `main` is the standalone universal control plane with:
+
+- persistent SQLite stores (fleet, audit, chat, webhook, policy, auth)
+- approval workflow + audit trail
+- LLM task and chat integration
+- metrics + webhooks + key rotation + update pipeline
+- green unit tests and green end-to-end suite (27/27)
 
 ## License
 
