@@ -45,10 +45,15 @@ func newTestServer(t *testing.T) *Server {
 func connectProbeWS(t *testing.T, srv *Server, probeID string) (*websocket.Conn, func()) {
 	t.Helper()
 
+	// Ensure probe has an API key for WebSocket auth
+	const testAPIKey = "test-probe-api-key"
+	_ = srv.fleetMgr.SetAPIKey(probeID, testAPIKey)
+
 	ts := httptest.NewServer(http.HandlerFunc(srv.hub.HandleProbeWS))
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/probe?id=" + url.QueryEscape(probeID)
 
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	header := http.Header{"Authorization": []string{"Bearer " + testAPIKey}}
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
 	if err != nil {
 		ts.Close()
 		t.Fatalf("dial probe ws: %v", err)

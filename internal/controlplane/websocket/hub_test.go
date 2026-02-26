@@ -280,3 +280,90 @@ func TestSendToSendsEnvelopeToConnectedProbe(t *testing.T) {
 		t.Fatalf("expected level %q, got %q", payload.Level, decoded.Level)
 	}
 }
+
+func TestHandleProbeWS_RejectsUnauthenticatedConnection(t *testing.T) {
+	hub := NewHub(zap.NewNop(), nil)
+	hub.SetAuthenticator(func(probeID, token string) bool {
+		return probeID == "prb-good" && token == "valid-key"
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(hub.HandleProbeWS))
+	defer srv.Close()
+
+	// No auth header → 401
+	wsURL := probeWSURL(t, srv.URL, "prb-good")
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err == nil {
+		t.Fatal("expected connection to be rejected")
+	}
+	if resp != nil && resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	}
+
+	// Verify no probe was registered
+	if len(hub.Connected()) != 0 {
+		t.Fatal("probe should not be connected")
+	}
+}
+
+func TestHandleProbeWS_RejectsInvalidCredentials(t *testing.T) {
+	hub := NewHub(zap.NewNop(), nil)
+	hub.SetAuthenticator(func(probeID, token string) bool {
+		return probeID == "prb-good" && token == "valid-key"
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(hub.HandleProbeWS))
+	defer srv.Close()
+
+	// Wrong token → 403
+	wsURL := probeWSURL(t, srv.URL, "prb-good")
+	header := http.Header{"Authorization": []string{"Bearer wrong-key"}}
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err == nil {
+		t.Fatal("expected connection to be rejected")
+	}
+	if resp != nil && resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleProbeWS_AcceptsValidCredentials(t *testing.T) {
+	hub := NewHub(zap.NewNop(), nil)
+	hub.SetAuthenticator(func(probeID, token string) bool {
+		return probeID == "prb-authed" && token == "valid-key-123"
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(hub.HandleProbeWS))
+	defer srv.Close()
+
+	wsURL := probeWSURL(t, srv.URL, "prb-authed")
+	header := http.Header{"Authorization": []string{"Bearer valid-key-123"}}
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatalf("expected connection to succeed: %v", err)
+	}
+	defer conn.Close()
+
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("expected 101, got %d", resp.StatusCode)
+	}
+
+	waitFor(t, 500*time.Millisecond, func() bool {
+		return containsProbe(hub.Connected(), "prb-authed")
+	})
+}
+
+func TestHandleProbeWS_NoAuthenticatorAllowsAll(t *testing.T) {
+	// nil authenticator = no auth check (backward compat / test mode)
+	hub := NewHub(zap.NewNop(), nil)
+
+	srv := httptest.NewServer(http.HandlerFunc(hub.HandleProbeWS))
+	defer srv.Close()
+
+	conn := dialProbeWS(t, srv.URL, "prb-noauth")
+	defer conn.Close()
+
+	waitFor(t, 500*time.Millisecond, func() bool {
+		return containsProbe(hub.Connected(), "prb-noauth")
+	})
+}

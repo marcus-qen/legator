@@ -18,7 +18,9 @@ import (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
-	CheckOrigin:     func(r *http.Request) bool { return true }, // TODO: tighten
+	// CheckOrigin allows all origins — probes connect from arbitrary hosts.
+	// Authentication is handled before upgrade via ProbeAuthenticator.
+	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
 // ProbeConn represents a connected probe.
@@ -30,16 +32,21 @@ type ProbeConn struct {
 	mu        sync.Mutex
 }
 
+// ProbeAuthenticator validates a probe's identity and credentials.
+// Returns true if the probe ID + bearer token are valid.
+type ProbeAuthenticator func(probeID, bearerToken string) bool
+
 // Hub manages all connected probes.
 type Hub struct {
-	probes       map[string]*ProbeConn
-	mu           sync.RWMutex
-	logger       *zap.Logger
-	onMsg        func(probeID string, env protocol.Envelope) // callback for incoming messages
-	onConnect    func(probeID string)
-	onDisconnect func(probeID string)
-	signer       *signing.Signer // nil = signing disabled
-	streams      *streamRegistry // output chunk subscribers
+	probes        map[string]*ProbeConn
+	mu            sync.RWMutex
+	logger        *zap.Logger
+	onMsg         func(probeID string, env protocol.Envelope) // callback for incoming messages
+	onConnect     func(probeID string)
+	onDisconnect  func(probeID string)
+	authenticator ProbeAuthenticator // nil = no auth (testing only)
+	signer        *signing.Signer   // nil = signing disabled
+	streams       *streamRegistry   // output chunk subscribers
 }
 
 // NewHub creates a new Hub.
@@ -55,6 +62,14 @@ func NewHub(logger *zap.Logger, onMsg func(string, protocol.Envelope)) *Hub {
 // SetSigner enables command signing on outgoing messages.
 func (h *Hub) SetSigner(s *signing.Signer) {
 	h.signer = s
+}
+
+// SetAuthenticator installs a callback that validates probe credentials
+// during the WebSocket handshake, before the connection is upgraded.
+func (h *Hub) SetAuthenticator(auth ProbeAuthenticator) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.authenticator = auth
 }
 
 // SetLifecycleHooks installs optional callbacks for connect/disconnect transitions.
@@ -83,7 +98,26 @@ func (h *Hub) HandleProbeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: validate Authorization header / API key
+	// Authenticate probe before upgrading the connection.
+	if h.authenticator != nil {
+		token := extractBearerToken(r)
+		if token == "" {
+			http.Error(w, `{"error":"missing authorization"}`, http.StatusUnauthorized)
+			h.logger.Warn("probe connection rejected: no bearer token",
+				zap.String("probe_id", probeID),
+				zap.String("remote_addr", r.RemoteAddr),
+			)
+			return
+		}
+		if !h.authenticator(probeID, token) {
+			http.Error(w, `{"error":"invalid credentials"}`, http.StatusForbidden)
+			h.logger.Warn("probe connection rejected: invalid credentials",
+				zap.String("probe_id", probeID),
+				zap.String("remote_addr", r.RemoteAddr),
+			)
+			return
+		}
+	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -247,4 +281,17 @@ func (h *Hub) List() []ProbeInfo {
 		result = append(result, info)
 	}
 	return result
+}
+
+// extractBearerToken pulls the token from "Authorization: Bearer <token>" header.
+func extractBearerToken(r *http.Request) string {
+	auth := r.Header.Get("Authorization")
+	if auth == "" {
+		return ""
+	}
+	const prefix = "Bearer "
+	if len(auth) > len(prefix) && auth[:len(prefix)] == prefix {
+		return auth[len(prefix):]
+	}
+	return ""
 }

@@ -113,7 +113,6 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 		handler = auth.Middleware(s.authStore, []string{
 			"/healthz",
 			"/version",
-			"/ws/probe",
 			"/api/v1/register",
 			"/download/*",
 			"/install.sh",
@@ -353,6 +352,18 @@ func (s *Server) initHub() {
 		now := time.Now().UTC()
 		s.publishEvent(events.ProbeDisconnected, probeID, fmt.Sprintf("Probe %s disconnected", probeID),
 			map[string]string{"status": "degraded", "last_seen": now.Format(time.RFC3339)})
+	})
+
+	// Authenticate probes by validating their API key against fleet store.
+	s.hub.SetAuthenticator(func(probeID, bearerToken string) bool {
+		ps, ok := s.fleetMgr.Get(probeID)
+		if !ok {
+			return false // unknown probe
+		}
+		if ps.APIKey == "" {
+			return false // probe has no key (shouldn't happen)
+		}
+		return ps.APIKey == bearerToken
 	})
 
 	// Signing key: config file > env var > auto-generated
