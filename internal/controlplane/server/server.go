@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/marcus-qen/legator/internal/controlplane/alerts"
 	"github.com/marcus-qen/legator/internal/controlplane/api"
 	"github.com/marcus-qen/legator/internal/controlplane/approval"
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
@@ -80,6 +81,10 @@ type Server struct {
 	webhookNotifier *webhook.Notifier
 	webhookStore    *webhook.Store
 
+	// Alerts
+	alertEngine *alerts.Engine
+	alertStore  *alerts.Store
+
 	// Events
 	eventBus *events.Bus
 
@@ -113,6 +118,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initAudit()
 	s.initApprovals()
 	s.initWebhooks()
+	s.initAlerts()
 	s.initChat()
 	s.initPolicy()
 	s.initLLM()
@@ -204,6 +210,12 @@ func (s *Server) Close() {
 	if s.chatStore != nil {
 		s.chatStore.Close()
 	}
+	if s.alertEngine != nil {
+		s.alertEngine.Stop()
+	}
+	if s.alertStore != nil {
+		s.alertStore.Close()
+	}
 	if s.webhookStore != nil {
 		s.webhookStore.Close()
 	}
@@ -285,6 +297,25 @@ func (s *Server) initWebhooks() {
 	} else {
 		s.webhookNotifier = webhook.NewNotifier()
 	}
+}
+
+func (s *Server) initAlerts() {
+	alertsDBPath := filepath.Join(s.cfg.DataDir, "alerts.db")
+	store, err := alerts.NewStore(alertsDBPath)
+	if err != nil {
+		s.logger.Warn("cannot open alerts database, falling back to in-memory",
+			zap.String("path", alertsDBPath), zap.Error(err))
+		store, err = alerts.NewStore(":memory:")
+		if err != nil {
+			s.logger.Error("cannot initialize alerts store", zap.Error(err))
+			return
+		}
+	}
+
+	s.alertStore = store
+	s.alertEngine = alerts.NewEngine(store, s.fleetMgr, s.webhookNotifier, s.eventBus, s.logger.Named("alerts"))
+	s.alertEngine.Start()
+	s.logger.Info("alerts engine initialized", zap.String("path", alertsDBPath))
 }
 
 func (s *Server) initChat() {
