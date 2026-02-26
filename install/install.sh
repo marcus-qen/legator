@@ -132,15 +132,15 @@ mkdir -p "$CONFIG_DIR" "$DATA_DIR" "$LOG_DIR"
 chown "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR" "$LOG_DIR"
 
 # Download binary
-BINARY="probe-${OS}-${ARCH}"
+BINARY="legator-probe-${OS}-${ARCH}"
 BIN_PATH="$TMP_DIR/$BINARY"
 
 if [[ "$USE_GITHUB_RELEASE" == "true" ]]; then
   RELEASE_BASE="https://github.com/marcus-qen/legator/releases/download/${VERSION}"
-  DOWNLOAD_URL="${RELEASE_BASE}/${BINARY}"
+  DOWNLOAD_URL="${RELEASE_BASE}/legator-probe-${OS}-${ARCH}"
   CHECKSUMS_URL="${RELEASE_BASE}/checksums.txt"
 else
-  DOWNLOAD_URL="${SERVER%/}/download/${BINARY}"
+  DOWNLOAD_URL="${SERVER%/}/download/legator-probe-${OS}-${ARCH}"
   CHECKSUMS_URL="${SERVER%/}/download/checksums.txt"
 fi
 

@@ -28,20 +28,20 @@ build-all: build-cp-all build-probe-all build-ctl-all
 
 build-cp-all:
 	mkdir -p $(BIN_DIR)
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/control-plane-linux-amd64 ./cmd/control-plane
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/control-plane-linux-arm64 ./cmd/control-plane
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/legator-control-plane-linux-amd64 ./cmd/control-plane
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/legator-control-plane-linux-arm64 ./cmd/control-plane
 
 build-probe-all:
 	mkdir -p $(BIN_DIR)
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/probe-linux-amd64 ./cmd/probe
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/probe-linux-arm64 ./cmd/probe
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/probe-darwin-arm64 ./cmd/probe
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/legator-probe-linux-amd64 ./cmd/probe
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/legator-probe-linux-arm64 ./cmd/probe
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/legator-probe-darwin-arm64 ./cmd/probe
 
 build-ctl-all:
 	mkdir -p $(BIN_DIR)
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/legatorctl-linux-amd64 ./cmd/legatorctl
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/legatorctl-linux-arm64 ./cmd/legatorctl
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/legatorctl-darwin-arm64 ./cmd/legatorctl
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/legator-ctl-linux-amd64 ./cmd/legatorctl
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/legator-ctl-linux-arm64 ./cmd/legatorctl
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/legator-ctl-darwin-arm64 ./cmd/legatorctl
 
 release-build: build-all
 

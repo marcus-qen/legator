@@ -374,9 +374,29 @@ func (s *Server) initHub() {
 		s.handleProbeMessage(probeID, env)
 	})
 	s.hub.SetLifecycleHooks(func(probeID string) {
+		previousStatus := ""
+		if ps, ok := s.fleetMgr.Get(probeID); ok {
+			previousStatus = ps.Status
+		}
+
+		if err := s.fleetMgr.SetOnline(probeID); err != nil {
+			s.logger.Warn("failed to mark probe online on connect",
+				zap.String("probe", probeID),
+				zap.Error(err),
+			)
+		}
+
 		now := time.Now().UTC()
-		s.publishEvent(events.ProbeConnected, probeID, fmt.Sprintf("Probe %s connected", probeID),
-			map[string]string{"status": "online", "last_seen": now.Format(time.RFC3339)})
+		detail := map[string]string{"status": "online", "last_seen": now.Format(time.RFC3339)}
+		if previousStatus == "offline" || previousStatus == "degraded" {
+			reconnectedDetail := map[string]string{
+				"status":          "online",
+				"last_seen":       now.Format(time.RFC3339),
+				"previous_status": previousStatus,
+			}
+			s.publishEvent(events.ProbeReconnected, probeID, fmt.Sprintf("Probe %s reconnected", probeID), reconnectedDetail)
+		}
+		s.publishEvent(events.ProbeConnected, probeID, fmt.Sprintf("Probe %s connected", probeID), detail)
 	}, func(probeID string) {
 		now := time.Now().UTC()
 		s.publishEvent(events.ProbeDisconnected, probeID, fmt.Sprintf("Probe %s disconnected", probeID),

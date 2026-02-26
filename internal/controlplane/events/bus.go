@@ -13,6 +13,7 @@ type EventType string
 
 const (
 	ProbeConnected    EventType = "probe.connected"
+	ProbeReconnected  EventType = "probe.reconnected"
 	ProbeDisconnected EventType = "probe.disconnected"
 	ProbeRegistered   EventType = "probe.registered"
 	ProbeOffline      EventType = "probe.offline"

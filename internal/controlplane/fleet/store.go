@@ -166,6 +166,18 @@ func (s *Store) MarkOffline(threshold time.Duration) {
 	}
 }
 
+// SetOnline marks a probe online and persists status + last_seen.
+func (s *Store) SetOnline(id string) error {
+	if err := s.mgr.SetOnline(id); err != nil {
+		return err
+	}
+	ps, ok := s.mgr.Get(id)
+	if !ok {
+		return fmt.Errorf("unknown probe: %s", id)
+	}
+	return s.updateLastSeen(ps)
+}
+
 // Close shuts down the store.
 func (s *Store) Close() error {
 	return s.db.Close()

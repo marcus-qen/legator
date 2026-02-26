@@ -65,6 +65,33 @@ func TestMarkOffline(t *testing.T) {
 	}
 }
 
+func TestSetOnline(t *testing.T) {
+	m := NewManager(testLogger())
+	m.Register("probe-1", "web-01", "linux", "amd64")
+
+	oldSeen := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	m.mu.Lock()
+	m.probes["probe-1"].Status = "offline"
+	m.probes["probe-1"].LastSeen = oldSeen
+	m.mu.Unlock()
+
+	if err := m.SetOnline("probe-1"); err != nil {
+		t.Fatalf("set online failed: %v", err)
+	}
+
+	ps, _ := m.Get("probe-1")
+	if ps.Status != "online" {
+		t.Fatalf("expected online, got %s", ps.Status)
+	}
+	if !ps.LastSeen.After(oldSeen) {
+		t.Fatalf("expected LastSeen to be updated, got %s", ps.LastSeen)
+	}
+
+	if err := m.SetOnline("missing"); err == nil {
+		t.Fatal("expected error for unknown probe")
+	}
+}
+
 func TestSetPolicy(t *testing.T) {
 	m := NewManager(testLogger())
 	m.Register("probe-1", "web-01", "linux", "amd64")

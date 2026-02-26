@@ -200,6 +200,50 @@ func TestStoreMarkOfflinePersists(t *testing.T) {
 	}
 }
 
+func TestStoreSetOnlinePersists(t *testing.T) {
+	dbPath := tempDBPath(t)
+
+	s1, err := NewStore(dbPath, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s1.Register("p1", "web-01", "linux", "amd64")
+
+	oldSeen := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	s1.mgr.mu.Lock()
+	s1.mgr.probes["p1"].Status = "offline"
+	s1.mgr.probes["p1"].LastSeen = oldSeen
+	s1.mgr.mu.Unlock()
+	_ = s1.upsertProbe(s1.mgr.probes["p1"])
+
+	if err := s1.SetOnline("p1"); err != nil {
+		t.Fatalf("set online failed: %v", err)
+	}
+
+	s1.Close()
+
+	s2, err := NewStore(dbPath, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+
+	p1, ok := s2.Get("p1")
+	if !ok {
+		t.Fatal("expected p1 after reopen")
+	}
+	if p1.Status != "online" {
+		t.Fatalf("expected online, got %s", p1.Status)
+	}
+	if !p1.LastSeen.After(oldSeen) {
+		t.Fatalf("expected last_seen to be updated, got %s", p1.LastSeen)
+	}
+
+	if err := s2.SetOnline("missing"); err == nil {
+		t.Fatal("expected error for unknown probe")
+	}
+}
+
 func TestStoreDBFileCreated(t *testing.T) {
 	dbPath := tempDBPath(t)
 
