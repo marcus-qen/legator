@@ -40,21 +40,44 @@ func New(policy Policy, logger *zap.Logger) *Executor {
 	}
 }
 
+// effectiveLevel returns the higher of the declared level and the classified level.
+// This prevents callers from bypassing policy by declaring a low level on a dangerous command.
+func (e *Executor) effectiveLevel(cmd *protocol.CommandPayload) protocol.CapabilityLevel {
+	declared := cmd.Level
+	classified := ClassifyCommand(cmd.Command, cmd.Args)
+
+	levels := map[protocol.CapabilityLevel]int{
+		protocol.CapObserve:   1,
+		protocol.CapDiagnose:  2,
+		protocol.CapRemediate: 3,
+	}
+
+	if levels[classified] > levels[declared] {
+		return classified
+	}
+	return declared
+}
+
 // Execute runs a command if policy allows it.
 func (e *Executor) Execute(ctx context.Context, cmd *protocol.CommandPayload) *protocol.CommandResultPayload {
 	result := &protocol.CommandResultPayload{
 		RequestID: cmd.RequestID,
 	}
 
+	// Defence in depth: use the higher of declared and classified level
+	requiredLevel := e.effectiveLevel(cmd)
+
 	// Policy check: capability level
-	if !e.levelAllowed(cmd.Level) {
+	if !e.levelAllowed(requiredLevel) {
 		result.ExitCode = -1
-		result.Stderr = fmt.Sprintf("policy violation: command requires %s but probe is at %s level",
-			cmd.Level, e.policy.Level)
+		result.Stderr = fmt.Sprintf("policy violation: command classified as %s but probe is at %s level",
+			requiredLevel, e.policy.Level)
 		e.logger.Warn("command blocked by policy",
 			zap.String("request_id", cmd.RequestID),
-			zap.String("required_level", string(cmd.Level)),
+			zap.String("classified_level", string(requiredLevel)),
+			zap.String("declared_level", string(cmd.Level)),
 			zap.String("probe_level", string(e.policy.Level)),
+			zap.String("command", cmd.Command),
 		)
 		return result
 	}

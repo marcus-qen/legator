@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -130,5 +131,45 @@ func TestTruncate(t *testing.T) {
 	}
 	if truncate("hi", 10) != "hi" {
 		t.Error("no-op truncate failed")
+	}
+}
+
+func TestExecute_ClassifierOverridesDeclaredLevel(t *testing.T) {
+	// Probe is at observe level
+	e := New(Policy{Level: protocol.CapObserve}, testLogger())
+
+	// Command declares observe but is actually remediate (touch)
+	cmd := &protocol.CommandPayload{
+		RequestID: "test-defence",
+		Command:   "touch",
+		Args:      []string{"/tmp/evil"},
+		Level:     protocol.CapObserve, // lies about level
+	}
+
+	result := e.Execute(context.Background(), cmd)
+	if result.ExitCode != -1 {
+		t.Error("expected command to be blocked")
+	}
+	if !strings.Contains(result.Stderr, "policy violation") {
+		t.Errorf("expected policy violation in stderr, got: %s", result.Stderr)
+	}
+	if !strings.Contains(result.Stderr, "remediate") {
+		t.Errorf("expected classified level in error, got: %s", result.Stderr)
+	}
+}
+
+func TestExecute_ClassifierAllowsLegitObserve(t *testing.T) {
+	// Probe at observe level, command is legitimately observe
+	e := New(Policy{Level: protocol.CapObserve}, testLogger())
+
+	cmd := &protocol.CommandPayload{
+		RequestID: "test-legit",
+		Command:   "hostname",
+		Level:     protocol.CapObserve,
+	}
+
+	result := e.Execute(context.Background(), cmd)
+	if result.ExitCode != 0 {
+		t.Errorf("expected exit 0, got %d: %s", result.ExitCode, result.Stderr)
 	}
 }

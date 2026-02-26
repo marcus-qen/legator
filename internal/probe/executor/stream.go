@@ -23,11 +23,12 @@ type ChunkCallback func(chunk protocol.OutputChunkPayload)
 // Policy checks are the same as Execute.
 func (e *Executor) ExecuteStream(ctx context.Context, cmd *protocol.CommandPayload, cb ChunkCallback) {
 	// Policy checks (same as Execute)
-	if !e.levelAllowed(cmd.Level) {
+	requiredLevel := e.effectiveLevel(cmd)
+	if !e.levelAllowed(requiredLevel) {
 		cb(protocol.OutputChunkPayload{
 			RequestID: cmd.RequestID,
 			Stream:    "stderr",
-			Data: "policy violation: command requires " + string(cmd.Level) +
+			Data: "policy violation: command classified as " + string(requiredLevel) +
 				" but probe is at " + string(e.policy.Level) + " level",
 			Final:    true,
 			ExitCode: -1,
