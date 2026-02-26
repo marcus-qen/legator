@@ -108,6 +108,25 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/webhooks/{id}", s.withPermission(auth.PermWebhookManage, s.webhookNotifier.DeleteWebhook))
 	mux.HandleFunc("POST /api/v1/webhooks/{id}/test", s.withPermission(auth.PermWebhookManage, s.webhookNotifier.TestWebhook))
 
+	// Alerts
+	if s.alertEngine != nil {
+		mux.HandleFunc("GET /api/v1/alerts", s.withPermission(auth.PermFleetRead, s.alertEngine.HandleListRules))
+		mux.HandleFunc("POST /api/v1/alerts", s.withPermission(auth.PermFleetWrite, s.alertEngine.HandleCreateRule))
+		mux.HandleFunc("GET /api/v1/alerts/active", s.withPermission(auth.PermFleetRead, s.alertEngine.HandleActiveAlerts))
+		mux.HandleFunc("GET /api/v1/alerts/{id}", s.withPermission(auth.PermFleetRead, s.alertEngine.HandleGetRule))
+		mux.HandleFunc("PUT /api/v1/alerts/{id}", s.withPermission(auth.PermFleetWrite, s.alertEngine.HandleUpdateRule))
+		mux.HandleFunc("DELETE /api/v1/alerts/{id}", s.withPermission(auth.PermFleetWrite, s.alertEngine.HandleDeleteRule))
+		mux.HandleFunc("GET /api/v1/alerts/{id}/history", s.withPermission(auth.PermFleetRead, s.alertEngine.HandleRuleHistory))
+	} else {
+		mux.HandleFunc("GET /api/v1/alerts", s.withPermission(auth.PermFleetRead, s.handleAlertsUnavailable))
+		mux.HandleFunc("POST /api/v1/alerts", s.withPermission(auth.PermFleetWrite, s.handleAlertsUnavailable))
+		mux.HandleFunc("GET /api/v1/alerts/active", s.withPermission(auth.PermFleetRead, s.handleAlertsUnavailable))
+		mux.HandleFunc("GET /api/v1/alerts/{id}", s.withPermission(auth.PermFleetRead, s.handleAlertsUnavailable))
+		mux.HandleFunc("PUT /api/v1/alerts/{id}", s.withPermission(auth.PermFleetWrite, s.handleAlertsUnavailable))
+		mux.HandleFunc("DELETE /api/v1/alerts/{id}", s.withPermission(auth.PermFleetWrite, s.handleAlertsUnavailable))
+		mux.HandleFunc("GET /api/v1/alerts/{id}/history", s.withPermission(auth.PermFleetRead, s.handleAlertsUnavailable))
+	}
+
 	// Auth (optional)
 	if s.authStore != nil {
 		mux.HandleFunc("GET /api/v1/auth/keys", s.withPermission(auth.PermAdmin, auth.HandleListKeys(s.authStore)))
@@ -1220,4 +1239,8 @@ func (s *Server) handleFleetCleanup(w http.ResponseWriter, r *http.Request) {
 		"removed": removed,
 		"count":   len(removed),
 	})
+}
+
+func (s *Server) handleAlertsUnavailable(w http.ResponseWriter, r *http.Request) {
+	writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "alerts engine unavailable")
 }

@@ -24,6 +24,8 @@ const (
 	ApprovalDecided   EventType = "approval.decided"
 	PolicyChanged     EventType = "policy.changed"
 	ChatMessage       EventType = "chat.message"
+	AlertFired        EventType = "alert.fired"
+	AlertResolved     EventType = "alert.resolved"
 )
 
 // Event represents a fleet event.
