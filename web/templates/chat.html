@@ -7,7 +7,6 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <link rel="stylesheet" href="/static/style.css" />
   </head>
@@ -84,8 +83,8 @@
             </button>
             <span class="status-pill status-{{if or (eq .Probe.Status "online") (eq .Probe.Status "pending") (eq .Probe.Status "degraded") (eq .Probe.Status "offline")}}{{.Probe.Status}}{{else}}pending{{end}}">{{if .Probe.Status}}{{.Probe.Status}}{{else}}unknown{{end}}</span>
             <span id="connection-status" class="connection-status">
-              <span id="connection-dot" class="connection-dot disconnected"></span>
-              <span id="connection-text">Disconnected</span>
+              <span id="connection-dot" class="connection-dot connecting"></span>
+              <span id="connection-text">Connecting…</span>
             </span>
           </div>
         </header>
@@ -180,11 +179,11 @@
         function updateConnection(connected) {
           wsConnected = connected;
           if (connected) {
-            connectionDot.classList.remove('disconnected');
+            connectionDot.classList.remove('connecting', 'disconnected');
             connectionDot.classList.add('connected');
             connectionText.textContent = 'Connected';
           } else {
-            connectionDot.classList.remove('connected');
+            connectionDot.classList.remove('connecting', 'connected');
             connectionDot.classList.add('disconnected');
             connectionText.textContent = 'Disconnected';
           }
@@ -293,7 +292,7 @@
         }
 
         async function loadHistory() {
-          if (!probeID || wsConnected) {
+          if (!probeID) {
             return;
           }
 
@@ -482,6 +481,7 @@
         loadProbeContext();
         setInterval(loadProbeContext, 15000);
 
+        loadHistory();
         connectChatSocket();
         startPolling();
       })();

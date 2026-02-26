@@ -1029,6 +1029,11 @@ select:focus {
   box-shadow: 0 0 8px rgba(34, 197, 94, 0.4);
 }
 
+.connection-dot.connecting {
+  background: var(--amber);
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+}
+
 .connection-dot.disconnected {
   background: var(--red);
 }
@@ -1160,28 +1165,29 @@ select:focus {
 
 .probe-context {
   display: grid;
-  gap: 8px;
-  padding: 12px;
+  grid-template-columns: 110px 1fr;
+  padding: 0;
 }
 
 .ctx-item {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  padding: 9px;
-  background: var(--card);
+  display: contents;
+}
+
+.ctx-label,
+.ctx-value {
+  padding: 8px 12px;
+  border-bottom: 1px solid #1f1f22;
+  font-size: 13px;
 }
 
 .ctx-label {
-  display: block;
-  font-size: 11px;
+  color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--muted-2);
-  margin-bottom: 3px;
+  font-size: 11px;
 }
 
 .ctx-value {
-  font-size: 13px;
   color: var(--text);
   word-break: break-word;
 }
@@ -1385,22 +1391,6 @@ details.approval-extra summary {
   .content-grid {
     grid-template-columns: 1fr;
   }
-
-  .chat-page {
-    grid-template-columns: 1fr;
-  }
-
-  .context-column {
-    order: -1;
-  }
-
-  .context-toggle {
-    display: inline-flex;
-  }
-
-  body.context-collapsed #probe-context-panel {
-    display: none;
-  }
 }
 
 @media (max-width: 900px) {
@@ -1438,7 +1428,31 @@ details.approval-extra summary {
     min-width: 720px;
   }
 
+  .chat-page {
+    grid-template-columns: 1fr;
+  }
+
+  .context-column {
+    order: -1;
+  }
+
+  .context-toggle {
+    display: inline-flex;
+  }
+
+  body.context-collapsed #probe-context-panel {
+    display: none;
+  }
+
   .chat-messages {
     min-height: 50vh;
   }
 }
+
+/* Utility classes (replacing Tailwind CDN) */
+.w-full { width: 100%; }
+.justify-center { justify-content: center; }
+.font-semibold { font-weight: 600; }
+.text-green-400 { color: #4ade80; }
+.text-base { font-size: 1rem; }
+.py-2\.5 { padding-top: 10px; padding-bottom: 10px; }
