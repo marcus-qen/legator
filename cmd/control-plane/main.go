@@ -87,8 +87,27 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	// Core components
-	fleetMgr := fleet.NewManager(logger.Named("fleet"))
+	// Core components — persistent fleet state when data dir is available
+	var fleetMgr fleet.Fleet
+	var fleetStore *fleet.Store
+	fleetDBPath := filepath.Join(cfg.DataDir, "fleet.db")
+	if err := os.MkdirAll(cfg.DataDir, 0750); err == nil {
+		store, err := fleet.NewStore(fleetDBPath, logger.Named("fleet"))
+		if err != nil {
+			logger.Warn("cannot open fleet database, falling back to in-memory",
+				zap.String("path", fleetDBPath), zap.Error(err))
+			fleetMgr = fleet.NewManager(logger.Named("fleet"))
+		} else {
+			fleetStore = store
+			fleetMgr = store
+			logger.Info("fleet store opened", zap.String("path", fleetDBPath))
+			defer fleetStore.Close()
+		}
+	} else {
+		logger.Warn("cannot create data dir, fleet will be in-memory only",
+			zap.String("dir", cfg.DataDir), zap.Error(err))
+		fleetMgr = fleet.NewManager(logger.Named("fleet"))
+	}
 	tokenStore := api.NewTokenStore()
 	cmdTracker := cmdtracker.New(2 * time.Minute)
 
@@ -879,6 +898,7 @@ func main() {
 		zap.String("addr", cfg.ListenAddr),
 		zap.String("version", version),
 		zap.Bool("audit_persistent", auditStore != nil),
+		zap.Bool("fleet_persistent", fleetStore != nil),
 	)
 
 	go func() {
@@ -898,7 +918,7 @@ func main() {
 }
 
 func handleProbeMessage(
-	fm *fleet.Manager,
+	fm fleet.Fleet,
 	emitAudit func(audit.EventType, string, string, string),
 	recordAudit func(audit.Event),
 	ct *cmdtracker.Tracker,
@@ -986,7 +1006,7 @@ func handleProbeMessage(
 	}
 }
 
-func offlineChecker(ctx context.Context, fm *fleet.Manager) {
+func offlineChecker(ctx context.Context, fm fleet.Fleet) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {

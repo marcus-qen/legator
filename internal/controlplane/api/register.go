@@ -103,7 +103,7 @@ type RegisterResponse struct {
 }
 
 // HandleRegister returns an HTTP handler for probe registration.
-func HandleRegister(ts *TokenStore, fm *fleet.Manager, logger *zap.Logger) http.HandlerFunc {
+func HandleRegister(ts *TokenStore, fm fleet.Fleet, logger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req RegisterRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -162,7 +162,7 @@ func generateAPIKey() string {
 }
 
 // HandleRegisterWithAudit wraps HandleRegister with audit logging.
-func HandleRegisterWithAudit(ts *TokenStore, fm *fleet.Manager, al AuditRecorder, logger *zap.Logger) http.HandlerFunc {
+func HandleRegisterWithAudit(ts *TokenStore, fm fleet.Fleet, al AuditRecorder, logger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req RegisterRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
