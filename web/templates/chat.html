@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Legator · Probe {{.ProbeID}} · Chat</title>
+    <title>Legator · Probe {{.Probe.ID}} · Chat</title>
     <link rel="stylesheet" href="/static/style.css" />
     <style>
       .chat-shell {
@@ -307,12 +307,12 @@
     <main class="chat-shell">
       <section class="chat-header">
         <div>
-          <a href="/probe/{{.ProbeID}}" class="back-link">← Back to Probe</a>
-          <h1 class="chat-title">{{if .Hostname}}{{.Hostname}}{{else}}{{.ProbeID}}{{end}}</h1>
+          <a href="/probe/{{.Probe.ID}}" class="back-link">← Back to Probe</a>
+          <h1 class="chat-title">{{if .Probe.Hostname}}{{.Probe.Hostname}}{{else}}{{.Probe.ID}}{{end}}</h1>
           <p class="chat-title-meta">
-            <span>Probe ID: {{.ProbeID}}</span>
+            <span>Probe ID: {{.Probe.ID}}</span>
             <span class="separator">•</span>
-            <span class="status-pill status-{{if or (eq .Status "online") (eq .Status "pending") (eq .Status "degraded") (eq .Status "offline")}}{{.Status}}{{else}}pending{{end}}">{{if .Status}}{{.Status}}{{else}}unknown{{end}}</span>
+            <span class="status-pill status-{{if or (eq .Probe.Status "online") (eq .Probe.Status "pending") (eq .Probe.Status "degraded") (eq .Probe.Status "offline")}}{{.Probe.Status}}{{else}}pending{{end}}">{{if .Probe.Status}}{{.Probe.Status}}{{else}}unknown{{end}}</span>
             <span class="separator">•</span>
             <span id="connection-status" class="connection-status">
               <span id="connection-dot" class="connection-dot disconnected"></span>
@@ -321,6 +321,18 @@
           </p>
         </div>
       </section>
+
+
+      <div id="probe-context" class="probe-context" style="display:none">
+        <div class="ctx-item"><span class="ctx-label">Hostname</span><span id="ctx-hostname" class="ctx-value">—</span></div>
+        <div class="ctx-item"><span class="ctx-label">Status</span><span id="ctx-status" class="ctx-value">—</span></div>
+        <div class="ctx-item"><span class="ctx-label">OS / Arch</span><span id="ctx-os" class="ctx-value">—</span></div>
+        <div class="ctx-item"><span class="ctx-label">Kernel</span><span id="ctx-kernel" class="ctx-value">—</span></div>
+        <div class="ctx-item"><span class="ctx-label">CPUs</span><span id="ctx-cpus" class="ctx-value">—</span></div>
+        <div class="ctx-item"><span class="ctx-label">Memory</span><span id="ctx-mem" class="ctx-value">—</span></div>
+        <div class="ctx-item"><span class="ctx-label">Policy</span><span id="ctx-policy" class="ctx-value">—</span></div>
+        <div class="ctx-item"><span class="ctx-label">Last Seen</span><span id="ctx-lastseen" class="ctx-value">—</span></div>
+      </div>
 
       <section class="chat-layout">
         <section id="message-list" class="chat-messages" aria-live="polite"></section>
