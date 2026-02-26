@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"runtime"
-	"sync"
 	"time"
 )
 
@@ -29,7 +28,6 @@ type Server struct {
 	serverURL string
 	startedAt time.Time
 	connCheck func() bool
-	mu        sync.RWMutex
 }
 
 // NewServer creates a status server.
@@ -72,7 +70,7 @@ func (s *Server) Handler() http.Handler {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(info)
+		_ = json.NewEncoder(w).Encode(info)
 	})
 
 	return mux

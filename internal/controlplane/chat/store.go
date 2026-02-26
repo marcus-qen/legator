@@ -43,8 +43,8 @@ func NewStore(dbPath string, logger *zap.Logger) (*Store, error) {
 		return nil, err
 	}
 
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_chat_probe ON chat_messages(probe_id)`)
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_chat_ts ON chat_messages(timestamp)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_chat_probe ON chat_messages(probe_id)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_chat_ts ON chat_messages(timestamp)`)
 
 	s := &Store{db: db, mgr: NewManager(logger)}
 

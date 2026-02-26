@@ -46,9 +46,9 @@ func NewStore(dbPath string, memoryLimit int) (*Store, error) {
 	}
 
 	// Index for common queries
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_probe ON audit_events(probe_id)`)
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_type ON audit_events(type)`)
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_events(timestamp)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_probe ON audit_events(probe_id)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_type ON audit_events(type)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_events(timestamp)`)
 
 	s := &Store{
 		db:  db,
@@ -151,13 +151,13 @@ func (s *Store) QueryPersisted(f Filter) ([]Event, error) {
 		}
 		evt.Timestamp, _ = time.Parse(time.RFC3339Nano, ts)
 		if detail != "" && detail != "null" {
-			json.Unmarshal([]byte(detail), &evt.Detail)
+			_ = json.Unmarshal([]byte(detail), &evt.Detail)
 		}
 		if before != "" && before != "null" {
-			json.Unmarshal([]byte(before), &evt.Before)
+			_ = json.Unmarshal([]byte(before), &evt.Before)
 		}
 		if after != "" && after != "null" {
-			json.Unmarshal([]byte(after), &evt.After)
+			_ = json.Unmarshal([]byte(after), &evt.After)
 		}
 		events = append(events, evt)
 	}

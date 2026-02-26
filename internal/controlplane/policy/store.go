@@ -76,7 +76,7 @@ func (ps *PersistentStore) Delete(id string) error {
 	if err := ps.Store.Delete(id); err != nil {
 		return err
 	}
-	ps.db.Exec(`DELETE FROM policy_templates WHERE id = ?`, id)
+	_, _ = ps.db.Exec(`DELETE FROM policy_templates WHERE id = ?`, id)
 	return nil
 }
 

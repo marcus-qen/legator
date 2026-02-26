@@ -73,7 +73,7 @@ func ScoreHealth(hb *protocol.HeartbeatPayload, inv *protocol.InventoryPayload) 
 		score = 0
 	}
 
-	status := "healthy"
+	var status string
 	switch {
 	case score >= 80:
 		status = "healthy"

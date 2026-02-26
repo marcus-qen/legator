@@ -63,7 +63,7 @@ func (cr *ChatResponder) Respond(
 	policyLevel protocol.CapabilityLevel,
 ) (string, error) {
 	// Build inventory context
-	invCtx := "Probe inventory: unknown"
+	var invCtx string
 	if inventory != nil {
 		invCtx = fmt.Sprintf("Probe: %s | Hostname: %s | OS: %s %s | Kernel: %s | CPUs: %d | RAM: %d MB | Policy: %s",
 			probeID, inventory.Hostname, inventory.OS, inventory.Arch, inventory.Kernel,
@@ -95,7 +95,7 @@ func (cr *ChatResponder) Respond(
 		if msg.Role == "system" {
 			continue // skip system messages from chat
 		}
-		messages = append(messages, Message{Role: msg.Role, Content: msg.Content})
+		messages = append(messages, Message(msg))
 	}
 
 	// Add the new user message

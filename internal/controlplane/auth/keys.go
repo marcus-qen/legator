@@ -74,7 +74,7 @@ func NewKeyStore(dbPath string) (*KeyStore, error) {
 		return nil, err
 	}
 
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_keys_prefix ON api_keys(key_prefix)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_keys_prefix ON api_keys(key_prefix)`)
 
 	return &KeyStore{db: db}, nil
 }
@@ -184,7 +184,7 @@ func (ks *KeyStore) Validate(plainKey string) (*APIKey, error) {
 	go func() {
 		ks.mu.Lock()
 		defer ks.mu.Unlock()
-		ks.db.Exec(`UPDATE api_keys SET last_used = ? WHERE id = ?`,
+		_, _ = ks.db.Exec(`UPDATE api_keys SET last_used = ? WHERE id = ?`,
 			now.Format(time.RFC3339Nano), key.ID)
 	}()
 

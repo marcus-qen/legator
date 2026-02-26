@@ -37,6 +37,12 @@ func main() {
 		err = cmdService(os.Args[2:])
 	case "status":
 		err = cmdStatus(os.Args[2:])
+	case "list":
+		err = cmdList(os.Args[2:])
+	case "info":
+		err = cmdInfo(os.Args[2:])
+	case "health":
+		err = cmdHealth(os.Args[2:])
 	case "uninstall":
 		err = cmdUninstall(ctx)
 	case "version":

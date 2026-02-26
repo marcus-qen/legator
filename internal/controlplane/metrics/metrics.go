@@ -105,6 +105,6 @@ func (c *Collector) Handler() http.HandlerFunc {
 		b.WriteString("# TYPE legator_uptime_seconds gauge\n")
 		fmt.Fprintf(&b, "legator_uptime_seconds %.0f\n", time.Since(c.startTime).Seconds())
 
-		w.Write([]byte(b.String()))
+		_, _ = w.Write([]byte(b.String()))
 	}
 }

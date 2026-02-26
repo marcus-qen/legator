@@ -57,8 +57,8 @@ func NewStore(dbPath string, logger *zap.Logger) (*Store, error) {
 		}
 	}
 
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_probes_status ON probes(status)`)
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_probes_last_seen ON probes(last_seen)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_probes_status ON probes(status)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_probes_last_seen ON probes(last_seen)`)
 
 	s := &Store{db: db, mgr: NewManager(logger)}
 

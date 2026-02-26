@@ -115,7 +115,7 @@ func (n *Notifier) Notify(event, probeID, summary string, detail any) {
 			Detail:    detail,
 		}
 		webhook := cfg
-		go n.sendPayloadWithRetries(webhook, payload)
+		go func() { _ = n.sendPayloadWithRetries(webhook, payload) }()
 	}
 }
 

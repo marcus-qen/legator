@@ -61,7 +61,7 @@ func (s *Store) Register(cfg WebhookConfig) {
 // Remove deletes a webhook and removes from disk.
 func (s *Store) Remove(id string) {
 	s.notifier.Remove(id)
-	s.db.Exec(`DELETE FROM webhooks WHERE id = ?`, id)
+	_, _ = s.db.Exec(`DELETE FROM webhooks WHERE id = ?`, id)
 }
 
 // List returns all webhooks.
