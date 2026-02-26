@@ -3,11 +3,13 @@ package chat
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/gorilla/websocket"
 	_ "modernc.org/sqlite"
 	"go.uber.org/zap"
 )
@@ -164,31 +166,31 @@ func (s *Store) HandleGetMessages(w http.ResponseWriter, r *http.Request) {
 func (s *Store) HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 	probeID := parseProbeID(r.URL.Path)
 	if probeID == "" {
-		http.Error(w, `{"error":"missing probe id"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "missing probe id")
 		return
 	}
 
 	var req chatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request")
 		return
 	}
 
 	content := strings.TrimSpace(req.Content)
 	if content == "" {
-		http.Error(w, `{"error":"message content required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "message content required")
 		return
 	}
 
 	if s.AddMessage(probeID, "user", content) == nil {
-		http.Error(w, `{"error":"failed to persist user message"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "failed to persist user message")
 		return
 	}
 
 	reply := s.mgr.respond(probeID, content)
 	assistant := s.AddMessage(probeID, "assistant", reply)
 	if assistant == nil {
-		http.Error(w, `{"error":"failed to generate assistant reply"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "failed to generate assistant reply")
 		return
 	}
 
@@ -201,7 +203,7 @@ func (s *Store) HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 func (s *Store) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 	probeID := r.URL.Query().Get("probe_id")
 	if probeID == "" {
-		http.Error(w, `{"error":"missing probe_id"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "missing probe_id")
 		return
 	}
 
@@ -219,17 +221,40 @@ func (s *Store) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 
 	done := make(chan struct{})
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				s.mgr.logger.Error("panic in chat websocket writer",
+					zap.String("probe_id", probeID),
+					zap.Any("panic", r),
+				)
+			}
+			close(done)
+		}()
+
 		for msg := range messages {
 			if err := conn.WriteJSON(msg); err != nil {
+				s.mgr.logger.Warn("failed to write chat message", zap.Error(err), zap.String("probe_id", probeID))
+				_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "write error"))
 				break
 			}
 		}
-		close(done)
 	}()
 
 	for {
 		var req chatRequest
 		if err := conn.ReadJSON(&req); err != nil {
+			var closeErr *websocket.CloseError
+			var syntaxErr *json.SyntaxError
+			var typeErr *json.UnmarshalTypeError
+			switch {
+			case errors.As(err, &syntaxErr), errors.As(err, &typeErr):
+				s.mgr.logger.Warn("ignoring malformed chat websocket payload", zap.String("probe_id", probeID), zap.Error(err))
+				continue
+			case errors.As(err, &closeErr):
+				break
+			default:
+				s.mgr.logger.Warn("chat websocket read failed", zap.String("probe_id", probeID), zap.Error(err))
+			}
 			break
 		}
 		content := strings.TrimSpace(req.Content)

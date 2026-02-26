@@ -29,7 +29,9 @@ type Session struct {
 // ResponderFunc generates an assistant reply given a probe ID and user message.
 // It receives the chat history (excluding the new user message) for context.
 // If nil, the manager uses a placeholder responder.
-type ResponderFunc func(probeID, userMessage string, history []Message) string
+type ResponderFunc func(probeID, userMessage string, history []Message) (string, error)
+
+const llmUnavailableUserMessage = "I'm unable to process your request right now — the LLM provider is unavailable. Please try again shortly."
 
 // Manager stores chat sessions keyed by probe ID.
 type Manager struct {
@@ -202,7 +204,12 @@ func (m *Manager) respond(probeID, content string) string {
 	m.mu.RUnlock()
 	if fn != nil {
 		history := m.GetMessages(probeID, 0) // all history
-		return fn(probeID, content, history)
+		reply, err := fn(probeID, content, history)
+		if err != nil {
+			m.logger.Warn("chat responder unavailable", zap.String("probe_id", probeID), zap.Error(err))
+			return llmUnavailableUserMessage
+		}
+		return reply
 	}
 	return chatReplyFor(content)
 }

@@ -1,6 +1,8 @@
 package chat
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,5 +126,20 @@ func TestSubscribeCancelStopsDelivery(t *testing.T) {
 		}
 	case <-time.After(200 * time.Millisecond):
 		// expected: channel should close and not receive any message
+	}
+}
+
+func TestRespond_ReturnsFriendlyMessageWhenResponderFails(t *testing.T) {
+	m := NewManager(testLogger())
+	m.SetResponder(func(probeID, userMessage string, history []Message) (string, error) {
+		return "", errors.New("dial tcp 127.0.0.1:11434: connect: connection refused")
+	})
+
+	reply := m.respond("probe-llm", "hello")
+	if reply != llmUnavailableUserMessage {
+		t.Fatalf("expected friendly fallback message, got %q", reply)
+	}
+	if strings.Contains(reply, "connection refused") {
+		t.Fatalf("reply leaked raw backend error: %q", reply)
 	}
 }

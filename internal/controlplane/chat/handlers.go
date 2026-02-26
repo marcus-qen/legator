@@ -28,7 +28,7 @@ type chatRequest struct {
 func (m *Manager) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 	probeID := r.URL.Query().Get("probe_id")
 	if probeID == "" {
-		http.Error(w, `{"error":"missing probe_id"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "missing probe_id")
 		return
 	}
 
@@ -46,6 +46,16 @@ func (m *Manager) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 
 	done := make(chan struct{})
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				m.logger.Error("panic in chat websocket writer",
+					zap.String("probe_id", probeID),
+					zap.Any("panic", r),
+				)
+			}
+			close(done)
+		}()
+
 		for msg := range messages {
 			if err := conn.WriteJSON(msg); err != nil {
 				m.logger.Warn("failed to write chat message", zap.Error(err), zap.String("probe_id", probeID))
@@ -53,14 +63,27 @@ func (m *Manager) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
-		close(done)
 	}()
 
 	for {
 		var req chatRequest
-		if err := conn.ReadJSON(&req); err != nil {
+
+		// Split NextReader + Decode so connection errors break but
+		// malformed JSON continues (ReadJSON conflates both).
+		_, reader, err := conn.NextReader()
+		if err != nil {
+			m.logger.Debug("chat websocket closed", zap.String("probe_id", probeID), zap.Error(err))
 			break
 		}
+
+		if decodeErr := json.NewDecoder(reader).Decode(&req); decodeErr != nil {
+			m.logger.Warn("ignoring malformed chat websocket payload",
+				zap.String("probe_id", probeID),
+				zap.Error(decodeErr),
+			)
+			continue
+		}
+
 		content := strings.TrimSpace(req.Content)
 		if content == "" {
 			continue
@@ -90,7 +113,7 @@ func (m *Manager) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 func (m *Manager) HandleGetMessages(w http.ResponseWriter, r *http.Request) {
 	probeID := parseProbeID(r.URL.Path)
 	if probeID == "" {
-		http.Error(w, `{"error":"missing probe id"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "missing probe id")
 		return
 	}
 
@@ -106,7 +129,7 @@ func (m *Manager) HandleGetMessages(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(messages); err != nil {
 		m.logger.Error("failed to encode chat history", zap.Error(err), zap.String("probe_id", probeID))
-		http.Error(w, `{"error":"failed to encode response"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "failed to encode response")
 	}
 }
 
@@ -115,30 +138,30 @@ func (m *Manager) HandleGetMessages(w http.ResponseWriter, r *http.Request) {
 func (m *Manager) HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 	probeID := parseProbeID(r.URL.Path)
 	if probeID == "" {
-		http.Error(w, `{"error":"missing probe id"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "missing probe id")
 		return
 	}
 
 	var req chatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request")
 		return
 	}
 
 	content := strings.TrimSpace(req.Content)
 	if content == "" {
-		http.Error(w, `{"error":"message content required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "message content required")
 		return
 	}
 
 	if m.AddMessage(probeID, "user", content) == nil {
-		http.Error(w, `{"error":"failed to persist user message"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "failed to persist user message")
 		return
 	}
 
 	assistant := m.AddMessage(probeID, "assistant", m.respond(probeID, content))
 	if assistant == nil {
-		http.Error(w, `{"error":"failed to generate assistant reply"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "failed to generate assistant reply")
 		return
 	}
 
@@ -146,7 +169,7 @@ func (m *Manager) HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(assistant); err != nil {
 		m.logger.Error("failed to encode assistant response", zap.Error(err), zap.String("probe_id", probeID))
-		http.Error(w, `{"error":"failed to encode response"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "failed to encode response")
 	}
 }
 

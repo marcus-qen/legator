@@ -3,6 +3,7 @@ package websocket
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -169,6 +170,15 @@ func (h *Hub) HandleProbeWS(w http.ResponseWriter, r *http.Request) {
 
 	// Server-side ping loop
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				h.logger.Error("panic in probe websocket ping loop",
+					zap.String("probe_id", probeID),
+					zap.Any("panic", r),
+				)
+			}
+		}()
+
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
@@ -185,6 +195,11 @@ func (h *Hub) HandleProbeWS(w http.ResponseWriter, r *http.Request) {
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
+			var closeErr *websocket.CloseError
+			if errors.As(err, &closeErr) {
+				break
+			}
+			h.logger.Warn("probe websocket read failed", zap.String("probe_id", probeID), zap.Error(err))
 			break
 		}
 

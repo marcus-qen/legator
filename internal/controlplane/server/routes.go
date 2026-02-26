@@ -158,12 +158,12 @@ func (s *Server) requirePermission(w http.ResponseWriter, r *http.Request, perm 
 	}
 
 	if !auth.IsAuthenticated(r.Context()) {
-		http.Error(w, `{"error":"authentication required"}`, http.StatusUnauthorized)
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return false
 	}
 
 	if !auth.HasPermissionFromContext(r.Context(), perm) {
-		http.Error(w, `{"error":"insufficient permissions","required":"`+string(perm)+`"}`, http.StatusForbidden)
+		writeJSONError(w, http.StatusForbidden, "forbidden", fmt.Sprintf("insufficient permissions (required: %s)", perm))
 		return false
 	}
 
@@ -180,12 +180,12 @@ func (s *Server) currentTemplateUser(r *http.Request) *TemplateUser {
 
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	if s.userStore == nil {
-		http.Error(w, `{"error":"auth not enabled"}`, http.StatusServiceUnavailable)
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "auth not enabled")
 		return
 	}
 	users, err := s.userStore.List()
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -194,7 +194,7 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	if s.userStore == nil {
-		http.Error(w, `{"error":"auth not enabled"}`, http.StatusServiceUnavailable)
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "auth not enabled")
 		return
 	}
 	var body struct {
@@ -204,16 +204,16 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		Role        string `json:"role"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request")
 		return
 	}
 	if body.Username == "" || body.Password == "" || body.Role == "" {
-		http.Error(w, `{"error":"username, password, and role required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "username, password, and role required")
 		return
 	}
 	user, err := s.userStore.Create(body.Username, body.DisplayName, body.Password, body.Role)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusConflict)
+		writeJSONError(w, http.StatusConflict, "conflict", err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -223,16 +223,16 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	if s.userStore == nil {
-		http.Error(w, `{"error":"auth not enabled"}`, http.StatusServiceUnavailable)
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "auth not enabled")
 		return
 	}
 	id := r.PathValue("id")
 	if id == "" {
-		http.Error(w, `{"error":"user id required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "user id required")
 		return
 	}
 	if err := s.userStore.Delete(id); err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -269,7 +269,7 @@ func (s *Server) handleGetProbe(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	ps, ok := s.fleetMgr.Get(id)
 	if !ok {
-		http.Error(w, `{"error":"probe not found"}`, http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "not_found", "probe not found")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -283,7 +283,7 @@ func (s *Server) handleProbeHealth(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	ps, ok := s.fleetMgr.Get(id)
 	if !ok {
-		http.Error(w, `{"error":"probe not found"}`, http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "not_found", "probe not found")
 		return
 	}
 	health := ps.Health
@@ -301,13 +301,13 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	ps, ok := s.fleetMgr.Get(id)
 	if !ok {
-		http.Error(w, `{"error":"probe not found"}`, http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "not_found", "probe not found")
 		return
 	}
 
 	var cmd protocol.CommandPayload
 	if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
-		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request")
 		return
 	}
 	if cmd.RequestID == "" {
@@ -318,7 +318,7 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 	if approval.NeedsApproval(&cmd, ps.PolicyLevel) {
 		req, err := s.approvalQueue.Submit(id, &cmd, "Manual command dispatch", approval.ClassifyRisk(&cmd), "api")
 		if err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":"approval queue: %s"}`, err.Error()), http.StatusServiceUnavailable)
+			writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", fmt.Sprintf("approval queue: %s", err.Error()))
 			return
 		}
 		s.emitAudit(audit.EventApprovalRequest, id, "api",
@@ -350,7 +350,7 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 		if pending != nil {
 			s.cmdTracker.Cancel(cmd.RequestID)
 		}
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadGateway)
+		writeJSONError(w, http.StatusBadGateway, "bad_gateway", err.Error())
 		return
 	}
 
@@ -380,7 +380,7 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(result)
 	case <-timer.C:
 		s.cmdTracker.Cancel(cmd.RequestID)
-		http.Error(w, `{"error":"timeout waiting for probe response"}`, http.StatusGatewayTimeout)
+		writeJSONError(w, http.StatusGatewayTimeout, "timeout", "timeout waiting for probe response")
 	case <-r.Context().Done():
 		s.cmdTracker.Cancel(cmd.RequestID)
 	}
@@ -393,19 +393,19 @@ func (s *Server) handleRotateKey(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	ps, ok := s.fleetMgr.Get(id)
 	if !ok {
-		http.Error(w, `{"error":"probe not found"}`, http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "not_found", "probe not found")
 		return
 	}
 
 	newKey, err := api.GenerateAPIKey()
 	if err != nil {
-		http.Error(w, `{"error":"failed to generate api key"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "failed to generate api key")
 		return
 	}
 
 	previousKey := ps.APIKey
 	if err := s.fleetMgr.SetAPIKey(id, newKey); err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
 
@@ -414,7 +414,7 @@ func (s *Server) handleRotateKey(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.hub.SendTo(id, protocol.MsgKeyRotation, rotation); err != nil {
 		_ = s.fleetMgr.SetAPIKey(id, previousKey)
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadGateway)
+		writeJSONError(w, http.StatusBadGateway, "bad_gateway", err.Error())
 		return
 	}
 
@@ -435,22 +435,22 @@ func (s *Server) handleProbeUpdate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	_, ok := s.fleetMgr.Get(id)
 	if !ok {
-		http.Error(w, `{"error":"probe not found"}`, http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "not_found", "probe not found")
 		return
 	}
 
 	var upd protocol.UpdatePayload
 	if err := json.NewDecoder(r.Body).Decode(&upd); err != nil {
-		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request")
 		return
 	}
 	if upd.URL == "" {
-		http.Error(w, `{"error":"url is required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "url is required")
 		return
 	}
 
 	if err := s.hub.SendTo(id, protocol.MsgUpdate, upd); err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadGateway)
+		writeJSONError(w, http.StatusBadGateway, "bad_gateway", err.Error())
 		return
 	}
 
@@ -473,11 +473,11 @@ func (s *Server) handleSetTags(w http.ResponseWriter, r *http.Request) {
 		Tags []string `json:"tags"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request")
 		return
 	}
 	if err := s.fleetMgr.SetTags(id, body.Tags); err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
 	s.emitAudit(audit.EventPolicyChanged, id, "api", fmt.Sprintf("Tags set: %v", body.Tags))
@@ -495,12 +495,12 @@ func (s *Server) handleApplyPolicy(w http.ResponseWriter, r *http.Request) {
 
 	_, ok := s.fleetMgr.Get(probeID)
 	if !ok {
-		http.Error(w, `{"error":"probe not found"}`, http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "not_found", "probe not found")
 		return
 	}
 	tpl, ok := s.policyStore.Get(policyID)
 	if !ok {
-		http.Error(w, `{"error":"policy template not found"}`, http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "not_found", "policy template not found")
 		return
 	}
 
@@ -533,14 +533,14 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.taskRunner == nil {
-		http.Error(w, `{"error":"no LLM provider configured. Set LEGATOR_LLM_PROVIDER, LEGATOR_LLM_BASE_URL, LEGATOR_LLM_API_KEY, LEGATOR_LLM_MODEL"}`, http.StatusServiceUnavailable)
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "no LLM provider configured. Set LEGATOR_LLM_PROVIDER, LEGATOR_LLM_BASE_URL, LEGATOR_LLM_API_KEY, LEGATOR_LLM_MODEL")
 		return
 	}
 
 	id := r.PathValue("id")
 	ps, ok := s.fleetMgr.Get(id)
 	if !ok {
-		http.Error(w, `{"error":"probe not found"}`, http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "not_found", "probe not found")
 		return
 	}
 
@@ -548,7 +548,7 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 		Task string `json:"task"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Task == "" {
-		http.Error(w, `{"error":"task is required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "task is required")
 		return
 	}
 
@@ -558,6 +558,8 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 	result, err := s.taskRunner.Run(r.Context(), id, req.Task, ps.Inventory, ps.PolicyLevel)
 	if err != nil {
 		s.logger.Warn("task execution error", zap.String("probe", id), zap.Error(err))
+		writeJSONError(w, http.StatusBadGateway, "llm_unavailable", "LLM provider is unavailable: "+err.Error())
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -600,13 +602,13 @@ func (s *Server) handleGroupCommand(w http.ResponseWriter, r *http.Request) {
 	tag := r.PathValue("tag")
 	probes := s.fleetMgr.ListByTag(tag)
 	if len(probes) == 0 {
-		http.Error(w, `{"error":"no probes with that tag"}`, http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "not_found", "no probes with that tag")
 		return
 	}
 
 	var cmd protocol.CommandPayload
 	if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
-		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request")
 		return
 	}
 
@@ -673,7 +675,7 @@ func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	req, ok := s.approvalQueue.Get(id)
 	if !ok {
-		http.Error(w, `{"error":"approval request not found"}`, http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "not_found", "approval request not found")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -691,17 +693,17 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 		DecidedBy string `json:"decided_by"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
 		return
 	}
 	if body.Decision == "" || body.DecidedBy == "" {
-		http.Error(w, `{"error":"decision and decided_by are required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "decision and decided_by are required")
 		return
 	}
 
 	req, err := s.approvalQueue.Decide(id, approval.Decision(body.Decision), body.DecidedBy)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 
@@ -711,7 +713,7 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 
 	if req.Decision == approval.DecisionApproved {
 		if err := s.hub.SendTo(req.ProbeID, protocol.MsgCommand, *req.Command); err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":"approved but dispatch failed: %s"}`, err.Error()), http.StatusBadGateway)
+			writeJSONError(w, http.StatusBadGateway, "bad_gateway", fmt.Sprintf("approved but dispatch failed: %s", err.Error()))
 			return
 		}
 		s.emitAudit(audit.EventCommandSent, req.ProbeID, body.DecidedBy,
@@ -761,13 +763,13 @@ func (s *Server) handleSSEStream(w http.ResponseWriter, r *http.Request) {
 	}
 	requestID := r.PathValue("requestId")
 	if requestID == "" {
-		http.Error(w, `{"error":"request_id required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "request_id required")
 		return
 	}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, `{"error":"streaming not supported"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "streaming not supported")
 		return
 	}
 
@@ -802,7 +804,7 @@ func (s *Server) handleEventsSSE(w http.ResponseWriter, r *http.Request) {
 	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, `{"error":"streaming not supported"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "streaming not supported")
 		return
 	}
 
@@ -850,7 +852,7 @@ func (s *Server) handleGetPolicy(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	tpl, ok := s.policyStore.Get(id)
 	if !ok {
-		http.Error(w, `{"error":"policy template not found"}`, http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "not_found", "policy template not found")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -870,11 +872,11 @@ func (s *Server) handleCreatePolicy(w http.ResponseWriter, r *http.Request) {
 		Paths       []string                 `json:"paths"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request")
 		return
 	}
 	if body.Name == "" {
-		http.Error(w, `{"error":"name required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "name required")
 		return
 	}
 	tpl := s.policyStore.Create(body.Name, body.Description, body.Level, body.Allowed, body.Blocked, body.Paths)
@@ -889,7 +891,7 @@ func (s *Server) handleDeletePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if err := s.policyStore.Delete(id); err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -913,7 +915,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
 	installScript := filepath.Join("install", "install.sh")
 	if _, err := os.Stat(installScript); os.IsNotExist(err) {
-		http.Error(w, "install script not found", http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "not_found", "install script not found")
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -972,7 +974,7 @@ func (s *Server) handleFleetPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tmpl.ExecuteTemplate(w, "fleet.html", data); err != nil {
 		s.logger.Error("failed to render fleet page", zap.Error(err))
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "internal error")
 	}
 }
 
@@ -1004,7 +1006,7 @@ func (s *Server) handleProbeDetailPage(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "probe-detail.html", data); err != nil {
 		s.logger.Error("failed to render probe detail", zap.String("probe", id), zap.Error(err))
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "internal error")
 	}
 }
 
@@ -1036,7 +1038,7 @@ func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "chat.html", data); err != nil {
 		s.logger.Error("failed to render chat", zap.String("probe", id), zap.Error(err))
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "internal error")
 	}
 }
 
@@ -1056,7 +1058,7 @@ func (s *Server) handleApprovalsPage(w http.ResponseWriter, r *http.Request) {
 		CurrentUser: s.currentTemplateUser(r),
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "approvals.html", data); err != nil {
-		http.Error(w, err.Error(), 500)
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
 	}
 }
 
@@ -1076,7 +1078,7 @@ func (s *Server) handleAuditPage(w http.ResponseWriter, r *http.Request) {
 		CurrentUser: s.currentTemplateUser(r),
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "audit.html", data); err != nil {
-		http.Error(w, err.Error(), 500)
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
 	}
 }
 
@@ -1086,7 +1088,7 @@ func (s *Server) handleDeleteProbe(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if id == "" {
-		http.Error(w, `{"error":"missing probe id"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "missing probe id")
 		return
 	}
 
@@ -1097,7 +1099,7 @@ func (s *Server) handleDeleteProbe(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if err := s.fleetMgr.Delete(id); err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
 

@@ -213,6 +213,45 @@ func TestHandleProbeWS_TracksMultipleProbes(t *testing.T) {
 	}
 }
 
+func TestHandleProbeWS_MalformedJSONDoesNotBreakSession(t *testing.T) {
+	msgCh := make(chan struct{}, 1)
+
+	hub := NewHub(zap.NewNop(), func(probeID string, env protocol.Envelope) {
+		if probeID == "probe-malformed" && env.Type == protocol.MsgHeartbeat {
+			select {
+			case msgCh <- struct{}{}:
+			default:
+			}
+		}
+	})
+
+	ts := httptest.NewServer(http.HandlerFunc(hub.HandleProbeWS))
+	defer ts.Close()
+
+	conn := dialProbeWS(t, ts.URL, "probe-malformed")
+	defer conn.Close()
+
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"bad":`)); err != nil {
+		t.Fatalf("write malformed probe payload: %v", err)
+	}
+
+	env := protocol.Envelope{
+		ID:        "env-ok",
+		Type:      protocol.MsgHeartbeat,
+		Timestamp: time.Now().UTC(),
+		Payload:   protocol.HeartbeatPayload{ProbeID: "probe-malformed"},
+	}
+	if err := conn.WriteJSON(env); err != nil {
+		t.Fatalf("write valid probe payload after malformed one: %v", err)
+	}
+
+	select {
+	case <-msgCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected heartbeat callback after malformed probe payload")
+	}
+}
+
 func TestSendToSendsEnvelopeToConnectedProbe(t *testing.T) {
 	hub := NewHub(zap.NewNop(), nil)
 	ts := httptest.NewServer(http.HandlerFunc(hub.HandleProbeWS))

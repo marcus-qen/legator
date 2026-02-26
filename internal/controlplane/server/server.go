@@ -437,7 +437,7 @@ func (s *Server) wireChatLLM() {
 		s.logger.Named("chat-llm"),
 	)
 
-	responder := func(probeID, userMessage string, history []chat.Message) string {
+	responder := func(probeID, userMessage string, history []chat.Message) (string, error) {
 		llmHistory := make([]llm.ChatMessage, len(history))
 		for i, m := range history {
 			llmHistory[i] = llm.ChatMessage{Role: m.Role, Content: m.Content}
@@ -453,12 +453,7 @@ func (s *Server) wireChatLLM() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 
-		reply, err := chatResponder.Respond(ctx, probeID, llmHistory, userMessage, inv, level)
-		if err != nil {
-			s.logger.Warn("chat LLM error", zap.String("probe", probeID), zap.Error(err))
-			return fmt.Sprintf("LLM error: %s. Try again or use the command API directly.", err.Error())
-		}
-		return reply
+		return chatResponder.Respond(ctx, probeID, llmHistory, userMessage, inv, level)
 	}
 
 	if s.chatStore != nil {
