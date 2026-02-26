@@ -173,3 +173,27 @@ func TestGenerateTokenHandler(t *testing.T) {
 		t.Error("empty token value")
 	}
 }
+
+func TestGenerateAPIKey(t *testing.T) {
+	k1, err := GenerateAPIKey()
+	if err != nil {
+		t.Fatalf("generate api key: %v", err)
+	}
+	k2, err := GenerateAPIKey()
+	if err != nil {
+		t.Fatalf("generate api key second call: %v", err)
+	}
+
+	if len(k1) != 68 { // lgk_ + 64 hex chars
+		t.Fatalf("unexpected key length: got %d key=%q", len(k1), k1)
+	}
+	if len(k2) != 68 {
+		t.Fatalf("unexpected key length: got %d key=%q", len(k2), k2)
+	}
+	if k1[:4] != "lgk_" || k2[:4] != "lgk_" {
+		t.Fatalf("keys must use lgk_ prefix: %q %q", k1, k2)
+	}
+	if k1 == k2 {
+		t.Fatal("expected unique keys from two generations")
+	}
+}

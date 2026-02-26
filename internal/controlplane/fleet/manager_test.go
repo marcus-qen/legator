@@ -142,3 +142,21 @@ func TestTagCounts(t *testing.T) {
 		t.Fatalf("unexpected tag counts: %#v", counts)
 	}
 }
+
+func TestSetAPIKey(t *testing.T) {
+	m := NewManager(testLogger())
+	m.Register("probe-1", "web-01", "linux", "amd64")
+
+	if err := m.SetAPIKey("probe-1", "lgk_test_key"); err != nil {
+		t.Fatalf("set api key failed: %v", err)
+	}
+
+	ps, _ := m.Get("probe-1")
+	if ps.APIKey != "lgk_test_key" {
+		t.Fatalf("expected api key to be updated, got %q", ps.APIKey)
+	}
+
+	if err := m.SetAPIKey("missing", "x"); err == nil {
+		t.Fatal("expected error for unknown probe")
+	}
+}

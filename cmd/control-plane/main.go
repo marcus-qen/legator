@@ -525,6 +525,45 @@ func main() {
 		}
 	})
 
+	mux.HandleFunc("POST /api/v1/probes/{id}/rotate-key", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		ps, ok := fleetMgr.Get(id)
+		if !ok {
+			http.Error(w, `{"error":"probe not found"}`, http.StatusNotFound)
+			return
+		}
+
+		newKey, err := api.GenerateAPIKey()
+		if err != nil {
+			http.Error(w, `{"error":"failed to generate api key"}`, http.StatusInternalServerError)
+			return
+		}
+
+		previousKey := ps.APIKey
+		if err := fleetMgr.SetAPIKey(id, newKey); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusNotFound)
+			return
+		}
+
+		rotation := protocol.KeyRotationPayload{
+			NewKey: newKey,
+		}
+		if err := hub.SendTo(id, protocol.MsgKeyRotation, rotation); err != nil {
+			_ = fleetMgr.SetAPIKey(id, previousKey)
+			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadGateway)
+			return
+		}
+
+		emitAudit(audit.EventProbeKeyRotated, id, "api", "Probe API key rotated")
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status":   "rotated",
+			"probe_id": id,
+			"new_key":  newKey,
+		})
+	})
+
 	// ── Registration ─────────────────────────────────────────
 	// Build audit recorder for register handlers
 	var auditRecorder api.AuditRecorder
@@ -963,7 +1002,6 @@ func main() {
 
 	mux.HandleFunc("GET /ws/probe", hub.HandleProbeWS)
 
-	
 	// ── Binary download (for install script) ─────────────────
 	mux.HandleFunc("GET /download/{filename}", func(w http.ResponseWriter, r *http.Request) {
 		filename := r.PathValue("filename")
@@ -1101,7 +1139,6 @@ func main() {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 		}
 	})
-
 
 	// ── Approval queue UI ────────────────────────────────────
 	mux.HandleFunc("GET /approvals", func(w http.ResponseWriter, r *http.Request) {

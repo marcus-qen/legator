@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// ProbeState represents the control plane's view of a probe.
+// ProbeState represents the control plane view of a probe.
 type ProbeState struct {
 	ID          string                     `json:"id"`
 	Hostname    string                     `json:"hostname"`
@@ -19,6 +19,7 @@ type ProbeState struct {
 	Arch        string                     `json:"arch"`
 	Status      string                     `json:"status"` // pending, online, offline, degraded
 	PolicyLevel protocol.CapabilityLevel   `json:"policy_level"`
+	APIKey      string                     `json:"-"`
 	Registered  time.Time                  `json:"registered"`
 	LastSeen    time.Time                  `json:"last_seen"`
 	Inventory   *protocol.InventoryPayload `json:"inventory,omitempty"`
@@ -94,7 +95,7 @@ func (m *Manager) Heartbeat(id string, hb *protocol.HeartbeatPayload) error {
 	return nil
 }
 
-// UpdateInventory stores a probe's inventory report.
+// UpdateInventory stores a probe inventory report.
 func (m *Manager) UpdateInventory(id string, inv *protocol.InventoryPayload) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -108,7 +109,7 @@ func (m *Manager) UpdateInventory(id string, inv *protocol.InventoryPayload) err
 	return nil
 }
 
-// Get returns a probe's state.
+// Get returns a probe state.
 func (m *Manager) Get(id string) (*ProbeState, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -128,7 +129,7 @@ func (m *Manager) List() []*ProbeState {
 	return result
 }
 
-// SetPolicy updates a probe's capability level.
+// SetPolicy updates a probe capability level.
 func (m *Manager) SetPolicy(id string, level protocol.CapabilityLevel) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -145,7 +146,20 @@ func (m *Manager) SetPolicy(id string, level protocol.CapabilityLevel) error {
 	return nil
 }
 
-// MarkOffline checks all probes and marks ones that haven't been seen recently.
+// SetAPIKey updates a probe API key in fleet state.
+func (m *Manager) SetAPIKey(id, apiKey string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	ps, ok := m.probes[id]
+	if !ok {
+		return fmt.Errorf("unknown probe: %s", id)
+	}
+	ps.APIKey = apiKey
+	return nil
+}
+
+// MarkOffline checks all probes and marks stale probes as offline.
 func (m *Manager) MarkOffline(threshold time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -174,7 +188,7 @@ func (m *Manager) Count() map[string]int {
 	return counts
 }
 
-// SetTags replaces the probe tags with a normalized set.
+// SetTags replaces probe tags with a normalized set.
 func (m *Manager) SetTags(id string, tags []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

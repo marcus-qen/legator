@@ -21,7 +21,8 @@ const (
 	MsgPolicyUpdate MessageType = "policy_update"
 	MsgPing         MessageType = "ping"
 	MsgPong         MessageType = "pong"
-	MsgUpdate       MessageType = "update" // Control Plane → Probe: update binary
+	MsgUpdate       MessageType = "update"       // Control Plane → Probe: update binary
+	MsgKeyRotation  MessageType = "key_rotation" // Control Plane → Probe: rotate probe API key
 
 	// Bidirectional
 	MsgOutputChunk MessageType = "output_chunk"
@@ -166,4 +167,10 @@ type PolicyUpdatePayload struct {
 	Allowed  []string        `json:"allowed,omitempty"` // Command allowlist
 	Blocked  []string        `json:"blocked,omitempty"` // Command blocklist
 	Paths    []string        `json:"paths,omitempty"`   // Protected paths
+}
+
+// KeyRotationPayload pushes a replacement API key to a probe.
+type KeyRotationPayload struct {
+	NewKey    string `json:"new_key"`
+	ExpiresAt string `json:"expires_at,omitempty"` // ISO8601, optional
 }

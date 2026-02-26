@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/marcus-qen/legator/internal/probe/connection"
@@ -190,6 +191,31 @@ func (a *Agent) handleMessage(env protocol.Envelope) {
 				a.logger.Error("restart failed", zap.Error(err))
 			}
 		}
+
+	case protocol.MsgKeyRotation:
+		data, _ := json.Marshal(env.Payload)
+		var rotation protocol.KeyRotationPayload
+		if err := json.Unmarshal(data, &rotation); err != nil {
+			a.logger.Warn("invalid key rotation payload", zap.Error(err))
+			return
+		}
+		if strings.TrimSpace(rotation.NewKey) == "" {
+			a.logger.Warn("key rotation payload missing new key")
+			return
+		}
+
+		previousKey := a.config.APIKey
+		a.config.APIKey = rotation.NewKey
+		if err := a.config.Save(a.config.ConfigDir); err != nil {
+			a.config.APIKey = previousKey
+			a.logger.Error("failed to persist rotated API key", zap.Error(err))
+			return
+		}
+
+		a.client.SetAPIKey(rotation.NewKey)
+		a.logger.Info("probe API key rotated",
+			zap.Bool("expires_at_set", rotation.ExpiresAt != ""),
+		)
 
 	case protocol.MsgPing:
 		_ = a.client.Send(protocol.MsgPong, nil)

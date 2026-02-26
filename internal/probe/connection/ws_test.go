@@ -115,3 +115,11 @@ func TestEnvelopeJSONSerialization(t *testing.T) {
 		t.Fatalf("Payload.RequestID mismatch: got %q want %q", decodedPayload.RequestID, original.Payload.(protocol.CommandResultPayload).RequestID)
 	}
 }
+
+func TestSetAPIKey(t *testing.T) {
+	c := NewClient("https://control.example/ws", "probe-conn", "old-key", zap.NewNop())
+	c.SetAPIKey("new-key")
+	if c.apiKey != "new-key" {
+		t.Fatalf("expected apiKey to be updated, got %q", c.apiKey)
+	}
+}

@@ -5,8 +5,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
-	"math/big"
 	"fmt"
+	"math/big"
 	"sync"
 	"time"
 
@@ -34,8 +34,8 @@ type Client struct {
 	conn      *websocket.Conn
 	mu        sync.Mutex
 	connected bool
-	inbox  chan protocol.Envelope
-	closed chan struct{}
+	inbox     chan protocol.Envelope
+	closed    chan struct{}
 }
 
 // NewClient creates a new WebSocket client.
@@ -55,6 +55,13 @@ func (c *Client) Connected() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.connected
+}
+
+// SetAPIKey updates the API key used for future control-plane connections.
+func (c *Client) SetAPIKey(apiKey string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.apiKey = apiKey
 }
 
 // Inbox returns the channel of inbound messages from the control plane.

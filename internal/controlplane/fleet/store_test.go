@@ -213,3 +213,31 @@ func TestStoreDBFileCreated(t *testing.T) {
 		t.Fatal("database file was not created")
 	}
 }
+
+func TestStoreSetAPIKeyPersists(t *testing.T) {
+	dbPath := tempDBPath(t)
+
+	s1, err := NewStore(dbPath, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s1.Register("p1", "web-01", "linux", "amd64")
+	if err := s1.SetAPIKey("p1", "lgk_rotated_key"); err != nil {
+		t.Fatalf("set api key: %v", err)
+	}
+	s1.Close()
+
+	s2, err := NewStore(dbPath, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+
+	p1, ok := s2.Get("p1")
+	if !ok {
+		t.Fatal("p1 not found after reopen")
+	}
+	if p1.APIKey != "lgk_rotated_key" {
+		t.Fatalf("expected persisted api key, got %q", p1.APIKey)
+	}
+}

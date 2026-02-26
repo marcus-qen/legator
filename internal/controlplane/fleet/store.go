@@ -4,11 +4,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/marcus-qen/legator/internal/protocol"
-	_ "modernc.org/sqlite"
 	"go.uber.org/zap"
+	_ "modernc.org/sqlite"
 )
 
 // Store provides persistent fleet management backed by SQLite.
@@ -38,6 +39,7 @@ func NewStore(dbPath string, logger *zap.Logger) (*Store, error) {
 		arch         TEXT NOT NULL DEFAULT '',
 		status       TEXT NOT NULL DEFAULT 'pending',
 		policy_level TEXT NOT NULL DEFAULT 'observe',
+		api_key      TEXT NOT NULL DEFAULT '',
 		registered   TEXT NOT NULL,
 		last_seen    TEXT NOT NULL,
 		labels       TEXT NOT NULL DEFAULT '{}',
@@ -46,6 +48,13 @@ func NewStore(dbPath string, logger *zap.Logger) (*Store, error) {
 	)`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("create probes table: %w", err)
+	}
+
+	if _, err := db.Exec(`ALTER TABLE probes ADD COLUMN api_key TEXT NOT NULL DEFAULT ''`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name: api_key") {
+			db.Close()
+			return nil, fmt.Errorf("add api_key column: %w", err)
+		}
 	}
 
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_probes_status ON probes(status)`)
@@ -69,7 +78,7 @@ func (s *Store) Manager() *Manager {
 
 // ── Delegated reads (in-memory) ─────────────────────────────
 
-func (s *Store) Get(id string) (*ProbeState, bool) { return s.mgr.Get(id) }
+func (s *Store) Get(id string) (*ProbeState, bool)  { return s.mgr.Get(id) }
 func (s *Store) List() []*ProbeState                { return s.mgr.List() }
 func (s *Store) Count() map[string]int              { return s.mgr.Count() }
 func (s *Store) ListByTag(tag string) []*ProbeState { return s.mgr.ListByTag(tag) }
@@ -84,7 +93,7 @@ func (s *Store) Register(id, hostname, os_, arch string) *ProbeState {
 	return ps
 }
 
-// Heartbeat updates the probe's last-seen time.
+// Heartbeat updates the probe last-seen time.
 func (s *Store) Heartbeat(id string, hb *protocol.HeartbeatPayload) error {
 	if err := s.mgr.Heartbeat(id, hb); err != nil {
 		return err
@@ -96,7 +105,7 @@ func (s *Store) Heartbeat(id string, hb *protocol.HeartbeatPayload) error {
 	return nil
 }
 
-// UpdateInventory stores a probe's inventory.
+// UpdateInventory stores a probe inventory.
 func (s *Store) UpdateInventory(id string, inv *protocol.InventoryPayload) error {
 	if err := s.mgr.UpdateInventory(id, inv); err != nil {
 		return err
@@ -108,7 +117,7 @@ func (s *Store) UpdateInventory(id string, inv *protocol.InventoryPayload) error
 	return nil
 }
 
-// SetPolicy updates a probe's capability level.
+// SetPolicy updates a probe capability level.
 func (s *Store) SetPolicy(id string, level protocol.CapabilityLevel) error {
 	if err := s.mgr.SetPolicy(id, level); err != nil {
 		return err
@@ -120,7 +129,19 @@ func (s *Store) SetPolicy(id string, level protocol.CapabilityLevel) error {
 	return nil
 }
 
-// SetTags replaces the probe's tags.
+// SetAPIKey updates a probe API key.
+func (s *Store) SetAPIKey(id, apiKey string) error {
+	if err := s.mgr.SetAPIKey(id, apiKey); err != nil {
+		return err
+	}
+	ps, ok := s.mgr.Get(id)
+	if ok {
+		_ = s.upsertProbe(ps)
+	}
+	return nil
+}
+
+// SetTags replaces the probe tags.
 func (s *Store) SetTags(id string, tags []string) error {
 	if err := s.mgr.SetTags(id, tags); err != nil {
 		return err
@@ -159,14 +180,15 @@ func (s *Store) upsertProbe(ps *ProbeState) error {
 		inv, _ = json.Marshal(ps.Inventory)
 	}
 
-	_, err := s.db.Exec(`INSERT INTO probes (id, hostname, os, arch, status, policy_level, registered, last_seen, labels, tags, inventory)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	_, err := s.db.Exec(`INSERT INTO probes (id, hostname, os, arch, status, policy_level, api_key, registered, last_seen, labels, tags, inventory)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			hostname     = excluded.hostname,
 			os           = excluded.os,
 			arch         = excluded.arch,
 			status       = excluded.status,
 			policy_level = excluded.policy_level,
+			api_key      = excluded.api_key,
 			last_seen    = excluded.last_seen,
 			labels       = excluded.labels,
 			tags         = excluded.tags,
@@ -177,6 +199,7 @@ func (s *Store) upsertProbe(ps *ProbeState) error {
 		ps.Arch,
 		ps.Status,
 		string(ps.PolicyLevel),
+		ps.APIKey,
 		ps.Registered.Format(time.RFC3339Nano),
 		ps.LastSeen.Format(time.RFC3339Nano),
 		string(labels),
@@ -198,7 +221,7 @@ func (s *Store) updateStatus(id, status string) error {
 }
 
 func (s *Store) loadAll() error {
-	rows, err := s.db.Query(`SELECT id, hostname, os, arch, status, policy_level, registered, last_seen, labels, tags, inventory FROM probes`)
+	rows, err := s.db.Query(`SELECT id, hostname, os, arch, status, policy_level, api_key, registered, last_seen, labels, tags, inventory FROM probes`)
 	if err != nil {
 		return err
 	}
@@ -206,12 +229,12 @@ func (s *Store) loadAll() error {
 
 	for rows.Next() {
 		var (
-			id, hostname, os_, arch, status, policyLevel string
-			registered, lastSeen                         string
-			labelsJSON, tagsJSON                         string
-			invJSON                                      sql.NullString
+			id, hostname, os_, arch, status, policyLevel, apiKey string
+			registered, lastSeen                                 string
+			labelsJSON, tagsJSON                                 string
+			invJSON                                              sql.NullString
 		)
-		if err := rows.Scan(&id, &hostname, &os_, &arch, &status, &policyLevel, &registered, &lastSeen, &labelsJSON, &tagsJSON, &invJSON); err != nil {
+		if err := rows.Scan(&id, &hostname, &os_, &arch, &status, &policyLevel, &apiKey, &registered, &lastSeen, &labelsJSON, &tagsJSON, &invJSON); err != nil {
 			continue
 		}
 
@@ -222,6 +245,7 @@ func (s *Store) loadAll() error {
 			Arch:        arch,
 			Status:      status,
 			PolicyLevel: protocol.CapabilityLevel(policyLevel),
+			APIKey:      apiKey,
 			Labels:      map[string]string{},
 			Tags:        []string{},
 		}

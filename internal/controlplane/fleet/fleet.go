@@ -15,6 +15,7 @@ type Fleet interface {
 	Get(id string) (*ProbeState, bool)
 	List() []*ProbeState
 	SetPolicy(id string, level protocol.CapabilityLevel) error
+	SetAPIKey(id, apiKey string) error
 	MarkOffline(threshold time.Duration)
 	Count() map[string]int
 	SetTags(id string, tags []string) error

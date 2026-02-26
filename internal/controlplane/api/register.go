@@ -1,4 +1,4 @@
-// Package api implements the control plane's HTTP API handlers.
+// Package api implements the control plane HTTP API handlers.
 package api
 
 import (
@@ -70,7 +70,7 @@ func (ts *TokenStore) Generate() *Token {
 	return token
 }
 
-// Consume validates and consumes a token. Returns false if invalid/expired/used.
+// Consume validates and consumes a token. Returns false if invalid, expired, or already used.
 func (ts *TokenStore) Consume(value string) bool {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
@@ -86,7 +86,7 @@ func (ts *TokenStore) Consume(value string) bool {
 	return true
 }
 
-// RegisterRequest is the probe's registration request.
+// RegisterRequest is the probe registration request.
 type RegisterRequest struct {
 	Token    string `json:"token"`
 	Hostname string `json:"hostname"`
@@ -100,6 +100,15 @@ type RegisterResponse struct {
 	ProbeID  string `json:"probe_id"`
 	APIKey   string `json:"api_key"`
 	PolicyID string `json:"policy_id"`
+}
+
+// GenerateAPIKey creates a 32-byte cryptographically secure API key and returns it as hex with lgk_ prefix.
+func GenerateAPIKey() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate api key: %w", err)
+	}
+	return "lgk_" + hex.EncodeToString(b), nil
 }
 
 // HandleRegister returns an HTTP handler for probe registration.
@@ -118,10 +127,15 @@ func HandleRegister(ts *TokenStore, fm fleet.Fleet, logger *zap.Logger) http.Han
 
 		// Generate probe identity
 		probeID := "prb-" + uuid.New().String()[:8]
-		apiKey := generateAPIKey()
+		apiKey, err := GenerateAPIKey()
+		if err != nil {
+			http.Error(w, `{"error":"failed to generate api key"}`, http.StatusInternalServerError)
+			return
+		}
 
 		// Register in fleet
 		fm.Register(probeID, req.Hostname, req.OS, req.Arch)
+		_ = fm.SetAPIKey(probeID, apiKey)
 
 		logger.Info("probe registered",
 			zap.String("probe_id", probeID),
@@ -153,14 +167,6 @@ func HandleGenerateToken(ts *TokenStore, logger *zap.Logger) http.HandlerFunc {
 	}
 }
 
-func generateAPIKey() string {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "lgk_" + hex.EncodeToString([]byte("fallback-key"))
-	}
-	return "lgk_" + hex.EncodeToString(b)
-}
-
 // HandleRegisterWithAudit wraps HandleRegister with audit logging.
 func HandleRegisterWithAudit(ts *TokenStore, fm fleet.Fleet, al AuditRecorder, logger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -176,9 +182,14 @@ func HandleRegisterWithAudit(ts *TokenStore, fm fleet.Fleet, al AuditRecorder, l
 		}
 
 		probeID := "prb-" + uuid.New().String()[:8]
-		apiKey := generateAPIKey()
+		apiKey, err := GenerateAPIKey()
+		if err != nil {
+			http.Error(w, `{"error":"failed to generate api key"}`, http.StatusInternalServerError)
+			return
+		}
 
 		fm.Register(probeID, req.Hostname, req.OS, req.Arch)
+		_ = fm.SetAPIKey(probeID, apiKey)
 
 		al.Record(audit.Event{
 			Type:    audit.EventProbeRegistered,

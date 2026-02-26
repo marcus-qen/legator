@@ -23,6 +23,7 @@ const (
 	EventApprovalDecided EventType = "approval.decided"
 	EventTokenGenerated  EventType = "token.generated"
 	EventInventoryUpdate EventType = "inventory.updated"
+	EventProbeKeyRotated EventType = "probe.key_rotated"
 )
 
 // Event is a single audit log entry.

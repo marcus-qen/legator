@@ -78,6 +78,9 @@ func TestMessageTypeConstants(t *testing.T) {
 		{"MsgPolicyUpdate", MsgPolicyUpdate, "policy_update"},
 		{"MsgPing", MsgPing, "ping"},
 		{"MsgPong", MsgPong, "pong"},
+		{"MsgUpdate", MsgUpdate, "update"},
+		{"MsgKeyRotation", MsgKeyRotation, "key_rotation"},
+		{"MsgOutputChunk", MsgOutputChunk, "output_chunk"},
 	}
 
 	seen := map[string]struct{}{}
@@ -111,5 +114,29 @@ func TestCapabilityLevelValues(t *testing.T) {
 		if tc.got != tc.want {
 			t.Errorf("%s: got %q, want %q", tc.name, tc.got, tc.want)
 		}
+	}
+}
+
+func TestKeyRotationPayloadJSON(t *testing.T) {
+	payload := KeyRotationPayload{
+		NewKey:    "lgk_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd",
+		ExpiresAt: "2026-02-27T02:00:00Z",
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal key rotation payload: %v", err)
+	}
+
+	var decoded KeyRotationPayload
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal key rotation payload: %v", err)
+	}
+
+	if decoded.NewKey != payload.NewKey {
+		t.Fatalf("new key mismatch: got %q want %q", decoded.NewKey, payload.NewKey)
+	}
+	if decoded.ExpiresAt != payload.ExpiresAt {
+		t.Fatalf("expires_at mismatch: got %q want %q", decoded.ExpiresAt, payload.ExpiresAt)
 	}
 }
