@@ -38,10 +38,12 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v1/probes/{id}/tags", s.handleSetTags)
 	mux.HandleFunc("POST /api/v1/probes/{id}/apply-policy/{policyId}", s.handleApplyPolicy)
 	mux.HandleFunc("POST /api/v1/probes/{id}/task", s.handleTask)
+	mux.HandleFunc("DELETE /api/v1/probes/{id}", s.handleDeleteProbe)
 	mux.HandleFunc("GET /api/v1/fleet/summary", s.handleFleetSummary)
 	mux.HandleFunc("GET /api/v1/fleet/tags", s.handleFleetTags)
 	mux.HandleFunc("GET /api/v1/fleet/by-tag/{tag}", s.handleListByTag)
 	mux.HandleFunc("POST /api/v1/fleet/by-tag/{tag}/command", s.handleGroupCommand)
+	mux.HandleFunc("POST /api/v1/fleet/cleanup", s.handleFleetCleanup)
 
 	// Registration
 	mux.HandleFunc("POST /api/v1/register", api.HandleRegisterWithAudit(s.tokenStore, s.fleetMgr, s.auditRecorder(), s.logger.Named("register")))
@@ -859,4 +861,56 @@ func (s *Server) handleAuditPage(w http.ResponseWriter, r *http.Request) {
 	if err := s.tmpl.ExecuteTemplate(w, "audit.html", nil); err != nil {
 		http.Error(w, err.Error(), 500)
 	}
+}
+
+
+func (s *Server) handleDeleteProbe(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, `{"error":"missing probe id"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Disconnect if currently connected
+	_ = s.hub.SendTo(id, protocol.MsgCommand, protocol.CommandPayload{
+		RequestID: "disconnect",
+		Command:   "__disconnect",
+	})
+
+	if err := s.fleetMgr.Delete(id); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusNotFound)
+		return
+	}
+
+	s.emitAudit(audit.EventProbeDeregistered, id, "api", fmt.Sprintf("probe %s deleted", id))
+	s.logger.Info("probe deleted", zap.String("id", id))
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, `{"deleted":"%s"}`, id)
+}
+
+func (s *Server) handleFleetCleanup(w http.ResponseWriter, r *http.Request) {
+	// Default: remove probes offline for more than 1 hour
+	threshold := time.Hour
+	if raw := r.URL.Query().Get("older_than"); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			threshold = d
+		}
+	}
+
+	removed := s.fleetMgr.CleanupOffline(threshold)
+
+	for _, id := range removed {
+		s.emitAudit(audit.EventProbeDeregistered, id, "cleanup", fmt.Sprintf("stale probe removed (offline > %s)", threshold))
+	}
+
+	s.logger.Info("fleet cleanup", zap.Int("removed", len(removed)), zap.Duration("threshold", threshold))
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]any{
+		"removed": removed,
+		"count":   len(removed),
+	})
 }

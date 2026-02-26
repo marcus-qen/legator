@@ -21,6 +21,8 @@ type Fleet interface {
 	SetTags(id string, tags []string) error
 	ListByTag(tag string) []*ProbeState
 	TagCounts() map[string]int
+	Delete(id string) error
+	CleanupOffline(olderThan time.Duration) []string
 }
 
 // compile-time interface checks

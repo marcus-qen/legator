@@ -5,6 +5,7 @@ set -uo pipefail
 PORT=19090
 CP_URL="http://localhost:$PORT"
 PROBE_CONFIG_DIR=$(mktemp -d)
+DATA_DIR=$(mktemp -d)
 PASSED=0
 FAILED=0
 CP_PID=""
@@ -17,6 +18,7 @@ cleanup() {
   [[ -n "$CP_PID" ]] && kill $CP_PID 2>/dev/null || true
   [[ -n "$PROBE_PID" ]] && kill $PROBE_PID 2>/dev/null || true
   rm -rf "$PROBE_CONFIG_DIR"
+  rm -rf "$DATA_DIR"
 }
 trap cleanup EXIT
 
@@ -25,7 +27,7 @@ echo ""
 
 # 1. Start control plane
 echo "1. Starting control plane on :$PORT..."
-LEGATOR_LISTEN_ADDR=":$PORT" ./bin/control-plane &
+LEGATOR_LISTEN_ADDR=":$PORT" LEGATOR_DATA_DIR="$DATA_DIR" ./bin/control-plane &
 CP_PID=$!
 sleep 1
 
@@ -376,6 +378,48 @@ else
 fi
 
 # 29. Summary
+
+# 29. Delete probe endpoint
+echo ""
+echo "29. Delete probe endpoint..."
+# Register a temp probe to delete
+DELETE_TOKEN=$(curl -s -X POST "$CP_URL/api/v1/tokens" | jq -r '.token // empty')
+if [[ -n "$DELETE_TOKEN" ]]; then
+  DELETE_REG=$(curl -s -X POST "$CP_URL/api/v1/register" \
+    -H "Content-Type: application/json" \
+    -d "{\"token\": \"$DELETE_TOKEN\", \"hostname\": \"delete-test\", \"os\": \"linux\", \"arch\": \"amd64\"}")
+  DELETE_ID=$(echo "$DELETE_REG" | jq -r '.probe_id // empty')
+  if [[ -n "$DELETE_ID" ]]; then
+    DEL_RESP=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$CP_URL/api/v1/probes/$DELETE_ID")
+    if [[ "$DEL_RESP" == "200" ]]; then
+      # Verify it's gone
+      GET_RESP=$(curl -s -o /dev/null -w "%{http_code}" "$CP_URL/api/v1/probes/$DELETE_ID")
+      if [[ "$GET_RESP" == "404" ]]; then
+        pass "Delete probe removes probe from fleet"
+      else
+        fail "Deleted probe still accessible (status=$GET_RESP)"
+      fi
+    else
+      fail "Delete probe returned $DEL_RESP"
+    fi
+  else
+    fail "Could not register temp probe for delete test"
+  fi
+else
+  fail "Could not generate token for delete test"
+fi
+
+# 30. Fleet cleanup endpoint
+echo ""
+echo "30. Fleet cleanup endpoint..."
+CLEANUP_RESP=$(curl -s -X POST "$CP_URL/api/v1/fleet/cleanup?older_than=0s")
+CLEANUP_COUNT=$(echo "$CLEANUP_RESP" | jq -r '.count // 0')
+if echo "$CLEANUP_RESP" | jq -e '.removed' > /dev/null 2>&1; then
+  pass "Fleet cleanup returns removed list (cleaned $CLEANUP_COUNT)"
+else
+  fail "Fleet cleanup response invalid"
+fi
+
 echo ""
 echo "=========================="
 echo "Results: $PASSED passed, $FAILED failed"

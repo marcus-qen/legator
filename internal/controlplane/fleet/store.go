@@ -279,3 +279,21 @@ func nullableJSON(data []byte) sql.NullString {
 	}
 	return sql.NullString{String: string(data), Valid: true}
 }
+
+// Delete removes a probe from the store and in-memory cache.
+func (s *Store) Delete(id string) error {
+	if err := s.mgr.Delete(id); err != nil {
+		return err
+	}
+	_, _ = s.db.Exec("DELETE FROM probes WHERE id = ?", id)
+	return nil
+}
+
+// CleanupOffline removes probes offline longer than the threshold.
+func (s *Store) CleanupOffline(olderThan time.Duration) []string {
+	removed := s.mgr.CleanupOffline(olderThan)
+	for _, id := range removed {
+		s.db.Exec("DELETE FROM probes WHERE id = ?", id)
+	}
+	return removed
+}

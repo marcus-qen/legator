@@ -24,6 +24,7 @@ const (
 	EventTokenGenerated  EventType = "token.generated"
 	EventInventoryUpdate EventType = "inventory.updated"
 	EventProbeKeyRotated EventType = "probe.key_rotated"
+	EventProbeDeregistered EventType = "probe.deregistered"
 )
 
 // Event is a single audit log entry.

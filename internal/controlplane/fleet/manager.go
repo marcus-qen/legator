@@ -252,3 +252,31 @@ func normalizeTags(tags []string) []string {
 	}
 	return out
 }
+
+// Delete removes a probe from the fleet entirely.
+// Returns error if the probe does not exist.
+func (m *Manager) Delete(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.probes[id]; !ok {
+		return fmt.Errorf("unknown probe: %s", id)
+	}
+	delete(m.probes, id)
+	return nil
+}
+
+// CleanupOffline removes all probes that have been offline longer than the given threshold.
+// Returns the list of removed probe IDs.
+func (m *Manager) CleanupOffline(olderThan time.Duration) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cutoff := time.Now().UTC().Add(-olderThan)
+	removed := []string{}
+	for id, ps := range m.probes {
+		if ps.Status == "offline" && ps.LastSeen.Before(cutoff) {
+			delete(m.probes, id)
+			removed = append(removed, id)
+		}
+	}
+	return removed
+}
