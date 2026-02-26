@@ -48,6 +48,11 @@ type ProbePageData struct {
 	CurrentUser *TemplateUser
 }
 
+// AlertsPageData is passed to alerts.html template.
+type AlertsPageData struct {
+	CurrentUser *TemplateUser
+}
+
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
 		"statusClass":    templateStatusClass,
