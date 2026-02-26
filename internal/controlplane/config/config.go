@@ -34,6 +34,9 @@ type Config struct {
 
 	// Log level (debug, info, warn, error)
 	LogLevel string `json:"log_level"`
+
+	// External URL for install commands (e.g. https://legator.example.com)
+	ExternalURL string `json:"external_url,omitempty"`
 }
 
 // LLMConfig configures the LLM provider.
@@ -114,6 +117,9 @@ func Load(path string) (Config, error) {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.RateLimit.RequestsPerMinute = n
 		}
+	}
+	if v := os.Getenv("LEGATOR_EXTERNAL_URL"); v != "" {
+		cfg.ExternalURL = v
 	}
 
 	return cfg, nil

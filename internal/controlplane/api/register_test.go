@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"strings"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -195,5 +196,88 @@ func TestGenerateAPIKey(t *testing.T) {
 	}
 	if k1 == k2 {
 		t.Fatal("expected unique keys from two generations")
+	}
+}
+
+func TestListActiveTokens(t *testing.T) {
+	ts := NewTokenStore()
+
+	// No tokens initially
+	if got := len(ts.ListActive()); got != 0 {
+		t.Errorf("expected 0 active tokens, got %d", got)
+	}
+
+	// Generate two tokens
+	t1 := ts.Generate()
+	_ = ts.Generate()
+	if got := len(ts.ListActive()); got != 2 {
+		t.Errorf("expected 2 active tokens, got %d", got)
+	}
+
+	// Consume one
+	ts.Consume(t1.Value)
+	if got := len(ts.ListActive()); got != 1 {
+		t.Errorf("expected 1 active token after consume, got %d", got)
+	}
+
+	// Total should still be 2
+	if got := ts.Count(); got != 2 {
+		t.Errorf("expected 2 total tokens, got %d", got)
+	}
+}
+
+func TestHandleListTokens(t *testing.T) {
+	ts := NewTokenStore()
+	ts.Generate()
+	ts.Generate()
+
+	handler := HandleListTokens(ts)
+	req := httptest.NewRequest("GET", "/api/v1/tokens", nil)
+	w := httptest.NewRecorder()
+	handler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	var resp struct {
+		Tokens []*Token `json:"tokens"`
+		Count  int      `json:"count"`
+		Total  int      `json:"total"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Count != 2 {
+		t.Errorf("expected count 2, got %d", resp.Count)
+	}
+	if resp.Total != 2 {
+		t.Errorf("expected total 2, got %d", resp.Total)
+	}
+}
+
+func TestTokenInstallCommand(t *testing.T) {
+	ts := NewTokenStore()
+	ts.SetServerURL("https://legator.example.com")
+
+	token := ts.Generate()
+	if token.InstallCommand == "" {
+		t.Fatal("install_command should be set when server URL is configured")
+	}
+	if !strings.Contains(token.InstallCommand, "https://legator.example.com") {
+		t.Errorf("install_command should contain server URL, got: %s", token.InstallCommand)
+	}
+	if !strings.Contains(token.InstallCommand, token.Value) {
+		t.Errorf("install_command should contain token value, got: %s", token.InstallCommand)
+	}
+}
+
+func TestTokenInstallCommandEmpty(t *testing.T) {
+	ts := NewTokenStore()
+	// No server URL set
+
+	token := ts.Generate()
+	if token.InstallCommand != "" {
+		t.Errorf("install_command should be empty when no server URL, got: %s", token.InstallCommand)
 	}
 }

@@ -104,6 +104,9 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 		return nil, err
 	}
 	s.tokenStore = api.NewTokenStore()
+	if s.cfg.ExternalURL != "" {
+		s.tokenStore.SetServerURL(s.cfg.ExternalURL)
+	}
 	s.cmdTracker = cmdtracker.New(2 * time.Minute)
 	s.initAudit()
 	s.initApprovals()

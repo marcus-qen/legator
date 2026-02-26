@@ -26,17 +26,19 @@ type AuditRecorder interface {
 
 // Token represents a single-use registration token.
 type Token struct {
-	Value   string    `json:"token"`
-	Created time.Time `json:"created"`
-	Expires time.Time `json:"expires"`
-	Used    bool      `json:"used"`
+	Value          string    `json:"token"`
+	Created        time.Time `json:"created"`
+	Expires        time.Time `json:"expires"`
+	Used           bool      `json:"used"`
+	InstallCommand string    `json:"install_command,omitempty"`
 }
 
 // TokenStore manages registration tokens.
 type TokenStore struct {
-	tokens map[string]*Token
-	secret []byte
-	mu     sync.RWMutex
+	tokens    map[string]*Token
+	secret    []byte
+	serverURL string // used to generate install commands
+	mu        sync.RWMutex
 }
 
 // NewTokenStore creates a token store with a random HMAC secret.
@@ -47,6 +49,13 @@ func NewTokenStore() *TokenStore {
 		tokens: make(map[string]*Token),
 		secret: secret,
 	}
+}
+
+// SetServerURL sets the server URL used in install commands.
+func (ts *TokenStore) SetServerURL(url string) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	ts.serverURL = url
 }
 
 // Generate creates a new registration token valid for 30 minutes.
@@ -66,6 +75,14 @@ func (ts *TokenStore) Generate() *Token {
 		Created: now,
 		Expires: now.Add(30 * time.Minute),
 	}
+
+	if ts.serverURL != "" {
+		token.InstallCommand = fmt.Sprintf(
+			"curl -sSL %s/install.sh | sudo bash -s -- --server %s --token %s",
+			ts.serverURL, ts.serverURL, token.Value,
+		)
+	}
+
 	ts.tokens[token.Value] = token
 	return token
 }
@@ -84,6 +101,28 @@ func (ts *TokenStore) Consume(value string) bool {
 	}
 	t.Used = true
 	return true
+}
+
+// ListActive returns all tokens that are unexpired and unused.
+func (ts *TokenStore) ListActive() []*Token {
+	ts.mu.RLock()
+	defer ts.mu.RUnlock()
+
+	now := time.Now().UTC()
+	var active []*Token
+	for _, t := range ts.tokens {
+		if !t.Used && now.Before(t.Expires) {
+			active = append(active, t)
+		}
+	}
+	return active
+}
+
+// Count returns the total number of tokens (active + used + expired).
+func (ts *TokenStore) Count() int {
+	ts.mu.RLock()
+	defer ts.mu.RUnlock()
+	return len(ts.tokens)
 }
 
 // RegisterRequest is the probe registration request.
@@ -159,11 +198,23 @@ func HandleRegister(ts *TokenStore, fm fleet.Fleet, logger *zap.Logger) http.Han
 // HandleGenerateToken returns an HTTP handler for creating registration tokens.
 func HandleGenerateToken(ts *TokenStore, logger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// TODO: require authentication
 		token := ts.Generate()
 		logger.Info("token generated", zap.String("expires", token.Expires.Format(time.RFC3339)))
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(token)
+	}
+}
+
+// HandleListTokens returns an HTTP handler that lists active (unused, unexpired) tokens.
+func HandleListTokens(ts *TokenStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		active := ts.ListActive()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tokens": active,
+			"count":  len(active),
+			"total":  ts.Count(),
+		})
 	}
 }
 

@@ -59,6 +59,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Registration
 	mux.HandleFunc("POST /api/v1/register", api.HandleRegisterWithAudit(s.tokenStore, s.fleetMgr, s.auditRecorder(), s.logger.Named("register")))
 	mux.HandleFunc("POST /api/v1/tokens", s.withPermission(auth.PermFleetWrite, api.HandleGenerateTokenWithAudit(s.tokenStore, s.auditRecorder(), s.logger.Named("tokens"))))
+	mux.HandleFunc("GET /api/v1/tokens", s.withPermission(auth.PermAdmin, api.HandleListTokens(s.tokenStore)))
 
 	// Metrics
 	metricsCollector := metrics.NewCollector(
