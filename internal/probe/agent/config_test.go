@@ -128,6 +128,66 @@ func TestRegisterSendsExpectedRequestAndReturnsConfig(t *testing.T) {
 	}
 }
 
+func TestRegisterWithOptionsUsesHostnameOverrideAndSetsTags(t *testing.T) {
+	var got registerRequestCapture
+	var gotTags []string
+	var gotAuth string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/register":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read body: %v", err)
+			}
+			if err := json.Unmarshal(body, &got); err != nil {
+				t.Fatalf("decode register body: %v", err)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"probe_id":  "probe-tagged",
+				"api_key":   "lgk_probe_key",
+				"policy_id": "policy-1",
+			})
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/probes/probe-tagged/tags":
+			gotAuth = r.Header.Get("Authorization")
+			var payload struct {
+				Tags []string `json:"tags"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode tags body: %v", err)
+			}
+			gotTags = payload.Tags
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{"tags": payload.Tags})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer ts.Close()
+
+	cfg, err := RegisterWithOptions(context.Background(), ts.URL, "token-123", zap.NewNop(), RegisterOptions{
+		HostnameOverride: "k8s-node-1",
+		Tags:             []string{"kubernetes", "daemonset", "kubernetes"},
+	})
+	if err != nil {
+		t.Fatalf("register returned error: %v", err)
+	}
+
+	if got.Hostname != "k8s-node-1" {
+		t.Fatalf("expected hostname override, got %q", got.Hostname)
+	}
+	if len(gotTags) != 2 || gotTags[0] != "kubernetes" || gotTags[1] != "daemonset" {
+		t.Fatalf("unexpected tags payload: %#v", gotTags)
+	}
+	if gotAuth != "Bearer lgk_probe_key" {
+		t.Fatalf("expected bearer API key auth, got %q", gotAuth)
+	}
+	if cfg.ProbeID != "probe-tagged" {
+		t.Fatalf("unexpected probe ID: %q", cfg.ProbeID)
+	}
+}
+
 func TestRegisterReturnsErrorOnBadStatus(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

@@ -3,9 +3,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -116,7 +118,74 @@ func parseConfigDir(args []string) (string, []string) {
 			remaining = append(remaining, args[i])
 		}
 	}
+
+	if configDir == "" {
+		configDir = strings.TrimSpace(os.Getenv("LEGATOR_CONFIG_DIR"))
+	}
+
 	return configDir, remaining
+}
+
+func parseProbeTags(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+
+	tags := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, tag := range strings.Split(raw, ",") {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
+		if _, ok := seen[tag]; ok {
+			continue
+		}
+		seen[tag] = struct{}{}
+		tags = append(tags, tag)
+	}
+	if len(tags) == 0 {
+		return nil
+	}
+	return tags
+}
+
+func autoInitConfigFromEnv(ctx context.Context, configDir string, logger *zap.Logger) error {
+	configPath := agent.ConfigPath(configDir)
+	if _, err := os.Stat(configPath); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("check config: %w", err)
+	}
+
+	serverURL := strings.TrimSpace(os.Getenv("LEGATOR_SERVER_URL"))
+	token := strings.TrimSpace(os.Getenv("LEGATOR_TOKEN"))
+	if serverURL == "" || token == "" {
+		return nil
+	}
+
+	tags := parseProbeTags(os.Getenv("LEGATOR_PROBE_TAGS"))
+	hostnameOverride := strings.TrimSpace(os.Getenv("NODE_NAME"))
+
+	cfg, err := agent.RegisterWithOptions(ctx, serverURL, token, logger, agent.RegisterOptions{
+		HostnameOverride: hostnameOverride,
+		Tags:             tags,
+	})
+	if err != nil {
+		return fmt.Errorf("auto-register: %w", err)
+	}
+
+	if err := cfg.Save(configDir); err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+
+	logger.Info("probe auto-initialized from environment",
+		zap.String("config_path", agent.ConfigPath(configDir)),
+		zap.String("probe_id", cfg.ProbeID),
+	)
+
+	return nil
 }
 
 func cmdInit(ctx context.Context, args []string) error {
@@ -144,8 +213,12 @@ func cmdInit(ctx context.Context, args []string) error {
 	logger, _ := zap.NewProduction()
 	defer func() { _ = logger.Sync() }()
 
+	hostnameOverride := strings.TrimSpace(os.Getenv("NODE_NAME"))
+
 	fmt.Printf("Registering with %s...\n", server)
-	cfg, err := agent.Register(ctx, server, token, logger)
+	cfg, err := agent.RegisterWithOptions(ctx, server, token, logger, agent.RegisterOptions{
+		HostnameOverride: hostnameOverride,
+	})
 	if err != nil {
 		return err
 	}
@@ -162,13 +235,17 @@ func cmdInit(ctx context.Context, args []string) error {
 func cmdRun(ctx context.Context, args []string) error {
 	configDir, _ := parseConfigDir(args)
 
+	logger, _ := zap.NewProduction()
+	defer func() { _ = logger.Sync() }()
+
+	if err := autoInitConfigFromEnv(ctx, configDir, logger); err != nil {
+		return err
+	}
+
 	cfg, err := agent.LoadConfig(configDir)
 	if err != nil {
 		return fmt.Errorf("load config: %w (run 'probe init' first)", err)
 	}
-
-	logger, _ := zap.NewProduction()
-	defer func() { _ = logger.Sync() }()
 
 	a := agent.New(cfg, logger)
 	return a.Run(ctx)

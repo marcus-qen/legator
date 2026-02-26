@@ -2,12 +2,13 @@ package api
 
 import (
 	"bytes"
-	"strings"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"go.uber.org/zap"
 )
@@ -16,6 +17,12 @@ func testLogger() *zap.Logger {
 	l, _ := zap.NewDevelopment()
 	return l
 }
+
+type auditRecorderStub struct{}
+
+func (auditRecorderStub) Record(_ audit.Event) {}
+
+func (auditRecorderStub) Emit(_ audit.EventType, _, _, _ string) {}
 
 func TestTokenGeneration(t *testing.T) {
 	ts := NewTokenStore()
@@ -44,6 +51,21 @@ func TestTokenConsume(t *testing.T) {
 	// Second consume should fail (single-use)
 	if ts.Consume(token.Value) {
 		t.Error("second consume should fail")
+	}
+}
+
+func TestTokenConsumeMultiUse(t *testing.T) {
+	ts := NewTokenStore()
+	token := ts.GenerateWithOptions(GenerateOptions{MultiUse: true})
+
+	if !ts.Consume(token.Value) {
+		t.Fatal("first consume should succeed for multi-use token")
+	}
+	if !ts.Consume(token.Value) {
+		t.Fatal("second consume should succeed for multi-use token")
+	}
+	if token.Used {
+		t.Fatal("multi-use token should not be marked used")
 	}
 }
 
@@ -172,6 +194,51 @@ func TestGenerateTokenHandler(t *testing.T) {
 	}
 	if token.Value == "" {
 		t.Error("empty token value")
+	}
+}
+
+func TestGenerateTokenHandler_MultiUseQueryParam(t *testing.T) {
+	ts := NewTokenStore()
+	handler := HandleGenerateToken(ts, testLogger())
+
+	req := httptest.NewRequest("POST", "/api/v1/tokens?multi_use=true", nil)
+	w := httptest.NewRecorder()
+	handler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var token Token
+	if err := json.NewDecoder(w.Body).Decode(&token); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !token.MultiUse {
+		t.Fatal("expected token to be multi-use")
+	}
+	if !ts.Consume(token.Value) || !ts.Consume(token.Value) {
+		t.Fatal("expected multi-use token to be consumable multiple times")
+	}
+}
+
+func TestGenerateTokenWithAuditHandler_MultiUseQueryParam(t *testing.T) {
+	ts := NewTokenStore()
+	handler := HandleGenerateTokenWithAudit(ts, auditRecorderStub{}, testLogger())
+
+	req := httptest.NewRequest("POST", "/api/v1/tokens?multi_use=true", nil)
+	w := httptest.NewRecorder()
+	handler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var token Token
+	if err := json.NewDecoder(w.Body).Decode(&token); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !token.MultiUse {
+		t.Fatal("expected token to be multi-use")
 	}
 }
 

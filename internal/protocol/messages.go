@@ -109,6 +109,7 @@ type InventoryPayload struct {
 	Services    []Service         `json:"services,omitempty"`
 	Users       []User            `json:"users,omitempty"`
 	Labels      map[string]string `json:"labels,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 	CollectedAt time.Time         `json:"collected_at"`
 }
 

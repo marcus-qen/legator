@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: legator-probe
+  namespace: legator-system
+  labels:
+    app.kubernetes.io/name: legator
+    app.kubernetes.io/component: probe
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: legator
+      app.kubernetes.io/component: probe
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: legator
+        app.kubernetes.io/component: probe
+    spec:
+      serviceAccountName: legator-probe
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      imagePullSecrets:
+      - name: harbor-pull-secret
+      containers:
+      - name: probe
+        image: harbor.lab.k-dev.uk/legator/probe:latest
+        env:
+        - name: LEGATOR_SERVER_URL
+          valueFrom:
+            secretKeyRef:
+              name: legator-probe-config
+              key: server-url
+        - name: LEGATOR_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: legator-probe-config
+              key: token
+        - name: LEGATOR_PROBE_TAGS
+          value: "kubernetes,daemonset,worker"
+        - name: LEGATOR_CONFIG_DIR
+          value: "/etc/legator"
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        volumeMounts:
+        - name: config
+          mountPath: /etc/legator
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+        securityContext:
+          readOnlyRootFilesystem: true
+          runAsNonRoot: false
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+      volumes:
+      - name: config
+        emptyDir: {}
+      terminationGracePeriodSeconds: 10
