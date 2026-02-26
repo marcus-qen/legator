@@ -26,12 +26,18 @@ type Session struct {
 	mu        sync.RWMutex
 }
 
+// ResponderFunc generates an assistant reply given a probe ID and user message.
+// It receives the chat history (excluding the new user message) for context.
+// If nil, the manager uses a placeholder responder.
+type ResponderFunc func(probeID, userMessage string, history []Message) string
+
 // Manager stores chat sessions keyed by probe ID.
 type Manager struct {
 	sessions    map[string]*Session
 	mu          sync.RWMutex
 	logger      *zap.Logger
 	subscribers map[string]map[chan Message]struct{}
+	responder   ResponderFunc
 }
 
 // NewManager creates a new chat session manager.
@@ -180,4 +186,23 @@ func (m *Manager) publish(probeID string, msg Message) {
 			)
 		}
 	}
+}
+
+// SetResponder sets the function used to generate assistant replies.
+func (m *Manager) SetResponder(fn ResponderFunc) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.responder = fn
+}
+
+// respond generates an assistant reply using the configured responder or placeholder.
+func (m *Manager) respond(probeID, content string) string {
+	m.mu.RLock()
+	fn := m.responder
+	m.mu.RUnlock()
+	if fn != nil {
+		history := m.GetMessages(probeID, 0) // all history
+		return fn(probeID, content, history)
+	}
+	return chatReplyFor(content)
 }

@@ -71,7 +71,7 @@ func (m *Manager) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		reply := chatReplyFor(content)
+		reply := m.respond(probeID, content)
 		if m.AddMessage(probeID, "assistant", reply) == nil {
 			m.logger.Warn("failed to persist assistant reply", zap.String("probe_id", probeID))
 			break
@@ -136,7 +136,7 @@ func (m *Manager) HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	assistant := m.AddMessage(probeID, "assistant", chatReplyFor(content))
+	assistant := m.AddMessage(probeID, "assistant", m.respond(probeID, content))
 	if assistant == nil {
 		http.Error(w, `{"error":"failed to generate assistant reply"}`, http.StatusInternalServerError)
 		return

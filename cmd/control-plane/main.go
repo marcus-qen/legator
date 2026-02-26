@@ -255,6 +255,65 @@ func main() {
 	go offlineChecker(ctx, fleetMgr)
 
 	chatMgr := chat.NewManager(logger.Named("chat"))
+
+	// Wire chat to LLM if task runner is available
+	if taskRunner != nil {
+		chatResponder := llm.NewChatResponder(
+			llm.NewOpenAIProvider(llm.ProviderConfig{
+				Name:    os.Getenv("LEGATOR_LLM_PROVIDER"),
+				BaseURL: os.Getenv("LEGATOR_LLM_BASE_URL"),
+				APIKey:  os.Getenv("LEGATOR_LLM_API_KEY"),
+				Model:   os.Getenv("LEGATOR_LLM_MODEL"),
+			}),
+			func(probeID string, cmd *protocol.CommandPayload) (*protocol.CommandResultPayload, error) {
+				pending := cmdTracker.Track(cmd.RequestID, probeID, cmd.Command, cmd.Level)
+				if err := hub.SendTo(probeID, protocol.MsgCommand, *cmd); err != nil {
+					cmdTracker.Cancel(cmd.RequestID)
+					return nil, err
+				}
+				timeout := cmd.Timeout + 5*time.Second
+				if timeout < 10*time.Second {
+					timeout = 35 * time.Second
+				}
+				select {
+				case result := <-pending.Result:
+					return result, nil
+				case <-time.After(timeout):
+					cmdTracker.Cancel(cmd.RequestID)
+					return nil, fmt.Errorf("timeout waiting for probe response")
+				}
+			},
+			logger.Named("chat-llm"),
+		)
+
+		chatMgr.SetResponder(func(probeID, userMessage string, history []chat.Message) string {
+			// Convert chat.Message to llm.ChatMessage
+			llmHistory := make([]llm.ChatMessage, len(history))
+			for i, m := range history {
+				llmHistory[i] = llm.ChatMessage{Role: m.Role, Content: m.Content}
+			}
+
+			// Get probe context
+			var inv *protocol.InventoryPayload
+			var level protocol.CapabilityLevel = protocol.CapObserve
+			if ps, ok := fleetMgr.Get(probeID); ok {
+				inv = ps.Inventory
+				level = ps.PolicyLevel
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+
+			reply, err := chatResponder.Respond(ctx, probeID, llmHistory, userMessage, inv, level)
+			if err != nil {
+				logger.Warn("chat LLM error", zap.String("probe", probeID), zap.Error(err))
+				return fmt.Sprintf("LLM error: %s. Try again or use the command API directly.", err.Error())
+			}
+			return reply
+		})
+		logger.Info("chat wired to LLM provider")
+	}
+
 	policyStore := policy.NewStore()
 
 	mux := http.NewServeMux()
