@@ -2,12 +2,10 @@ package alerts
 
 import (
 	"fmt"
-	"reflect"
 	"sort"
 	"strings"
 	"sync"
 	"time"
-	"unsafe"
 
 	"github.com/google/uuid"
 	"github.com/marcus-qen/legator/internal/controlplane/events"
@@ -373,25 +371,7 @@ func lastHeartbeat(probe *fleet.ProbeState) *protocol.HeartbeatPayload {
 	if probe == nil {
 		return nil
 	}
-
-	v := reflect.ValueOf(probe)
-	if v.Kind() != reflect.Ptr || v.IsNil() {
-		return nil
-	}
-	field := v.Elem().FieldByName("lastHB")
-	if !field.IsValid() || field.IsNil() {
-		return nil
-	}
-
-	if field.CanInterface() {
-		hb, _ := field.Interface().(*protocol.HeartbeatPayload)
-		return hb
-	}
-
-	// Cross-package access to unexported field.
-	ptr := reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem()
-	hb, _ := ptr.Interface().(*protocol.HeartbeatPayload)
-	return hb
+	return probe.LastHeartbeat()
 }
 
 // SnapshotFiring returns current firing keys/events for tests and diagnostics.

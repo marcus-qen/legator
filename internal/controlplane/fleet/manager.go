@@ -295,3 +295,8 @@ func (m *Manager) CleanupOffline(olderThan time.Duration) []string {
 	}
 	return removed
 }
+
+// LastHeartbeat returns the last heartbeat payload for external consumers.
+func (ps *ProbeState) LastHeartbeat() *protocol.HeartbeatPayload {
+	return ps.lastHB
+}
