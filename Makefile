@@ -5,10 +5,12 @@ BIN_DIR ?= bin
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+REGISTRY ?= harbor.lab.k-dev.uk/legator
+IMAGE_TAG ?= $(VERSION)
 
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-.PHONY: build build-cp build-probe build-ctl build-all build-cp-all build-probe-all build-ctl-all release-build test lint e2e clean
+.PHONY: build build-cp build-probe build-ctl build-all build-cp-all build-probe-all build-ctl-all release-build test lint e2e docker-probe docker-push-probe clean
 
 build: build-cp build-probe build-ctl
 
@@ -53,6 +55,16 @@ lint:
 
 e2e:
 	bash hack/e2e-test.sh
+
+docker-probe:
+	docker build -f Dockerfile.probe \
+		-t $(REGISTRY)/probe:$(IMAGE_TAG) \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg COMMIT=$(COMMIT) \
+		--build-arg DATE=$(DATE) .
+
+docker-push-probe:
+	docker push $(REGISTRY)/probe:$(IMAGE_TAG)
 
 clean:
 	rm -rf $(BIN_DIR)

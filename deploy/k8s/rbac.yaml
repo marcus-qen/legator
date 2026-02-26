@@ -1,0 +1,30 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: legator-probe-reader
+  labels:
+    app.kubernetes.io/name: legator
+    app.kubernetes.io/component: probe
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "pods", "namespaces"]
+  verbs: ["get", "list"]
+- apiGroups: ["apps"]
+  resources: ["daemonsets"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: legator-probe-reader
+  labels:
+    app.kubernetes.io/name: legator
+    app.kubernetes.io/component: probe
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: legator-probe-reader
+subjects:
+- kind: ServiceAccount
+  name: legator-probe
+  namespace: legator-system
