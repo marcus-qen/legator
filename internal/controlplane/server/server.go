@@ -22,6 +22,8 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/config"
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
+	"github.com/marcus-qen/legator/internal/controlplane/session"
+	"github.com/marcus-qen/legator/internal/controlplane/users"
 	"github.com/marcus-qen/legator/internal/controlplane/llm"
 	"github.com/marcus-qen/legator/internal/controlplane/metrics"
 	"github.com/marcus-qen/legator/internal/controlplane/policy"
@@ -59,7 +61,9 @@ type Server struct {
 	chatStore  *chat.Store
 	authStore  *auth.KeyStore
 
-	// Multi-user auth adapters (wired by Track 1 implementation)
+	// Multi-user auth
+	userStore          *users.Store
+	sessionStore       *session.Store
 	userAuth           auth.UserAuthenticator
 	sessionCreator     auth.SessionCreator
 	sessionValidator   auth.SessionValidator
@@ -200,6 +204,12 @@ func (s *Server) Close() {
 	}
 	if s.policyPersistent != nil {
 		s.policyPersistent.Close()
+	}
+	if s.userStore != nil {
+		s.userStore.Close()
+	}
+	if s.sessionStore != nil {
+		s.sessionStore.Close()
 	}
 }
 
@@ -455,17 +465,91 @@ func (s *Server) initAuth() {
 	if os.Getenv("LEGATOR_AUTH") != "true" && os.Getenv("LEGATOR_AUTH") != "1" {
 		return
 	}
+
+	if err := os.MkdirAll(s.cfg.DataDir, 0750); err != nil {
+		s.logger.Warn("cannot create data dir", zap.Error(err))
+		return
+	}
+
+	// API key store
 	authDBPath := filepath.Join(s.cfg.DataDir, "auth.db")
-	if err := os.MkdirAll(s.cfg.DataDir, 0750); err == nil {
-		store, err := auth.NewKeyStore(authDBPath)
+	store, err := auth.NewKeyStore(authDBPath)
+	if err != nil {
+		s.logger.Warn("cannot open auth database",
+			zap.String("path", authDBPath), zap.Error(err))
+	} else {
+		s.authStore = store
+		s.logger.Info("auth store opened", zap.String("path", authDBPath))
+	}
+
+	// User store
+	userDBPath := filepath.Join(s.cfg.DataDir, "users.db")
+	userStore, err := users.NewStore(userDBPath)
+	if err != nil {
+		s.logger.Warn("cannot open user database",
+			zap.String("path", userDBPath), zap.Error(err))
+		return
+	}
+	s.userStore = userStore
+	s.logger.Info("user store opened", zap.String("path", userDBPath))
+
+	// Bootstrap admin user on first run
+	if userStore.Count() == 0 {
+		password := generateBootstrapPassword()
+		admin, err := userStore.Create("admin", "Administrator", password, "admin")
 		if err != nil {
-			s.logger.Warn("cannot open auth database",
-				zap.String("path", authDBPath), zap.Error(err))
+			s.logger.Error("failed to create bootstrap admin", zap.Error(err))
 		} else {
-			s.authStore = store
-			s.logger.Info("auth store opened", zap.String("path", authDBPath))
+			s.logger.Info("bootstrap admin user created",
+				zap.String("username", admin.Username),
+				zap.String("password", password),
+				zap.String("role", admin.Role),
+			)
+			fmt.Fprintf(os.Stderr, "\n"+
+				"╔════════════════════════════════════════════╗\n"+
+				"║  FIRST RUN — Admin credentials created     ║\n"+
+				"║  Username: admin                           ║\n"+
+				"║  Password: %-32s║\n"+
+				"║  Change this password immediately!         ║\n"+
+				"╚════════════════════════════════════════════╝\n\n", password)
 		}
 	}
+
+	// Session store
+	sessionDBPath := filepath.Join(s.cfg.DataDir, "sessions.db")
+	sessionStore, err := session.NewStore(sessionDBPath, 24*time.Hour)
+	if err != nil {
+		s.logger.Warn("cannot open session database",
+			zap.String("path", sessionDBPath), zap.Error(err))
+		return
+	}
+	s.sessionStore = sessionStore
+	s.logger.Info("session store opened", zap.String("path", sessionDBPath))
+
+	// Wire adapters
+	sessAdapter := &sessionAdapter{store: sessionStore, userStore: userStore}
+	s.userAuth = &userAuthAdapter{store: userStore}
+	s.sessionCreator = sessAdapter
+	s.sessionValidator = sessAdapter
+	s.sessionDeleter = sessAdapter
+	s.permissionResolver = &roleResolver{}
+
+	// Start session cleanup goroutine
+	go func() {
+		ticker := time.NewTicker(15 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			if n, err := sessionStore.Cleanup(); err == nil && n > 0 {
+				s.logger.Info("expired sessions cleaned", zap.Int("count", n))
+			}
+		}
+	}()
+}
+
+func generateBootstrapPassword() string {
+	b := make([]byte, 18)
+	_, _ = rand.Read(b)
+	return fmt.Sprintf("%x", b)[:24]
 }
 
 func (s *Server) loadTemplates() {

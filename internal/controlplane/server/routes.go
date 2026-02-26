@@ -171,21 +171,64 @@ func (s *Server) currentTemplateUser(r *http.Request) *TemplateUser {
 }
 
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
+	if s.userStore == nil {
+		http.Error(w, `{"error":"auth not enabled"}`, http.StatusServiceUnavailable)
+		return
+	}
+	users, err := s.userStore.List()
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": "user management is not implemented in this track"})
+	_ = json.NewEncoder(w).Encode(map[string]any{"users": users, "total": len(users)})
 }
 
 func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	if s.userStore == nil {
+		http.Error(w, `{"error":"auth not enabled"}`, http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		Username    string `json:"username"`
+		DisplayName string `json:"display_name"`
+		Password    string `json:"password"`
+		Role        string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+	if body.Username == "" || body.Password == "" || body.Role == "" {
+		http.Error(w, `{"error":"username, password, and role required"}`, http.StatusBadRequest)
+		return
+	}
+	user, err := s.userStore.Create(body.Username, body.DisplayName, body.Password, body.Role)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusConflict)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": "user management is not implemented in this track"})
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(user)
 }
 
 func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	if s.userStore == nil {
+		http.Error(w, `{"error":"auth not enabled"}`, http.StatusServiceUnavailable)
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, `{"error":"user id required"}`, http.StatusBadRequest)
+		return
+	}
+	if err := s.userStore.Delete(id); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusNotFound)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": "user management is not implemented in this track"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }
 
 // ── Health / Version ─────────────────────────────────────────
