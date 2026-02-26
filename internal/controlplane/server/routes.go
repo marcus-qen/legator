@@ -1,0 +1,819 @@
+package server
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/marcus-qen/legator/internal/controlplane/api"
+	"github.com/marcus-qen/legator/internal/controlplane/approval"
+	"github.com/marcus-qen/legator/internal/controlplane/audit"
+	"github.com/marcus-qen/legator/internal/controlplane/auth"
+	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
+	"github.com/marcus-qen/legator/internal/controlplane/fleet"
+	"github.com/marcus-qen/legator/internal/controlplane/metrics"
+	"github.com/marcus-qen/legator/internal/protocol"
+	"go.uber.org/zap"
+)
+
+func (s *Server) registerRoutes(mux *http.ServeMux) {
+	// Health + version
+	mux.HandleFunc("GET /healthz", s.handleHealthz)
+	mux.HandleFunc("GET /version", s.handleVersion)
+
+	// Fleet API
+	mux.HandleFunc("GET /api/v1/probes", s.handleListProbes)
+	mux.HandleFunc("GET /api/v1/probes/{id}", s.handleGetProbe)
+	mux.HandleFunc("GET /api/v1/probes/{id}/health", s.handleProbeHealth)
+	mux.HandleFunc("POST /api/v1/probes/{id}/command", s.handleDispatchCommand)
+	mux.HandleFunc("POST /api/v1/probes/{id}/rotate-key", s.handleRotateKey)
+	mux.HandleFunc("POST /api/v1/probes/{id}/update", s.handleProbeUpdate)
+	mux.HandleFunc("PUT /api/v1/probes/{id}/tags", s.handleSetTags)
+	mux.HandleFunc("POST /api/v1/probes/{id}/apply-policy/{policyId}", s.handleApplyPolicy)
+	mux.HandleFunc("POST /api/v1/probes/{id}/task", s.handleTask)
+	mux.HandleFunc("GET /api/v1/fleet/summary", s.handleFleetSummary)
+	mux.HandleFunc("GET /api/v1/fleet/tags", s.handleFleetTags)
+	mux.HandleFunc("GET /api/v1/fleet/by-tag/{tag}", s.handleListByTag)
+	mux.HandleFunc("POST /api/v1/fleet/by-tag/{tag}/command", s.handleGroupCommand)
+
+	// Registration
+	mux.HandleFunc("POST /api/v1/register", api.HandleRegisterWithAudit(s.tokenStore, s.fleetMgr, s.auditRecorder(), s.logger.Named("register")))
+	mux.HandleFunc("POST /api/v1/tokens", api.HandleGenerateTokenWithAudit(s.tokenStore, s.auditRecorder(), s.logger.Named("tokens")))
+
+	// Metrics
+	metricsCollector := metrics.NewCollector(
+		s.fleetMgr,
+		&hubConnectedAdapter{hub: s.hub},
+		s.approvalQueue,
+		s.metricsAuditCounter(),
+	)
+	mux.HandleFunc("GET /api/v1/metrics", metricsCollector.Handler())
+
+	// Approvals
+	mux.HandleFunc("GET /api/v1/approvals", s.handleListApprovals)
+	mux.HandleFunc("GET /api/v1/approvals/{id}", s.handleGetApproval)
+	mux.HandleFunc("POST /api/v1/approvals/{id}/decide", s.handleDecideApproval)
+
+	// Audit
+	mux.HandleFunc("GET /api/v1/audit", s.handleAuditLog)
+
+	// Commands
+	mux.HandleFunc("GET /api/v1/commands/pending", s.handlePendingCommands)
+	mux.HandleFunc("GET /api/v1/commands/{requestId}/stream", s.handleSSEStream)
+
+	// Policy templates
+	mux.HandleFunc("GET /api/v1/policies", s.handleListPolicies)
+	mux.HandleFunc("GET /api/v1/policies/{id}", s.handleGetPolicy)
+	mux.HandleFunc("POST /api/v1/policies", s.handleCreatePolicy)
+	mux.HandleFunc("DELETE /api/v1/policies/{id}", s.handleDeletePolicy)
+
+	// Webhooks
+	mux.HandleFunc("GET /api/v1/webhooks", s.webhookNotifier.ListWebhooks)
+	mux.HandleFunc("POST /api/v1/webhooks", s.webhookNotifier.RegisterWebhook)
+	mux.HandleFunc("GET /api/v1/webhooks/{id}", s.webhookNotifier.GetWebhook)
+	mux.HandleFunc("DELETE /api/v1/webhooks/{id}", s.webhookNotifier.DeleteWebhook)
+	mux.HandleFunc("POST /api/v1/webhooks/{id}/test", s.webhookNotifier.TestWebhook)
+
+	// Auth (optional)
+	if s.authStore != nil {
+		mux.HandleFunc("GET /api/v1/auth/keys", auth.HandleListKeys(s.authStore))
+		mux.HandleFunc("POST /api/v1/auth/keys", auth.HandleCreateKey(s.authStore))
+		mux.HandleFunc("DELETE /api/v1/auth/keys/{id}", auth.HandleDeleteKey(s.authStore))
+	}
+
+	// Chat API
+	if s.chatStore != nil {
+		mux.HandleFunc("GET /api/v1/probes/{id}/chat", s.chatStore.HandleGetMessages)
+		mux.HandleFunc("POST /api/v1/probes/{id}/chat", s.chatStore.HandleSendMessage)
+		mux.HandleFunc("GET /ws/chat", s.chatStore.HandleChatWS)
+	} else {
+		mux.HandleFunc("GET /api/v1/probes/{id}/chat", s.chatMgr.HandleGetMessages)
+		mux.HandleFunc("POST /api/v1/probes/{id}/chat", s.chatMgr.HandleSendMessage)
+		mux.HandleFunc("GET /ws/chat", s.chatMgr.HandleChatWS)
+	}
+
+	// WebSocket for probes
+	mux.HandleFunc("GET /ws/probe", s.hub.HandleProbeWS)
+
+	// Binary download + install script
+	mux.HandleFunc("GET /download/{filename}", s.handleDownload)
+	mux.HandleFunc("GET /install.sh", s.handleInstallScript)
+
+	// Static assets
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join("web", "static")))))
+
+	// Web UI pages
+	mux.HandleFunc("GET /", s.handleFleetPage)
+	mux.HandleFunc("GET /probe/{id}", s.handleProbeDetailPage)
+	mux.HandleFunc("GET /probe/{id}/chat", s.handleChatPage)
+	mux.HandleFunc("GET /approvals", s.handleApprovalsPage)
+	mux.HandleFunc("GET /audit", s.handleAuditPage)
+}
+
+// ── Health / Version ─────────────────────────────────────────
+
+func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintln(w, "ok")
+}
+
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"version": Version, "commit": Commit, "date": Date,
+	})
+}
+
+// ── Fleet API ────────────────────────────────────────────────
+
+func (s *Server) handleListProbes(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(s.fleetMgr.List())
+}
+
+func (s *Server) handleGetProbe(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	ps, ok := s.fleetMgr.Get(id)
+	if !ok {
+		http.Error(w, `{"error":"probe not found"}`, http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(ps)
+}
+
+func (s *Server) handleProbeHealth(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	ps, ok := s.fleetMgr.Get(id)
+	if !ok {
+		http.Error(w, `{"error":"probe not found"}`, http.StatusNotFound)
+		return
+	}
+	health := ps.Health
+	if health == nil {
+		health = &fleet.HealthScore{Score: 0, Status: "unknown", Warnings: []string{"no heartbeat data yet"}}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(health)
+}
+
+func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	ps, ok := s.fleetMgr.Get(id)
+	if !ok {
+		http.Error(w, `{"error":"probe not found"}`, http.StatusNotFound)
+		return
+	}
+
+	var cmd protocol.CommandPayload
+	if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+	if cmd.RequestID == "" {
+		cmd.RequestID = fmt.Sprintf("cmd-%d", time.Now().UnixNano()%100000)
+	}
+
+	// Check if this command needs approval
+	if approval.NeedsApproval(&cmd, ps.PolicyLevel) {
+		req, err := s.approvalQueue.Submit(id, &cmd, "Manual command dispatch", approval.ClassifyRisk(&cmd), "api")
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"approval queue: %s"}`, err.Error()), http.StatusServiceUnavailable)
+			return
+		}
+		s.emitAudit(audit.EventApprovalRequest, id, "api",
+			fmt.Sprintf("Approval required for: %s (risk: %s)", cmd.Command, approval.ClassifyRisk(&cmd)))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":      "pending_approval",
+			"approval_id": req.ID,
+			"risk_level":  req.RiskLevel,
+			"expires_at":  req.ExpiresAt,
+			"message":     "Command requires human approval. Use POST /api/v1/approvals/{id}/decide to approve or deny.",
+		})
+		return
+	}
+
+	wantWait := r.URL.Query().Get("wait") == "true" || r.URL.Query().Get("wait") == "1"
+	wantStream := r.URL.Query().Get("stream") == "true" || r.URL.Query().Get("stream") == "1"
+	if wantStream {
+		cmd.Stream = true
+	}
+
+	var pending *cmdtracker.PendingCommand
+	if wantWait {
+		pending = s.cmdTracker.Track(cmd.RequestID, id, cmd.Command, ps.PolicyLevel)
+	}
+
+	if err := s.hub.SendTo(id, protocol.MsgCommand, cmd); err != nil {
+		if pending != nil {
+			s.cmdTracker.Cancel(cmd.RequestID)
+		}
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadGateway)
+		return
+	}
+
+	s.emitAudit(audit.EventCommandSent, id, "api", fmt.Sprintf("Command dispatched: %s", cmd.Command))
+
+	if !wantWait {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status":     "dispatched",
+			"request_id": cmd.RequestID,
+		})
+		return
+	}
+
+	timeout := 30 * time.Second
+	if cmd.Timeout > 0 {
+		timeout = cmd.Timeout + 5*time.Second
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case result := <-pending.Result:
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(result)
+	case <-timer.C:
+		s.cmdTracker.Cancel(cmd.RequestID)
+		http.Error(w, `{"error":"timeout waiting for probe response"}`, http.StatusGatewayTimeout)
+	case <-r.Context().Done():
+		s.cmdTracker.Cancel(cmd.RequestID)
+	}
+}
+
+func (s *Server) handleRotateKey(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	ps, ok := s.fleetMgr.Get(id)
+	if !ok {
+		http.Error(w, `{"error":"probe not found"}`, http.StatusNotFound)
+		return
+	}
+
+	newKey, err := api.GenerateAPIKey()
+	if err != nil {
+		http.Error(w, `{"error":"failed to generate api key"}`, http.StatusInternalServerError)
+		return
+	}
+
+	previousKey := ps.APIKey
+	if err := s.fleetMgr.SetAPIKey(id, newKey); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusNotFound)
+		return
+	}
+
+	rotation := protocol.KeyRotationPayload{
+		NewKey: newKey,
+	}
+	if err := s.hub.SendTo(id, protocol.MsgKeyRotation, rotation); err != nil {
+		_ = s.fleetMgr.SetAPIKey(id, previousKey)
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadGateway)
+		return
+	}
+
+	s.emitAudit(audit.EventProbeKeyRotated, id, "api", "Probe API key rotated")
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status":   "rotated",
+		"probe_id": id,
+		"new_key":  newKey,
+	})
+}
+
+func (s *Server) handleProbeUpdate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	_, ok := s.fleetMgr.Get(id)
+	if !ok {
+		http.Error(w, `{"error":"probe not found"}`, http.StatusNotFound)
+		return
+	}
+
+	var upd protocol.UpdatePayload
+	if err := json.NewDecoder(r.Body).Decode(&upd); err != nil {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+	if upd.URL == "" {
+		http.Error(w, `{"error":"url is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := s.hub.SendTo(id, protocol.MsgUpdate, upd); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadGateway)
+		return
+	}
+
+	s.emitAudit(audit.EventCommandSent, id, "api",
+		fmt.Sprintf("Update dispatched: %s → %s", upd.Version, upd.URL))
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status":  "dispatched",
+		"version": upd.Version,
+	})
+}
+
+func (s *Server) handleSetTags(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var body struct {
+		Tags []string `json:"tags"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+	if err := s.fleetMgr.SetTags(id, body.Tags); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusNotFound)
+		return
+	}
+	s.emitAudit(audit.EventPolicyChanged, id, "api", fmt.Sprintf("Tags set: %v", body.Tags))
+	ps, _ := s.fleetMgr.Get(id)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"probe_id": id, "tags": ps.Tags})
+}
+
+func (s *Server) handleApplyPolicy(w http.ResponseWriter, r *http.Request) {
+	probeID := r.PathValue("id")
+	policyID := r.PathValue("policyId")
+
+	_, ok := s.fleetMgr.Get(probeID)
+	if !ok {
+		http.Error(w, `{"error":"probe not found"}`, http.StatusNotFound)
+		return
+	}
+	tpl, ok := s.policyStore.Get(policyID)
+	if !ok {
+		http.Error(w, `{"error":"policy template not found"}`, http.StatusNotFound)
+		return
+	}
+
+	_ = s.fleetMgr.SetPolicy(probeID, tpl.Level)
+
+	pol := tpl.ToPolicy()
+	if err := s.hub.SendTo(probeID, protocol.MsgPolicyUpdate, pol); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status": "applied_locally",
+			"note":   "probe offline, policy saved but not pushed",
+		})
+		return
+	}
+
+	s.emitAudit(audit.EventPolicyChanged, probeID, "api",
+		fmt.Sprintf("Policy %s (%s) applied", tpl.Name, tpl.ID))
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status":    "applied",
+		"probe_id":  probeID,
+		"policy_id": policyID,
+		"level":     string(tpl.Level),
+	})
+}
+
+func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
+	if s.taskRunner == nil {
+		http.Error(w, `{"error":"no LLM provider configured. Set LEGATOR_LLM_PROVIDER, LEGATOR_LLM_BASE_URL, LEGATOR_LLM_API_KEY, LEGATOR_LLM_MODEL"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	id := r.PathValue("id")
+	ps, ok := s.fleetMgr.Get(id)
+	if !ok {
+		http.Error(w, `{"error":"probe not found"}`, http.StatusNotFound)
+		return
+	}
+
+	var req struct {
+		Task string `json:"task"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Task == "" {
+		http.Error(w, `{"error":"task is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	s.logger.Info("task submitted", zap.String("probe", id), zap.String("task", req.Task))
+	s.emitAudit(audit.EventCommandSent, id, "llm-task", fmt.Sprintf("Task submitted: %s", req.Task))
+
+	result, err := s.taskRunner.Run(r.Context(), id, req.Task, ps.Inventory, ps.PolicyLevel)
+	if err != nil {
+		s.logger.Warn("task execution error", zap.String("probe", id), zap.Error(err))
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"counts":            s.fleetMgr.Count(),
+		"connected":         s.hub.Connected(),
+		"pending_approvals": s.approvalQueue.PendingCount(),
+	})
+}
+
+func (s *Server) handleFleetTags(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"tags": s.fleetMgr.TagCounts()})
+}
+
+func (s *Server) handleListByTag(w http.ResponseWriter, r *http.Request) {
+	tag := r.PathValue("tag")
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(s.fleetMgr.ListByTag(tag))
+}
+
+func (s *Server) handleGroupCommand(w http.ResponseWriter, r *http.Request) {
+	tag := r.PathValue("tag")
+	probes := s.fleetMgr.ListByTag(tag)
+	if len(probes) == 0 {
+		http.Error(w, `{"error":"no probes with that tag"}`, http.StatusNotFound)
+		return
+	}
+
+	var cmd protocol.CommandPayload
+	if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+
+	results := make([]map[string]string, 0, len(probes))
+	for _, ps := range probes {
+		rid := fmt.Sprintf("grp-%s-%d", ps.ID[:8], time.Now().UnixNano()%100000)
+		c := cmd
+		c.RequestID = rid
+		if err := s.hub.SendTo(ps.ID, protocol.MsgCommand, c); err != nil {
+			results = append(results, map[string]string{
+				"probe_id": ps.ID, "status": "error", "error": err.Error(),
+			})
+		} else {
+			results = append(results, map[string]string{
+				"probe_id": ps.ID, "status": "dispatched", "request_id": rid,
+			})
+		}
+	}
+
+	s.emitAudit(audit.EventCommandSent, tag, "api",
+		fmt.Sprintf("Group command to %d probes (tag=%s): %s", len(probes), tag, cmd.Command))
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"tag":     tag,
+		"total":   len(probes),
+		"results": results,
+	})
+}
+
+// ── Approvals ────────────────────────────────────────────────
+
+func (s *Server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
+	limitStr := r.URL.Query().Get("limit")
+	limit := 50
+	if v, err := strconv.Atoi(limitStr); err == nil && v > 0 {
+		limit = v
+	}
+
+	status := r.URL.Query().Get("status")
+	w.Header().Set("Content-Type", "application/json")
+
+	if status == "pending" {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"approvals":     s.approvalQueue.Pending(),
+			"pending_count": s.approvalQueue.PendingCount(),
+		})
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"approvals":     s.approvalQueue.All(limit),
+		"pending_count": s.approvalQueue.PendingCount(),
+	})
+}
+
+func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	req, ok := s.approvalQueue.Get(id)
+	if !ok {
+		http.Error(w, `{"error":"approval request not found"}`, http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(req)
+}
+
+func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var body struct {
+		Decision  string `json:"decision"`
+		DecidedBy string `json:"decided_by"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+	if body.Decision == "" || body.DecidedBy == "" {
+		http.Error(w, `{"error":"decision and decided_by are required"}`, http.StatusBadRequest)
+		return
+	}
+
+	req, err := s.approvalQueue.Decide(id, approval.Decision(body.Decision), body.DecidedBy)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadRequest)
+		return
+	}
+
+	s.emitAudit(audit.EventApprovalDecided, req.ProbeID, body.DecidedBy,
+		fmt.Sprintf("Approval %s for: %s", body.Decision, req.Command.Command))
+
+	if req.Decision == approval.DecisionApproved {
+		if err := s.hub.SendTo(req.ProbeID, protocol.MsgCommand, *req.Command); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"approved but dispatch failed: %s"}`, err.Error()), http.StatusBadGateway)
+			return
+		}
+		s.emitAudit(audit.EventCommandSent, req.ProbeID, body.DecidedBy,
+			fmt.Sprintf("Approved command dispatched: %s", req.Command.Command))
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":  string(req.Decision),
+		"request": req,
+	})
+}
+
+// ── Audit ────────────────────────────────────────────────────
+
+func (s *Server) handleAuditLog(w http.ResponseWriter, r *http.Request) {
+	probeID := r.URL.Query().Get("probe_id")
+	limitStr := r.URL.Query().Get("limit")
+	limit := 50
+	if v, err := strconv.Atoi(limitStr); err == nil && v > 0 {
+		limit = v
+	}
+	events := s.queryAudit(audit.Filter{ProbeID: probeID, Limit: limit})
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"events": events, "total": s.countAudit()})
+}
+
+// ── Commands ─────────────────────────────────────────────────
+
+func (s *Server) handlePendingCommands(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"pending":   s.cmdTracker.ListPending(),
+		"in_flight": s.cmdTracker.InFlight(),
+	})
+}
+
+func (s *Server) handleSSEStream(w http.ResponseWriter, r *http.Request) {
+	requestID := r.PathValue("requestId")
+	if requestID == "" {
+		http.Error(w, `{"error":"request_id required"}`, http.StatusBadRequest)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, `{"error":"streaming not supported"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	sub, cleanup := s.hub.SubscribeStream(requestID, 256)
+	defer cleanup()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case chunk := <-sub.Ch:
+			data, _ := json.Marshal(chunk)
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+			if chunk.Final {
+				return
+			}
+		}
+	}
+}
+
+// ── Policy templates ─────────────────────────────────────────
+
+func (s *Server) handleListPolicies(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(s.policyStore.List())
+}
+
+func (s *Server) handleGetPolicy(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	tpl, ok := s.policyStore.Get(id)
+	if !ok {
+		http.Error(w, `{"error":"policy template not found"}`, http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(tpl)
+}
+
+func (s *Server) handleCreatePolicy(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name        string                   `json:"name"`
+		Description string                   `json:"description"`
+		Level       protocol.CapabilityLevel `json:"level"`
+		Allowed     []string                 `json:"allowed"`
+		Blocked     []string                 `json:"blocked"`
+		Paths       []string                 `json:"paths"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+	if body.Name == "" {
+		http.Error(w, `{"error":"name required"}`, http.StatusBadRequest)
+		return
+	}
+	tpl := s.policyStore.Create(body.Name, body.Description, body.Level, body.Allowed, body.Blocked, body.Paths)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(tpl)
+}
+
+func (s *Server) handleDeletePolicy(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.policyStore.Delete(id); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── Downloads ────────────────────────────────────────────────
+
+func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
+	filename := r.PathValue("filename")
+	releasesDir := filepath.Join(s.cfg.DataDir, "releases")
+	filePath := filepath.Join(releasesDir, filepath.Base(filename))
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(filename)))
+	http.ServeFile(w, r, filePath)
+}
+
+func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
+	installScript := filepath.Join("install", "install.sh")
+	if _, err := os.Stat(installScript); os.IsNotExist(err) {
+		http.Error(w, "install script not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	http.ServeFile(w, r, installScript)
+}
+
+// ── Web UI pages ─────────────────────────────────────────────
+
+func (s *Server) handleFleetPage(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	if s.tmpl == nil {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<!DOCTYPE html>
+<html><head><title>Legator Control Plane</title></head>
+<body>
+<h1>Legator Control Plane</h1>
+<p>Version: %s (%s)</p>
+<p><a href="/api/v1/probes">Fleet API</a> | <a href="/api/v1/fleet/summary">Summary</a> | <a href="/api/v1/approvals?status=pending">Approvals</a></p>
+</body></html>`, Version, Commit)
+		return
+	}
+
+	probes := s.fleetMgr.List()
+	sort.Slice(probes, func(i, j int) bool {
+		lhs := strings.ToLower(probes[i].Hostname)
+		if lhs == "" {
+			lhs = probes[i].ID
+		}
+		rhs := strings.ToLower(probes[j].Hostname)
+		if rhs == "" {
+			rhs = probes[j].ID
+		}
+		return lhs < rhs
+	})
+
+	counts := s.fleetMgr.Count()
+	data := FleetPageData{
+		Probes: probes,
+		Summary: FleetSummary{
+			Online:   counts["online"],
+			Offline:  counts["offline"],
+			Degraded: counts["degraded"],
+			Total:    len(probes),
+		},
+		Version: Version,
+		Commit:  Commit,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.tmpl.ExecuteTemplate(w, "fleet.html", data); err != nil {
+		s.logger.Error("failed to render fleet page", zap.Error(err))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleProbeDetailPage(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	ps, ok := s.fleetMgr.Get(id)
+	if !ok {
+		ps = &fleet.ProbeState{
+			ID:          id,
+			Status:      "offline",
+			PolicyLevel: protocol.CapObserve,
+		}
+	}
+
+	if s.tmpl == nil {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<h1>Probe: %s</h1><p>Status: %s</p>`, id, ps.Status)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data := ProbePageData{
+		Probe:  ps,
+		Uptime: calculateUptime(ps.Registered),
+	}
+	if err := s.tmpl.ExecuteTemplate(w, "probe-detail.html", data); err != nil {
+		s.logger.Error("failed to render probe detail", zap.String("probe", id), zap.Error(err))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	ps, ok := s.fleetMgr.Get(id)
+	if !ok {
+		ps = &fleet.ProbeState{
+			ID:          id,
+			Status:      "offline",
+			PolicyLevel: protocol.CapObserve,
+		}
+	}
+
+	if s.tmpl == nil {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<h1>Chat: %s</h1><p>Template not loaded</p>`, id)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data := ProbePageData{
+		Probe:  ps,
+		Uptime: calculateUptime(ps.Registered),
+	}
+	if err := s.tmpl.ExecuteTemplate(w, "chat.html", data); err != nil {
+		s.logger.Error("failed to render chat", zap.String("probe", id), zap.Error(err))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleApprovalsPage(w http.ResponseWriter, r *http.Request) {
+	if s.tmpl == nil {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, "<h1>Approval Queue</h1><p>Template not loaded</p>")
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.tmpl.ExecuteTemplate(w, "approvals.html", nil); err != nil {
+		http.Error(w, err.Error(), 500)
+	}
+}
+
+func (s *Server) handleAuditPage(w http.ResponseWriter, r *http.Request) {
+	if s.tmpl == nil {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, "<h1>Audit Log</h1><p>Template not loaded</p>")
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.tmpl.ExecuteTemplate(w, "audit.html", nil); err != nil {
+		http.Error(w, err.Error(), 500)
+	}
+}
