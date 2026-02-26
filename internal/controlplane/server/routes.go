@@ -47,7 +47,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Registration
 	mux.HandleFunc("POST /api/v1/register", api.HandleRegisterWithAudit(s.tokenStore, s.fleetMgr, s.auditRecorder(), s.logger.Named("register")))
-	mux.HandleFunc("POST /api/v1/tokens", api.HandleGenerateTokenWithAudit(s.tokenStore, s.auditRecorder(), s.logger.Named("tokens")))
+	mux.HandleFunc("POST /api/v1/tokens", s.withPermission(auth.PermFleetWrite, api.HandleGenerateTokenWithAudit(s.tokenStore, s.auditRecorder(), s.logger.Named("tokens"))))
 
 	// Metrics
 	metricsCollector := metrics.NewCollector(
@@ -56,7 +56,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		s.approvalQueue,
 		s.metricsAuditCounter(),
 	)
-	mux.HandleFunc("GET /api/v1/metrics", metricsCollector.Handler())
+	mux.HandleFunc("GET /api/v1/metrics", s.withPermission(auth.PermFleetRead, metricsCollector.Handler()))
 
 	// Approvals
 	mux.HandleFunc("GET /api/v1/approvals", s.handleListApprovals)
@@ -80,28 +80,28 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/policies/{id}", s.handleDeletePolicy)
 
 	// Webhooks
-	mux.HandleFunc("GET /api/v1/webhooks", s.webhookNotifier.ListWebhooks)
-	mux.HandleFunc("POST /api/v1/webhooks", s.webhookNotifier.RegisterWebhook)
-	mux.HandleFunc("GET /api/v1/webhooks/{id}", s.webhookNotifier.GetWebhook)
-	mux.HandleFunc("DELETE /api/v1/webhooks/{id}", s.webhookNotifier.DeleteWebhook)
-	mux.HandleFunc("POST /api/v1/webhooks/{id}/test", s.webhookNotifier.TestWebhook)
+	mux.HandleFunc("GET /api/v1/webhooks", s.withPermission(auth.PermWebhookManage, s.webhookNotifier.ListWebhooks))
+	mux.HandleFunc("POST /api/v1/webhooks", s.withPermission(auth.PermWebhookManage, s.webhookNotifier.RegisterWebhook))
+	mux.HandleFunc("GET /api/v1/webhooks/{id}", s.withPermission(auth.PermWebhookManage, s.webhookNotifier.GetWebhook))
+	mux.HandleFunc("DELETE /api/v1/webhooks/{id}", s.withPermission(auth.PermWebhookManage, s.webhookNotifier.DeleteWebhook))
+	mux.HandleFunc("POST /api/v1/webhooks/{id}/test", s.withPermission(auth.PermWebhookManage, s.webhookNotifier.TestWebhook))
 
 	// Auth (optional)
 	if s.authStore != nil {
-		mux.HandleFunc("GET /api/v1/auth/keys", auth.HandleListKeys(s.authStore))
-		mux.HandleFunc("POST /api/v1/auth/keys", auth.HandleCreateKey(s.authStore))
-		mux.HandleFunc("DELETE /api/v1/auth/keys/{id}", auth.HandleDeleteKey(s.authStore))
+		mux.HandleFunc("GET /api/v1/auth/keys", s.withPermission(auth.PermAdmin, auth.HandleListKeys(s.authStore)))
+		mux.HandleFunc("POST /api/v1/auth/keys", s.withPermission(auth.PermAdmin, auth.HandleCreateKey(s.authStore)))
+		mux.HandleFunc("DELETE /api/v1/auth/keys/{id}", s.withPermission(auth.PermAdmin, auth.HandleDeleteKey(s.authStore)))
 	}
 
 	// Chat API
 	if s.chatStore != nil {
-		mux.HandleFunc("GET /api/v1/probes/{id}/chat", s.chatStore.HandleGetMessages)
-		mux.HandleFunc("POST /api/v1/probes/{id}/chat", s.chatStore.HandleSendMessage)
-		mux.HandleFunc("GET /ws/chat", s.chatStore.HandleChatWS)
+		mux.HandleFunc("GET /api/v1/probes/{id}/chat", s.withPermission(auth.PermFleetRead, s.chatStore.HandleGetMessages))
+		mux.HandleFunc("POST /api/v1/probes/{id}/chat", s.withPermission(auth.PermFleetRead, s.chatStore.HandleSendMessage))
+		mux.HandleFunc("GET /ws/chat", s.withPermission(auth.PermFleetRead, s.chatStore.HandleChatWS))
 	} else {
-		mux.HandleFunc("GET /api/v1/probes/{id}/chat", s.chatMgr.HandleGetMessages)
-		mux.HandleFunc("POST /api/v1/probes/{id}/chat", s.chatMgr.HandleSendMessage)
-		mux.HandleFunc("GET /ws/chat", s.chatMgr.HandleChatWS)
+		mux.HandleFunc("GET /api/v1/probes/{id}/chat", s.withPermission(auth.PermFleetRead, s.chatMgr.HandleGetMessages))
+		mux.HandleFunc("POST /api/v1/probes/{id}/chat", s.withPermission(auth.PermFleetRead, s.chatMgr.HandleSendMessage))
+		mux.HandleFunc("GET /ws/chat", s.withPermission(auth.PermFleetRead, s.chatMgr.HandleChatWS))
 	}
 
 	// WebSocket for probes
@@ -122,6 +122,34 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /audit", s.handleAuditPage)
 }
 
+func (s *Server) withPermission(perm auth.Permission, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.requirePermission(w, r, perm) {
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (s *Server) requirePermission(w http.ResponseWriter, r *http.Request, perm auth.Permission) bool {
+	if s.authStore == nil {
+		return true
+	}
+
+	key := auth.FromContext(r.Context())
+	if key == nil {
+		http.Error(w, `{"error":"authentication required"}`, http.StatusUnauthorized)
+		return false
+	}
+
+	if !auth.HasPermission(key, perm) {
+		http.Error(w, `{"error":"insufficient permissions","required":"`+string(perm)+`"}`, http.StatusForbidden)
+		return false
+	}
+
+	return true
+}
+
 // ── Health / Version ─────────────────────────────────────────
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
@@ -138,11 +166,17 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 // ── Fleet API ────────────────────────────────────────────────
 
 func (s *Server) handleListProbes(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(s.fleetMgr.List())
 }
 
 func (s *Server) handleGetProbe(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
 	id := r.PathValue("id")
 	ps, ok := s.fleetMgr.Get(id)
 	if !ok {
@@ -154,6 +188,9 @@ func (s *Server) handleGetProbe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProbeHealth(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
 	id := r.PathValue("id")
 	ps, ok := s.fleetMgr.Get(id)
 	if !ok {
@@ -169,6 +206,9 @@ func (s *Server) handleProbeHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermCommandExec) {
+		return
+	}
 	id := r.PathValue("id")
 	ps, ok := s.fleetMgr.Get(id)
 	if !ok {
@@ -258,6 +298,9 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRotateKey(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetWrite) {
+		return
+	}
 	id := r.PathValue("id")
 	ps, ok := s.fleetMgr.Get(id)
 	if !ok {
@@ -297,6 +340,9 @@ func (s *Server) handleRotateKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProbeUpdate(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetWrite) {
+		return
+	}
 	id := r.PathValue("id")
 	_, ok := s.fleetMgr.Get(id)
 	if !ok {
@@ -330,6 +376,9 @@ func (s *Server) handleProbeUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSetTags(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetWrite) {
+		return
+	}
 	id := r.PathValue("id")
 	var body struct {
 		Tags []string `json:"tags"`
@@ -349,6 +398,9 @@ func (s *Server) handleSetTags(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleApplyPolicy(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetWrite) {
+		return
+	}
 	probeID := r.PathValue("id")
 	policyID := r.PathValue("policyId")
 
@@ -388,6 +440,9 @@ func (s *Server) handleApplyPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermCommandExec) {
+		return
+	}
 	if s.taskRunner == nil {
 		http.Error(w, `{"error":"no LLM provider configured. Set LEGATOR_LLM_PROVIDER, LEGATOR_LLM_BASE_URL, LEGATOR_LLM_API_KEY, LEGATOR_LLM_MODEL"}`, http.StatusServiceUnavailable)
 		return
@@ -421,6 +476,9 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"counts":            s.fleetMgr.Count(),
@@ -430,17 +488,26 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleFleetTags(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"tags": s.fleetMgr.TagCounts()})
 }
 
 func (s *Server) handleListByTag(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
 	tag := r.PathValue("tag")
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(s.fleetMgr.ListByTag(tag))
 }
 
 func (s *Server) handleGroupCommand(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermCommandExec) {
+		return
+	}
 	tag := r.PathValue("tag")
 	probes := s.fleetMgr.ListByTag(tag)
 	if len(probes) == 0 {
@@ -484,6 +551,9 @@ func (s *Server) handleGroupCommand(w http.ResponseWriter, r *http.Request) {
 // ── Approvals ────────────────────────────────────────────────
 
 func (s *Server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermApprovalRead) {
+		return
+	}
 	limitStr := r.URL.Query().Get("limit")
 	limit := 50
 	if v, err := strconv.Atoi(limitStr); err == nil && v > 0 {
@@ -508,6 +578,9 @@ func (s *Server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermApprovalRead) {
+		return
+	}
 	id := r.PathValue("id")
 	req, ok := s.approvalQueue.Get(id)
 	if !ok {
@@ -519,6 +592,9 @@ func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermApprovalWrite) {
+		return
+	}
 	id := r.PathValue("id")
 
 	var body struct {
@@ -563,6 +639,9 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 // ── Audit ────────────────────────────────────────────────────
 
 func (s *Server) handleAuditLog(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermAuditRead) {
+		return
+	}
 	probeID := r.URL.Query().Get("probe_id")
 	limitStr := r.URL.Query().Get("limit")
 	limit := 50
@@ -577,6 +656,9 @@ func (s *Server) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 // ── Commands ─────────────────────────────────────────────────
 
 func (s *Server) handlePendingCommands(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermCommandExec) {
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"pending":   s.cmdTracker.ListPending(),
@@ -585,6 +667,9 @@ func (s *Server) handlePendingCommands(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSSEStream(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermCommandExec) {
+		return
+	}
 	requestID := r.PathValue("requestId")
 	if requestID == "" {
 		http.Error(w, `{"error":"request_id required"}`, http.StatusBadRequest)
@@ -623,6 +708,9 @@ func (s *Server) handleSSEStream(w http.ResponseWriter, r *http.Request) {
 // ── Events SSE ───────────────────────────────────────────────
 
 func (s *Server) handleEventsSSE(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, `{"error":"streaming not supported"}`, http.StatusInternalServerError)
@@ -659,11 +747,17 @@ func (s *Server) handleEventsSSE(w http.ResponseWriter, r *http.Request) {
 // ── Policy templates ─────────────────────────────────────────
 
 func (s *Server) handleListPolicies(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(s.policyStore.List())
 }
 
 func (s *Server) handleGetPolicy(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
 	id := r.PathValue("id")
 	tpl, ok := s.policyStore.Get(id)
 	if !ok {
@@ -675,6 +769,9 @@ func (s *Server) handleGetPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreatePolicy(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetWrite) {
+		return
+	}
 	var body struct {
 		Name        string                   `json:"name"`
 		Description string                   `json:"description"`
@@ -698,6 +795,9 @@ func (s *Server) handleCreatePolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeletePolicy(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetWrite) {
+		return
+	}
 	id := r.PathValue("id")
 	if err := s.policyStore.Delete(id); err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusNotFound)
@@ -734,6 +834,9 @@ func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
 // ── Web UI pages ─────────────────────────────────────────────
 
 func (s *Server) handleFleetPage(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
@@ -784,6 +887,9 @@ func (s *Server) handleFleetPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProbeDetailPage(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
 	id := r.PathValue("id")
 	ps, ok := s.fleetMgr.Get(id)
 	if !ok {
@@ -812,6 +918,9 @@ func (s *Server) handleProbeDetailPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
 	id := r.PathValue("id")
 	ps, ok := s.fleetMgr.Get(id)
 	if !ok {
@@ -840,6 +949,9 @@ func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleApprovalsPage(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
 	if s.tmpl == nil {
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprint(w, "<h1>Approval Queue</h1><p>Template not loaded</p>")
@@ -852,6 +964,9 @@ func (s *Server) handleApprovalsPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuditPage(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
 	if s.tmpl == nil {
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprint(w, "<h1>Audit Log</h1><p>Template not loaded</p>")
@@ -863,8 +978,10 @@ func (s *Server) handleAuditPage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-
 func (s *Server) handleDeleteProbe(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetWrite) {
+		return
+	}
 	id := r.PathValue("id")
 	if id == "" {
 		http.Error(w, `{"error":"missing probe id"}`, http.StatusBadRequest)
@@ -891,6 +1008,9 @@ func (s *Server) handleDeleteProbe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleFleetCleanup(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetWrite) {
+		return
+	}
 	// Default: remove probes offline for more than 1 hour
 	threshold := time.Hour
 	if raw := r.URL.Query().Get("older_than"); raw != "" {

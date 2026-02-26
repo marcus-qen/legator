@@ -108,9 +108,22 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
 
+	var handler http.Handler = mux
+	if s.authStore != nil {
+		handler = auth.Middleware(s.authStore, []string{
+			"/healthz",
+			"/version",
+			"/ws/probe",
+			"/api/v1/register",
+			"/download/*",
+			"/install.sh",
+			"/static/*",
+		})(handler)
+	}
+
 	s.httpServer = &http.Server{
 		Addr:         cfg.ListenAddr,
-		Handler:      mux,
+		Handler:      handler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
