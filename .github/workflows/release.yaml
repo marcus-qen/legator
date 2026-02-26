@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   release:
     name: Build and release
@@ -20,33 +23,41 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
-      - name: Build binaries
-        run: |
-          make build-cp
-          make build-probe-all
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build all binaries
+        run: make build-all
 
       - name: Generate checksums
         run: |
           cd bin
-          sha256sum control-plane probe-linux-amd64 probe-linux-arm64 probe-darwin-arm64 > checksums.txt
+          sha256sum * > checksums.txt
+          cat checksums.txt
 
       - name: Prepare release notes
-        id: release-notes
         run: |
           TAG_NAME="${{ github.ref_name }}"
-          if [ "$(git cat-file -t "$TAG_NAME")" = "tag" ]; then
+          if [ "$(git cat-file -t "$TAG_NAME" 2>/dev/null)" = "tag" ]; then
             git cat-file -p "$TAG_NAME" | sed -n '/^$/,$p' > release-notes.md
           else
-            cp CHANGELOG.md release-notes.md
+            echo "## ${TAG_NAME}" > release-notes.md
+            echo "" >> release-notes.md
+            git log --oneline HEAD~10..HEAD >> release-notes.md
           fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b
         with:
           files: |
-            bin/control-plane
+            bin/control-plane-linux-amd64
+            bin/control-plane-linux-arm64
             bin/probe-linux-amd64
             bin/probe-linux-arm64
             bin/probe-darwin-arm64
+            bin/legatorctl-linux-amd64
+            bin/legatorctl-linux-arm64
+            bin/legatorctl-darwin-arm64
             bin/checksums.txt
+            install/install.sh
           body_path: release-notes.md

@@ -9,6 +9,12 @@ import (
 	"strings"
 )
 
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 const (
 	defaultServer = "http://localhost:8080"
 )
@@ -55,6 +61,9 @@ func main() {
 		err = runTokens(ctx, client, cfg, args)
 	case "keys":
 		err = runKeys(ctx, client, cfg, args)
+	case "version":
+		fmt.Printf("legatorctl %s (commit: %s, built: %s)\n", version, commit, date)
+		return
 	case "help", "--help", "-h":
 		printUsage()
 	default:
