@@ -20,5 +20,5 @@ Thumbs.db
 /etc/probe/
 /var/lib/probe/
 /var/log/probe/
-control-plane
-probe
+/control-plane
+/probe

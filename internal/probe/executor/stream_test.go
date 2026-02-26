@@ -102,7 +102,7 @@ func TestExecuteStream_EchoStreams(t *testing.T) {
 }
 
 func TestExecuteStream_MultilineOutput(t *testing.T) {
-	e := New(Policy{Level: protocol.CapObserve}, zap.NewNop())
+	e := New(Policy{Level: protocol.CapRemediate}, zap.NewNop())
 	cmd := &protocol.CommandPayload{
 		RequestID: "s4",
 		Command:   "sh",
@@ -166,7 +166,7 @@ func TestExecuteStream_StderrOutput(t *testing.T) {
 }
 
 func TestExecuteStream_NonZeroExit(t *testing.T) {
-	e := New(Policy{Level: protocol.CapObserve}, zap.NewNop())
+	e := New(Policy{Level: protocol.CapRemediate}, zap.NewNop())
 	cmd := &protocol.CommandPayload{
 		RequestID: "s6",
 		Command:   "sh",
