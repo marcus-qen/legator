@@ -3,7 +3,9 @@ package connection
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
+	"math/big"
 	"fmt"
 	"sync"
 	"time"
@@ -29,8 +31,9 @@ type Client struct {
 	probeID   string
 	logger    *zap.Logger
 
-	conn   *websocket.Conn
-	mu     sync.Mutex
+	conn      *websocket.Conn
+	mu        sync.Mutex
+	connected bool
 	inbox  chan protocol.Envelope
 	closed chan struct{}
 }
@@ -45,6 +48,13 @@ func NewClient(serverURL, probeID, apiKey string, logger *zap.Logger) *Client {
 		inbox:     make(chan protocol.Envelope, 64),
 		closed:    make(chan struct{}),
 	}
+}
+
+// Connected returns true if the WebSocket connection is currently established.
+func (c *Client) Connected() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.connected
 }
 
 // Inbox returns the channel of inbound messages from the control plane.
@@ -77,15 +87,29 @@ func (c *Client) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(delay):
+		case <-time.After(jitter(delay)):
 		}
 
 		// Exponential backoff with cap
+		// Reset backoff on successful reconnect attempt would go here
 		delay = delay * 2
 		if delay > maxReconnectDelay {
 			delay = maxReconnectDelay
 		}
 	}
+}
+
+// jitter adds 0-50% random jitter to a duration to prevent thundering herd.
+func jitter(d time.Duration) time.Duration {
+	max := int64(d / 2)
+	if max <= 0 {
+		return d
+	}
+	n, err := rand.Int(rand.Reader, big.NewInt(max))
+	if err != nil {
+		return d
+	}
+	return d + time.Duration(n.Int64())
 }
 
 func (c *Client) connectAndServe(ctx context.Context) error {
@@ -110,6 +134,9 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 		c.mu.Unlock()
 	}()
 
+	c.mu.Lock()
+	c.connected = true
+	c.mu.Unlock()
 	c.logger.Info("connected to control plane", zap.String("url", url))
 
 	// Start heartbeat
