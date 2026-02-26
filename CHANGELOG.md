@@ -1,5 +1,42 @@
 # Changelog
 
+## v1.0.0-alpha.2 (2026-02-26)
+
+Auth hardening, observability, and public deployment.
+
+### Security
+- **Scoped API key permissions** — PermFleetRead, PermFleetWrite, PermCommandExec, ApprovalRead/Write, AuditRead, WebhookManage, Admin
+- Auth middleware with skip paths for health/version/probe WS/registration/static
+- 401/403 enforcement with permission matrix tests
+
+### Observability
+- **Event bus → webhook integration** — all fleet events (connect, disconnect, offline, commands) automatically trigger webhooks
+- Webhook forwarder goroutine replaces direct calls; single dispatch path
+- **Real-time SSE on probe detail page** — status badge, health, last-seen update live
+- WebSocket lifecycle hooks emit probe.connected/probe.disconnected events with status/last_seen payload
+
+### Infrastructure
+- **Public Caddy route** — `legator.lab.k-dev.uk` direct to control plane (no Pomerium, no SSH tunnel)
+- Probe connects via WSS through public URL
+
+### Testing
+- **31 new server package tests** across 3 files (server_test.go, messages_test.go, templates_test.go)
+- Template anchor tests ensure SSE wiring survives refactors
+- Probe delete + fleet cleanup endpoint tests
+
+### UI
+- Chat page context panel with probe system info
+- Fleet table chat buttons
+- Probe detail incremental DOM updates (no full-page reload)
+- Connection indicator badge (live/reconnecting)
+
+### Operations
+- Probe delete and fleet cleanup endpoints
+- WebSocket keepalive improvements
+
+### Stats
+- 94 Go files, 27 test suites, 29 e2e tests
+- 10 multi-arch release assets
 ## v1.0.0-alpha.1 (2026-02-26)
 
 First release of the standalone Legator control plane. Complete rewrite from the K8s-native runtime (v0.1–v0.9.2) to a universal fleet management system.
