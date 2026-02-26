@@ -4,75 +4,94 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Legator Fleet</title>
-    <link rel="stylesheet" href="/static/style.css" />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; background: #0d1117; color: #c9d1d9; min-height: 100vh; }
+      .app { max-width: 1400px; margin: 0 auto; padding: 20px; }
+      header { padding: 24px 0; border-bottom: 1px solid #21262d; margin-bottom: 24px; }
+      header h1 { font-size: 24px; color: #58a6ff; font-weight: 600; }
+      header p { color: #8b949e; font-size: 14px; margin-top: 4px; }
+      .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
+      .card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 16px; text-align: center; }
+      .card span { display: block; font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; }
+      .card strong { display: block; font-size: 28px; margin-top: 4px; }
+      .card.online strong { color: #3fb950; }
+      .card.offline strong { color: #f85149; }
+      .card.degraded strong { color: #d29922; }
+      .card.total strong { color: #58a6ff; }
+      .panel { background: #161b22; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; }
+      .panel-header { padding: 16px 20px; border-bottom: 1px solid #21262d; display: flex; justify-content: space-between; align-items: center; }
+      .panel-header h2 { font-size: 16px; color: #c9d1d9; }
+      .panel-header .sub { font-size: 12px; color: #484f58; }
+      table { width: 100%; border-collapse: collapse; }
+      th { text-align: left; padding: 10px 16px; font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #21262d; background: #0d1117; position: sticky; top: 0; }
+      td { padding: 10px 16px; border-bottom: 1px solid #21262d; font-size: 13px; }
+      tr.probe-row { cursor: pointer; transition: background 0.15s; }
+      tr.probe-row:hover { background: #1c2128; }
+      .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+      .dot-online { background: #3fb950; }
+      .dot-offline { background: #f85149; }
+      .dot-degraded { background: #d29922; }
+      .dot-pending { background: #484f58; }
+      .pill { display: inline-block; background: #21262d; color: #8b949e; border-radius: 12px; padding: 2px 8px; font-size: 11px; margin: 1px 2px; }
+      .health-bar { display: inline-flex; align-items: center; gap: 6px; }
+      .health-fill { height: 6px; border-radius: 3px; min-width: 4px; }
+      .health-green { background: #3fb950; }
+      .health-yellow { background: #d29922; }
+      .health-red { background: #f85149; }
+      .health-gray { background: #484f58; }
+      .empty-state { text-align: center; padding: 40px; color: #484f58; }
+      .table-wrap { overflow-x: auto; }
+      @media (max-width: 768px) { .cards { grid-template-columns: repeat(2, 1fr); } }
+    </style>
   </head>
   <body>
-    <div class="app-shell">
-      <header class="topbar">
-        <h1>Legator Control Plane</h1>
+    <div class="app">
+      <header>
+        <h1>⚡ Legator Control Plane</h1>
         <p>Fleet overview and probe management</p>
       </header>
 
-      <section class="summary-bar" aria-label="fleet summary">
-        <div class="summary-pill">
-          <span>Online</span>
-          <strong id="online-count">{{.Summary.Online}}</strong>
-        </div>
-        <div class="summary-pill">
-          <span>Offline</span>
-          <strong id="offline-count">{{.Summary.Offline}}</strong>
-        </div>
-        <div class="summary-pill">
-          <span>Degraded</span>
-          <strong id="degraded-count">{{.Summary.Degraded}}</strong>
-        </div>
-        <div class="summary-pill total">
-          <span>Total</span>
-          <strong id="total-count">{{.Summary.Total}}</strong>
-        </div>
+      <section class="cards">
+        <div class="card online"><span>Online</span><strong id="online-count">{{.Summary.Online}}</strong></div>
+        <div class="card offline"><span>Offline</span><strong id="offline-count">{{.Summary.Offline}}</strong></div>
+        <div class="card degraded"><span>Degraded</span><strong id="degraded-count">{{.Summary.Degraded}}</strong></div>
+        <div class="card total"><span>Total</span><strong id="total-count">{{.Summary.Total}}</strong></div>
       </section>
 
-      <section class="panel" aria-label="fleet table">
+      <section class="panel">
         <div class="panel-header">
           <h2>Fleet</h2>
-          <span class="panel-subtitle">Auto-refreshes every 10 seconds</span>
+          <span class="sub">Auto-refreshes every 10s</span>
         </div>
         <div class="table-wrap">
-          <table class="fleet-table">
+          <table>
             <thead>
               <tr>
+                <th>Status</th>
                 <th>Hostname</th>
                 <th>Probe ID</th>
-                <th>Status</th>
-                <th>OS</th>
-                <th>Arch</th>
-                <th>CPUs</th>
-                <th>Last seen</th>
+                <th>OS/Arch</th>
                 <th>Policy</th>
+                <th>Health</th>
+                <th>Tags</th>
+                <th>Last Seen</th>
               </tr>
             </thead>
             <tbody id="fleet-table-body">
-              {{if .Probes}}
-                {{range .Probes}}
-                  <tr class="probe-row" data-probe-id="{{.ID}}" tabindex="0">
-                    <td>{{if .Hostname}}{{.Hostname}}{{else}}-{{end}}</td>
-                    <td>{{.ID}}</td>
-                    <td>
-                      <span class="status-badge status-{{statusClass .Status}}">
-                        {{humanizeStatus .Status}}
-                      </span>
-                    </td>
-                    <td>{{if .OS}}{{.OS}}{{else}}-{{end}}</td>
-                    <td>{{if .Arch}}{{.Arch}}{{else}}-{{end}}</td>
-                    <td>{{if .Inventory}}{{.Inventory.CPUs}}{{else}}-{{end}}</td>
-                    <td>{{formatLastSeen .LastSeen}}</td>
-                    <td>{{.PolicyLevel}}</td>
-                  </tr>
-                {{end}}
-              {{else}}
-                <tr>
-                  <td colspan="8" class="empty-state">No probes registered yet.</td>
-                </tr>
+              {{if .Probes}}{{range .Probes}}
+              <tr class="probe-row" data-probe-id="{{.ID}}">
+                <td><span class="dot dot-{{statusClass .Status}}"></span>{{humanizeStatus .Status}}</td>
+                <td>{{if .Hostname}}{{.Hostname}}{{else}}-{{end}}</td>
+                <td style="color:#58a6ff">{{.ID}}</td>
+                <td>{{if .OS}}{{.OS}}/{{.Arch}}{{else}}-{{end}}</td>
+                <td>{{.PolicyLevel}}</td>
+                <td>{{if .Health}}<div class="health-bar"><span class="health-fill {{if ge .Health.Score 80}}health-green{{else if ge .Health.Score 50}}health-yellow{{else}}health-red{{end}}" style="width:{{.Health.Score}}px"></span><span>{{.Health.Score}}</span></div>{{else}}<span style="color:#484f58">—</span>{{end}}</td>
+                <td>{{range .Tags}}<span class="pill">{{.}}</span>{{end}}</td>
+                <td>{{formatLastSeen .LastSeen}}</td>
+              </tr>
+              {{end}}{{else}}
+              <tr><td colspan="8" class="empty-state">No probes registered yet.</td></tr>
               {{end}}
             </tbody>
           </table>
@@ -80,159 +99,67 @@
       </section>
     </div>
 
-    <template id="fleet-row-template">
-      <tr class="probe-row" data-probe-id="">
-        <td class="hostname"></td>
-        <td class="probe-id"></td>
-        <td>
-          <span class="status-badge"></span>
-        </td>
-        <td class="os"></td>
-        <td class="arch"></td>
-        <td class="cpus"></td>
-        <td class="last-seen"></td>
-        <td class="policy"></td>
-      </tr>
-    </template>
-
     <script>
-      const POLL_INTERVAL_MS = 10000;
-
-      function statusToClass(status) {
-        const normalized = (status || "pending").toLowerCase();
-        if (normalized === "online") return "status-online";
-        if (normalized === "degraded") return "status-degraded";
-        if (normalized === "offline") return "status-offline";
-        return "status-pending";
+      function statusDotClass(s) {
+        s = (s || '').toLowerCase();
+        if (s === 'online') return 'dot-online';
+        if (s === 'offline') return 'dot-offline';
+        if (s === 'degraded') return 'dot-degraded';
+        return 'dot-pending';
       }
-
-      function formatLastSeen(value) {
-        if (!value) return "—";
-        const ts = new Date(value);
-        if (isNaN(ts.getTime())) return value;
-
-        const now = new Date();
-        const diff = Math.max(0, Math.floor((now - ts) / 1000));
-        const hours = Math.floor(diff / 3600);
-        const mins = Math.floor((diff % 3600) / 60);
-        const secs = diff % 60;
-
-        if (diff < 60) return `${diff}s ago`;
-        if (diff < 3600) return `${mins}m ${secs}s ago`;
-        if (diff < 86400) return `${hours}h ${mins}m ago`;
-
-        const days = Math.floor(diff / 86400);
-        const remHours = Math.floor((diff % 86400) / 3600);
-        return `${days}d ${remHours}h ago`;
+      function healthClass(score) {
+        if (score >= 80) return 'health-green';
+        if (score >= 50) return 'health-yellow';
+        return 'health-red';
       }
-
-      function normalizeStatus(status) {
-        return (status || "pending").toLowerCase();
+      function fmtLastSeen(v) {
+        if (!v) return '—';
+        const d = Math.max(0, Math.floor((Date.now() - new Date(v)) / 1000));
+        if (d < 60) return d + 's ago';
+        if (d < 3600) return Math.floor(d/60) + 'm ago';
+        if (d < 86400) return Math.floor(d/3600) + 'h ago';
+        return Math.floor(d/86400) + 'd ago';
       }
-
-      function renderRow(probe) {
-        const template = document.getElementById('fleet-row-template');
-        const row = template.content.firstElementChild.cloneNode(true);
-
-        row.dataset.probeId = probe.id;
-        row.querySelector('.hostname').textContent = probe.hostname || '-';
-        row.querySelector('.probe-id').textContent = probe.id || '-';
-
-        const statusBadge = row.querySelector('.status-badge');
-        const normalized = normalizeStatus(probe.status);
-        statusBadge.classList.add(statusToClass(normalized));
-        statusBadge.textContent = normalized;
-
-        row.querySelector('.os').textContent = probe.os || '-';
-        row.querySelector('.arch').textContent = probe.arch || '-';
-        row.querySelector('.cpus').textContent = probe.inventory && typeof probe.inventory.cpus === 'number' ? probe.inventory.cpus : '-';
-        row.querySelector('.last-seen').textContent = formatLastSeen(probe.last_seen);
-        row.querySelector('.policy').textContent = probe.policy_level || 'observe';
-
-        row.addEventListener('click', () => {
-          window.location.href = `/probe/${encodeURIComponent(probe.id)}`;
-        });
-        row.addEventListener('keypress', (event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            window.location.href = `/probe/${encodeURIComponent(probe.id)}`;
+      function refresh() {
+        fetch('/api/v1/probes', {cache:'no-store'}).then(r=>r.json()).then(probes => {
+          const tb = document.getElementById('fleet-table-body');
+          let on=0, off=0, deg=0;
+          tb.innerHTML = '';
+          if (!probes || !probes.length) {
+            tb.innerHTML = '<tr><td colspan="8" class="empty-state">No probes registered yet.</td></tr>';
+            return;
           }
-        });
-
-        return row;
-      }
-
-      function renderFleetTable(probes) {
-        const tableBody = document.getElementById('fleet-table-body');
-
-        tableBody.innerHTML = '';
-        if (!Array.isArray(probes) || probes.length === 0) {
-          const empty = document.createElement('tr');
-          const cell = document.createElement('td');
-          cell.colSpan = 8;
-          cell.className = 'empty-state';
-          cell.textContent = 'No probes registered yet.';
-          empty.appendChild(cell);
-          tableBody.appendChild(empty);
-        } else {
-          probes.forEach((probe) => {
-            tableBody.appendChild(renderRow(probe));
+          probes.forEach(p => {
+            const s = (p.status||'').toLowerCase();
+            if (s==='online') on++; else if (s==='offline') off++; else if (s==='degraded') deg++;
+            const tr = document.createElement('tr');
+            tr.className = 'probe-row';
+            tr.dataset.probeId = p.id;
+            tr.onclick = () => location.href = '/probe/' + encodeURIComponent(p.id);
+            const h = p.health;
+            const tags = (p.tags||[]).map(t=>'<span class="pill">'+t+'</span>').join('');
+            const hbar = h ? '<div class="health-bar"><span class="health-fill '+healthClass(h.score)+'" style="width:'+h.score+'px"></span><span>'+h.score+'</span></div>' : '<span style="color:#484f58">—</span>';
+            tr.innerHTML = '<td><span class="dot '+statusDotClass(s)+'"></span>'+s+'</td>'
+              +'<td>'+(p.hostname||'-')+'</td>'
+              +'<td style="color:#58a6ff">'+p.id+'</td>'
+              +'<td>'+(p.os?p.os+'/'+p.arch:'-')+'</td>'
+              +'<td>'+(p.policy_level||'observe')+'</td>'
+              +'<td>'+hbar+'</td>'
+              +'<td>'+tags+'</td>'
+              +'<td>'+fmtLastSeen(p.last_seen)+'</td>';
+            tb.appendChild(tr);
           });
-        }
-
-        let online = 0;
-        let offline = 0;
-        let degraded = 0;
-
-        probes.forEach((probe) => {
-          const normalized = normalizeStatus(probe.status);
-          if (normalized === 'online') online += 1;
-          else if (normalized === 'offline') offline += 1;
-          else if (normalized === 'degraded') degraded += 1;
-        });
-
-        document.getElementById('online-count').textContent = String(online);
-        document.getElementById('offline-count').textContent = String(offline);
-        document.getElementById('degraded-count').textContent = String(degraded);
-        document.getElementById('total-count').textContent = String(Array.isArray(probes) ? probes.length : 0);
+          document.getElementById('online-count').textContent = on;
+          document.getElementById('offline-count').textContent = off;
+          document.getElementById('degraded-count').textContent = deg;
+          document.getElementById('total-count').textContent = probes.length;
+        }).catch(()=>{});
       }
-
-      function refreshFleet() {
-        fetch('/api/v1/probes', { cache: 'no-store' })
-          .then((res) => {
-            if (!res.ok) {
-              throw new Error(`status ${res.status}`);
-            }
-            return res.json();
-          })
-          .then((probes) => {
-            renderFleetTable(probes);
-          })
-          .catch((error) => {
-            console.error('Failed to refresh fleet data:', error);
-          });
-      }
-
-      function attachRowNavigation() {
-        document.querySelectorAll('.probe-row[data-probe-id]').forEach((row) => {
-          const probeId = row.dataset.probeId;
-          if (!probeId) return;
-
-          row.addEventListener('click', () => {
-            window.location.href = `/probe/${encodeURIComponent(probeId)}`;
-          });
-          row.addEventListener('keypress', (event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              window.location.href = `/probe/${encodeURIComponent(probeId)}`;
-            }
-          });
-        });
-      }
-
-      attachRowNavigation();
-      refreshFleet();
-      setInterval(refreshFleet, POLL_INTERVAL_MS);
+      document.querySelectorAll('.probe-row').forEach(r => {
+        r.onclick = () => location.href = '/probe/' + encodeURIComponent(r.dataset.probeId);
+      });
+      refresh();
+      setInterval(refresh, 10000);
     </script>
   </body>
 </html>

@@ -4,151 +4,125 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Legator · Probe {{.Probe.ID}}</title>
-    <link rel="stylesheet" href="/static/style.css" />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; background: #0d1117; color: #c9d1d9; min-height: 100vh; }
+      a { color: #58a6ff; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      .app { max-width: 1200px; margin: 0 auto; padding: 20px; }
+      .back { display: inline-block; margin-bottom: 16px; font-size: 13px; color: #8b949e; }
+      .back:hover { color: #58a6ff; }
+      .header { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 20px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+      .header-left h1 { font-size: 20px; color: #c9d1d9; }
+      .header-left .meta { font-size: 12px; color: #8b949e; margin-top: 4px; }
+      .header-right { display: flex; gap: 12px; align-items: center; }
+      .badge { display: inline-block; padding: 4px 12px; border-radius: 16px; font-size: 12px; font-weight: 600; }
+      .badge-online { background: rgba(63,185,80,0.15); color: #3fb950; }
+      .badge-offline { background: rgba(248,81,73,0.15); color: #f85149; }
+      .badge-degraded { background: rgba(210,153,34,0.15); color: #d29922; }
+      .badge-pending { background: rgba(72,79,88,0.15); color: #8b949e; }
+      .health-badge { padding: 4px 12px; border-radius: 16px; font-size: 12px; font-weight: 600; }
+      .health-good { background: rgba(63,185,80,0.15); color: #3fb950; }
+      .health-warn { background: rgba(210,153,34,0.15); color: #d29922; }
+      .health-crit { background: rgba(248,81,73,0.15); color: #f85149; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+      .panel { background: #161b22; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; }
+      .panel h2 { font-size: 14px; padding: 12px 16px; border-bottom: 1px solid #21262d; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; }
+      .kv { display: grid; grid-template-columns: 120px 1fr; gap: 0; }
+      .kv dt { padding: 8px 16px; font-size: 12px; color: #8b949e; border-bottom: 1px solid #21262d; }
+      .kv dd { padding: 8px 16px; font-size: 13px; border-bottom: 1px solid #21262d; }
+      .tags { padding: 12px 16px; }
+      .pill { display: inline-block; background: #21262d; color: #8b949e; border-radius: 12px; padding: 2px 10px; font-size: 11px; margin: 2px; }
+      .section-list { list-style: none; max-height: 300px; overflow-y: auto; }
+      .section-list li { padding: 8px 16px; border-bottom: 1px solid #21262d; font-size: 12px; display: flex; justify-content: space-between; }
+      .section-list li:last-child { border-bottom: none; }
+      .muted { color: #484f58; }
+      .actions { display: flex; gap: 8px; padding: 12px 16px; }
+      .btn { display: inline-block; padding: 6px 16px; border-radius: 6px; font-size: 12px; font-weight: 600; border: 1px solid #21262d; background: #21262d; color: #c9d1d9; cursor: pointer; text-decoration: none; }
+      .btn:hover { background: #30363d; text-decoration: none; }
+      .btn-primary { background: #238636; border-color: #238636; color: #fff; }
+      .btn-primary:hover { background: #2ea043; }
+      .empty { padding: 16px; color: #484f58; font-size: 12px; text-align: center; }
+      .full-width { grid-column: 1 / -1; }
+      @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+    </style>
   </head>
   <body>
-    <div class="app-shell">
-      <header class="topbar detail-topbar">
-        <a href="/" class="back-link">← Back to Fleet</a>
-        <h1>{{if .Probe.Inventory}}{{.Probe.Inventory.Hostname}}{{else}}{{.Probe.Hostname}}{{end}}</h1>
-        <p>
-          <span>Probe ID: {{.Probe.ID}}</span>
-          <span class="separator">•</span>
-          <span class="status-pill status-{{statusClass .Probe.Status}}">{{humanizeStatus .Probe.Status}}</span>
-          <span class="separator">•</span>
-          <span>Policy: {{.Probe.PolicyLevel}}</span>
-        </p>
-        <p>
-          Last seen {{formatLastSeen .Probe.LastSeen}} · Uptime {{.Uptime}}
-        </p>
-      </header>
+    <div class="app">
+      <a href="/" class="back">← Back to Fleet</a>
 
-      <main class="detail-grid">
-        <section class="panel inventory-panel">
-          <h2>Inventory</h2>
+      <div class="header">
+        <div class="header-left">
+          <h1>{{if .Probe.Inventory}}{{.Probe.Inventory.Hostname}}{{else}}{{.Probe.Hostname}}{{end}}</h1>
+          <div class="meta">
+            ID: {{.Probe.ID}} · Policy: {{.Probe.PolicyLevel}} · Last seen {{formatLastSeen .Probe.LastSeen}} · Uptime {{.Uptime}}
+          </div>
+        </div>
+        <div class="header-right">
+          <span class="badge badge-{{statusClass .Probe.Status}}">{{humanizeStatus .Probe.Status}}</span>
+          {{if .Probe.Health}}<span class="health-badge {{if ge .Probe.Health.Score 80}}health-good{{else if ge .Probe.Health.Score 50}}health-warn{{else}}health-crit{{end}}">Health: {{.Probe.Health.Score}}/100</span>{{end}}
+        </div>
+      </div>
 
-          <dl class="metadata-grid">
-            <div>
-              <dt>Hostname</dt>
-              <dd>{{if .Probe.Inventory}}{{.Probe.Inventory.Hostname}}{{else}}{{.Probe.Hostname}}{{end}}</dd>
-            </div>
-            <div>
-              <dt>OS</dt>
-              <dd>{{if .Probe.Inventory}}{{.Probe.Inventory.OS}}{{else}}{{.Probe.OS}}{{end}}</dd>
-            </div>
-            <div>
-              <dt>Arch</dt>
-              <dd>{{if .Probe.Inventory}}{{.Probe.Inventory.Arch}}{{else}}{{.Probe.Arch}}{{end}}</dd>
-            </div>
-            <div>
-              <dt>Kernel</dt>
-              <dd>{{if .Probe.Inventory}}{{.Probe.Inventory.Kernel}}{{else}}-{{end}}</dd>
-            </div>
-            <div>
-              <dt>CPU</dt>
-              <dd>{{if .Probe.Inventory}}{{.Probe.Inventory.CPUs}}{{else}}-{{end}} cores</dd>
-            </div>
-            <div>
-              <dt>RAM</dt>
-              <dd>{{if .Probe.Inventory}}{{humanBytes .Probe.Inventory.MemTotal}}{{else}}-{{end}}</dd>
-            </div>
-            <div>
-              <dt>Disk</dt>
-              <dd>{{if .Probe.Inventory}}{{humanBytes .Probe.Inventory.DiskTotal}}{{else}}-{{end}}</dd>
-            </div>
+      <div class="grid">
+        <div class="panel">
+          <h2>System</h2>
+          <dl class="kv">
+            <dt>Hostname</dt>
+            <dd>{{if .Probe.Inventory}}{{.Probe.Inventory.Hostname}}{{else}}{{.Probe.Hostname}}{{end}}</dd>
+            <dt>OS</dt>
+            <dd>{{if .Probe.Inventory}}{{.Probe.Inventory.OS}}{{else}}{{.Probe.OS}}{{end}}</dd>
+            <dt>Arch</dt>
+            <dd>{{if .Probe.Inventory}}{{.Probe.Inventory.Arch}}{{else}}{{.Probe.Arch}}{{end}}</dd>
+            <dt>Kernel</dt>
+            <dd>{{if .Probe.Inventory}}{{.Probe.Inventory.Kernel}}{{else}}-{{end}}</dd>
+            <dt>CPUs</dt>
+            <dd>{{if .Probe.Inventory}}{{.Probe.Inventory.CPUs}}{{else}}-{{end}}</dd>
+            <dt>Memory</dt>
+            <dd>{{if .Probe.Inventory}}{{humanBytes .Probe.Inventory.MemTotal}}{{else}}-{{end}}</dd>
+            <dt>Disk</dt>
+            <dd>{{if .Probe.Inventory}}{{humanBytes .Probe.Inventory.DiskTotal}}{{else}}-{{end}}</dd>
           </dl>
+        </div>
 
-          <section class="detail-section">
-            <h3>Network interfaces ({{if .Probe.Inventory}}{{len .Probe.Inventory.Interfaces}}{{else}}0{{end}})</h3>
-            {{with .Probe.Inventory}}
-              {{if .Interfaces}}
-                <ul class="kv-list">
-                  {{range .Interfaces}}
-                    <li>
-                      <div>
-                        <strong>{{.Name}}</strong>
-                        {{if .MAC}} · {{.MAC}}{{end}}
-                      </div>
-                      <div>{{.State}}</div>
-                      <ul>
-                        {{range .Addrs}}
-                          <li>{{.}}</li>
-                        {{end}}
-                      </ul>
-                    </li>
-                  {{end}}
-                </ul>
-              {{else}}
-                <p class="empty-state">No interfaces reported yet.</p>
-              {{end}}
-            {{else}}
-              <p class="empty-state">No interfaces reported yet.</p>
-            {{end}}
-          </section>
+        <div class="panel">
+          <h2>Tags &amp; Actions</h2>
+          <div class="tags">
+            {{if .Probe.Tags}}{{range .Probe.Tags}}<span class="pill">{{.}}</span>{{end}}{{else}}<span class="muted">No tags</span>{{end}}
+          </div>
+          <div class="actions">
+            <a href="/probe/{{.Probe.ID}}/chat" class="btn btn-primary">💬 Chat</a>
+            <a href="/" class="btn">← Fleet</a>
+          </div>
+        </div>
 
-          <section class="detail-section">
-            <h3>Services ({{if .Probe.Inventory}}{{len .Probe.Inventory.Services}}{{else}}0{{end}})</h3>
-            {{with .Probe.Inventory}}
-              {{if .Services}}
-                <ul class="kv-list">
-                  {{range .Services}}
-                    <li>
-                      <span>{{.Name}}</span>
-                      <span>{{.State}} · enabled={{.Enabled}}</span>
-                    </li>
-                  {{end}}
-                </ul>
-              {{else}}
-                <p class="empty-state">No services reported yet.</p>
-              {{end}}
-            {{else}}
-              <p class="empty-state">No services reported yet.</p>
-            {{end}}
-          </section>
+        <div class="panel">
+          <h2>Network Interfaces</h2>
+          {{with .Probe.Inventory}}{{if .Interfaces}}
+          <ul class="section-list">
+            {{range .Interfaces}}<li><span><strong>{{.Name}}</strong>{{if .MAC}} · {{.MAC}}{{end}}</span><span class="muted">{{.State}} {{range .Addrs}}{{.}} {{end}}</span></li>{{end}}
+          </ul>
+          {{else}}<div class="empty">No interfaces reported</div>{{end}}{{else}}<div class="empty">No interfaces reported</div>{{end}}
+        </div>
 
-          <section class="detail-section">
-            <h3>Packages ({{if .Probe.Inventory}}{{len .Probe.Inventory.Packages}}{{else}}0{{end}})</h3>
-            {{with .Probe.Inventory}}
-              {{if .Packages}}
-                <ul class="kv-list">
-                  {{range .Packages}}
-                    <li>{{.Name}} <span class="muted">{{.Version}} ({{.Manager}})</span></li>
-                  {{end}}
-                </ul>
-              {{else}}
-                <p class="empty-state">No packages reported yet.</p>
-              {{end}}
-            {{else}}
-              <p class="empty-state">No packages reported yet.</p>
-            {{end}}
-          </section>
+        <div class="panel">
+          <h2>Services</h2>
+          {{with .Probe.Inventory}}{{if .Services}}
+          <ul class="section-list">
+            {{range .Services}}<li><span>{{.Name}}</span><span class="muted">{{.State}} · enabled={{.Enabled}}</span></li>{{end}}
+          </ul>
+          {{else}}<div class="empty">No services reported</div>{{end}}{{else}}<div class="empty">No services reported</div>{{end}}
+        </div>
 
-          <section class="detail-section">
-            <h3>Users ({{if .Probe.Inventory}}{{len .Probe.Inventory.Users}}{{else}}0{{end}})</h3>
-            {{with .Probe.Inventory}}
-              {{if .Users}}
-                <ul class="kv-list">
-                  {{range .Users}}
-                    <li>
-                      <span>{{.Name}} (UID {{.UID}})</span>
-                      <span class="muted">{{range .Groups}}{{.}} {{end}}</span>
-                    </li>
-                  {{end}}
-                </ul>
-              {{else}}
-                <p class="empty-state">No users reported yet.</p>
-              {{end}}
-            {{else}}
-              <p class="empty-state">No users reported yet.</p>
-            {{end}}
-          </section>
-        </section>
-
-        <aside class="panel chat-panel">
-          <h2>Chat</h2>
-          <div class="chat-placeholder">Chat coming soon</div>
-        </aside>
-      </main>
+        <div class="panel full-width">
+          <h2>Packages</h2>
+          {{with .Probe.Inventory}}{{if .Packages}}
+          <ul class="section-list">
+            {{range .Packages}}<li><span>{{.Name}}</span><span class="muted">{{.Version}} ({{.Manager}})</span></li>{{end}}
+          </ul>
+          {{else}}<div class="empty">No packages reported</div>{{end}}{{else}}<div class="empty">No packages reported</div>{{end}}
+        </div>
+      </div>
     </div>
   </body>
 </html>
