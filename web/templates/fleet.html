@@ -1,322 +1,240 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Legator Fleet</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <link rel="stylesheet" href="/static/style.css" />
-  </head>
-  <body>
-    <div class="app-layout">
-      <aside class="sidebar" id="app-sidebar">
-        <div class="sidebar-brand">
-          <span class="brand-mark"><i data-lucide="cpu" class="icon-18"></i></span>
-          <div class="brand-copy">
-            <strong>Legator</strong>
-            <span>Control Plane</span>
-          </div>
-        </div>
+{{define "title"}}Fleet — Legator{{end}}
 
-        <nav class="sidebar-nav">
-          <a class="sidebar-link active" href="/">
-            <i data-lucide="server" class="icon-16"></i>
-            <span>Fleet</span>
-            <span class="count" data-badge="probes">{{.Summary.Total}}</span>
-          </a>
-          <a class="sidebar-link" href="/fleet/chat" data-nav-chat>
-            <i data-lucide="message-square" class="icon-16"></i>
-            <span>Fleet Chat</span>
-          </a>
-          <a class="sidebar-link" href="/approvals">
-            <i data-lucide="shield-check" class="icon-16"></i>
-            <span>Approvals</span>
-            <span class="count" data-badge="approvals">0</span>
-          </a>
-          <a class="sidebar-link" href="/audit">
-            <i data-lucide="scroll-text" class="icon-16"></i>
-            <span>Audit</span>
-          </a>
-          <a class="sidebar-link" href="/alerts">
-            <i data-lucide="bell" class="icon-16"></i>
-            <span>Alerts</span>
-          </a>
-          <a class="sidebar-link" href="/">
-            <i data-lucide="settings" class="icon-16"></i>
-            <span>Settings</span>
-          </a>
-        </nav>
+{{define "header"}}
+<div>
+  <h1 class="page-title">Fleet</h1>
+  <span class="page-meta">{{.Summary.Total}} probes · v{{.Version}}</span>
+</div>
+{{end}}
 
-        <div class="sidebar-footer">
-          {{if .CurrentUser}}
-          <div class="user-chip">
-            <div class="meta">
-              <strong>{{.CurrentUser.Username}}</strong>
-              <span>Signed in</span>
-            </div>
-            <span class="role-badge role-{{if .CurrentUser.Role}}{{.CurrentUser.Role}}{{else}}unknown{{end}}">{{if .CurrentUser.Role}}{{.CurrentUser.Role}}{{else}}viewer{{end}}</span>
-          </div>
-          {{end}}
-          <form method="POST" action="/logout" class="logout-form">
-            <button type="submit" class="btn btn-ghost w-full justify-center">
-              <i data-lucide="log-out" class="icon-14"></i>
-              Logout
-            </button>
-          </form>
-        </div>
-      </aside>
+{{define "content"}}
+<section class="panel">
+  <div class="stat-row">
+    <span>Online: <strong id="cnt-online">{{.Summary.Online}}</strong></span>
+    <span>Offline: <strong id="cnt-offline">{{.Summary.Offline}}</strong></span>
+    <span>Degraded: <strong id="cnt-degraded">{{.Summary.Degraded}}</strong></span>
+    <span>Total: <strong id="cnt-total">{{.Summary.Total}}</strong></span>
+    <span class="right"><span class="dot dot-pending" id="sse-dot"></span><span id="sse-status">connecting…</span></span>
+  </div>
+</section>
 
-      <div class="sidebar-overlay" data-sidebar-close></div>
-
-      <main class="main-content">
-        <header class="page-header">
-          <div>
-            <button class="sidebar-toggle" data-sidebar-toggle aria-label="Toggle navigation">
-              <i data-lucide="menu" class="icon-16"></i>
-            </button>
-            <h1 class="page-title">Fleet Command Centre</h1>
-            <p class="page-subtitle">Live posture of every probe · Version <span id="version">{{.Version}}</span></p>
-          </div>
-          <div class="page-actions">
-            <a class="btn" href="/fleet/chat"><i data-lucide="message-square" class="icon-14"></i>Fleet Chat</a>
-            <a class="btn" href="/approvals"><i data-lucide="shield-check" class="icon-14"></i>Review approvals</a>
-            <a class="btn" href="/audit"><i data-lucide="scroll-text" class="icon-14"></i>Audit log</a>
-          </div>
-        </header>
-
-        <section class="stats-grid">
-          <article class="stat-card online">
-            <span class="label"><i data-lucide="circle" class="icon-14"></i>Online</span>
-            <strong class="value value-online" id="cnt-online">{{.Summary.Online}}</strong>
-          </article>
-          <article class="stat-card offline">
-            <span class="label"><i data-lucide="circle" class="icon-14"></i>Offline</span>
-            <strong class="value value-offline" id="cnt-offline">{{.Summary.Offline}}</strong>
-          </article>
-          <article class="stat-card degraded">
-            <span class="label"><i data-lucide="activity" class="icon-14"></i>Degraded</span>
-            <strong class="value value-degraded" id="cnt-degraded">{{.Summary.Degraded}}</strong>
-          </article>
-          <article class="stat-card total">
-            <span class="label"><i data-lucide="layers" class="icon-14"></i>Total</span>
-            <strong class="value value-total" id="cnt-total">{{.Summary.Total}}</strong>
-          </article>
-        </section>
-
-        <section class="content-grid">
-          <section class="panel">
-            <div class="panel-header">
-              <h2 class="panel-title">Fleet</h2>
-              <span class="panel-sub"><span class="live-dot" id="sse-dot"></span><span id="sse-status">connecting…</span></span>
-            </div>
-
-            <div class="table-wrap">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th><span class="sort-head">Status <i data-lucide="chevrons-up-down" class="icon-14"></i></span></th>
-                    <th><span class="sort-head">Hostname <i data-lucide="chevrons-up-down" class="icon-14"></i></span></th>
-                    <th>Probe ID</th>
-                    <th>OS / Arch</th>
-                    <th>Policy</th>
-                    <th>Health</th>
-                    <th>Tags</th>
-                    <th><span class="sort-head">Last Seen <i data-lucide="chevrons-up-down" class="icon-14"></i></span></th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody id="fleet-body">
-                  {{if .Probes}}{{range .Probes}}
-                  <tr class="probe-row" data-probe-id="{{.ID}}" onclick="location.href='/probe/'+encodeURIComponent('{{.ID}}')">
-                    <td><span class="dot dot-{{statusClass .Status}}"></span>{{humanizeStatus .Status}}</td>
-                    <td>{{if .Hostname}}{{.Hostname}}{{else}}-{{end}}</td>
-                    <td class="id-text">{{.ID}}</td>
-                    <td>{{if .OS}}{{.OS}}/{{.Arch}}{{else}}-{{end}}</td>
-                    <td>{{.PolicyLevel}}</td>
-                    <td>
-                      {{if .Health}}
-                      <div class="health-meter">
-                        <span class="health-track"><span class="health-fill {{if ge .Health.Score 80}}health-green{{else if ge .Health.Score 50}}health-yellow{{else}}health-red{{end}}" style="width:{{.Health.Score}}%"></span></span>
-                        <span class="health-score">{{.Health.Score}}%</span>
-                      </div>
-                      {{else}}
-                      <span class="muted">—</span>
-                      {{end}}
-                    </td>
-                    <td>{{range .Tags}}<span class="tag-pill">{{.}}</span>{{end}}</td>
-                    <td>{{formatLastSeen .LastSeen}}</td>
-                    <td>
-                      <a href="/probe/{{.ID}}/chat" onclick="event.stopPropagation()" class="btn btn-ghost" title="Chat with probe">
-                        <i data-lucide="message-square" class="icon-14"></i>
-                        Chat
-                      </a>
-                    </td>
-                  </tr>
-                  {{end}}{{else}}
-                  <tr><td colspan="9" class="empty-state">No probes registered yet.</td></tr>
-                  {{end}}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <aside class="panel">
-            <div class="panel-header">
-              <h2 class="panel-title">Live Activity</h2>
-              <span class="panel-sub" id="feed-count">0 events</span>
-            </div>
-            <div class="activity-feed" id="feed">
-              <div class="feed-empty">Waiting for fleet events…</div>
-            </div>
-          </aside>
-        </section>
-      </main>
+<section class="grid-two">
+  <section class="panel">
+    <div class="panel-header">
+      <h2 class="panel-title">Probes</h2>
     </div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Hostname</th>
+            <th>Probe ID</th>
+            <th>OS/Arch</th>
+            <th>Policy</th>
+            <th>Health</th>
+            <th>Tags</th>
+            <th>Last Seen</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="fleet-body">
+          {{if .Probes}}{{range .Probes}}
+          <tr class="probe-row" data-probe-id="{{.ID}}" onclick="location.href='/probe/'+encodeURIComponent('{{.ID}}')">
+            <td><span class="dot dot-{{statusClass .Status}}"></span>{{humanizeStatus .Status}}</td>
+            <td>{{if .Hostname}}{{.Hostname}}{{else}}-{{end}}</td>
+            <td class="id-text">{{.ID}}</td>
+            <td>{{if .OS}}{{.OS}}/{{.Arch}}{{else}}-{{end}}</td>
+            <td>{{.PolicyLevel}}</td>
+            <td>
+              {{if .Health}}
+              <div class="health-meter">
+                <span class="health-track"><span class="health-fill {{if ge .Health.Score 80}}ok{{else if ge .Health.Score 50}}warn{{else}}bad{{end}}" style="width:{{.Health.Score}}%"></span></span>
+                <span class="health-score">{{.Health.Score}}%</span>
+              </div>
+              {{else}}
+              <span class="muted">—</span>
+              {{end}}
+            </td>
+            <td>{{if .Tags}}{{range .Tags}}<span class="tag">{{.}}</span>{{end}}{{else}}<span class="muted">—</span>{{end}}</td>
+            <td>{{formatLastSeen .LastSeen}}</td>
+            <td><a href="/probe/{{.ID}}/chat" onclick="event.stopPropagation()" class="btn">chat</a></td>
+          </tr>
+          {{end}}{{else}}
+          <tr><td colspan="9" class="empty-state">No probes registered yet.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </section>
 
-    <script src="/static/app.js"></script>
-    <script>
-      const MAX_FEED = 100;
-      let feedCount = 0;
+  <aside class="panel">
+    <div class="panel-header">
+      <h2 class="panel-title">Activity Feed</h2>
+      <span class="panel-sub" id="feed-count">0 events</span>
+    </div>
+    <div class="feed" id="feed">
+      <div class="feed-item muted">Waiting for fleet events…</div>
+    </div>
+  </aside>
+</section>
+{{end}}
 
-      function dotClass(s) {
-        s = (s || '').toLowerCase();
-        return s === 'online' ? 'dot-online' : s === 'offline' ? 'dot-offline' : s === 'degraded' ? 'dot-degraded' : 'dot-pending';
-      }
+{{define "scripts"}}
+<script>
+(() => {
+  const MAX_FEED = 100;
+  let feedCount = 0;
 
-      function hClass(sc) {
-        return sc >= 80 ? 'health-green' : sc >= 50 ? 'health-yellow' : 'health-red';
-      }
+  function dotClass(status) {
+    const s = (status || '').toLowerCase();
+    if (s === 'online') return 'dot-online';
+    if (s === 'offline') return 'dot-offline';
+    if (s === 'degraded') return 'dot-degraded';
+    return 'dot-pending';
+  }
 
-      function ago(v) {
-        if (!v) return '—';
-        const d = Math.max(0, Math.floor((Date.now() - new Date(v)) / 1000));
-        if (d < 60) return d + 's ago';
-        if (d < 3600) return Math.floor(d / 60) + 'm ago';
-        if (d < 86400) return Math.floor(d / 3600) + 'h ago';
-        return Math.floor(d / 86400) + 'd ago';
-      }
+  function healthClass(score) {
+    if (score >= 80) return 'ok';
+    if (score >= 50) return 'warn';
+    return 'bad';
+  }
 
-      function hms(ts) {
-        const d = new Date(ts);
-        return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') + ':' + String(d.getSeconds()).padStart(2, '0');
-      }
+  function ago(value) {
+    if (!value) return '—';
+    const d = Math.max(0, Math.floor((Date.now() - new Date(value)) / 1000));
+    if (d < 60) return d + 's ago';
+    if (d < 3600) return Math.floor(d / 60) + 'm ago';
+    if (d < 86400) return Math.floor(d / 3600) + 'h ago';
+    return Math.floor(d / 86400) + 'd ago';
+  }
 
-      function typeTag(t) {
-        if (t.startsWith('command.')) return '<span class="type cmd">CMD</span>';
-        if (t.startsWith('probe.')) return '<span class="type probe">PROBE</span>';
-        if (t.startsWith('approval.')) return '<span class="type approval">APPROVAL</span>';
-        return '<span class="type error">' + t.split('.')[0].toUpperCase() + '</span>';
-      }
+  function hms(ts) {
+    const d = new Date(ts || Date.now());
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') + ':' + String(d.getSeconds()).padStart(2, '0');
+  }
 
-      function refreshFleet() {
-        fetch('/api/v1/probes', { cache: 'no-store' }).then((r) => r.json()).then((probes) => {
-          const tb = document.getElementById('fleet-body');
-          let on = 0, off = 0, deg = 0;
-          tb.innerHTML = '';
-          if (!probes || !probes.length) {
-            tb.innerHTML = '<tr><td colspan="9" class="empty-state">No probes registered yet.</td></tr>';
-            return;
-          }
-          probes.forEach((p) => {
-            const s = (p.status || '').toLowerCase();
-            if (s === 'online') on++; else if (s === 'offline') off++; else if (s === 'degraded') deg++;
-            const tr = document.createElement('tr');
-            tr.className = 'probe-row';
-            tr.dataset.probeId = p.id;
-            tr.onclick = () => location.href = '/probe/' + encodeURIComponent(p.id);
-            const h = p.health;
-            const tags = (p.tags || []).map((t) => '<span class="tag-pill">' + t + '</span>').join('');
-            const hbar = h
-              ? '<div class="health-meter"><span class="health-track"><span class="health-fill ' + hClass(h.score) + '" style="width:' + h.score + '%"></span></span><span class="health-score">' + h.score + '%</span></div>'
-              : '<span class="muted">—</span>';
-            tr.innerHTML = '<td><span class="dot ' + dotClass(s) + '"></span>' + s + '</td>'
-              + '<td>' + (p.hostname || '-') + '</td>'
-              + '<td class="id-text">' + p.id + '</td>'
-              + '<td>' + (p.os ? p.os + '/' + p.arch : '-') + '</td>'
-              + '<td>' + (p.policy_level || 'observe') + '</td>'
-              + '<td>' + hbar + '</td>'
-              + '<td>' + tags + '</td>'
-              + '<td>' + ago(p.last_seen) + '</td>'
-              + '<td><a href="/probe/' + encodeURIComponent(p.id) + '/chat" onclick="event.stopPropagation()" class="btn btn-ghost" title="Chat with probe"><i data-lucide="message-square" class="icon-14"></i>Chat</a></td>';
-            tb.appendChild(tr);
-          });
-          update('cnt-online', on);
-          update('cnt-offline', off);
-          update('cnt-degraded', deg);
-          update('cnt-total', probes.length);
-          if (window.LegatorUI && window.LegatorUI.refreshIcons) {
-            window.LegatorUI.refreshIcons();
-          }
-        }).catch(() => {});
-      }
+  function typeTag(type) {
+    const t = String(type || 'event');
+    if (t.startsWith('command.')) return '<span class="tag">cmd</span>';
+    if (t.startsWith('probe.')) return '<span class="tag">probe</span>';
+    if (t.startsWith('approval.')) return '<span class="tag">approval</span>';
+    return '<span class="tag">' + t.split('.')[0] + '</span>';
+  }
 
-      function update(id, val) {
-        const el = document.getElementById(id);
-        if (el.textContent !== String(val)) {
-          el.textContent = val;
-          const card = el.closest('.stat-card');
-          if (card) {
-            card.classList.add('flash');
-            setTimeout(() => card.classList.remove('flash'), 800);
-          }
+  function updateCounter(id, value) {
+    const node = document.getElementById(id);
+    if (node) node.textContent = String(value);
+  }
+
+  function refreshFleet() {
+    fetch('/api/v1/probes', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((probes) => {
+        const rows = Array.isArray(probes) ? probes : [];
+        const body = document.getElementById('fleet-body');
+        body.innerHTML = '';
+
+        if (!rows.length) {
+          body.innerHTML = '<tr><td colspan="9" class="empty-state">No probes registered yet.</td></tr>';
+          updateCounter('cnt-online', 0);
+          updateCounter('cnt-offline', 0);
+          updateCounter('cnt-degraded', 0);
+          updateCounter('cnt-total', 0);
+          return;
         }
-      }
 
-      function addFeedItem(evt) {
-        const feed = document.getElementById('feed');
-        const empty = feed.querySelector('.feed-empty');
-        if (empty) empty.remove();
+        let online = 0;
+        let offline = 0;
+        let degraded = 0;
 
-        const div = document.createElement('div');
-        div.className = 'feed-item';
-        const pid = evt.probe_id ? ' <span class="id-text">' + evt.probe_id.slice(0, 12) + '</span>' : '';
-        div.innerHTML = '<span class="ts">' + hms(evt.timestamp) + '</span>' + typeTag(evt.type) + pid + ' ' + evt.summary;
-        feed.insertBefore(div, feed.firstChild);
+        rows.forEach((p) => {
+          const status = String(p.status || 'pending').toLowerCase();
+          if (status === 'online') online += 1;
+          else if (status === 'offline') offline += 1;
+          else if (status === 'degraded') degraded += 1;
 
-        feedCount++;
-        while (feed.children.length > MAX_FEED) feed.removeChild(feed.lastChild);
-        document.getElementById('feed-count').textContent = feedCount + ' events';
-      }
+          const tr = document.createElement('tr');
+          tr.className = 'probe-row';
+          tr.dataset.probeId = p.id;
+          tr.onclick = () => { location.href = '/probe/' + encodeURIComponent(p.id); };
 
-      let es = null;
-      function connectSSE() {
-        const dot = document.getElementById('sse-dot');
-        const status = document.getElementById('sse-status');
+          const tags = Array.isArray(p.tags) && p.tags.length
+            ? p.tags.map((tag) => '<span class="tag">' + tag + '</span>').join(' ')
+            : '<span class="muted">—</span>';
 
-        es = new EventSource('/api/v1/events');
+          const health = p.health && typeof p.health.score === 'number'
+            ? '<div class="health-meter"><span class="health-track"><span class="health-fill ' + healthClass(p.health.score) + '" style="width:' + p.health.score + '%"></span></span><span class="health-score">' + p.health.score + '%</span></div>'
+            : '<span class="muted">—</span>';
 
-        es.onopen = () => {
-          dot.classList.remove('disconnected');
-          status.textContent = 'live';
-        };
+          tr.innerHTML = ''
+            + '<td><span class="dot ' + dotClass(status) + '"></span>' + status + '</td>'
+            + '<td>' + (p.hostname || '-') + '</td>'
+            + '<td class="id-text">' + p.id + '</td>'
+            + '<td>' + (p.os ? (p.os + '/' + (p.arch || '-')) : '-') + '</td>'
+            + '<td>' + (p.policy_level || 'observe') + '</td>'
+            + '<td>' + health + '</td>'
+            + '<td>' + tags + '</td>'
+            + '<td>' + ago(p.last_seen) + '</td>'
+            + '<td><a href="/probe/' + encodeURIComponent(p.id) + '/chat" onclick="event.stopPropagation()" class="btn">chat</a></td>';
 
-        es.onerror = () => {
-          dot.classList.add('disconnected');
-          status.textContent = 'reconnecting…';
-        };
-
-        const types = ['probe.connected', 'probe.disconnected', 'probe.offline', 'probe.registered',
-                       'command.dispatched', 'command.completed', 'command.failed',
-                       'approval.needed', 'approval.decided', 'policy.changed', 'chat.message'];
-        types.forEach((t) => {
-          es.addEventListener(t, (e) => {
-            try {
-              const evt = JSON.parse(e.data);
-              addFeedItem(evt);
-              if (t.startsWith('probe.') || t === 'command.completed' || t === 'command.failed') {
-                refreshFleet();
-              }
-            } catch (err) {}
-          });
+          body.appendChild(tr);
         });
-      }
 
-      refreshFleet();
-      connectSSE();
-      setInterval(refreshFleet, 30000);
-    </script>
-  </body>
-</html>
+        updateCounter('cnt-online', online);
+        updateCounter('cnt-offline', offline);
+        updateCounter('cnt-degraded', degraded);
+        updateCounter('cnt-total', rows.length);
+      })
+      .catch(() => {});
+  }
+
+  function addFeedItem(evt) {
+    const feed = document.getElementById('feed');
+    const item = document.createElement('div');
+    const pid = evt.probe_id ? ' <span class="id-text">' + evt.probe_id.slice(0, 12) + '</span>' : '';
+    item.className = 'feed-item';
+    item.innerHTML = '<span class="muted">' + hms(evt.timestamp) + '</span> ' + typeTag(evt.type) + pid + ' ' + (evt.summary || 'event');
+    feed.prepend(item);
+
+    feedCount += 1;
+    while (feed.children.length > MAX_FEED) {
+      feed.removeChild(feed.lastChild);
+    }
+    document.getElementById('feed-count').textContent = feedCount + ' events';
+  }
+
+  const dot = document.getElementById('sse-dot');
+  const status = document.getElementById('sse-status');
+  const handlers = {
+    onopen: () => {
+      dot.className = 'dot dot-online';
+      status.textContent = 'live';
+    },
+    onerror: () => {
+      dot.className = 'dot dot-offline';
+      status.textContent = 'reconnecting…';
+    },
+  };
+
+  [
+    'probe.connected', 'probe.disconnected', 'probe.offline', 'probe.registered',
+    'command.dispatched', 'command.completed', 'command.failed',
+    'approval.needed', 'approval.decided', 'policy.changed', 'chat.message',
+  ].forEach((eventName) => {
+    handlers[eventName] = (evt) => {
+      addFeedItem(evt);
+      if (eventName.startsWith('probe.') || eventName === 'command.completed' || eventName === 'command.failed') {
+        refreshFleet();
+      }
+    };
+  });
+
+  refreshFleet();
+  if (window.LegatorUI && window.LegatorUI.connectSSE) {
+    window.LegatorUI.connectSSE(handlers);
+  }
+  setInterval(refreshFleet, 30000);
+})();
+</script>
+{{end}}

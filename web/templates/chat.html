@@ -1,544 +1,430 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Legator · Probe {{.Probe.ID}} · Chat</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <link rel="stylesheet" href="/static/style.css" />
-  </head>
-  <body>
-    <div class="app-layout">
-      <aside class="sidebar" id="app-sidebar">
-        <div class="sidebar-brand">
-          <span class="brand-mark"><i data-lucide="cpu" class="icon-18"></i></span>
-          <div class="brand-copy">
-            <strong>Legator</strong>
-            <span>Control Plane</span>
-          </div>
-        </div>
-
-        <nav class="sidebar-nav">
-          <a class="sidebar-link" href="/">
-            <i data-lucide="server" class="icon-16"></i>
-            <span>Fleet</span>
-            <span class="count" data-badge="probes">0</span>
-          </a>
-          <a class="sidebar-link active" href="/probe/{{.Probe.ID}}/chat" data-nav-chat>
-            <i data-lucide="message-square" class="icon-16"></i>
-            <span>Chat</span>
-          </a>
-          <a class="sidebar-link" href="/approvals">
-            <i data-lucide="shield-check" class="icon-16"></i>
-            <span>Approvals</span>
-            <span class="count" data-badge="approvals">0</span>
-          </a>
-          <a class="sidebar-link" href="/audit">
-            <i data-lucide="scroll-text" class="icon-16"></i>
-            <span>Audit</span>
-          </a>
-          <a class="sidebar-link" href="/alerts">
-            <i data-lucide="bell" class="icon-16"></i>
-            <span>Alerts</span>
-          </a>
-          <a class="sidebar-link" href="/">
-            <i data-lucide="settings" class="icon-16"></i>
-            <span>Settings</span>
-          </a>
-        </nav>
-
-        <div class="sidebar-footer">
-          {{if .CurrentUser}}
-          <div class="user-chip">
-            <div class="meta">
-              <strong>{{.CurrentUser.Username}}</strong>
-              <span>Signed in</span>
-            </div>
-            <span class="role-badge role-{{if .CurrentUser.Role}}{{.CurrentUser.Role}}{{else}}unknown{{end}}">{{if .CurrentUser.Role}}{{.CurrentUser.Role}}{{else}}viewer{{end}}</span>
-          </div>
-          {{end}}
-          <form method="POST" action="/logout" class="logout-form">
-            <button type="submit" class="btn btn-ghost w-full justify-center">
-              <i data-lucide="log-out" class="icon-14"></i>
-              Logout
-            </button>
-          </form>
-        </div>
-      </aside>
-
-      <div class="sidebar-overlay" data-sidebar-close></div>
-
-      <main class="main-content chat-main">
-        <header class="page-header chat-header">
-          <div class="chat-header-main">
-            <button class="sidebar-toggle" data-sidebar-toggle aria-label="Toggle navigation">
-              <i data-lucide="menu" class="icon-16"></i>
-            </button>
-            <div class="chat-header-copy">
-              <a href="/probe/{{.Probe.ID}}" class="back-link"><i data-lucide="arrow-left" class="icon-14"></i>Back to probe detail</a>
-              <h1 class="page-title">{{if .Probe.Hostname}}{{.Probe.Hostname}}{{else}}Probe {{.Probe.ID}}{{end}}</h1>
-              <p class="chat-header-sub">Probe ID: <span class="id-text">{{.Probe.ID}}</span></p>
-            </div>
-          </div>
-          <div class="page-actions">
-            <button class="context-toggle" type="button" data-context-toggle aria-label="Toggle probe context" aria-expanded="false" aria-controls="probe-context-panel">
-              <i data-lucide="panel-right" class="icon-14"></i>
-            </button>
-            <span class="status-pill status-{{if or (eq .Probe.Status "online") (eq .Probe.Status "pending") (eq .Probe.Status "degraded") (eq .Probe.Status "offline")}}{{.Probe.Status}}{{else}}pending{{end}}">{{if .Probe.Status}}{{.Probe.Status}}{{else}}unknown{{end}}</span>
-            <span id="connection-status" class="connection-status">
-              <span id="connection-dot" class="connection-dot connecting"></span>
-              <span id="connection-text">Connecting…</span>
-            </span>
-          </div>
-        </header>
-
-        <section class="chat-page">
-          <div class="chat-column">
-            <div class="chat-stream">
-              <section id="message-list" class="chat-messages" aria-live="polite"></section>
-              <div id="empty-state" class="chat-empty">
-                <i data-lucide="sparkles" class="icon-18"></i>
-                <span>Ask this probe anything</span>
-              </div>
-            </div>
-            <div id="typing" class="typing" aria-live="polite">Assistant is typing<span class="typing-dot"></span></div>
-          </div>
-
-          <div class="chat-composer-wrap">
-            <form id="chat-form" class="chat-composer" autocomplete="off">
-              <textarea
-                id="chat-input"
-                name="message"
-                rows="1"
-                placeholder="Ask this probe for help..."
-                maxlength="4000"
-                autocomplete="off"
-                required
-              ></textarea>
-              <button id="send-btn" class="chat-send-btn" type="submit" aria-label="Send message">
-                <i data-lucide="send" class="icon-16"></i>
-              </button>
-            </form>
-          </div>
-        </section>
-      </main>
-
-      <div class="context-backdrop" id="context-backdrop" data-context-close></div>
-
-      <aside class="context-column panel" id="probe-context-panel" aria-hidden="true">
-        <div class="panel-header">
-          <h2 class="panel-title">Probe Context</h2>
-          <button class="context-close" type="button" data-context-close aria-label="Close probe context">
-            <i data-lucide="x" class="icon-14"></i>
-          </button>
-        </div>
-        <div id="probe-context" class="probe-context hidden">
-          <div class="ctx-item"><span class="ctx-label">Hostname</span><span id="ctx-hostname" class="ctx-value">—</span></div>
-          <div class="ctx-item"><span class="ctx-label">Status</span><span id="ctx-status" class="ctx-value">—</span></div>
-          <div class="ctx-item"><span class="ctx-label">OS / Arch</span><span id="ctx-os" class="ctx-value">—</span></div>
-          <div class="ctx-item"><span class="ctx-label">Kernel</span><span id="ctx-kernel" class="ctx-value">—</span></div>
-          <div class="ctx-item"><span class="ctx-label">CPUs</span><span id="ctx-cpus" class="ctx-value">—</span></div>
-          <div class="ctx-item"><span class="ctx-label">Memory</span><span id="ctx-mem" class="ctx-value">—</span></div>
-          <div class="ctx-item"><span class="ctx-label">Policy</span><span id="ctx-policy" class="ctx-value">—</span></div>
-          <div class="ctx-item"><span class="ctx-label">Last Seen</span><span id="ctx-lastseen" class="ctx-value">—</span></div>
-        </div>
-      </aside>
-    </div>
-
-    <script src="/static/app.js"></script>
-    <script>
-      (() => {
-        const messageList = document.getElementById('message-list');
-        const emptyState = document.getElementById('empty-state');
-        const chatForm = document.getElementById('chat-form');
-        const input = document.getElementById('chat-input');
-        const sendButton = document.getElementById('send-btn');
-        const typing = document.getElementById('typing');
-        const connectionDot = document.getElementById('connection-dot');
-        const connectionText = document.getElementById('connection-text');
-        const contextToggle = document.querySelector('[data-context-toggle]');
-        const contextPanel = document.getElementById('probe-context-panel');
-        const contextCloseButtons = document.querySelectorAll('[data-context-close]');
-        const maxInputHeight = 160;
-
-        function setContextOpen(isOpen) {
-          document.body.classList.toggle('context-open', isOpen);
-          if (contextToggle) {
-            contextToggle.setAttribute('aria-expanded', String(isOpen));
-          }
-          if (contextPanel) {
-            contextPanel.setAttribute('aria-hidden', String(!isOpen));
-          }
-        }
-
-        if (contextToggle) {
-          contextToggle.addEventListener('click', () => {
-            const nextOpen = !document.body.classList.contains('context-open');
-            setContextOpen(nextOpen);
-          });
-        }
-
-        contextCloseButtons.forEach((button) => {
-          button.addEventListener('click', () => setContextOpen(false));
-        });
-
-        document.addEventListener('keydown', (event) => {
-          if (event.key === 'Escape' && document.body.classList.contains('context-open')) {
-            setContextOpen(false);
-          }
-        });
-
-        function autoResizeInput() {
-          input.style.height = 'auto';
-          input.style.height = Math.min(input.scrollHeight, maxInputHeight) + 'px';
-        }
-
-        input.addEventListener('input', autoResizeInput);
-
-        input.addEventListener('keydown', (event) => {
-          if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
-            event.preventDefault();
-            chatForm.requestSubmit();
-          }
-        });
-
-        const pathParts = window.location.pathname.split('/').filter(Boolean);
-        const probeID = pathParts[1] || '';
-
-        const knownMessageIds = new Set();
-        let awaitingReply = false;
-        let ws = null;
-        let wsConnected = false;
-        let reconnectTimeout = null;
-        let pollTimer = null;
-
-        const limit = 200;
-
-        function toISODate(value) {
-          if (!value) return '';
-          const parsed = new Date(value);
-          if (Number.isNaN(parsed.getTime())) return '';
-          return parsed.toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-          });
-        }
-
-        function updateConnection(connected) {
-          wsConnected = connected;
-          if (connected) {
-            connectionDot.classList.remove('connecting', 'disconnected');
-            connectionDot.classList.add('connected');
-            connectionText.textContent = 'Connected';
-          } else {
-            connectionDot.classList.remove('connecting', 'connected');
-            connectionDot.classList.add('disconnected');
-            connectionText.textContent = 'Disconnected';
-          }
-        }
-
-        function setTyping(isTyping) {
-          typing.classList.toggle('show', isTyping);
-          input.disabled = isTyping;
-          sendButton.disabled = isTyping;
-        }
-
-        function scrollToBottom() {
-          messageList.scrollTop = messageList.scrollHeight;
-        }
-
-        function renderPlainText(container, text) {
-          const line = document.createElement('div');
-          line.className = 'chat-body';
-          line.textContent = text;
-          container.appendChild(line);
-        }
-
-        function renderContent(container, content) {
-          if (!content) {
-            const empty = document.createElement('div');
-            empty.className = 'chat-body';
-            empty.textContent = '';
-            container.appendChild(empty);
-            return;
-          }
-
-          const text = String(content);
-          const codePattern = /```(?:[a-zA-Z0-9_+-]*)?\n?([\s\S]*?)```/g;
-
-          let last = 0;
-          let hasBlock = false;
-          let match;
-
-          while ((match = codePattern.exec(text)) !== null) {
-            hasBlock = true;
-            const before = text.slice(last, match.index);
-            if (before.trim()) {
-              renderPlainText(container, before);
-            }
-
-            const snippet = document.createElement('pre');
-            snippet.className = 'chat-code';
-            snippet.textContent = (match[1] || '').replace(/^\n/, '').trimRight();
-            container.appendChild(snippet);
-
-            last = match.index + match[0].length;
-          }
-
-          if (!hasBlock) {
-            renderPlainText(container, text);
-            return;
-          }
-
-          const remaining = text.slice(last);
-          if (remaining.trim()) {
-            renderPlainText(container, remaining);
-          }
-        }
-
-        function renderMessage(message) {
-          if (!message || !message.id || knownMessageIds.has(message.id)) {
-            return;
-          }
-          knownMessageIds.add(message.id);
-
-          emptyState.style.display = 'none';
-
-          const role = message.role || 'system';
-          const row = document.createElement('article');
-          row.className = `message-row ${role}`;
-
-          const bubble = document.createElement('div');
-          bubble.className = `chat-message ${role}`;
-
-          const body = document.createElement('div');
-          renderContent(body, message.content);
-          bubble.appendChild(body);
-
-          if (message.command_id) {
-            const cmd = document.createElement('div');
-            cmd.className = 'chat-meta chat-command-id';
-            cmd.textContent = `command: ${message.command_id}`;
-            bubble.appendChild(cmd);
-          }
-
-          if (message.timestamp) {
-            const meta = document.createElement('div');
-            meta.className = 'chat-meta';
-            meta.textContent = toISODate(message.timestamp);
-            bubble.appendChild(meta);
-          }
-
-          row.appendChild(bubble);
-          messageList.appendChild(row);
-          scrollToBottom();
-
-          if (awaitingReply && role !== 'user') {
-            awaitingReply = false;
-            setTyping(false);
-          }
-        }
-
-        async function loadHistory() {
-          if (!probeID) {
-            return;
-          }
-
-          try {
-            const resp = await fetch(`/api/v1/probes/${probeID}/chat?limit=${limit}`, {
-              method: 'GET',
-              headers: {
-                Accept: 'application/json',
-              },
-            });
-
-            if (!resp.ok) {
-              return;
-            }
-
-            const messages = await resp.json();
-            if (!Array.isArray(messages)) {
-              return;
-            }
-
-            messages.forEach((msg) => {
-              renderMessage(msg);
-            });
-          } catch {
-            // no-op: polling is best-effort
-          }
-        }
-
-        function startPolling() {
-          if (pollTimer) {
-            return;
-          }
-          pollTimer = window.setInterval(() => {
-            loadHistory();
-          }, 3000);
-          loadHistory();
-        }
-
-        function stopPolling() {
-          if (!pollTimer) {
-            return;
-          }
-          clearInterval(pollTimer);
-          pollTimer = null;
-        }
-
-        function connectChatSocket() {
-          if (!probeID) {
-            startPolling();
-            return;
-          }
-
-          if (ws) {
-            ws.close();
-          }
-
-          const wsScheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
-          const wsURL = `${wsScheme}://${location.host}/ws/chat?probe_id=${encodeURIComponent(probeID)}`;
-          ws = new WebSocket(wsURL);
-
-          ws.onopen = () => {
-            updateConnection(true);
-            stopPolling();
-            if (reconnectTimeout) {
-              clearTimeout(reconnectTimeout);
-              reconnectTimeout = null;
-            }
-          };
-
-          ws.onmessage = (event) => {
-            if (!event.data) {
-              return;
-            }
-
-            let message;
-            try {
-              message = JSON.parse(event.data);
-            } catch {
-              return;
-            }
-            renderMessage(message);
-          };
-
-          ws.onclose = () => {
-            updateConnection(false);
-            startPolling();
-            if (!reconnectTimeout) {
-              reconnectTimeout = window.setTimeout(connectChatSocket, 3000);
-            }
-          };
-
-          ws.onerror = () => {
-            if (ws) {
-              ws.close();
-            }
-          };
-        }
-
-        async function sendViaREST(content) {
-          const response = await fetch(`/api/v1/probes/${probeID}/chat`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Accept: 'application/json',
-            },
-            body: JSON.stringify({ content }),
-          });
-
-          if (!response.ok) {
-            throw new Error('failed to send message');
-          }
-
-          const assistantMessage = await response.json();
-          renderMessage(assistantMessage);
-
-          return assistantMessage;
-        }
-
-        chatForm.addEventListener('submit', async (event) => {
-          event.preventDefault();
-          if (awaitingReply || !probeID) {
-            return;
-          }
-
-          const content = input.value.trim();
-          if (!content) {
-            return;
-          }
-
-          input.value = '';
-          autoResizeInput();
-          awaitingReply = true;
-          setTyping(true);
-
-          const localMessage = {
-            id: `local-${Date.now()}`,
-            role: 'user',
-            content,
-            timestamp: new Date().toISOString(),
-          };
-
-          renderMessage(localMessage);
-
-          if (wsConnected && ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ content }));
-            return;
-          }
-
-          try {
-            await sendViaREST(content);
-          } catch (error) {
-            awaitingReply = false;
-            setTyping(false);
-            renderMessage({
-              id: `err-${Date.now()}`,
-              role: 'system',
-              content: 'Unable to send chat message. Check connection and try again.',
-              timestamp: new Date().toISOString(),
-            });
-          }
-        });
-
-        setTyping(false);
-        autoResizeInput();
-
-        async function loadProbeContext() {
-          try {
-            const resp = await fetch('/api/v1/probes/' + encodeURIComponent(probeID));
-            if (!resp.ok) return;
-            const p = await resp.json();
-            const ctx = document.getElementById('probe-context');
-            ctx.classList.remove('hidden');
-            document.getElementById('ctx-hostname').textContent = p.hostname || '—';
-            const statusEl = document.getElementById('ctx-status');
-            statusEl.textContent = p.status || '—';
-            statusEl.className = 'ctx-value ' + (p.status || '');
-            const inv = p.inventory || {};
-            document.getElementById('ctx-os').textContent = (inv.os || p.os || '—') + ' / ' + (inv.arch || p.arch || '—');
-            document.getElementById('ctx-kernel').textContent = inv.kernel || '—';
-            document.getElementById('ctx-cpus').textContent = inv.cpus || '—';
-            const memMB = inv.mem_total_bytes ? Math.round(inv.mem_total_bytes / 1048576) : null;
-            document.getElementById('ctx-mem').textContent = memMB ? memMB + ' MB' : '—';
-            document.getElementById('ctx-policy').textContent = p.policy_level || '—';
-            document.getElementById('ctx-lastseen').textContent = p.last_seen ? new Date(p.last_seen).toLocaleTimeString() : '—';
-          } catch {}
-        }
-
-        loadProbeContext();
-        setInterval(loadProbeContext, 15000);
-
-        loadHistory();
-        connectChatSocket();
-        startPolling();
-      })();
-    </script>
-  </body>
-</html>
+{{define "title"}}Probe {{.Probe.ID}} Chat — Legator{{end}}
+
+{{define "header"}}
+<div>
+  <h1 class="page-title">{{if .Probe.Hostname}}{{.Probe.Hostname}}{{else}}Probe {{.Probe.ID}}{{end}} Chat</h1>
+  <span class="page-meta">Probe ID <span class="id-text">{{.Probe.ID}}</span></span>
+</div>
+<div class="right">
+  <a href="/probe/{{.Probe.ID}}" class="btn">Probe Detail</a>
+  <button class="btn" type="button" data-context-toggle aria-expanded="false" aria-controls="probe-context-panel">Context</button>
+  <span id="connection-status" class="tag"><span id="connection-dot" class="dot dot-pending"></span> <span id="connection-text">Connecting…</span></span>
+</div>
+{{end}}
+
+{{define "content"}}
+<section class="chat-shell">
+  <section class="chat-container">
+    <div id="message-list" class="chat-messages" aria-live="polite"></div>
+    <div id="empty-state" class="empty-state">Ask this probe anything.</div>
+    <div id="typing" class="muted">Assistant is typing…</div>
+  </section>
+  <form id="chat-form" class="chat-input" autocomplete="off">
+    <textarea id="chat-input" name="message" rows="1" placeholder="Ask this probe for help..." maxlength="4000" autocomplete="off" required></textarea>
+    <button id="send-btn" class="btn btn-primary" type="submit">Send</button>
+  </form>
+</section>
+
+<div class="context-backdrop" id="context-backdrop" data-context-close></div>
+<aside class="context-column panel" id="probe-context-panel" aria-hidden="true">
+  <div class="panel-header">
+    <h2 class="panel-title">Probe Context</h2>
+    <button class="btn" type="button" data-context-close>Close</button>
+  </div>
+  <div id="probe-context" class="feed hidden">
+    <div class="feed-item"><span class="muted">Hostname</span> <span id="ctx-hostname">—</span></div>
+    <div class="feed-item"><span class="muted">Status</span> <span id="ctx-status">—</span></div>
+    <div class="feed-item"><span class="muted">OS / Arch</span> <span id="ctx-os">—</span></div>
+    <div class="feed-item"><span class="muted">Kernel</span> <span id="ctx-kernel">—</span></div>
+    <div class="feed-item"><span class="muted">CPUs</span> <span id="ctx-cpus">—</span></div>
+    <div class="feed-item"><span class="muted">Memory</span> <span id="ctx-mem">—</span></div>
+    <div class="feed-item"><span class="muted">Policy</span> <span id="ctx-policy">—</span></div>
+    <div class="feed-item"><span class="muted">Last Seen</span> <span id="ctx-lastseen">—</span></div>
+  </div>
+</aside>
+{{end}}
+
+{{define "scripts"}}
+<script>
+(() => {
+  const messageList = document.getElementById('message-list');
+  const emptyState = document.getElementById('empty-state');
+  const chatForm = document.getElementById('chat-form');
+  const input = document.getElementById('chat-input');
+  const sendButton = document.getElementById('send-btn');
+  const typing = document.getElementById('typing');
+  const connectionDot = document.getElementById('connection-dot');
+  const connectionText = document.getElementById('connection-text');
+  const contextToggle = document.querySelector('[data-context-toggle]');
+  const contextPanel = document.getElementById('probe-context-panel');
+  const contextCloseButtons = document.querySelectorAll('[data-context-close]');
+  const maxInputHeight = 160;
+
+  function setContextOpen(isOpen) {
+    document.body.classList.toggle('context-open', isOpen);
+    if (contextToggle) {
+      contextToggle.setAttribute('aria-expanded', String(isOpen));
+    }
+    if (contextPanel) {
+      contextPanel.setAttribute('aria-hidden', String(!isOpen));
+    }
+  }
+
+  if (contextToggle) {
+    contextToggle.addEventListener('click', () => {
+      const nextOpen = !document.body.classList.contains('context-open');
+      setContextOpen(nextOpen);
+    });
+  }
+
+  contextCloseButtons.forEach((button) => {
+    button.addEventListener('click', () => setContextOpen(false));
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && document.body.classList.contains('context-open')) {
+      setContextOpen(false);
+    }
+  });
+
+  function autoResizeInput() {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, maxInputHeight) + 'px';
+  }
+
+  input.addEventListener('input', autoResizeInput);
+
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      chatForm.requestSubmit();
+    }
+  });
+
+  const pathParts = window.location.pathname.split('/').filter(Boolean);
+  const probeID = pathParts[1] || '';
+
+  const knownMessageIds = new Set();
+  let awaitingReply = false;
+  let ws = null;
+  let wsConnected = false;
+  let reconnectTimeout = null;
+  let pollTimer = null;
+
+  const limit = 200;
+
+  function toISODate(value) {
+    if (!value) return '';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '';
+    return parsed.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  }
+
+  function updateConnection(connected) {
+    wsConnected = connected;
+    connectionDot.className = connected ? 'dot dot-online' : 'dot dot-offline';
+    connectionText.textContent = connected ? 'Connected' : 'Disconnected';
+  }
+
+  function setTyping(isTyping) {
+    typing.style.display = isTyping ? 'block' : 'none';
+    input.disabled = isTyping;
+    sendButton.disabled = isTyping;
+  }
+
+  function scrollToBottom() {
+    messageList.scrollTop = messageList.scrollHeight;
+  }
+
+  function renderPlainText(container, text) {
+    const line = document.createElement('div');
+    line.className = 'chat-body';
+    line.textContent = text;
+    container.appendChild(line);
+  }
+
+  function renderContent(container, content) {
+    if (!content) {
+      const empty = document.createElement('div');
+      empty.className = 'chat-body';
+      empty.textContent = '';
+      container.appendChild(empty);
+      return;
+    }
+
+    const text = String(content);
+    const codePattern = /```(?:[a-zA-Z0-9_+-]*)?\n?([\s\S]*?)```/g;
+
+    let last = 0;
+    let hasBlock = false;
+    let match;
+
+    while ((match = codePattern.exec(text)) !== null) {
+      hasBlock = true;
+      const before = text.slice(last, match.index);
+      if (before.trim()) {
+        renderPlainText(container, before);
+      }
+
+      const snippet = document.createElement('pre');
+      snippet.className = 'chat-code';
+      snippet.textContent = (match[1] || '').replace(/^\n/, '').trimRight();
+      container.appendChild(snippet);
+
+      last = match.index + match[0].length;
+    }
+
+    if (!hasBlock) {
+      renderPlainText(container, text);
+      return;
+    }
+
+    const remaining = text.slice(last);
+    if (remaining.trim()) {
+      renderPlainText(container, remaining);
+    }
+  }
+
+  function renderMessage(message) {
+    if (!message || !message.id || knownMessageIds.has(message.id)) {
+      return;
+    }
+    knownMessageIds.add(message.id);
+
+    emptyState.style.display = 'none';
+
+    const role = message.role || 'system';
+    const row = document.createElement('article');
+    row.className = `msg-row ${role}`;
+
+    const bubble = document.createElement('div');
+    bubble.className = `msg msg-${role}`;
+
+    const body = document.createElement('div');
+    renderContent(body, message.content);
+    bubble.appendChild(body);
+
+    if (message.command_id) {
+      const cmd = document.createElement('div');
+      cmd.className = 'chat-meta';
+      cmd.textContent = `command: ${message.command_id}`;
+      bubble.appendChild(cmd);
+    }
+
+    if (message.timestamp) {
+      const meta = document.createElement('div');
+      meta.className = 'chat-meta';
+      meta.textContent = toISODate(message.timestamp);
+      bubble.appendChild(meta);
+    }
+
+    row.appendChild(bubble);
+    messageList.appendChild(row);
+    scrollToBottom();
+
+    if (awaitingReply && role !== 'user') {
+      awaitingReply = false;
+      setTyping(false);
+    }
+  }
+
+  async function loadHistory() {
+    if (!probeID) {
+      return;
+    }
+
+    try {
+      const resp = await fetch(`/api/v1/probes/${probeID}/chat?limit=${limit}`, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+
+      if (!resp.ok) {
+        return;
+      }
+
+      const messages = await resp.json();
+      if (!Array.isArray(messages)) {
+        return;
+      }
+
+      messages.forEach((msg) => {
+        renderMessage(msg);
+      });
+    } catch {
+      // no-op
+    }
+  }
+
+  function startPolling() {
+    if (pollTimer) {
+      return;
+    }
+    pollTimer = window.setInterval(() => {
+      loadHistory();
+    }, 3000);
+    loadHistory();
+  }
+
+  function stopPolling() {
+    if (!pollTimer) {
+      return;
+    }
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+
+  function connectChatSocket() {
+    if (!probeID) {
+      startPolling();
+      return;
+    }
+
+    if (ws) {
+      ws.close();
+    }
+
+    const wsScheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsURL = `${wsScheme}://${location.host}/ws/chat?probe_id=${encodeURIComponent(probeID)}`;
+    ws = new WebSocket(wsURL);
+
+    ws.onopen = () => {
+      updateConnection(true);
+      stopPolling();
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = null;
+      }
+    };
+
+    ws.onmessage = (event) => {
+      if (!event.data) {
+        return;
+      }
+
+      let message;
+      try {
+        message = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      renderMessage(message);
+    };
+
+    ws.onclose = () => {
+      updateConnection(false);
+      startPolling();
+      if (!reconnectTimeout) {
+        reconnectTimeout = window.setTimeout(connectChatSocket, 3000);
+      }
+    };
+
+    ws.onerror = () => {
+      if (ws) {
+        ws.close();
+      }
+    };
+  }
+
+  async function sendViaREST(content) {
+    const response = await fetch(`/api/v1/probes/${probeID}/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({ content }),
+    });
+
+    if (!response.ok) {
+      throw new Error('failed to send message');
+    }
+
+    const assistantMessage = await response.json();
+    renderMessage(assistantMessage);
+
+    return assistantMessage;
+  }
+
+  chatForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (awaitingReply || !probeID) {
+      return;
+    }
+
+    const content = input.value.trim();
+    if (!content) {
+      return;
+    }
+
+    input.value = '';
+    autoResizeInput();
+    awaitingReply = true;
+    setTyping(true);
+
+    const localMessage = {
+      id: `local-${Date.now()}`,
+      role: 'user',
+      content,
+      timestamp: new Date().toISOString(),
+    };
+
+    renderMessage(localMessage);
+
+    if (wsConnected && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ content }));
+      return;
+    }
+
+    try {
+      await sendViaREST(content);
+    } catch (error) {
+      awaitingReply = false;
+      setTyping(false);
+      renderMessage({
+        id: `err-${Date.now()}`,
+        role: 'system',
+        content: 'Unable to send chat message. Check connection and try again.',
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
+
+  setTyping(false);
+  autoResizeInput();
+
+  async function loadProbeContext() {
+    try {
+      const resp = await fetch('/api/v1/probes/' + encodeURIComponent(probeID));
+      if (!resp.ok) return;
+      const p = await resp.json();
+      const ctx = document.getElementById('probe-context');
+      ctx.classList.remove('hidden');
+      document.getElementById('ctx-hostname').textContent = p.hostname || '—';
+      document.getElementById('ctx-status').textContent = p.status || '—';
+      const inv = p.inventory || {};
+      document.getElementById('ctx-os').textContent = (inv.os || p.os || '—') + ' / ' + (inv.arch || p.arch || '—');
+      document.getElementById('ctx-kernel').textContent = inv.kernel || '—';
+      document.getElementById('ctx-cpus').textContent = inv.cpus || '—';
+      const memMB = inv.mem_total_bytes ? Math.round(inv.mem_total_bytes / 1048576) : null;
+      document.getElementById('ctx-mem').textContent = memMB ? memMB + ' MB' : '—';
+      document.getElementById('ctx-policy').textContent = p.policy_level || '—';
+      document.getElementById('ctx-lastseen').textContent = p.last_seen ? new Date(p.last_seen).toLocaleTimeString() : '—';
+    } catch {}
+  }
+
+  loadProbeContext();
+  setInterval(loadProbeContext, 15000);
+
+  loadHistory();
+  connectChatSocket();
+  startPolling();
+})();
+</script>
+{{end}}

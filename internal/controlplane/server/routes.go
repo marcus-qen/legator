@@ -974,7 +974,7 @@ func (s *Server) handleFleetPage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if s.tmpl == nil {
+	if s.pages == nil {
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprintf(w, `<!DOCTYPE html>
 <html><head><title>Legator Control Plane</title></head>
@@ -1001,6 +1001,11 @@ func (s *Server) handleFleetPage(w http.ResponseWriter, r *http.Request) {
 
 	counts := s.fleetMgr.Count()
 	data := FleetPageData{
+		BasePage: BasePage{
+			CurrentUser: s.currentTemplateUser(r),
+			Version:     Version,
+			ActiveNav:   "fleet",
+		},
 		Probes: probes,
 		Summary: FleetSummary{
 			Online:   counts["online"],
@@ -1008,13 +1013,11 @@ func (s *Server) handleFleetPage(w http.ResponseWriter, r *http.Request) {
 			Degraded: counts["degraded"],
 			Total:    len(probes),
 		},
-		Version:     Version,
-		Commit:      Commit,
-		CurrentUser: s.currentTemplateUser(r),
+		Commit: Commit,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tmpl.ExecuteTemplate(w, "fleet.html", data); err != nil {
+	if err := s.pages.Render(w, "fleet", data); err != nil {
 		s.logger.Error("failed to render fleet page", zap.Error(err))
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "internal error")
 	}
@@ -1034,7 +1037,7 @@ func (s *Server) handleProbeDetailPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if s.tmpl == nil {
+	if s.pages == nil {
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprintf(w, `<h1>Probe: %s</h1><p>Status: %s</p>`, id, ps.Status)
 		return
@@ -1042,11 +1045,15 @@ func (s *Server) handleProbeDetailPage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	data := ProbePageData{
-		Probe:       ps,
-		Uptime:      calculateUptime(ps.Registered),
-		CurrentUser: s.currentTemplateUser(r),
+		BasePage: BasePage{
+			CurrentUser: s.currentTemplateUser(r),
+			Version:     Version,
+			ActiveNav:   "fleet",
+		},
+		Probe:  ps,
+		Uptime: calculateUptime(ps.Registered),
 	}
-	if err := s.tmpl.ExecuteTemplate(w, "probe-detail.html", data); err != nil {
+	if err := s.pages.Render(w, "probe-detail", data); err != nil {
 		s.logger.Error("failed to render probe detail", zap.String("probe", id), zap.Error(err))
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "internal error")
 	}
@@ -1099,7 +1106,7 @@ func (s *Server) handleFleetChatPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	inv := s.fleetMgr.Inventory(fleet.InventoryFilter{})
-	if s.tmpl == nil {
+	if s.pages == nil {
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprint(w, `<h1>Fleet Chat</h1><p>Template not loaded</p>`)
 		return
@@ -1107,10 +1114,14 @@ func (s *Server) handleFleetChatPage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	data := FleetChatPageData{
-		Inventory:   inv,
-		CurrentUser: s.currentTemplateUser(r),
+		BasePage: BasePage{
+			CurrentUser: s.currentTemplateUser(r),
+			Version:     Version,
+			ActiveNav:   "fleet-chat",
+		},
+		Inventory: inv,
 	}
-	if err := s.tmpl.ExecuteTemplate(w, "fleet-chat.html", data); err != nil {
+	if err := s.pages.Render(w, "fleet-chat", data); err != nil {
 		s.logger.Error("failed to render fleet chat", zap.Error(err))
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "internal error")
 	}
@@ -1130,7 +1141,7 @@ func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if s.tmpl == nil {
+	if s.pages == nil {
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprintf(w, `<h1>Chat: %s</h1><p>Template not loaded</p>`, id)
 		return
@@ -1138,11 +1149,15 @@ func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	data := ProbePageData{
-		Probe:       ps,
-		Uptime:      calculateUptime(ps.Registered),
-		CurrentUser: s.currentTemplateUser(r),
+		BasePage: BasePage{
+			CurrentUser: s.currentTemplateUser(r),
+			Version:     Version,
+			ActiveNav:   "fleet",
+		},
+		Probe:  ps,
+		Uptime: calculateUptime(ps.Registered),
 	}
-	if err := s.tmpl.ExecuteTemplate(w, "chat.html", data); err != nil {
+	if err := s.pages.Render(w, "chat", data); err != nil {
 		s.logger.Error("failed to render chat", zap.String("probe", id), zap.Error(err))
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "internal error")
 	}
@@ -1152,18 +1167,18 @@ func (s *Server) handleApprovalsPage(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(w, r, auth.PermFleetRead) {
 		return
 	}
-	if s.tmpl == nil {
+	if s.pages == nil {
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprint(w, "<h1>Approval Queue</h1><p>Template not loaded</p>")
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	data := struct {
-		CurrentUser *TemplateUser
-	}{
+	data := BasePage{
 		CurrentUser: s.currentTemplateUser(r),
+		Version:     Version,
+		ActiveNav:   "approvals",
 	}
-	if err := s.tmpl.ExecuteTemplate(w, "approvals.html", data); err != nil {
+	if err := s.pages.Render(w, "approvals", data); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
 	}
 }
@@ -1172,18 +1187,18 @@ func (s *Server) handleAuditPage(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(w, r, auth.PermFleetRead) {
 		return
 	}
-	if s.tmpl == nil {
+	if s.pages == nil {
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprint(w, "<h1>Audit Log</h1><p>Template not loaded</p>")
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	data := struct {
-		CurrentUser *TemplateUser
-	}{
+	data := BasePage{
 		CurrentUser: s.currentTemplateUser(r),
+		Version:     Version,
+		ActiveNav:   "audit",
 	}
-	if err := s.tmpl.ExecuteTemplate(w, "audit.html", data); err != nil {
+	if err := s.pages.Render(w, "audit", data); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
 	}
 }
@@ -1192,16 +1207,20 @@ func (s *Server) handleAlertsPage(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(w, r, auth.PermFleetRead) {
 		return
 	}
-	if s.tmpl == nil {
+	if s.pages == nil {
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprint(w, "<h1>Alerts</h1><p>Template not loaded</p>")
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	data := AlertsPageData{
-		CurrentUser: s.currentTemplateUser(r),
+		BasePage: BasePage{
+			CurrentUser: s.currentTemplateUser(r),
+			Version:     Version,
+			ActiveNav:   "alerts",
+		},
 	}
-	if err := s.tmpl.ExecuteTemplate(w, "alerts.html", data); err != nil {
+	if err := s.pages.Render(w, "alerts", data); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
 	}
 }

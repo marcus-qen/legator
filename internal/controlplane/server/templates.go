@@ -26,31 +26,37 @@ type TemplateUser struct {
 	Role     string
 }
 
+// BasePage contains common layout metadata shared by all pages.
+type BasePage struct {
+	CurrentUser *TemplateUser
+	Version     string
+	ActiveNav   string
+}
+
 // FleetPageData is passed to the fleet.html template.
 type FleetPageData struct {
-	Probes      []*fleet.ProbeState
-	Summary     FleetSummary
-	Version     string
-	Commit      string
-	CurrentUser *TemplateUser
+	BasePage
+	Probes  []*fleet.ProbeState
+	Summary FleetSummary
+	Commit  string
 }
 
 // FleetChatPageData is passed to fleet-chat.html template.
 type FleetChatPageData struct {
-	Inventory   fleet.FleetInventory
-	CurrentUser *TemplateUser
+	BasePage
+	Inventory fleet.FleetInventory
 }
 
 // ProbePageData is passed to probe-detail.html and chat.html templates.
 type ProbePageData struct {
-	Probe       *fleet.ProbeState
-	Uptime      string
-	CurrentUser *TemplateUser
+	BasePage
+	Probe  *fleet.ProbeState
+	Uptime string
 }
 
 // AlertsPageData is passed to alerts.html template.
 type AlertsPageData struct {
-	CurrentUser *TemplateUser
+	BasePage
 }
 
 func templateFuncs() template.FuncMap {

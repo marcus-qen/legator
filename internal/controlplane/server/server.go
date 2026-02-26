@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"html/template"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -92,10 +93,34 @@ type Server struct {
 	taskRunner *llm.TaskRunner
 
 	// Templates
-	tmpl *template.Template
+	pages *pageTemplates
 
 	// HTTP
 	httpServer *http.Server
+}
+
+type pageTemplate struct {
+	tmpl      *template.Template
+	rootBlock string
+}
+
+type pageTemplates struct {
+	templates map[string]pageTemplate
+}
+
+func (pt *pageTemplates) Render(w io.Writer, page string, data interface{}) error {
+	if pt == nil {
+		return fmt.Errorf("templates not initialized")
+	}
+	entry, ok := pt.templates[page]
+	if !ok {
+		return fmt.Errorf("template %q not found", page)
+	}
+	root := entry.rootBlock
+	if root == "" {
+		root = "base"
+	}
+	return entry.tmpl.ExecuteTemplate(w, root, data)
 }
 
 // New builds a fully-wired Server from config.
@@ -623,12 +648,29 @@ func generateBootstrapPassword() string {
 
 func (s *Server) loadTemplates() {
 	tmplDir := filepath.Join("web", "templates")
-	tmpl, err := template.New("").Funcs(templateFuncs()).ParseGlob(filepath.Join(tmplDir, "*.html"))
+	pt := &pageTemplates{templates: make(map[string]pageTemplate)}
+
+	pages := []string{"fleet", "probe-detail", "chat", "fleet-chat", "approvals", "audit", "alerts"}
+	for _, page := range pages {
+		t, err := template.New("").Funcs(templateFuncs()).ParseFiles(
+			filepath.Join(tmplDir, "_base.html"),
+			filepath.Join(tmplDir, page+".html"),
+		)
+		if err != nil {
+			s.logger.Warn("failed to load page template", zap.String("page", page), zap.Error(err))
+			return
+		}
+		pt.templates[page] = pageTemplate{tmpl: t, rootBlock: "base"}
+	}
+
+	loginTemplate, err := template.New("").Funcs(templateFuncs()).ParseFiles(filepath.Join(tmplDir, "login.html"))
 	if err != nil {
-		s.logger.Warn("failed to load templates, UI will show fallback", zap.Error(err))
+		s.logger.Warn("failed to load login template", zap.Error(err))
 		return
 	}
-	s.tmpl = tmpl
+	pt.templates["login"] = pageTemplate{tmpl: loginTemplate, rootBlock: "login.html"}
+
+	s.pages = pt
 }
 
 // ── Internal helpers ─────────────────────────────────────────

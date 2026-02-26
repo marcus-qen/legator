@@ -1,184 +1,116 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Legator · Approval Queue</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <link rel="stylesheet" href="/static/style.css" />
-  </head>
-  <body>
-    <div class="app-layout">
-      <aside class="sidebar" id="app-sidebar">
-        <div class="sidebar-brand">
-          <span class="brand-mark"><i data-lucide="cpu" class="icon-18"></i></span>
-          <div class="brand-copy">
-            <strong>Legator</strong>
-            <span>Control Plane</span>
-          </div>
-        </div>
+{{define "title"}}Approvals — Legator{{end}}
 
-        <nav class="sidebar-nav">
-          <a class="sidebar-link" href="/">
-            <i data-lucide="server" class="icon-16"></i>
-            <span>Fleet</span>
-            <span class="count" data-badge="probes">0</span>
-          </a>
-          <a class="sidebar-link" href="#" data-nav-chat>
-            <i data-lucide="message-square" class="icon-16"></i>
-            <span>Chat</span>
-          </a>
-          <a class="sidebar-link active" href="/approvals">
-            <i data-lucide="shield-check" class="icon-16"></i>
-            <span>Approvals</span>
-            <span class="count" data-badge="approvals" id="pending-count">0</span>
-          </a>
-          <a class="sidebar-link" href="/audit">
-            <i data-lucide="scroll-text" class="icon-16"></i>
-            <span>Audit</span>
-          </a>
-          <a class="sidebar-link" href="/alerts">
-            <i data-lucide="bell" class="icon-16"></i>
-            <span>Alerts</span>
-          </a>
-          <a class="sidebar-link" href="/">
-            <i data-lucide="settings" class="icon-16"></i>
-            <span>Settings</span>
-          </a>
-        </nav>
+{{define "header"}}
+<div>
+  <h1 class="page-title">Approvals</h1>
+  <span class="page-meta">Human-in-the-loop queue</span>
+</div>
+{{end}}
 
-        <div class="sidebar-footer">
-          {{if .CurrentUser}}
-          <div class="user-chip">
-            <div class="meta">
-              <strong>{{.CurrentUser.Username}}</strong>
-              <span>Signed in</span>
-            </div>
-            <span class="role-badge role-{{if .CurrentUser.Role}}{{.CurrentUser.Role}}{{else}}unknown{{end}}">{{if .CurrentUser.Role}}{{.CurrentUser.Role}}{{else}}viewer{{end}}</span>
-          </div>
-          {{end}}
-          <form method="POST" action="/logout" class="logout-form">
-            <button type="submit" class="btn btn-ghost w-full justify-center">
-              <i data-lucide="log-out" class="icon-14"></i>
-              Logout
-            </button>
-          </form>
-        </div>
-      </aside>
+{{define "content"}}
+<section class="panel">
+  <div class="stat-row">
+    <span>Pending: <strong id="pending-count">0</strong></span>
+  </div>
+</section>
 
-      <div class="sidebar-overlay" data-sidebar-close></div>
+<section id="approvals-list" class="feed"></section>
 
-      <main class="main-content">
-        <header class="page-header">
-          <div>
-            <button class="sidebar-toggle" data-sidebar-toggle aria-label="Toggle navigation">
-              <i data-lucide="menu" class="icon-16"></i>
-            </button>
-            <h1 class="page-title">Approvals Queue</h1>
-            <p class="page-subtitle">Human-in-the-loop gate for sensitive actions across your fleet.</p>
-          </div>
-        </header>
+<section id="empty-state" class="panel empty-state hidden">
+  All clear — no pending approvals.
+</section>
+{{end}}
 
-        <section id="approvals-list" class="approvals-list"></section>
+{{define "scripts"}}
+<script>
+(() => {
+  const decidedBy = {{if .CurrentUser}}"{{.CurrentUser.Username}}"{{else}}"operator"{{end}};
 
-        <section id="empty-state" class="panel empty-state hidden">
-          <h2 class="text-base font-semibold text-green-400">All clear</h2>
-          <p class="mt-1">No pending approvals. The fleet is operating within policy.</p>
-        </section>
-      </main>
-    </div>
+  function riskClass(risk) {
+    const r = (risk || '').toLowerCase();
+    if (r === 'high' || r === 'critical') return 'tag-offline';
+    if (r === 'medium') return 'tag-degraded';
+    return 'tag-online';
+  }
 
-    <div class="toast" id="toast"></div>
+  function fmtTime(value) {
+    if (!value) return '—';
+    return new Date(value).toLocaleString();
+  }
 
-    <script src="/static/app.js"></script>
-    <script>
-      function riskClass(r) {
-        r = (r || '').toLowerCase();
-        if (r === 'high' || r === 'critical') return 'risk-high';
-        if (r === 'medium') return 'risk-medium';
-        return 'risk-low';
-      }
+  function notify(message, ok) {
+    if (window.LegatorUI && window.LegatorUI.showToast) {
+      window.LegatorUI.showToast(message, ok ? 'success' : 'error');
+    }
+  }
 
-      function fmtTime(v) {
-        if (!v) return '—';
-        return new Date(v).toLocaleString();
-      }
+  function normalizeApprovals(payload) {
+    if (Array.isArray(payload)) return payload;
+    if (payload && Array.isArray(payload.approvals)) return payload.approvals;
+    return [];
+  }
 
-      function showToast(msg, ok) {
-        if (window.LegatorUI && window.LegatorUI.showToast) {
-          window.LegatorUI.showToast(msg, ok ? 'success' : 'error');
-          return;
+  function decide(id, decision) {
+    fetch('/api/v1/approvals/' + encodeURIComponent(id) + '/decide', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision, decided_by: decidedBy }),
+    })
+      .then(async (resp) => {
+        if (!resp.ok) {
+          const msg = await resp.text();
+          throw new Error(msg || `status ${resp.status}`);
         }
-        const t = document.getElementById('toast');
-        t.textContent = msg;
-        t.classList.add('show');
-        setTimeout(() => t.classList.remove('show'), 3000);
-      }
+        notify(decision === 'approved' ? 'Approval granted' : 'Request denied', true);
+        refresh();
+      })
+      .catch((err) => notify('Failed: ' + err.message, false));
+  }
 
-      function decide(id, decision) {
-        fetch('/api/v1/approvals/' + id + '/decide', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ decision: decision }),
-        }).then((r) => {
-          if (r.ok) {
-            showToast(decision === 'approved' ? 'Approval granted' : 'Request denied', decision === 'approved');
-            refresh();
-          } else {
-            showToast('Failed: ' + r.status, false);
-          }
-        }).catch(() => showToast('Network error', false));
-      }
+  window.approvalsDecide = decide;
 
-      function refresh() {
-        fetch('/api/v1/approvals', { cache: 'no-store' }).then((r) => r.json()).then((items) => {
-          const list = document.getElementById('approvals-list');
-          const empty = document.getElementById('empty-state');
-          const pending = (items || []).filter((i) => i.status === 'pending');
-          document.getElementById('pending-count').textContent = pending.length;
+  function render(items) {
+    const list = document.getElementById('approvals-list');
+    const empty = document.getElementById('empty-state');
+    const pending = items.filter((item) => (item.decision || item.status) === 'pending');
 
-          if (!pending.length) {
-            list.innerHTML = '';
-            empty.classList.remove('hidden');
-            return;
-          }
+    document.getElementById('pending-count').textContent = String(pending.length);
 
-          empty.classList.add('hidden');
-          list.innerHTML = pending.map((a) => `
-            <article class="approval-card">
-              <div class="approval-header">
-                <div class="approval-left">
-                  <span class="risk ${riskClass(a.risk)}">${(a.risk || 'unknown').toUpperCase()}</span>
-                  <strong class="id-text">${a.probe_id || 'unknown probe'}</strong>
-                  <span class="panel-sub">Requested ${fmtTime(a.created_at || a.submitted_at)}</span>
-                </div>
-                <div class="page-actions">
-                  <button class="btn btn-primary" onclick="decide('${a.id}','approved')"><i data-lucide="check" class="icon-14"></i>Approve</button>
-                  <button class="btn btn-danger" onclick="decide('${a.id}','denied')"><i data-lucide="x" class="icon-14"></i>Deny</button>
-                </div>
-              </div>
-              <div class="approval-body">
-                <pre class="approval-command">${JSON.stringify(a.command || a.task || a, null, 2)}</pre>
-                <div class="approval-meta">Approval ID: <span class="id-text">${a.id}</span></div>
-                <details class="approval-extra">
-                  <summary>View payload details</summary>
-                  <pre class="approval-command">${JSON.stringify(a, null, 2)}</pre>
-                </details>
-              </div>
-            </article>
-          `).join('');
+    if (!pending.length) {
+      list.innerHTML = '';
+      empty.classList.remove('hidden');
+      return;
+    }
 
-          if (window.LegatorUI && window.LegatorUI.refreshIcons) {
-            window.LegatorUI.refreshIcons();
-          }
-        }).catch(() => {});
-      }
+    empty.classList.add('hidden');
+    list.innerHTML = pending.map((approval) => {
+      const risk = approval.risk_level || approval.risk || 'unknown';
+      return `
+        <article class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title"><span class="tag ${riskClass(risk)}">${String(risk).toUpperCase()}</span> ${approval.probe_id || 'unknown probe'}</h2>
+            <span class="panel-sub">${fmtTime(approval.created_at || approval.submitted_at)}</span>
+          </div>
+          <pre class="chat-code">${JSON.stringify(approval.command || approval.task || approval, null, 2)}</pre>
+          <div class="actions-row">
+            <button class="btn btn-primary" onclick="approvalsDecide('${approval.id}','approved')">Approve</button>
+            <button class="btn btn-danger" onclick="approvalsDecide('${approval.id}','denied')">Deny</button>
+          </div>
+          <div class="muted">Approval ID: <span class="id-text">${approval.id}</span></div>
+        </article>
+      `;
+    }).join('');
+  }
 
-      refresh();
-      setInterval(refresh, 5000);
-    </script>
-  </body>
-</html>
+  function refresh() {
+    fetch('/api/v1/approvals?status=pending', { cache: 'no-store' })
+      .then((resp) => resp.json())
+      .then((payload) => render(normalizeApprovals(payload)))
+      .catch(() => {});
+  }
+
+  refresh();
+  setInterval(refresh, 5000);
+})();
+</script>
+{{end}}
