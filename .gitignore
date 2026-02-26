@@ -21,3 +21,4 @@ Thumbs.db
 /var/lib/probe/
 /var/log/probe/
 control-plane
+probe
