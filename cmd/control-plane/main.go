@@ -26,6 +26,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/llm"
 	"github.com/marcus-qen/legator/internal/controlplane/metrics"
+	"github.com/marcus-qen/legator/internal/controlplane/webhook"
 	"github.com/marcus-qen/legator/internal/controlplane/policy"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
 	"github.com/marcus-qen/legator/internal/protocol"
@@ -252,8 +253,10 @@ func main() {
 	}
 	hub.SetSigner(signing.NewSigner(signingKey))
 
+	webhookNotifier := webhook.NewNotifier()
+
 	// Start offline checker
-	go offlineChecker(ctx, fleetMgr)
+	go offlineChecker(ctx, fleetMgr, webhookNotifier)
 
 	// Chat: persistent when data dir is available
 	var chatMgr *chat.Manager
@@ -671,6 +674,13 @@ func main() {
 			"level":     string(tpl.Level),
 		})
 	})
+
+	// ── Webhook API ──────────────────────────────────────────
+	mux.HandleFunc("GET /api/v1/webhooks", webhookNotifier.ListWebhooks)
+	mux.HandleFunc("POST /api/v1/webhooks", webhookNotifier.RegisterWebhook)
+	mux.HandleFunc("GET /api/v1/webhooks/{id}", webhookNotifier.GetWebhook)
+	mux.HandleFunc("DELETE /api/v1/webhooks/{id}", webhookNotifier.DeleteWebhook)
+	mux.HandleFunc("POST /api/v1/webhooks/{id}/test", webhookNotifier.TestWebhook)
 
 	// ── Approval queue API ───────────────────────────────────
 	mux.HandleFunc("GET /api/v1/approvals", func(w http.ResponseWriter, r *http.Request) {
@@ -1129,15 +1139,25 @@ func handleProbeMessage(
 	}
 }
 
-func offlineChecker(ctx context.Context, fm fleet.Fleet) {
+func offlineChecker(ctx context.Context, fm fleet.Fleet, wn *webhook.Notifier) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
+	var lastOffline = map[string]bool{}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			fm.MarkOffline(60 * time.Second)
+			// Notify on new offline probes
+			for _, ps := range fm.List() {
+				if ps.Status == "offline" && !lastOffline[ps.ID] {
+					wn.Notify("probe.offline", ps.ID,
+						fmt.Sprintf("Probe %s (%s) went offline", ps.ID, ps.Hostname),
+						map[string]string{"last_seen": ps.LastSeen.Format(time.RFC3339)})
+				}
+				lastOffline[ps.ID] = (ps.Status == "offline")
+			}
 		}
 	}
 }
