@@ -148,9 +148,6 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/fleet/chat", s.withPermission(auth.PermFleetRead, s.handleFleetSendMessage))
 	mux.HandleFunc("GET /ws/fleet-chat", s.withPermission(auth.PermFleetRead, s.handleFleetChatWS))
 
-	// WebSocket for probes
-	mux.HandleFunc("GET /ws/probe", s.hub.HandleProbeWS)
-
 	// Binary download + install script
 	mux.HandleFunc("GET /download/{filename}", s.handleDownload)
 	mux.HandleFunc("GET /install.sh", s.handleInstallScript)
@@ -168,6 +165,10 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /probe/{id}/chat", s.handleChatPage)
 	mux.HandleFunc("GET /approvals", s.handleApprovalsPage)
 	mux.HandleFunc("GET /audit", s.handleAuditPage)
+	mux.HandleFunc("GET /alerts", s.handleAlertsPage)
+
+	// WebSocket for probes
+	mux.HandleFunc("GET /ws/probe", s.hub.HandleProbeWS)
 }
 
 func (s *Server) withPermission(perm auth.Permission, next http.HandlerFunc) http.HandlerFunc {
@@ -1183,6 +1184,24 @@ func (s *Server) handleAuditPage(w http.ResponseWriter, r *http.Request) {
 		CurrentUser: s.currentTemplateUser(r),
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "audit.html", data); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
+	}
+}
+
+func (s *Server) handleAlertsPage(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
+	if s.tmpl == nil {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, "<h1>Alerts</h1><p>Template not loaded</p>")
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data := AlertsPageData{
+		CurrentUser: s.currentTemplateUser(r),
+	}
+	if err := s.tmpl.ExecuteTemplate(w, "alerts.html", data); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
 	}
 }

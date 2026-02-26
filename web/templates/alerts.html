@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Legator · Alerts</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/static/style.css" />
+    <style>
+      .alerts-banner {
+        display: grid;
+        gap: 10px;
+      }
+
+      .alert-card {
+        border: 1px solid rgba(245, 158, 11, 0.35);
+        background: rgba(245, 158, 11, 0.12);
+        border-radius: 12px;
+        padding: 12px 14px;
+      }
+
+      .alert-card-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .alert-card-title {
+        font-weight: 600;
+      }
+
+      .alert-card-meta {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .alert-card-message {
+        margin-top: 8px;
+      }
+
+      .muted-note {
+        color: var(--muted);
+      }
+
+      .rule-enabled {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .rule-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .link-btn {
+        border: 0;
+        background: transparent;
+        color: #9ac2ff;
+        cursor: pointer;
+        padding: 0;
+        font: inherit;
+      }
+
+      .link-btn:hover {
+        color: #c4dbff;
+        text-decoration: underline;
+      }
+
+      .history-row td {
+        background: rgba(0, 0, 0, 0.18);
+      }
+
+      .history-wrap {
+        display: grid;
+        gap: 10px;
+      }
+
+      .history-event {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px;
+        background: #1b1a19;
+      }
+
+      .history-event-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 4px;
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .status-pill.firing {
+        color: #fbbf24;
+        background: rgba(251, 191, 36, 0.14);
+      }
+
+      .status-pill.resolved {
+        color: #86efac;
+        background: rgba(34, 197, 94, 0.14);
+      }
+
+      #alerts-create-panel {
+        position: fixed;
+        top: 0;
+        right: 0;
+        width: min(420px, calc(100vw - 20px));
+        height: 100vh;
+        margin: 0;
+        border-radius: 0;
+        border-left: 1px solid var(--border);
+        border-right: 0;
+        border-top: 0;
+        border-bottom: 0;
+        transform: translateX(100%);
+        transition: transform var(--transition);
+        z-index: 50;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .create-panel-body {
+        padding: 14px;
+        display: grid;
+        gap: 12px;
+        overflow: auto;
+      }
+
+      .create-panel-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+      }
+
+      body.alerts-create-open .context-backdrop {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      body.alerts-create-open #alerts-create-panel {
+        transform: translateX(0);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-layout">
+      <aside class="sidebar" id="app-sidebar">
+        <div class="sidebar-brand">
+          <span class="brand-mark"><i data-lucide="cpu" class="icon-18"></i></span>
+          <div class="brand-copy">
+            <strong>Legator</strong>
+            <span>Control Plane</span>
+          </div>
+        </div>
+
+        <nav class="sidebar-nav">
+          <a class="sidebar-link" href="/">
+            <i data-lucide="server" class="icon-16"></i>
+            <span>Fleet</span>
+            <span class="count" data-badge="probes">0</span>
+          </a>
+          <a class="sidebar-link" href="#" data-nav-chat>
+            <i data-lucide="message-square" class="icon-16"></i>
+            <span>Chat</span>
+          </a>
+          <a class="sidebar-link" href="/approvals">
+            <i data-lucide="shield-check" class="icon-16"></i>
+            <span>Approvals</span>
+            <span class="count" data-badge="approvals">0</span>
+          </a>
+          <a class="sidebar-link" href="/audit">
+            <i data-lucide="scroll-text" class="icon-16"></i>
+            <span>Audit</span>
+          </a>
+          <a class="sidebar-link active" href="/alerts">
+            <i data-lucide="bell" class="icon-16"></i>
+            <span>Alerts</span>
+          </a>
+          <a class="sidebar-link" href="/">
+            <i data-lucide="settings" class="icon-16"></i>
+            <span>Settings</span>
+          </a>
+        </nav>
+
+        <div class="sidebar-footer">
+          {{if .CurrentUser}}
+          <div class="user-chip">
+            <div class="meta">
+              <strong>{{.CurrentUser.Username}}</strong>
+              <span>Signed in</span>
+            </div>
+            <span class="role-badge role-{{if .CurrentUser.Role}}{{.CurrentUser.Role}}{{else}}unknown{{end}}">{{if .CurrentUser.Role}}{{.CurrentUser.Role}}{{else}}viewer{{end}}</span>
+          </div>
+          {{end}}
+          <form method="POST" action="/logout" class="logout-form">
+            <button type="submit" class="btn btn-ghost w-full justify-center">
+              <i data-lucide="log-out" class="icon-14"></i>
+              Logout
+            </button>
+          </form>
+        </div>
+      </aside>
+
+      <div class="sidebar-overlay" data-sidebar-close></div>
+
+      <main class="main-content">
+        <header class="page-header">
+          <div>
+            <button class="sidebar-toggle" data-sidebar-toggle aria-label="Toggle navigation">
+              <i data-lucide="menu" class="icon-16"></i>
+            </button>
+            <h1 class="page-title">Alerts</h1>
+            <p class="page-subtitle">Manage alert rules, monitor active incidents, and review rule history.</p>
+          </div>
+          <div class="page-actions">
+            <button class="btn" type="button" id="create-rule-btn"><i data-lucide="plus" class="icon-14"></i>Create Alert Rule</button>
+          </div>
+        </header>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Active Alerts</h2>
+            <span class="panel-sub" id="active-alert-count">0 firing</span>
+          </div>
+          <div id="active-alerts" class="alerts-banner">
+            <p class="muted-note">Loading active alerts…</p>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Alert Rules</h2>
+            <span class="panel-sub" id="rules-count">0 rules</span>
+          </div>
+
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Threshold</th>
+                  <th>Duration</th>
+                  <th>Tags</th>
+                  <th>Enabled</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="rules-body">
+                <tr><td colspan="7" class="empty-state">Loading rules…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="context-backdrop" data-create-close></div>
+
+    <aside class="context-column panel" id="alerts-create-panel" aria-hidden="true">
+      <div class="panel-header">
+        <h2 class="panel-title">Create Alert Rule</h2>
+        <button class="context-close" type="button" data-create-close aria-label="Close create panel">
+          <i data-lucide="x" class="icon-14"></i>
+        </button>
+      </div>
+
+      <form id="create-rule-form" class="create-panel-body" autocomplete="off">
+        <label>
+          <span class="ctx-label">Name</span>
+          <input type="text" id="rule-name" class="form-control" required />
+        </label>
+
+        <label>
+          <span class="ctx-label">Description</span>
+          <input type="text" id="rule-description" class="form-control" />
+        </label>
+
+        <label>
+          <span class="ctx-label">Condition Type</span>
+          <select id="rule-type" class="form-control" required>
+            <option value="probe_offline">probe_offline</option>
+            <option value="disk_threshold">disk_threshold</option>
+            <option value="cpu_threshold">cpu_threshold</option>
+          </select>
+        </label>
+
+        <label id="threshold-wrap">
+          <span class="ctx-label">Threshold</span>
+          <input type="number" id="rule-threshold" class="form-control" min="0" step="0.1" value="90" />
+        </label>
+
+        <label>
+          <span class="ctx-label">Duration</span>
+          <input type="text" id="rule-duration" class="form-control" value="2m" required />
+        </label>
+
+        <label>
+          <span class="ctx-label">Tags</span>
+          <input type="text" id="rule-tags" class="form-control" placeholder="prod, edge, critical" />
+        </label>
+
+        <label class="rule-enabled">
+          <input type="checkbox" id="rule-enabled" checked />
+          <span>Enabled</span>
+        </label>
+
+        <div class="create-panel-actions">
+          <button type="button" class="btn btn-ghost" data-create-close>Cancel</button>
+          <button type="submit" class="btn"><i data-lucide="save" class="icon-14"></i>Create</button>
+        </div>
+      </form>
+    </aside>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="/static/app.js"></script>
+    <script>
+      (() => {
+        const state = {
+          rules: [],
+          history: {},
+        };
+
+        const activeAlertsEl = document.getElementById('active-alerts');
+        const activeAlertCountEl = document.getElementById('active-alert-count');
+        const rulesBodyEl = document.getElementById('rules-body');
+        const rulesCountEl = document.getElementById('rules-count');
+
+        const createBtn = document.getElementById('create-rule-btn');
+        const createPanel = document.getElementById('alerts-create-panel');
+        const createForm = document.getElementById('create-rule-form');
+        const createCloseTargets = document.querySelectorAll('[data-create-close]');
+
+        const typeInput = document.getElementById('rule-type');
+        const thresholdWrap = document.getElementById('threshold-wrap');
+        const thresholdInput = document.getElementById('rule-threshold');
+
+        function showToast(message, kind) {
+          if (window.LegatorUI && window.LegatorUI.showToast) {
+            window.LegatorUI.showToast(message, kind || 'info');
+          }
+        }
+
+        function escapeHTML(value) {
+          return String(value || '')
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#39;');
+        }
+
+        function fmtTime(value) {
+          if (!value) return '—';
+          const parsed = new Date(value);
+          if (Number.isNaN(parsed.getTime())) return '—';
+          return parsed.toLocaleString();
+        }
+
+        function setCreatePanelOpen(isOpen) {
+          document.body.classList.toggle('alerts-create-open', isOpen);
+          createPanel.setAttribute('aria-hidden', String(!isOpen));
+        }
+
+        function parseTags(input) {
+          return (input || '')
+            .split(',')
+            .map((t) => t.trim())
+            .filter(Boolean);
+        }
+
+        function conditionThreshold(rule) {
+          const type = rule?.condition?.type || '';
+          if (type === 'disk_threshold' || type === 'cpu_threshold') {
+            return rule?.condition?.threshold ?? '—';
+          }
+          return '—';
+        }
+
+        function updateThresholdVisibility() {
+          const type = typeInput.value;
+          const needsThreshold = type === 'disk_threshold' || type === 'cpu_threshold';
+          thresholdWrap.style.display = needsThreshold ? 'block' : 'none';
+          thresholdInput.required = needsThreshold;
+          if (!needsThreshold) {
+            thresholdInput.value = '0';
+          } else if (!thresholdInput.value || Number(thresholdInput.value) <= 0) {
+            thresholdInput.value = '90';
+          }
+        }
+
+        async function requestJSON(url, options) {
+          const response = await fetch(url, {
+            credentials: 'include',
+            ...options,
+          });
+
+          if (!response.ok) {
+            let detail = response.statusText;
+            try {
+              const body = await response.json();
+              detail = body?.message || body?.error || detail;
+            } catch {
+              // keep status text
+            }
+            throw new Error(detail || 'Request failed');
+          }
+
+          if (response.status === 204) {
+            return null;
+          }
+
+          return response.json();
+        }
+
+        function renderActiveAlerts(alerts) {
+          const active = Array.isArray(alerts) ? alerts : [];
+          activeAlertCountEl.textContent = `${active.length} firing`;
+
+          if (!active.length) {
+            activeAlertsEl.innerHTML = '<p class="muted-note">No active alerts.</p>';
+            return;
+          }
+
+          activeAlertsEl.innerHTML = active.map((alert) => {
+            return `
+              <article class="alert-card">
+                <div class="alert-card-head">
+                  <span class="alert-card-title">${escapeHTML(alert.rule_name || 'Unnamed rule')}</span>
+                  <span class="status-pill firing">firing</span>
+                </div>
+                <p class="alert-card-meta">Probe: <span class="id-text">${escapeHTML(alert.probe_id || '—')}</span> · Since ${fmtTime(alert.fired_at)}</p>
+                <p class="alert-card-message">${escapeHTML(alert.message || 'No message')}</p>
+              </article>
+            `;
+          }).join('');
+        }
+
+        function renderHistoryEvents(ruleID, events) {
+          const list = Array.isArray(events) ? events : [];
+          if (!list.length) {
+            return '<p class="muted-note">No history events for this rule.</p>';
+          }
+
+          return `<div class="history-wrap">${list.map((event) => `
+            <article class="history-event">
+              <div class="history-event-head">
+                <span class="status-pill ${escapeHTML((event.status || '').toLowerCase())}">${escapeHTML(event.status || 'unknown')}</span>
+                <span class="muted-note">${fmtTime(event.resolved_at || event.fired_at)}</span>
+              </div>
+              <p><strong>Probe:</strong> <span class="id-text">${escapeHTML(event.probe_id || '—')}</span></p>
+              <p><strong>Message:</strong> ${escapeHTML(event.message || '—')}</p>
+            </article>
+          `).join('')}</div>`;
+        }
+
+        function renderRules() {
+          const rules = Array.isArray(state.rules) ? state.rules : [];
+          rulesCountEl.textContent = `${rules.length} rules`;
+
+          if (!rules.length) {
+            rulesBodyEl.innerHTML = '<tr><td colspan="7" class="empty-state">No alert rules configured.</td></tr>';
+            return;
+          }
+
+          rulesBodyEl.innerHTML = rules.map((rule) => {
+            const tags = Array.isArray(rule.condition?.tags) && rule.condition.tags.length
+              ? rule.condition.tags.map((tag) => `<span class="tag-pill">${escapeHTML(tag)}</span>`).join(' ')
+              : '<span class="muted-note">—</span>';
+
+            const historyVisible = Boolean(state.history[rule.id]?.visible);
+            const historyCell = state.history[rule.id]?.loading
+              ? '<p class="muted-note">Loading history…</p>'
+              : renderHistoryEvents(rule.id, state.history[rule.id]?.events || []);
+
+            return `
+              <tr data-rule-id="${escapeHTML(rule.id)}">
+                <td>${escapeHTML(rule.name || '—')}</td>
+                <td>${escapeHTML(rule.condition?.type || '—')}</td>
+                <td>${escapeHTML(conditionThreshold(rule))}</td>
+                <td>${escapeHTML(rule.condition?.duration || '—')}</td>
+                <td>${tags}</td>
+                <td>
+                  <label class="rule-enabled">
+                    <input type="checkbox" data-toggle-rule="${escapeHTML(rule.id)}" ${rule.enabled ? 'checked' : ''} />
+                    <span>${rule.enabled ? 'On' : 'Off'}</span>
+                  </label>
+                </td>
+                <td>
+                  <div class="rule-actions">
+                    <button type="button" class="link-btn" data-history-rule="${escapeHTML(rule.id)}">View History</button>
+                    <button type="button" class="btn btn-ghost" data-delete-rule="${escapeHTML(rule.id)}"><i data-lucide="trash-2" class="icon-14"></i>Delete</button>
+                  </div>
+                </td>
+              </tr>
+              <tr class="history-row" data-history-row="${escapeHTML(rule.id)}" ${historyVisible ? '' : 'style="display:none;"'}>
+                <td colspan="7">${historyCell}</td>
+              </tr>
+            `;
+          }).join('');
+
+          if (window.LegatorUI && window.LegatorUI.refreshIcons) {
+            window.LegatorUI.refreshIcons();
+          }
+        }
+
+        async function refreshActiveAlerts() {
+          try {
+            const payload = await requestJSON('/api/v1/alerts/active', { cache: 'no-store' });
+            renderActiveAlerts(payload?.alerts || []);
+          } catch (error) {
+            activeAlertsEl.innerHTML = '<p class="muted-note">Failed to load active alerts.</p>';
+          }
+        }
+
+        async function refreshRules() {
+          try {
+            state.rules = await requestJSON('/api/v1/alerts', { cache: 'no-store' });
+            renderRules();
+          } catch (error) {
+            rulesBodyEl.innerHTML = `<tr><td colspan="7" class="empty-state">Failed to load rules: ${escapeHTML(error.message)}</td></tr>`;
+          }
+        }
+
+        async function updateRuleEnabled(ruleID, enabled) {
+          const rule = state.rules.find((item) => item.id === ruleID);
+          if (!rule) return;
+
+          try {
+            await requestJSON(`/api/v1/alerts/${encodeURIComponent(ruleID)}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                name: rule.name,
+                description: rule.description || '',
+                enabled,
+                condition: {
+                  type: rule.condition?.type || 'probe_offline',
+                  threshold: Number(rule.condition?.threshold || 0),
+                  duration: rule.condition?.duration || '1m',
+                  tags: Array.isArray(rule.condition?.tags) ? rule.condition.tags : [],
+                },
+                actions: Array.isArray(rule.actions) ? rule.actions : [],
+              }),
+            });
+
+            rule.enabled = enabled;
+            renderRules();
+            showToast(enabled ? 'Rule enabled' : 'Rule disabled', 'success');
+          } catch (error) {
+            showToast(`Failed to update rule: ${error.message}`, 'error');
+            renderRules();
+          }
+        }
+
+        async function deleteRule(ruleID) {
+          if (!window.confirm('Delete this alert rule?')) {
+            return;
+          }
+
+          try {
+            await requestJSON(`/api/v1/alerts/${encodeURIComponent(ruleID)}`, {
+              method: 'DELETE',
+            });
+            showToast('Rule deleted', 'success');
+            delete state.history[ruleID];
+            await refreshRules();
+            await refreshActiveAlerts();
+          } catch (error) {
+            showToast(`Failed to delete rule: ${error.message}`, 'error');
+          }
+        }
+
+        async function toggleHistory(ruleID) {
+          const current = state.history[ruleID] || { visible: false, loading: false, events: [] };
+
+          if (current.visible) {
+            state.history[ruleID] = { ...current, visible: false };
+            renderRules();
+            return;
+          }
+
+          state.history[ruleID] = { ...current, visible: true };
+          renderRules();
+
+          if (current.events && current.events.length) {
+            return;
+          }
+
+          state.history[ruleID] = { ...state.history[ruleID], loading: true };
+          renderRules();
+
+          try {
+            const payload = await requestJSON(`/api/v1/alerts/${encodeURIComponent(ruleID)}/history?limit=20`, {
+              cache: 'no-store',
+            });
+            state.history[ruleID] = {
+              visible: true,
+              loading: false,
+              events: Array.isArray(payload?.events) ? payload.events : [],
+            };
+          } catch (error) {
+            state.history[ruleID] = {
+              visible: true,
+              loading: false,
+              events: [],
+            };
+            showToast(`Failed to load rule history: ${error.message}`, 'error');
+          }
+
+          renderRules();
+        }
+
+        rulesBodyEl.addEventListener('change', (event) => {
+          const checkbox = event.target.closest('[data-toggle-rule]');
+          if (!checkbox) return;
+          const ruleID = checkbox.getAttribute('data-toggle-rule');
+          void updateRuleEnabled(ruleID, checkbox.checked);
+        });
+
+        rulesBodyEl.addEventListener('click', (event) => {
+          const historyBtn = event.target.closest('[data-history-rule]');
+          if (historyBtn) {
+            const ruleID = historyBtn.getAttribute('data-history-rule');
+            void toggleHistory(ruleID);
+            return;
+          }
+
+          const deleteBtn = event.target.closest('[data-delete-rule]');
+          if (deleteBtn) {
+            const ruleID = deleteBtn.getAttribute('data-delete-rule');
+            void deleteRule(ruleID);
+          }
+        });
+
+        createBtn.addEventListener('click', () => setCreatePanelOpen(true));
+        createCloseTargets.forEach((target) => {
+          target.addEventListener('click', () => setCreatePanelOpen(false));
+        });
+
+        document.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape' && document.body.classList.contains('alerts-create-open')) {
+            setCreatePanelOpen(false);
+          }
+        });
+
+        typeInput.addEventListener('change', updateThresholdVisibility);
+
+        createForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
+
+          const ruleType = typeInput.value;
+          const needsThreshold = ruleType === 'disk_threshold' || ruleType === 'cpu_threshold';
+
+          const payload = {
+            name: document.getElementById('rule-name').value.trim(),
+            description: document.getElementById('rule-description').value.trim(),
+            enabled: document.getElementById('rule-enabled').checked,
+            condition: {
+              type: ruleType,
+              threshold: needsThreshold ? Number(thresholdInput.value || 0) : 0,
+              duration: document.getElementById('rule-duration').value.trim(),
+              tags: parseTags(document.getElementById('rule-tags').value),
+            },
+            actions: [],
+          };
+
+          try {
+            await requestJSON('/api/v1/alerts', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            showToast('Alert rule created', 'success');
+            createForm.reset();
+            document.getElementById('rule-enabled').checked = true;
+            typeInput.value = 'probe_offline';
+            updateThresholdVisibility();
+            setCreatePanelOpen(false);
+            await refreshRules();
+            await refreshActiveAlerts();
+          } catch (error) {
+            showToast(`Failed to create rule: ${error.message}`, 'error');
+          }
+        });
+
+        updateThresholdVisibility();
+        refreshActiveAlerts();
+        refreshRules();
+      })();
+    </script>
+  </body>
+</html>
