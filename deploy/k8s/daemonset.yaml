@@ -32,7 +32,7 @@ spec:
       - name: harbor-pull-secret
       containers:
       - name: probe
-        image: harbor.lab.k-dev.uk/legator/probe:v1.0.0-alpha.10
+        image: harbor.lab.k-dev.uk/legator/probe:v1.0.0-alpha.10-hotfix1
         env:
         - name: LEGATOR_SERVER_URL
           valueFrom:
