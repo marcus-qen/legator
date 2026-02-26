@@ -124,5 +124,79 @@
         </div>
       </div>
     </div>
+    <script>
+      const PROBE_ID = '{{.Probe.ID}}';
+
+      // ── Live indicators ──
+      const statusBadge = document.querySelector('.badge');
+      const healthBadge = document.querySelector('.health-badge');
+      const metaDiv = document.querySelector('.meta');
+
+      function updateStatus(status) {
+        if (!statusBadge) return;
+        statusBadge.className = 'badge badge-' + statusClass(status);
+        statusBadge.textContent = humanize(status);
+      }
+
+      function statusClass(s) {
+        if (s === 'online') return 'online';
+        if (s === 'offline') return 'offline';
+        if (s === 'degraded') return 'degraded';
+        return 'pending';
+      }
+
+      function humanize(s) {
+        return s.charAt(0).toUpperCase() + s.slice(1);
+      }
+
+      function updateLastSeen() {
+        if (!metaDiv) return;
+        const text = metaDiv.textContent;
+        metaDiv.textContent = text.replace(/Last seen [^·]+/, 'Last seen just now ');
+      }
+
+      // ── SSE connection ──
+      let es = null;
+      let reconnectTimer = null;
+
+      function connectSSE() {
+        if (es) { es.close(); }
+
+        es = new EventSource('/api/v1/events');
+
+        es.onerror = () => {
+          if (!reconnectTimer) {
+            reconnectTimer = setTimeout(() => { reconnectTimer = null; connectSSE(); }, 5000);
+          }
+        };
+
+        const types = ['probe.connected','probe.disconnected','probe.offline',
+                       'command.dispatched','command.completed','command.failed',
+                       'policy.changed'];
+        types.forEach(t => {
+          es.addEventListener(t, e => {
+            try {
+              const evt = JSON.parse(e.data);
+              if (evt.probe_id !== PROBE_ID) return;
+
+              // Update status on connect/disconnect
+              if (t === 'probe.connected') {
+                updateStatus('online');
+                updateLastSeen();
+              } else if (t === 'probe.disconnected' || t === 'probe.offline') {
+                updateStatus('offline');
+              }
+
+              // Refresh full page data periodically (inventory might have changed)
+              if (t === 'probe.connected') {
+                setTimeout(() => { location.reload(); }, 3000);
+              }
+            } catch(err) {}
+          });
+        });
+      }
+
+      connectSSE();
+    </script>
   </body>
 </html>
