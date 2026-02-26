@@ -4,141 +4,55 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Legator Login</title>
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body {
-        min-height: 100vh;
-        font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-        background: #0d1117;
-        color: #c9d1d9;
-        display: grid;
-        place-items: center;
-        padding: 20px;
-      }
-      .login-card {
-        width: 100%;
-        max-width: 420px;
-        background: #161b22;
-        border: 1px solid #21262d;
-        border-radius: 10px;
-        padding: 28px 24px;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.35);
-      }
-      h1 {
-        font-size: 24px;
-        color: #58a6ff;
-        margin-bottom: 6px;
-      }
-      p.subtitle {
-        font-size: 13px;
-        color: #8b949e;
-        margin-bottom: 18px;
-      }
-      .error {
-        margin-bottom: 14px;
-        border: 1px solid rgba(248,81,73,0.45);
-        background: rgba(248,81,73,0.12);
-        color: #ffb4ae;
-        border-radius: 8px;
-        padding: 10px 12px;
-        font-size: 12px;
-      }
-      .oidc-btn {
-        display: block;
-        width: 100%;
-        text-align: center;
-        text-decoration: none;
-        border: 1px solid #1f6feb;
-        background: #1f6feb;
-        color: #fff;
-        border-radius: 8px;
-        padding: 10px 14px;
-        font-size: 14px;
-        font-weight: 600;
-        margin-bottom: 14px;
-      }
-      .oidc-btn:hover { background: #388bfd; }
-      .divider {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 10px;
-        color: #8b949e;
-        font-size: 12px;
-        margin: 6px 0 14px;
-      }
-      .divider::before,
-      .divider::after {
-        content: "";
-        flex: 1;
-        border-top: 1px solid #30363d;
-      }
-      label {
-        display: block;
-        font-size: 12px;
-        color: #8b949e;
-        margin-bottom: 6px;
-      }
-      input {
-        width: 100%;
-        border: 1px solid #30363d;
-        background: #0d1117;
-        color: #c9d1d9;
-        border-radius: 8px;
-        padding: 10px 12px;
-        margin-bottom: 14px;
-        font-size: 14px;
-      }
-      input:focus {
-        outline: none;
-        border-color: #58a6ff;
-        box-shadow: 0 0 0 2px rgba(88,166,255,0.2);
-      }
-      button {
-        width: 100%;
-        border: 1px solid #238636;
-        background: #238636;
-        color: #fff;
-        border-radius: 8px;
-        padding: 10px 14px;
-        font-size: 14px;
-        font-weight: 600;
-        cursor: pointer;
-      }
-      button:hover { background: #2ea043; }
-      .foot {
-        margin-top: 14px;
-        font-size: 11px;
-        color: #484f58;
-        text-align: center;
-      }
-    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
-    <main class="login-card">
-      <h1>⚡ Legator</h1>
-      <p class="subtitle">Control Plane Login</p>
+    <main class="login-shell">
+      <section class="login-card">
+        <div class="login-brand">
+          <span class="mark"><i data-lucide="cpu" class="icon-20"></i></span>
+          <div>
+            <h1>Legator</h1>
+            <p class="subtitle">Control Plane Login</p>
+          </div>
+        </div>
 
-      {{if .Error}}
-      <div class="error">{{.Error}}</div>
-      {{end}}
+        {{if .Error}}
+        <div class="error-banner">{{.Error}}</div>
+        {{end}}
 
-      {{if .OIDCEnabled}}
-      <a class="oidc-btn" href="/auth/oidc/login">Sign in with {{.OIDCProviderName}}</a>
-      <div class="divider"><span>or</span></div>
-      {{end}}
+        {{if .OIDCEnabled}}
+        <a class="btn btn-primary w-full justify-center py-2.5" href="/auth/oidc/login">Sign in with {{.OIDCProviderName}}</a>
+        <div class="divider"><span>or</span></div>
+        {{end}}
 
-      <form method="POST" action="/login">
-        <label for="username">Username</label>
-        <input id="username" name="username" type="text" autocomplete="username" value="{{.Username}}" required />
+        <form method="POST" action="/login" class="space-y-3">
+          <div>
+            <label class="form-label" for="username">Username</label>
+            <input id="username" name="username" type="text" autocomplete="username" value="{{.Username}}" required />
+          </div>
 
-        <label for="password">Password</label>
-        <input id="password" name="password" type="password" autocomplete="current-password" required />
+          <div>
+            <label class="form-label" for="password">Password</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required />
+          </div>
 
-        <button type="submit">Sign in</button>
-      </form>
+          <button type="submit" class="btn btn-primary w-full justify-center py-2.5">Sign in</button>
+        </form>
 
-      <div class="foot">Legator multi-user access</div>
+        <div class="login-foot">Legator multi-user access</div>
+      </section>
     </main>
+
+    <script>
+      if (window.lucide) {
+        window.lucide.createIcons();
+      }
+    </script>
   </body>
 </html>

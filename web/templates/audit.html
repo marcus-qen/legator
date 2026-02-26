@@ -4,102 +4,199 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Legator · Audit Log</title>
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; background: #0d1117; color: #c9d1d9; min-height: 100vh; }
-      a { color: #58a6ff; text-decoration: none; }
-      .app { max-width: 1200px; margin: 0 auto; padding: 20px; }
-      .back { display: inline-block; margin-bottom: 16px; font-size: 13px; color: #8b949e; }
-      header { position: relative; padding: 24px 0; border-bottom: 1px solid #21262d; margin-bottom: 24px; }
-      header h1 { font-size: 24px; color: #58a6ff; }
-      header p { color: #8b949e; font-size: 14px; margin-top: 4px; }
-      .user-nav { position: absolute; top: 10px; right: 0; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #8b949e; }
-      .user-nav strong { color: #c9d1d9; }
-      .user-nav form { margin: 0; }
-      .user-nav button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px; padding: 3px 8px; font-size: 11px; cursor: pointer; }
-      .user-nav button:hover { border-color: #58a6ff; }
-      .panel { background: #161b22; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; }
-      table { width: 100%; border-collapse: collapse; }
-      th { text-align: left; padding: 10px 16px; font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #21262d; background: #0d1117; position: sticky; top: 0; }
-      td { padding: 8px 16px; border-bottom: 1px solid #21262d; font-size: 12px; }
-      .type-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }
-      .type-command { background: rgba(88,166,255,0.15); color: #58a6ff; }
-      .type-register { background: rgba(63,185,80,0.15); color: #3fb950; }
-      .type-approval { background: rgba(210,153,34,0.15); color: #d29922; }
-      .type-policy { background: rgba(163,113,247,0.15); color: #a371f7; }
-      .type-default { background: rgba(72,79,88,0.15); color: #8b949e; }
-      .empty { text-align: center; padding: 40px; color: #484f58; }
-      .table-wrap { overflow-x: auto; max-height: 80vh; overflow-y: auto; }
-    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
-    <div class="app">
-      <a href="/" class="back">← Back to Fleet</a>
-      <header>
-        <h1>📋 Audit Log</h1>
-        <p>Immutable record of all fleet actions</p>
-        {{if .CurrentUser}}
-        <div class="user-nav">
-          <span>{{.CurrentUser.Username}}</span>
-          <form method="POST" action="/logout"><button type="submit">Logout</button></form>
+    <div class="app-layout">
+      <aside class="sidebar" id="app-sidebar">
+        <div class="sidebar-brand">
+          <span class="brand-mark"><i data-lucide="cpu" class="icon-18"></i></span>
+          <div class="brand-copy">
+            <strong>Legator</strong>
+            <span>Control Plane</span>
+          </div>
         </div>
-        {{end}}
-      </header>
-      <section class="panel">
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Type</th>
-                <th>Probe</th>
-                <th>Actor</th>
-                <th>Summary</th>
-              </tr>
-            </thead>
-            <tbody id="audit-body">
-              <tr><td colspan="5" class="empty">Loading...</td></tr>
-            </tbody>
-          </table>
+
+        <nav class="sidebar-nav">
+          <a class="sidebar-link" href="/">
+            <i data-lucide="server" class="icon-16"></i>
+            <span>Fleet</span>
+            <span class="count" data-badge="probes">0</span>
+          </a>
+          <a class="sidebar-link" href="#" data-nav-chat>
+            <i data-lucide="message-square" class="icon-16"></i>
+            <span>Chat</span>
+          </a>
+          <a class="sidebar-link" href="/approvals">
+            <i data-lucide="shield-check" class="icon-16"></i>
+            <span>Approvals</span>
+            <span class="count" data-badge="approvals">0</span>
+          </a>
+          <a class="sidebar-link active" href="/audit">
+            <i data-lucide="scroll-text" class="icon-16"></i>
+            <span>Audit</span>
+          </a>
+          <a class="sidebar-link" href="/">
+            <i data-lucide="settings" class="icon-16"></i>
+            <span>Settings</span>
+          </a>
+        </nav>
+
+        <div class="sidebar-footer">
+          {{if .CurrentUser}}
+          <div class="user-chip">
+            <div class="meta">
+              <strong>{{.CurrentUser.Username}}</strong>
+              <span>Signed in</span>
+            </div>
+            <span class="role-badge role-{{if .CurrentUser.Role}}{{.CurrentUser.Role}}{{else}}unknown{{end}}">{{if .CurrentUser.Role}}{{.CurrentUser.Role}}{{else}}viewer{{end}}</span>
+          </div>
+          {{end}}
+          <form method="POST" action="/logout" class="logout-form">
+            <button type="submit" class="btn btn-ghost w-full justify-center">
+              <i data-lucide="log-out" class="icon-14"></i>
+              Logout
+            </button>
+          </form>
         </div>
-      </section>
+      </aside>
+
+      <div class="sidebar-overlay" data-sidebar-close></div>
+
+      <main class="main-content">
+        <header class="page-header">
+          <div>
+            <button class="sidebar-toggle" data-sidebar-toggle aria-label="Toggle navigation">
+              <i data-lucide="menu" class="icon-16"></i>
+            </button>
+            <h1 class="page-title">Audit Log</h1>
+            <p class="page-subtitle">Immutable timeline of actions, decisions, and automation across the fleet.</p>
+          </div>
+        </header>
+
+        <section class="panel">
+          <div class="audit-filters">
+            <input id="filter-text" type="text" placeholder="Filter by probe, actor, summary…" class="form-control" />
+            <select id="filter-type" class="form-control">
+              <option value="">All event types</option>
+              <option value="command">Command</option>
+              <option value="probe">Probe</option>
+              <option value="approval">Approval</option>
+              <option value="policy">Policy</option>
+            </select>
+          </div>
+
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th><span class="sort-head">Time <i data-lucide="chevrons-up-down" class="icon-14"></i></span></th>
+                  <th>Type</th>
+                  <th>Probe</th>
+                  <th>Actor</th>
+                  <th>Summary</th>
+                </tr>
+              </thead>
+              <tbody id="audit-body">
+                <tr><td colspan="5" class="empty-state">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
     </div>
+
+    <script src="/static/app.js"></script>
     <script>
+      let latestEvents = [];
+
       function typeClass(t) {
-        t = (t||'').toLowerCase();
+        t = (t || '').toLowerCase();
         if (t.includes('command')) return 'type-command';
-        if (t.includes('register')) return 'type-register';
+        if (t.includes('register') || t.includes('probe')) return 'type-register';
         if (t.includes('approval')) return 'type-approval';
         if (t.includes('policy')) return 'type-policy';
         return 'type-default';
       }
+
       function fmtTime(v) {
         if (!v) return '—';
-        const d = new Date(v);
-        return d.toLocaleString();
+        return new Date(v).toLocaleString();
       }
+
+      function matchesFilters(event) {
+        const textFilter = (document.getElementById('filter-text').value || '').trim().toLowerCase();
+        const typeFilter = (document.getElementById('filter-type').value || '').trim().toLowerCase();
+
+        const type = (event.type || '').toLowerCase();
+        const probe = (event.probe_id || '').toLowerCase();
+        const actor = (event.actor || '').toLowerCase();
+        const summary = (event.summary || '').toLowerCase();
+
+        if (typeFilter && !type.includes(typeFilter)) {
+          return false;
+        }
+
+        if (!textFilter) {
+          return true;
+        }
+
+        return type.includes(textFilter) || probe.includes(textFilter) || actor.includes(textFilter) || summary.includes(textFilter);
+      }
+
+      function render(events) {
+        const tb = document.getElementById('audit-body');
+        const filtered = (events || []).filter(matchesFilters);
+
+        if (!filtered.length) {
+          tb.innerHTML = '<tr><td colspan="5" class="empty-state">No matching audit events.</td></tr>';
+          return;
+        }
+
+        tb.innerHTML = filtered.map((e, idx) => `
+          <tr class="probe-row" onclick="toggleDetail(${idx})">
+            <td>${fmtTime(e.timestamp)}</td>
+            <td><span class="type-badge ${typeClass(e.type)}">${e.type || '—'}</span></td>
+            <td>${e.probe_id || '—'}</td>
+            <td>${e.actor || 'system'}</td>
+            <td>${e.summary || '—'}</td>
+          </tr>
+          <tr id="audit-detail-${idx}" class="audit-detail-row" style="display:none;">
+            <td colspan="5"><pre class="audit-detail">${JSON.stringify(e, null, 2)}</pre></td>
+          </tr>
+        `).join('');
+      }
+
+      window.toggleDetail = function (idx) {
+        const row = document.getElementById('audit-detail-' + idx);
+        if (!row) return;
+        row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+      };
+
       function refresh() {
-        fetch('/api/v1/audit?limit=200', {cache:'no-store'}).then(r=>r.json()).then(events => {
-          const tb = document.getElementById('audit-body');
+        fetch('/api/v1/audit?limit=300', { cache: 'no-store' }).then((r) => r.json()).then((events) => {
           if (!events || !events.length) {
-            tb.innerHTML = '<tr><td colspan="5" class="empty">No audit events recorded yet.</td></tr>';
+            latestEvents = [];
+            render([]);
             return;
           }
-          // Sort newest first
-          events.sort((a,b) => new Date(b.timestamp||0) - new Date(a.timestamp||0));
-          tb.innerHTML = events.map(e => `
-            <tr>
-              <td>${fmtTime(e.timestamp)}</td>
-              <td><span class="type-badge ${typeClass(e.type)}">${e.type||'—'}</span></td>
-              <td>${e.probe_id||'—'}</td>
-              <td>${e.actor||'system'}</td>
-              <td>${e.summary||'—'}</td>
-            </tr>
-          `).join('');
-        }).catch(()=>{
-          document.getElementById('audit-body').innerHTML = '<tr><td colspan="5" class="empty">Failed to load audit events.</td></tr>';
+
+          events.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+          latestEvents = events;
+          render(latestEvents);
+        }).catch(() => {
+          document.getElementById('audit-body').innerHTML = '<tr><td colspan="5" class="empty-state">Failed to load audit events.</td></tr>';
         });
       }
+
+      document.getElementById('filter-text').addEventListener('input', () => render(latestEvents));
+      document.getElementById('filter-type').addEventListener('change', () => render(latestEvents));
+
       refresh();
       setInterval(refresh, 10000);
     </script>

@@ -4,129 +4,176 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Legator · Approval Queue</title>
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; background: #0d1117; color: #c9d1d9; min-height: 100vh; }
-      a { color: #58a6ff; text-decoration: none; }
-      a:hover { text-decoration: underline; }
-      .app { max-width: 1200px; margin: 0 auto; padding: 20px; }
-      .back { display: inline-block; margin-bottom: 16px; font-size: 13px; color: #8b949e; }
-      header { position: relative; padding: 24px 0; border-bottom: 1px solid #21262d; margin-bottom: 24px; }
-      header h1 { font-size: 24px; color: #d29922; }
-      header p { color: #8b949e; font-size: 14px; margin-top: 4px; }
-      .user-nav { position: absolute; top: 10px; right: 0; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #8b949e; }
-      .user-nav strong { color: #c9d1d9; }
-      .user-nav form { margin: 0; }
-      .user-nav button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px; padding: 3px 8px; font-size: 11px; cursor: pointer; }
-      .user-nav button:hover { border-color: #58a6ff; }
-      .count { display: inline-block; background: rgba(210,153,34,0.15); color: #d29922; padding: 2px 10px; border-radius: 12px; font-size: 13px; margin-left: 8px; }
-      .panel { background: #161b22; border: 1px solid #21262d; border-radius: 8px; margin-bottom: 16px; overflow: hidden; }
-      .approval-header { padding: 16px 20px; border-bottom: 1px solid #21262d; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
-      .approval-header .left { display: flex; align-items: center; gap: 12px; }
-      .risk { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
-      .risk-high { background: rgba(248,81,73,0.15); color: #f85149; }
-      .risk-medium { background: rgba(210,153,34,0.15); color: #d29922; }
-      .risk-low { background: rgba(63,185,80,0.15); color: #3fb950; }
-      .approval-body { padding: 16px 20px; }
-      .approval-body pre { background: #0d1117; padding: 12px; border-radius: 6px; font-size: 12px; overflow-x: auto; color: #8b949e; margin: 8px 0; }
-      .meta { font-size: 12px; color: #484f58; margin-top: 8px; }
-      .actions { display: flex; gap: 8px; }
-      .btn { padding: 6px 16px; border-radius: 6px; font-size: 12px; font-weight: 600; border: none; cursor: pointer; }
-      .btn-approve { background: #238636; color: #fff; }
-      .btn-approve:hover { background: #2ea043; }
-      .btn-deny { background: #da3633; color: #fff; }
-      .btn-deny:hover { background: #f85149; }
-      .empty { text-align: center; padding: 60px 20px; color: #484f58; }
-      .empty h2 { font-size: 18px; margin-bottom: 8px; color: #3fb950; }
-      .toast { position: fixed; bottom: 20px; right: 20px; background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 12px 20px; font-size: 13px; display: none; z-index: 100; }
-    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
-    <div class="app">
-      <a href="/" class="back">← Back to Fleet</a>
-      <header>
-        <h1>⚖️ Approval Queue <span class="count" id="pending-count">0</span></h1>
-        <p>Review and approve pending actions across the fleet</p>
-        {{if .CurrentUser}}
-        <div class="user-nav">
-          <span>{{.CurrentUser.Username}}</span>
-          <form method="POST" action="/logout"><button type="submit">Logout</button></form>
+    <div class="app-layout">
+      <aside class="sidebar" id="app-sidebar">
+        <div class="sidebar-brand">
+          <span class="brand-mark"><i data-lucide="cpu" class="icon-18"></i></span>
+          <div class="brand-copy">
+            <strong>Legator</strong>
+            <span>Control Plane</span>
+          </div>
         </div>
-        {{end}}
-      </header>
-      <div id="approvals-list"></div>
-      <div id="empty-state" class="empty" style="display:none">
-        <h2>✅ All clear</h2>
-        <p>No pending approvals. The fleet is running within policy.</p>
-      </div>
+
+        <nav class="sidebar-nav">
+          <a class="sidebar-link" href="/">
+            <i data-lucide="server" class="icon-16"></i>
+            <span>Fleet</span>
+            <span class="count" data-badge="probes">0</span>
+          </a>
+          <a class="sidebar-link" href="#" data-nav-chat>
+            <i data-lucide="message-square" class="icon-16"></i>
+            <span>Chat</span>
+          </a>
+          <a class="sidebar-link active" href="/approvals">
+            <i data-lucide="shield-check" class="icon-16"></i>
+            <span>Approvals</span>
+            <span class="count" data-badge="approvals" id="pending-count">0</span>
+          </a>
+          <a class="sidebar-link" href="/audit">
+            <i data-lucide="scroll-text" class="icon-16"></i>
+            <span>Audit</span>
+          </a>
+          <a class="sidebar-link" href="/">
+            <i data-lucide="settings" class="icon-16"></i>
+            <span>Settings</span>
+          </a>
+        </nav>
+
+        <div class="sidebar-footer">
+          {{if .CurrentUser}}
+          <div class="user-chip">
+            <div class="meta">
+              <strong>{{.CurrentUser.Username}}</strong>
+              <span>Signed in</span>
+            </div>
+            <span class="role-badge role-{{if .CurrentUser.Role}}{{.CurrentUser.Role}}{{else}}unknown{{end}}">{{if .CurrentUser.Role}}{{.CurrentUser.Role}}{{else}}viewer{{end}}</span>
+          </div>
+          {{end}}
+          <form method="POST" action="/logout" class="logout-form">
+            <button type="submit" class="btn btn-ghost w-full justify-center">
+              <i data-lucide="log-out" class="icon-14"></i>
+              Logout
+            </button>
+          </form>
+        </div>
+      </aside>
+
+      <div class="sidebar-overlay" data-sidebar-close></div>
+
+      <main class="main-content">
+        <header class="page-header">
+          <div>
+            <button class="sidebar-toggle" data-sidebar-toggle aria-label="Toggle navigation">
+              <i data-lucide="menu" class="icon-16"></i>
+            </button>
+            <h1 class="page-title">Approvals Queue</h1>
+            <p class="page-subtitle">Human-in-the-loop gate for sensitive actions across your fleet.</p>
+          </div>
+        </header>
+
+        <section id="approvals-list" class="approvals-list"></section>
+
+        <section id="empty-state" class="panel empty-state hidden">
+          <h2 class="text-base font-semibold text-green-400">All clear</h2>
+          <p class="mt-1">No pending approvals. The fleet is operating within policy.</p>
+        </section>
+      </main>
     </div>
+
     <div class="toast" id="toast"></div>
+
+    <script src="/static/app.js"></script>
     <script>
       function riskClass(r) {
-        r = (r||'').toLowerCase();
+        r = (r || '').toLowerCase();
         if (r === 'high' || r === 'critical') return 'risk-high';
         if (r === 'medium') return 'risk-medium';
         return 'risk-low';
       }
+
       function fmtTime(v) {
         if (!v) return '—';
         return new Date(v).toLocaleString();
       }
+
       function showToast(msg, ok) {
+        if (window.LegatorUI && window.LegatorUI.showToast) {
+          window.LegatorUI.showToast(msg, ok ? 'success' : 'error');
+          return;
+        }
         const t = document.getElementById('toast');
         t.textContent = msg;
-        t.style.display = 'block';
-        t.style.borderColor = ok ? '#238636' : '#da3633';
-        setTimeout(() => t.style.display = 'none', 3000);
+        t.classList.add('show');
+        setTimeout(() => t.classList.remove('show'), 3000);
       }
+
       function decide(id, decision) {
         fetch('/api/v1/approvals/' + id + '/decide', {
           method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({decision: decision})
-        }).then(r => {
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ decision: decision }),
+        }).then((r) => {
           if (r.ok) {
-            showToast(decision === 'approved' ? '✅ Approved' : '❌ Denied', decision === 'approved');
+            showToast(decision === 'approved' ? 'Approval granted' : 'Request denied', decision === 'approved');
             refresh();
           } else {
             showToast('Failed: ' + r.status, false);
           }
         }).catch(() => showToast('Network error', false));
       }
+
       function refresh() {
-        fetch('/api/v1/approvals', {cache:'no-store'}).then(r=>r.json()).then(items => {
+        fetch('/api/v1/approvals', { cache: 'no-store' }).then((r) => r.json()).then((items) => {
           const list = document.getElementById('approvals-list');
           const empty = document.getElementById('empty-state');
-          const pending = (items||[]).filter(i => i.status === 'pending');
+          const pending = (items || []).filter((i) => i.status === 'pending');
           document.getElementById('pending-count').textContent = pending.length;
+
           if (!pending.length) {
             list.innerHTML = '';
-            empty.style.display = 'block';
+            empty.classList.remove('hidden');
             return;
           }
-          empty.style.display = 'none';
-          list.innerHTML = pending.map(a => `
-            <div class="panel">
+
+          empty.classList.add('hidden');
+          list.innerHTML = pending.map((a) => `
+            <article class="approval-card">
               <div class="approval-header">
-                <div class="left">
-                  <span class="risk ${riskClass(a.risk)}">${(a.risk||'unknown').toUpperCase()}</span>
-                  <strong>${a.probe_id || 'unknown probe'}</strong>
+                <div class="approval-left">
+                  <span class="risk ${riskClass(a.risk)}">${(a.risk || 'unknown').toUpperCase()}</span>
+                  <strong class="id-text">${a.probe_id || 'unknown probe'}</strong>
+                  <span class="panel-sub">Requested ${fmtTime(a.created_at || a.submitted_at)}</span>
                 </div>
-                <div class="actions">
-                  <button class="btn btn-approve" onclick="decide('${a.id}','approved')">✅ Approve</button>
-                  <button class="btn btn-deny" onclick="decide('${a.id}','denied')">❌ Deny</button>
+                <div class="page-actions">
+                  <button class="btn btn-primary" onclick="decide('${a.id}','approved')"><i data-lucide="check" class="icon-14"></i>Approve</button>
+                  <button class="btn btn-danger" onclick="decide('${a.id}','denied')"><i data-lucide="x" class="icon-14"></i>Deny</button>
                 </div>
               </div>
               <div class="approval-body">
-                <pre>${JSON.stringify(a.command || a.task || a, null, 2)}</pre>
-                <div class="meta">
-                  Requested: ${fmtTime(a.created_at || a.submitted_at)} · ID: ${a.id}
-                </div>
+                <pre class="approval-command">${JSON.stringify(a.command || a.task || a, null, 2)}</pre>
+                <div class="approval-meta">Approval ID: <span class="id-text">${a.id}</span></div>
+                <details class="approval-extra">
+                  <summary>View payload details</summary>
+                  <pre class="approval-command">${JSON.stringify(a, null, 2)}</pre>
+                </details>
               </div>
-            </div>
+            </article>
           `).join('');
-        }).catch(()=>{});
+
+          if (window.LegatorUI && window.LegatorUI.refreshIcons) {
+            window.LegatorUI.refreshIcons();
+          }
+        }).catch(() => {});
       }
+
       refresh();
       setInterval(refresh, 5000);
     </script>

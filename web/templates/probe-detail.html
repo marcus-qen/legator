@@ -4,166 +4,197 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Legator · Probe {{.Probe.ID}}</title>
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; background: #0d1117; color: #c9d1d9; min-height: 100vh; }
-      a { color: #58a6ff; text-decoration: none; }
-      a:hover { text-decoration: underline; }
-      .app { max-width: 1200px; margin: 0 auto; padding: 20px; }
-      .back { display: inline-block; margin-bottom: 16px; font-size: 13px; color: #8b949e; }
-      .back:hover { color: #58a6ff; }
-      .header { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 20px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; }
-      .header-left h1 { font-size: 20px; color: #c9d1d9; }
-      .header-left .meta { font-size: 12px; color: #8b949e; margin-top: 4px; }
-      .header-right { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-      .user-nav { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; color: #8b949e; }
-      .user-nav strong { color: #c9d1d9; }
-      .user-nav form { margin: 0; }
-      .user-nav button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px; padding: 3px 8px; font-size: 11px; cursor: pointer; }
-      .user-nav button:hover { border-color: #58a6ff; }
-      .badge { display: inline-block; padding: 4px 12px; border-radius: 16px; font-size: 12px; font-weight: 600; }
-      .badge-online { background: rgba(63,185,80,0.15); color: #3fb950; }
-      .badge-offline { background: rgba(248,81,73,0.15); color: #f85149; }
-      .badge-degraded { background: rgba(210,153,34,0.15); color: #d29922; }
-      .badge-pending { background: rgba(72,79,88,0.15); color: #8b949e; }
-      .health-badge { padding: 4px 12px; border-radius: 16px; font-size: 12px; font-weight: 600; }
-      .health-good { background: rgba(63,185,80,0.15); color: #3fb950; }
-      .health-warn { background: rgba(210,153,34,0.15); color: #d29922; }
-      .health-crit { background: rgba(248,81,73,0.15); color: #f85149; }
-      .conn-badge { padding: 4px 10px; border-radius: 16px; font-size: 11px; font-weight: 600; border: 1px solid #30363d; color: #8b949e; }
-      .conn-live { border-color: rgba(63,185,80,0.4); color: #3fb950; background: rgba(63,185,80,0.12); }
-      .conn-reconnecting { border-color: rgba(210,153,34,0.4); color: #d29922; background: rgba(210,153,34,0.12); }
-      .meta-note { margin-top: 8px; font-size: 11px; color: #d29922; display: none; }
-      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-      .panel { background: #161b22; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; }
-      .panel h2 { font-size: 14px; padding: 12px 16px; border-bottom: 1px solid #21262d; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; }
-      .kv { display: grid; grid-template-columns: 120px 1fr; gap: 0; }
-      .kv dt { padding: 8px 16px; font-size: 12px; color: #8b949e; border-bottom: 1px solid #21262d; }
-      .kv dd { padding: 8px 16px; font-size: 13px; border-bottom: 1px solid #21262d; }
-      .tags { padding: 12px 16px; }
-      .pill { display: inline-block; background: #21262d; color: #8b949e; border-radius: 12px; padding: 2px 10px; font-size: 11px; margin: 2px; }
-      .section-list { list-style: none; max-height: 300px; overflow-y: auto; }
-      .section-list li { padding: 8px 16px; border-bottom: 1px solid #21262d; font-size: 12px; display: flex; justify-content: space-between; }
-      .section-list li:last-child { border-bottom: none; }
-      .muted { color: #484f58; }
-      .actions { display: flex; gap: 8px; padding: 12px 16px; }
-      .btn { display: inline-block; padding: 6px 16px; border-radius: 6px; font-size: 12px; font-weight: 600; border: 1px solid #21262d; background: #21262d; color: #c9d1d9; cursor: pointer; text-decoration: none; }
-      .btn:hover { background: #30363d; text-decoration: none; }
-      .btn-primary { background: #238636; border-color: #238636; color: #fff; }
-      .btn-primary:hover { background: #2ea043; }
-      .empty { padding: 16px; color: #484f58; font-size: 12px; text-align: center; }
-      .full-width { grid-column: 1 / -1; }
-      @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
-    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
-    <div class="app" data-probe-id="{{.Probe.ID}}">
-      <a href="/" class="back">← Back to Fleet</a>
-
-      {{$statusClass := statusClass .Probe.Status}}
-      {{$healthScore := 18}}
-      {{$healthClass := "health-crit"}}
-      {{if .Probe.Health}}
-        {{$healthScore = .Probe.Health.Score}}
-        {{if ge .Probe.Health.Score 80}}
-          {{$healthClass = "health-good"}}
-        {{else if ge .Probe.Health.Score 50}}
-          {{$healthClass = "health-warn"}}
-        {{else}}
-          {{$healthClass = "health-crit"}}
-        {{end}}
-      {{else if eq $statusClass "online"}}
-        {{$healthScore = 100}}
+    {{$statusClass := statusClass .Probe.Status}}
+    {{$healthScore := 18}}
+    {{$healthClass := "health-crit"}}
+    {{if .Probe.Health}}
+      {{$healthScore = .Probe.Health.Score}}
+      {{if ge .Probe.Health.Score 80}}
         {{$healthClass = "health-good"}}
-      {{else if eq $statusClass "degraded"}}
-        {{$healthScore = 63}}
+      {{else if ge .Probe.Health.Score 50}}
         {{$healthClass = "health-warn"}}
-      {{else if eq $statusClass "pending"}}
-        {{$healthScore = 49}}
-        {{$healthClass = "health-warn"}}
+      {{else}}
+        {{$healthClass = "health-crit"}}
       {{end}}
+    {{else if eq $statusClass "online"}}
+      {{$healthScore = 100}}
+      {{$healthClass = "health-good"}}
+    {{else if eq $statusClass "degraded"}}
+      {{$healthScore = 63}}
+      {{$healthClass = "health-warn"}}
+    {{else if eq $statusClass "pending"}}
+      {{$healthScore = 49}}
+      {{$healthClass = "health-warn"}}
+    {{end}}
 
-      <div class="header">
-        <div class="header-left">
-          <h1 id="probe-hostname-title">{{if .Probe.Inventory}}{{if .Probe.Inventory.Hostname}}{{.Probe.Inventory.Hostname}}{{else}}{{if .Probe.Hostname}}{{.Probe.Hostname}}{{else}}(unknown){{end}}{{end}}{{else}}{{if .Probe.Hostname}}{{.Probe.Hostname}}{{else}}(unknown){{end}}{{end}}</h1>
-          <div class="meta" id="probe-meta-line">
-            ID: <span id="probe-id" data-probe-id="{{.Probe.ID}}">{{.Probe.ID}}</span> · Policy: <span id="probe-policy">{{.Probe.PolicyLevel}}</span> · Last seen <span id="probe-last-seen">{{formatLastSeen .Probe.LastSeen}}</span> · Uptime <span id="probe-uptime">{{.Uptime}}</span>
+    <div class="app-layout">
+      <aside class="sidebar" id="app-sidebar">
+        <div class="sidebar-brand">
+          <span class="brand-mark"><i data-lucide="cpu" class="icon-18"></i></span>
+          <div class="brand-copy">
+            <strong>Legator</strong>
+            <span>Control Plane</span>
           </div>
-          <div class="meta-note" id="probe-refresh-note" role="status" aria-live="polite"></div>
         </div>
-        <div class="header-right">
+
+        <nav class="sidebar-nav">
+          <a class="sidebar-link active" href="/">
+            <i data-lucide="server" class="icon-16"></i>
+            <span>Fleet</span>
+            <span class="count" data-badge="probes">0</span>
+          </a>
+          <a class="sidebar-link" href="/probe/{{.Probe.ID}}/chat" data-nav-chat>
+            <i data-lucide="message-square" class="icon-16"></i>
+            <span>Chat</span>
+          </a>
+          <a class="sidebar-link" href="/approvals">
+            <i data-lucide="shield-check" class="icon-16"></i>
+            <span>Approvals</span>
+            <span class="count" data-badge="approvals">0</span>
+          </a>
+          <a class="sidebar-link" href="/audit">
+            <i data-lucide="scroll-text" class="icon-16"></i>
+            <span>Audit</span>
+          </a>
+          <a class="sidebar-link" href="/">
+            <i data-lucide="settings" class="icon-16"></i>
+            <span>Settings</span>
+          </a>
+        </nav>
+
+        <div class="sidebar-footer">
           {{if .CurrentUser}}
-          <div class="user-nav">
-            <span>{{.CurrentUser.Username}}</span>
-            <form method="POST" action="/logout"><button type="submit">Logout</button></form>
+          <div class="user-chip">
+            <div class="meta">
+              <strong>{{.CurrentUser.Username}}</strong>
+              <span>Signed in</span>
+            </div>
+            <span class="role-badge role-{{if .CurrentUser.Role}}{{.CurrentUser.Role}}{{else}}unknown{{end}}">{{if .CurrentUser.Role}}{{.CurrentUser.Role}}{{else}}viewer{{end}}</span>
           </div>
           {{end}}
-          <span id="probe-status-badge" class="badge badge-{{$statusClass}}">{{humanizeStatus .Probe.Status}}</span>
-          <span id="probe-health-badge" class="health-badge {{$healthClass}}">Health: <span id="probe-health-score">{{$healthScore}}</span>/100</span>
-          <span id="probe-conn-badge" class="conn-badge conn-reconnecting" role="status" aria-live="polite">reconnecting</span>
+          <form method="POST" action="/logout" class="logout-form">
+            <button type="submit" class="btn btn-ghost w-full justify-center">
+              <i data-lucide="log-out" class="icon-14"></i>
+              Logout
+            </button>
+          </form>
         </div>
-      </div>
+      </aside>
 
-      <div class="grid">
-        <div class="panel">
-          <h2>System</h2>
-          <dl class="kv">
-            <dt>Hostname</dt>
-            <dd id="probe-hostname-field">{{if .Probe.Inventory}}{{if .Probe.Inventory.Hostname}}{{.Probe.Inventory.Hostname}}{{else}}{{if .Probe.Hostname}}{{.Probe.Hostname}}{{else}}-{{end}}{{end}}{{else}}{{if .Probe.Hostname}}{{.Probe.Hostname}}{{else}}-{{end}}{{end}}</dd>
-            <dt>OS</dt>
-            <dd id="probe-os-field">{{if .Probe.Inventory}}{{if .Probe.Inventory.OS}}{{.Probe.Inventory.OS}}{{else}}{{if .Probe.OS}}{{.Probe.OS}}{{else}}-{{end}}{{end}}{{else}}{{if .Probe.OS}}{{.Probe.OS}}{{else}}-{{end}}{{end}}</dd>
-            <dt>Arch</dt>
-            <dd id="probe-arch-field">{{if .Probe.Inventory}}{{if .Probe.Inventory.Arch}}{{.Probe.Inventory.Arch}}{{else}}{{if .Probe.Arch}}{{.Probe.Arch}}{{else}}-{{end}}{{end}}{{else}}{{if .Probe.Arch}}{{.Probe.Arch}}{{else}}-{{end}}{{end}}</dd>
-            <dt>Kernel</dt>
-            <dd id="probe-kernel-field">{{if .Probe.Inventory}}{{if .Probe.Inventory.Kernel}}{{.Probe.Inventory.Kernel}}{{else}}-{{end}}{{else}}-{{end}}</dd>
-            <dt>CPUs</dt>
-            <dd id="probe-cpus-field">{{if .Probe.Inventory}}{{.Probe.Inventory.CPUs}}{{else}}-{{end}}</dd>
-            <dt>Memory</dt>
-            <dd id="probe-memory-field">{{if .Probe.Inventory}}{{humanBytes .Probe.Inventory.MemTotal}}{{else}}-{{end}}</dd>
-            <dt>Disk</dt>
-            <dd id="probe-disk-field">{{if .Probe.Inventory}}{{humanBytes .Probe.Inventory.DiskTotal}}{{else}}-{{end}}</dd>
-          </dl>
-        </div>
+      <div class="sidebar-overlay" data-sidebar-close></div>
 
-        <div class="panel">
-          <h2>Tags &amp; Actions</h2>
-          <div class="tags">
-            {{if .Probe.Tags}}{{range .Probe.Tags}}<span class="pill">{{.}}</span>{{end}}{{else}}<span class="muted">No tags</span>{{end}}
-          </div>
-          <div class="actions">
-            <a href="/probe/{{.Probe.ID}}/chat" class="btn btn-primary">💬 Chat</a>
-            <a href="/" class="btn">← Fleet</a>
-          </div>
-        </div>
+      <main class="main-content">
+        <div class="detail-shell app" data-probe-id="{{.Probe.ID}}">
+          <section class="panel detail-hero">
+            <a href="/" class="back-link"><i data-lucide="arrow-left" class="icon-14"></i>Back to fleet</a>
 
-        <div class="panel">
-          <h2>Network Interfaces</h2>
-          {{with .Probe.Inventory}}{{if .Interfaces}}
-          <ul class="section-list">
-            {{range .Interfaces}}<li><span><strong>{{.Name}}</strong>{{if .MAC}} · {{.MAC}}{{end}}</span><span class="muted">{{.State}} {{range .Addrs}}{{.}} {{end}}</span></li>{{end}}
-          </ul>
-          {{else}}<div class="empty">No interfaces reported</div>{{end}}{{else}}<div class="empty">No interfaces reported</div>{{end}}
-        </div>
+            <div class="detail-hero-top">
+              <div>
+                <button class="sidebar-toggle" data-sidebar-toggle aria-label="Toggle navigation">
+                  <i data-lucide="menu" class="icon-16"></i>
+                </button>
+                <h1 id="probe-hostname-title" class="page-title">{{if .Probe.Inventory}}{{if .Probe.Inventory.Hostname}}{{.Probe.Inventory.Hostname}}{{else}}{{if .Probe.Hostname}}{{.Probe.Hostname}}{{else}}(unknown){{end}}{{end}}{{else}}{{if .Probe.Hostname}}{{.Probe.Hostname}}{{else}}(unknown){{end}}{{end}}</h1>
+                <p class="detail-meta" id="probe-meta-line">
+                  ID: <span id="probe-id" data-probe-id="{{.Probe.ID}}" class="id-text">{{.Probe.ID}}</span>
+                  · Policy: <span id="probe-policy">{{.Probe.PolicyLevel}}</span>
+                  · Last seen <span id="probe-last-seen">{{formatLastSeen .Probe.LastSeen}}</span>
+                  · Uptime <span id="probe-uptime">{{.Uptime}}</span>
+                </p>
+                <div class="meta-note" id="probe-refresh-note" role="status" aria-live="polite"></div>
+              </div>
 
-        <div class="panel">
-          <h2>Services</h2>
-          {{with .Probe.Inventory}}{{if .Services}}
-          <ul class="section-list">
-            {{range .Services}}<li><span>{{.Name}}</span><span class="muted">{{.State}} · enabled={{.Enabled}}</span></li>{{end}}
-          </ul>
-          {{else}}<div class="empty">No services reported</div>{{end}}{{else}}<div class="empty">No services reported</div>{{end}}
-        </div>
+              <div class="page-actions">
+                <span id="probe-status-badge" class="badge badge-{{$statusClass}}">{{humanizeStatus .Probe.Status}}</span>
+                <span id="probe-health-badge" class="health-badge {{$healthClass}}">Health: <span id="probe-health-score">{{$healthScore}}</span>/100</span>
+                <span id="probe-conn-badge" class="conn-badge conn-reconnecting" role="status" aria-live="polite">reconnecting</span>
+              </div>
+            </div>
 
-        <div class="panel full-width">
-          <h2>Packages</h2>
-          {{with .Probe.Inventory}}{{if .Packages}}
-          <ul class="section-list">
-            {{range .Packages}}<li><span>{{.Name}}</span><span class="muted">{{.Version}} ({{.Manager}})</span></li>{{end}}
-          </ul>
-          {{else}}<div class="empty">No packages reported</div>{{end}}{{else}}<div class="empty">No packages reported</div>{{end}}
+            <div class="health-meter mt-3">
+              <span class="health-track"><span class="health-fill" id="probe-health-fill" style="width:{{$healthScore}}%"></span></span>
+              <span class="health-score"><span id="probe-health-percent">{{$healthScore}}</span>%</span>
+            </div>
+
+            <div class="detail-tabs">
+              <span class="tab-chip active">System</span>
+              <span class="tab-chip">Network</span>
+              <span class="tab-chip">Services</span>
+              <span class="tab-chip">Tags</span>
+            </div>
+          </section>
+
+          <section class="detail-grid">
+            <article class="panel">
+              <div class="panel-header"><h2 class="panel-title">System</h2></div>
+              <dl class="kv-grid">
+                <dt>Hostname</dt>
+                <dd id="probe-hostname-field">{{if .Probe.Inventory}}{{if .Probe.Inventory.Hostname}}{{.Probe.Inventory.Hostname}}{{else}}{{if .Probe.Hostname}}{{.Probe.Hostname}}{{else}}-{{end}}{{end}}{{else}}{{if .Probe.Hostname}}{{.Probe.Hostname}}{{else}}-{{end}}{{end}}</dd>
+                <dt>OS</dt>
+                <dd id="probe-os-field">{{if .Probe.Inventory}}{{if .Probe.Inventory.OS}}{{.Probe.Inventory.OS}}{{else}}{{if .Probe.OS}}{{.Probe.OS}}{{else}}-{{end}}{{end}}{{else}}{{if .Probe.OS}}{{.Probe.OS}}{{else}}-{{end}}{{end}}</dd>
+                <dt>Arch</dt>
+                <dd id="probe-arch-field">{{if .Probe.Inventory}}{{if .Probe.Inventory.Arch}}{{.Probe.Inventory.Arch}}{{else}}{{if .Probe.Arch}}{{.Probe.Arch}}{{else}}-{{end}}{{end}}{{else}}{{if .Probe.Arch}}{{.Probe.Arch}}{{else}}-{{end}}{{end}}</dd>
+                <dt>Kernel</dt>
+                <dd id="probe-kernel-field">{{if .Probe.Inventory}}{{if .Probe.Inventory.Kernel}}{{.Probe.Inventory.Kernel}}{{else}}-{{end}}{{else}}-{{end}}</dd>
+                <dt>CPUs</dt>
+                <dd id="probe-cpus-field">{{if .Probe.Inventory}}{{.Probe.Inventory.CPUs}}{{else}}-{{end}}</dd>
+                <dt>Memory</dt>
+                <dd id="probe-memory-field">{{if .Probe.Inventory}}{{humanBytes .Probe.Inventory.MemTotal}}{{else}}-{{end}}</dd>
+                <dt>Disk</dt>
+                <dd id="probe-disk-field">{{if .Probe.Inventory}}{{humanBytes .Probe.Inventory.DiskTotal}}{{else}}-{{end}}</dd>
+              </dl>
+            </article>
+
+            <article class="panel">
+              <div class="panel-header"><h2 class="panel-title">Tags & Actions</h2></div>
+              <div class="p-3">
+                {{if .Probe.Tags}}{{range .Probe.Tags}}<span class="tag-pill">{{.}}</span>{{end}}{{else}}<span class="muted">No tags</span>{{end}}
+              </div>
+              <div class="actions">
+                <a href="/probe/{{.Probe.ID}}/chat" class="btn btn-primary"><i data-lucide="message-square" class="icon-14"></i>Open chat</a>
+                <a href="/" class="btn"><i data-lucide="arrow-left" class="icon-14"></i>Back to fleet</a>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-header"><h2 class="panel-title">Network</h2></div>
+              {{with .Probe.Inventory}}{{if .Interfaces}}
+              <ul class="section-list">
+                {{range .Interfaces}}<li><span><strong>{{.Name}}</strong>{{if .MAC}} · {{.MAC}}{{end}}</span><span class="muted">{{.State}} {{range .Addrs}}{{.}} {{end}}</span></li>{{end}}
+              </ul>
+              {{else}}<div class="empty">No interfaces reported</div>{{end}}{{else}}<div class="empty">No interfaces reported</div>{{end}}
+            </article>
+
+            <article class="panel">
+              <div class="panel-header"><h2 class="panel-title">Services</h2></div>
+              {{with .Probe.Inventory}}{{if .Services}}
+              <ul class="section-list">
+                {{range .Services}}<li><span>{{.Name}}</span><span class="muted">{{.State}} · enabled={{.Enabled}}</span></li>{{end}}
+              </ul>
+              {{else}}<div class="empty">No services reported</div>{{end}}{{else}}<div class="empty">No services reported</div>{{end}}
+            </article>
+
+            <article class="panel full-width">
+              <div class="panel-header"><h2 class="panel-title">Packages</h2></div>
+              {{with .Probe.Inventory}}{{if .Packages}}
+              <ul class="section-list">
+                {{range .Packages}}<li><span>{{.Name}}</span><span class="muted">{{.Version}} ({{.Manager}})</span></li>{{end}}
+              </ul>
+              {{else}}<div class="empty">No packages reported</div>{{end}}{{else}}<div class="empty">No packages reported</div>{{end}}
+            </article>
+          </section>
         </div>
-      </div>
+      </main>
     </div>
+
+    <script src="/static/app.js"></script>
     <script>
       (function () {
         const PROBE_ID = '{{.Probe.ID}}';
@@ -315,6 +346,10 @@
           if (!refs.healthBadge || !health) return;
           refs.healthBadge.className = `health-badge ${health.className}`;
           setText(refs.healthScore, String(health.score));
+          const fill = document.getElementById('probe-health-fill');
+          const pct = document.getElementById('probe-health-percent');
+          if (fill) fill.style.width = `${health.score}%`;
+          if (pct) pct.textContent = String(health.score);
         }
 
         function applyLastSeen(raw) {
