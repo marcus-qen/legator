@@ -25,6 +25,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/llm"
+	"github.com/marcus-qen/legator/internal/controlplane/policy"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
 	"github.com/marcus-qen/legator/internal/protocol"
 	"github.com/marcus-qen/legator/internal/shared/signing"
@@ -235,6 +236,7 @@ func main() {
 	go offlineChecker(ctx, fleetMgr)
 
 	chatMgr := chat.NewManager(logger.Named("chat"))
+	policyStore := policy.NewStore()
 
 	mux := http.NewServeMux()
 
@@ -369,6 +371,170 @@ func main() {
 			"counts":            fleetMgr.Count(),
 			"connected":         hub.Connected(),
 			"pending_approvals": approvalQueue.PendingCount(),
+		})
+	})
+
+	// ── Probe tags ──────────────────────────────────────────
+	mux.HandleFunc("PUT /api/v1/probes/{id}/tags", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		var body struct {
+			Tags []string `json:"tags"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+			return
+		}
+		if err := fleetMgr.SetTags(id, body.Tags); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusNotFound)
+			return
+		}
+		emitAudit(audit.EventPolicyChanged, id, "api", fmt.Sprintf("Tags set: %v", body.Tags))
+		ps, _ := fleetMgr.Get(id)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"probe_id": id, "tags": ps.Tags})
+	})
+
+	mux.HandleFunc("GET /api/v1/fleet/tags", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"tags": fleetMgr.TagCounts()})
+	})
+
+	mux.HandleFunc("GET /api/v1/fleet/by-tag/{tag}", func(w http.ResponseWriter, r *http.Request) {
+		tag := r.PathValue("tag")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(fleetMgr.ListByTag(tag))
+	})
+
+	// ── Group command (dispatch to all probes with a tag) ───
+	mux.HandleFunc("POST /api/v1/fleet/by-tag/{tag}/command", func(w http.ResponseWriter, r *http.Request) {
+		tag := r.PathValue("tag")
+		probes := fleetMgr.ListByTag(tag)
+		if len(probes) == 0 {
+			http.Error(w, `{"error":"no probes with that tag"}`, http.StatusNotFound)
+			return
+		}
+
+		var cmd protocol.CommandPayload
+		if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
+			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+			return
+		}
+
+		results := make([]map[string]string, 0, len(probes))
+		for _, ps := range probes {
+			rid := fmt.Sprintf("grp-%s-%d", ps.ID[:8], time.Now().UnixNano()%100000)
+			c := cmd
+			c.RequestID = rid
+			if err := hub.SendTo(ps.ID, protocol.MsgCommand, c); err != nil {
+				results = append(results, map[string]string{
+					"probe_id": ps.ID, "status": "error", "error": err.Error(),
+				})
+			} else {
+				results = append(results, map[string]string{
+					"probe_id": ps.ID, "status": "dispatched", "request_id": rid,
+				})
+			}
+		}
+
+		emitAudit(audit.EventCommandSent, tag, "api",
+			fmt.Sprintf("Group command to %d probes (tag=%s): %s", len(probes), tag, cmd.Command))
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tag":     tag,
+			"total":   len(probes),
+			"results": results,
+		})
+	})
+
+	// ── Policy templates ────────────────────────────────────
+	mux.HandleFunc("GET /api/v1/policies", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(policyStore.List())
+	})
+
+	mux.HandleFunc("GET /api/v1/policies/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		tpl, ok := policyStore.Get(id)
+		if !ok {
+			http.Error(w, `{"error":"policy template not found"}`, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(tpl)
+	})
+
+	mux.HandleFunc("POST /api/v1/policies", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Name        string                   `json:"name"`
+			Description string                   `json:"description"`
+			Level       protocol.CapabilityLevel `json:"level"`
+			Allowed     []string                 `json:"allowed"`
+			Blocked     []string                 `json:"blocked"`
+			Paths       []string                 `json:"paths"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+			return
+		}
+		if body.Name == "" {
+			http.Error(w, `{"error":"name required"}`, http.StatusBadRequest)
+			return
+		}
+		tpl := policyStore.Create(body.Name, body.Description, body.Level, body.Allowed, body.Blocked, body.Paths)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(tpl)
+	})
+
+	mux.HandleFunc("DELETE /api/v1/policies/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if err := policyStore.Delete(id); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	// Apply a policy template to a probe (sends policy update over WebSocket)
+	mux.HandleFunc("POST /api/v1/probes/{id}/apply-policy/{policyId}", func(w http.ResponseWriter, r *http.Request) {
+		probeID := r.PathValue("id")
+		policyID := r.PathValue("policyId")
+
+		_, ok := fleetMgr.Get(probeID)
+		if !ok {
+			http.Error(w, `{"error":"probe not found"}`, http.StatusNotFound)
+			return
+		}
+		tpl, ok := policyStore.Get(policyID)
+		if !ok {
+			http.Error(w, `{"error":"policy template not found"}`, http.StatusNotFound)
+			return
+		}
+
+		// Update fleet manager state
+		_ = fleetMgr.SetPolicy(probeID, tpl.Level)
+
+		// Push policy to probe
+		pol := tpl.ToPolicy()
+		if err := hub.SendTo(probeID, protocol.MsgPolicyUpdate, pol); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"status": "applied_locally",
+				"note":   "probe offline, policy saved but not pushed",
+			})
+			return
+		}
+
+		emitAudit(audit.EventPolicyChanged, probeID, "api",
+			fmt.Sprintf("Policy %s (%s) applied", tpl.Name, tpl.ID))
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status":    "applied",
+			"probe_id":  probeID,
+			"policy_id": policyID,
+			"level":     string(tpl.Level),
 		})
 	})
 

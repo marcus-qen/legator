@@ -3,6 +3,7 @@ package fleet
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +23,7 @@ type ProbeState struct {
 	LastSeen    time.Time                  `json:"last_seen"`
 	Inventory   *protocol.InventoryPayload `json:"inventory,omitempty"`
 	Labels      map[string]string          `json:"labels,omitempty"`
+	Tags        []string                   `json:"tags,omitempty"`
 }
 
 // Manager tracks all probes in the fleet.
@@ -55,6 +57,7 @@ func (m *Manager) Register(id, hostname, os, arch string) *ProbeState {
 		Registered:  now,
 		LastSeen:    now,
 		Labels:      map[string]string{},
+		Tags:        []string{},
 	}
 	m.probes[id] = ps
 	m.logger.Info("probe registered",
@@ -156,4 +159,69 @@ func (m *Manager) Count() map[string]int {
 		counts[ps.Status]++
 	}
 	return counts
+}
+
+// SetTags replaces the probe tags with a normalized set.
+func (m *Manager) SetTags(id string, tags []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	ps, ok := m.probes[id]
+	if !ok {
+		return fmt.Errorf("unknown probe: %s", id)
+	}
+	ps.Tags = normalizeTags(tags)
+	return nil
+}
+
+// ListByTag returns probes that contain the given tag.
+func (m *Manager) ListByTag(tag string) []*ProbeState {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	tag = strings.ToLower(strings.TrimSpace(tag))
+	if tag == "" {
+		return nil
+	}
+	out := make([]*ProbeState, 0)
+	for _, ps := range m.probes {
+		for _, t := range ps.Tags {
+			if t == tag {
+				out = append(out, ps)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// TagCounts returns fleet probe counts by tag.
+func (m *Manager) TagCounts() map[string]int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	counts := map[string]int{}
+	for _, ps := range m.probes {
+		for _, t := range ps.Tags {
+			counts[t]++
+		}
+	}
+	return counts
+}
+
+func normalizeTags(tags []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(tags))
+	for _, raw := range tags {
+		t := strings.ToLower(strings.TrimSpace(raw))
+		if t == "" {
+			continue
+		}
+		if _, ok := seen[t]; ok {
+			continue
+		}
+		seen[t] = struct{}{}
+		out = append(out, t)
+	}
+	return out
 }

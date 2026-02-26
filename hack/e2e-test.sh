@@ -274,7 +274,73 @@ else
   fail "Chat GET endpoint returned $CHAT_STATUS (expected 200)"
 fi
 
-# 20. Summary
+
+# 20. Tag management
+echo ""
+echo "20. Tag management..."
+TAG_RESULT=$(curl -sf -X PUT "$CP_URL/api/v1/probes/$PROBE_ID/tags"   -H "Content-Type: application/json"   -d '{"tags":["prod","web","linux"]}')
+TAG_COUNT=$(echo "$TAG_RESULT" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('tags',[])))" 2>/dev/null)
+if [[ "$TAG_COUNT" == "3" ]]; then
+  pass "Tags set (3 tags)"
+else
+  fail "Tag set failed (got count=$TAG_COUNT)"
+fi
+
+# 21. Fleet tags endpoint
+echo ""
+echo "21. Fleet tags endpoint..."
+FLEET_TAGS=$(curl -sf "$CP_URL/api/v1/fleet/tags")
+PROD_COUNT=$(echo "$FLEET_TAGS" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tags',{}).get('prod',0))" 2>/dev/null)
+if [[ "$PROD_COUNT" -ge 1 ]]; then
+  pass "Fleet tags lists prod=$PROD_COUNT"
+else
+  fail "Fleet tags missing prod count"
+fi
+
+# 22. List by tag
+echo ""
+echo "22. List by tag..."
+BY_TAG=$(curl -sf "$CP_URL/api/v1/fleet/by-tag/prod")
+BY_TAG_COUNT=$(echo "$BY_TAG" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null)
+if [[ "$BY_TAG_COUNT" -ge 1 ]]; then
+  pass "List by tag returns $BY_TAG_COUNT probes"
+else
+  fail "List by tag empty"
+fi
+
+# 23. Policy templates
+echo ""
+echo "23. Policy template listing..."
+POLICIES=$(curl -sf "$CP_URL/api/v1/policies")
+POL_COUNT=$(echo "$POLICIES" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null)
+if [[ "$POL_COUNT" -ge 3 ]]; then
+  pass "Policy store has $POL_COUNT templates (3 built-in)"
+else
+  fail "Expected at least 3 policy templates, got $POL_COUNT"
+fi
+
+# 24. Apply policy to probe
+echo ""
+echo "24. Apply policy to probe..."
+APPLY=$(curl -sf -X POST "$CP_URL/api/v1/probes/$PROBE_ID/apply-policy/diagnose")
+APPLY_STATUS=$(echo "$APPLY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null)
+if [[ "$APPLY_STATUS" == "applied" ]]; then
+  pass "Policy 'diagnose' applied to probe"
+else
+  fail "Policy apply returned status=$APPLY_STATUS (expected applied)"
+fi
+
+# 25. Verify probe policy level changed
+echo ""
+echo "25. Verify probe policy level..."
+PROBE_LEVEL=$(curl -sf "$CP_URL/api/v1/probes/$PROBE_ID" | python3 -c "import sys,json; print(json.load(sys.stdin).get('policy_level',''))" 2>/dev/null)
+if [[ "$PROBE_LEVEL" == "diagnose" ]]; then
+  pass "Probe policy level is now diagnose"
+else
+  fail "Probe policy level is $PROBE_LEVEL (expected diagnose)"
+fi
+
+# 26. Summary
 echo ""
 echo "=========================="
 echo "Results: $PASSED passed, $FAILED failed"
