@@ -32,25 +32,37 @@ type ProbeConn struct {
 
 // Hub manages all connected probes.
 type Hub struct {
-	probes map[string]*ProbeConn
-	mu     sync.RWMutex
-	logger *zap.Logger
-	onMsg  func(probeID string, env protocol.Envelope) // callback for incoming messages
-	signer *signing.Signer                             // nil = signing disabled
+	probes  map[string]*ProbeConn
+	mu      sync.RWMutex
+	logger  *zap.Logger
+	onMsg   func(probeID string, env protocol.Envelope) // callback for incoming messages
+	signer  *signing.Signer                             // nil = signing disabled
+	streams *streamRegistry                             // output chunk subscribers
 }
 
 // NewHub creates a new Hub.
 func NewHub(logger *zap.Logger, onMsg func(string, protocol.Envelope)) *Hub {
 	return &Hub{
-		probes: make(map[string]*ProbeConn),
-		logger: logger,
-		onMsg:  onMsg,
+		probes:  make(map[string]*ProbeConn),
+		logger:  logger,
+		onMsg:   onMsg,
+		streams: newStreamRegistry(),
 	}
 }
 
 // SetSigner enables command signing on outgoing messages.
 func (h *Hub) SetSigner(s *signing.Signer) {
 	h.signer = s
+}
+
+// SubscribeStream returns a subscriber for streaming output of a command.
+func (h *Hub) SubscribeStream(requestID string, bufSize int) (*StreamSubscriber, func()) {
+	return h.streams.Subscribe(requestID, bufSize)
+}
+
+// DispatchChunk sends an output chunk to all subscribers for that request.
+func (h *Hub) DispatchChunk(chunk protocol.OutputChunkPayload) {
+	h.streams.Dispatch(chunk)
 }
 
 // HandleProbeWS is the HTTP handler for probe WebSocket connections.

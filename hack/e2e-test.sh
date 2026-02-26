@@ -241,7 +241,40 @@ else
   fail "Expected at least 3 audit entries, got $AUDIT_TOTAL"
 fi
 
-# 17. Summary
+
+# 17. Streaming command dispatch
+echo ""
+echo "17. Streaming command dispatch..."
+STREAM_RESULT=$(curl -sf -X POST "$CP_URL/api/v1/probes/$PROBE_ID/command?stream=true"   -H "Content-Type: application/json"   -d '{"command":"echo","args":["streaming works"],"level":"observe"}')
+STREAM_RID=$(echo "$STREAM_RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('request_id', ''))" 2>/dev/null)
+if [[ -n "$STREAM_RID" ]]; then
+  pass "Streaming command dispatched (request_id=$STREAM_RID)"
+else
+  fail "Streaming command dispatch failed"
+fi
+
+# 18. SSE stream endpoint exists
+echo ""
+echo "18. SSE stream endpoint..."
+SSE_STATUS=$(curl -sf -o /dev/null -w "%{http_code}" --max-time 3 "$CP_URL/api/v1/commands/fake-id/stream" 2>/dev/null || echo "timeout")
+# SSE holds connection open waiting for data. curl returns 000 on max-time timeout = endpoint is live.
+if [[ "$SSE_STATUS" == "timeout" || "$SSE_STATUS" == "200" || "$SSE_STATUS" == "000timeout" ]]; then
+  pass "SSE stream endpoint is live"
+else
+  fail "SSE stream endpoint returned unexpected status: $SSE_STATUS"
+fi
+
+# 19. Chat API exists
+echo ""
+echo "19. Chat API endpoints..."
+CHAT_STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$CP_URL/api/v1/probes/$PROBE_ID/chat?limit=10" 2>/dev/null || echo "000")
+if [[ "$CHAT_STATUS" == "200" ]]; then
+  pass "Chat GET endpoint returns 200"
+else
+  fail "Chat GET endpoint returned $CHAT_STATUS (expected 200)"
+fi
+
+# 20. Summary
 echo ""
 echo "=========================="
 echo "Results: $PASSED passed, $FAILED failed"

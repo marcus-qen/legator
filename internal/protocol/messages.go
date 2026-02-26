@@ -21,6 +21,9 @@ const (
 	MsgPolicyUpdate MessageType = "policy_update"
 	MsgPing         MessageType = "ping"
 	MsgPong         MessageType = "pong"
+
+	// Bidirectional
+	MsgOutputChunk MessageType = "output_chunk"
 )
 
 // Envelope wraps every message on the wire.
@@ -135,6 +138,16 @@ type User struct {
 	UID    int      `json:"uid"`
 	Groups []string `json:"groups,omitempty"`
 	Shell  string   `json:"shell"`
+}
+
+// OutputChunkPayload streams incremental output from a running command.
+type OutputChunkPayload struct {
+	RequestID string `json:"request_id"`
+	Stream    string `json:"stream"` // "stdout" or "stderr"
+	Data      string `json:"data"`
+	Seq       int    `json:"seq"`       // sequence number for ordering
+	Final     bool   `json:"final"`     // true = command has finished
+	ExitCode  int    `json:"exit_code"` // only meaningful when Final=true
 }
 
 // PolicyUpdatePayload pushes a new policy to the probe.

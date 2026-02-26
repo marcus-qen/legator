@@ -127,12 +127,20 @@ func (a *Agent) handleMessage(env protocol.Envelope) {
 			zap.String("request_id", cmd.RequestID),
 			zap.String("command", cmd.Command),
 			zap.String("level", string(cmd.Level)),
+			zap.Bool("stream", cmd.Stream),
 		)
 
-		result := a.executor.Execute(context.Background(), &cmd)
-
-		if err := a.client.Send(protocol.MsgCommandResult, result); err != nil {
-			a.logger.Error("failed to send result", zap.Error(err))
+		if cmd.Stream {
+			a.executor.ExecuteStream(context.Background(), &cmd, func(chunk protocol.OutputChunkPayload) {
+				if err := a.client.Send(protocol.MsgOutputChunk, chunk); err != nil {
+					a.logger.Error("failed to send output chunk", zap.Error(err))
+				}
+			})
+		} else {
+			result := a.executor.Execute(context.Background(), &cmd)
+			if err := a.client.Send(protocol.MsgCommandResult, result); err != nil {
+				a.logger.Error("failed to send result", zap.Error(err))
+			}
 		}
 
 	case protocol.MsgPolicyUpdate:

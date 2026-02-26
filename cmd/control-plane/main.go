@@ -21,6 +21,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/api"
 	"github.com/marcus-qen/legator/internal/controlplane/approval"
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
+	"github.com/marcus-qen/legator/internal/controlplane/chat"
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/llm"
@@ -208,7 +209,7 @@ func main() {
 	}
 
 	hub = cpws.NewHub(logger.Named("ws"), func(probeID string, env protocol.Envelope) {
-		handleProbeMessage(fleetMgr, emitAudit, recordAudit, cmdTracker, logger, probeID, env)
+		handleProbeMessage(fleetMgr, emitAudit, recordAudit, cmdTracker, hub, logger, probeID, env)
 	})
 
 	signingKeyHex := os.Getenv("LEGATOR_SIGNING_KEY")
@@ -232,6 +233,8 @@ func main() {
 
 	// Start offline checker
 	go offlineChecker(ctx, fleetMgr)
+
+	chatMgr := chat.NewManager(logger.Named("chat"))
 
 	mux := http.NewServeMux()
 
@@ -300,6 +303,10 @@ func main() {
 		}
 
 		wantWait := r.URL.Query().Get("wait") == "true" || r.URL.Query().Get("wait") == "1"
+		wantStream := r.URL.Query().Get("stream") == "true" || r.URL.Query().Get("stream") == "1"
+		if wantStream {
+			cmd.Stream = true
+		}
 
 		var pending *cmdtracker.PendingCommand
 		if wantWait {
@@ -504,6 +511,48 @@ func main() {
 	})
 
 	// ── WebSocket endpoint for probes ────────────────────────
+	// Chat API
+	mux.HandleFunc("GET /api/v1/probes/{id}/chat", chatMgr.HandleGetMessages)
+	mux.HandleFunc("POST /api/v1/probes/{id}/chat", chatMgr.HandleSendMessage)
+	mux.HandleFunc("GET /ws/chat", chatMgr.HandleChatWS)
+
+	// SSE endpoint for streaming command output
+	mux.HandleFunc("GET /api/v1/commands/{requestId}/stream", func(w http.ResponseWriter, r *http.Request) {
+		requestID := r.PathValue("requestId")
+		if requestID == "" {
+			http.Error(w, `{"error":"request_id required"}`, http.StatusBadRequest)
+			return
+		}
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, `{"error":"streaming not supported"}`, http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		sub, cleanup := hub.SubscribeStream(requestID, 256)
+		defer cleanup()
+
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case chunk := <-sub.Ch:
+				data, _ := json.Marshal(chunk)
+				fmt.Fprintf(w, "data: %s\n\n", data)
+				flusher.Flush()
+				if chunk.Final {
+					return
+				}
+			}
+		}
+	})
+
 	mux.HandleFunc("GET /ws/probe", hub.HandleProbeWS)
 
 	// ── Static assets ────────────────────────────────────────
@@ -589,6 +638,35 @@ func main() {
 		}
 	})
 
+	// ── Chat UI ─────────────────────────────────────────────
+	mux.HandleFunc("GET /probe/{id}/chat", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		ps, ok := fleetMgr.Get(id)
+		if !ok {
+			ps = &fleet.ProbeState{
+				ID:          id,
+				Status:      "offline",
+				PolicyLevel: protocol.CapObserve,
+			}
+		}
+
+		if tmpl == nil {
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprintf(w, `<h1>Chat: %s</h1><p>Template not loaded</p>`, id)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		data := ProbePageData{
+			Probe:  ps,
+			Uptime: calculateUptime(ps.Registered),
+		}
+		if err := tmpl.ExecuteTemplate(w, "chat.html", data); err != nil {
+			logger.Error("failed to render chat", zap.String("probe", id), zap.Error(err))
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
+	})
+
 	srv := &http.Server{
 		Addr:         cfg.ListenAddr,
 		Handler:      mux,
@@ -624,6 +702,7 @@ func handleProbeMessage(
 	emitAudit func(audit.EventType, string, string, string),
 	recordAudit func(audit.Event),
 	ct *cmdtracker.Tracker,
+	wsHub *cpws.Hub,
 	logger *zap.Logger,
 	probeID string,
 	env protocol.Envelope,
@@ -676,6 +755,27 @@ func handleProbeMessage(
 		})
 		if err := ct.Complete(result.RequestID, &result); err != nil {
 			logger.Debug("no waiting caller for result", zap.String("request_id", result.RequestID))
+		}
+
+	case protocol.MsgOutputChunk:
+		data, _ := json.Marshal(env.Payload)
+		var chunk protocol.OutputChunkPayload
+		if err := json.Unmarshal(data, &chunk); err != nil {
+			logger.Warn("bad output chunk", zap.String("probe", probeID), zap.Error(err))
+			return
+		}
+		wsHub.DispatchChunk(chunk)
+		if chunk.Final {
+			logger.Info("streaming command completed",
+				zap.String("probe", probeID),
+				zap.String("request_id", chunk.RequestID),
+				zap.Int("exit_code", chunk.ExitCode),
+			)
+			// Also complete the cmdtracker so sync callers get notified
+			_ = ct.Complete(chunk.RequestID, &protocol.CommandResultPayload{
+				RequestID: chunk.RequestID,
+				ExitCode:  chunk.ExitCode,
+			})
 		}
 
 	default:
