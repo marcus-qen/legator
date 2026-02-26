@@ -121,15 +121,12 @@ func (h *Hub) HandleProbeWS(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				pc.mu.Lock()
-				err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second))
-				pc.mu.Unlock()
-				if err != nil {
-					return
-				}
+		for range ticker.C {
+			pc.mu.Lock()
+			err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second))
+			pc.mu.Unlock()
+			if err != nil {
+				return
 			}
 		}
 	}()

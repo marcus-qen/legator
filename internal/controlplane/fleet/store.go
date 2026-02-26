@@ -293,7 +293,7 @@ func (s *Store) Delete(id string) error {
 func (s *Store) CleanupOffline(olderThan time.Duration) []string {
 	removed := s.mgr.CleanupOffline(olderThan)
 	for _, id := range removed {
-		s.db.Exec("DELETE FROM probes WHERE id = ?", id)
+		_, _ = s.db.Exec("DELETE FROM probes WHERE id = ?", id)
 	}
 	return removed
 }
