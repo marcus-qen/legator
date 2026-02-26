@@ -20,6 +20,7 @@ import (
 
 	"github.com/marcus-qen/legator/internal/controlplane/api"
 	"github.com/marcus-qen/legator/internal/controlplane/approval"
+	"github.com/marcus-qen/legator/internal/controlplane/auth"
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/chat"
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
@@ -252,6 +253,23 @@ func main() {
 			zap.String("key_hex", hex.EncodeToString(signingKey)))
 	}
 	hub.SetSigner(signing.NewSigner(signingKey))
+
+	// Auth: API key store (optional — enabled when LEGATOR_AUTH=true)
+	var authStore *auth.KeyStore
+	if os.Getenv("LEGATOR_AUTH") == "true" || os.Getenv("LEGATOR_AUTH") == "1" {
+		authDBPath := filepath.Join(cfg.DataDir, "auth.db")
+		if err := os.MkdirAll(cfg.DataDir, 0750); err == nil {
+			store, err := auth.NewKeyStore(authDBPath)
+			if err != nil {
+				logger.Warn("cannot open auth database",
+					zap.String("path", authDBPath), zap.Error(err))
+			} else {
+				authStore = store
+				logger.Info("auth store opened", zap.String("path", authDBPath))
+				defer authStore.Close()
+			}
+		}
+	}
 
 	webhookNotifier := webhook.NewNotifier()
 
@@ -681,6 +699,13 @@ func main() {
 	mux.HandleFunc("GET /api/v1/webhooks/{id}", webhookNotifier.GetWebhook)
 	mux.HandleFunc("DELETE /api/v1/webhooks/{id}", webhookNotifier.DeleteWebhook)
 	mux.HandleFunc("POST /api/v1/webhooks/{id}/test", webhookNotifier.TestWebhook)
+
+	// ── Auth API (key management) ────────────────────────────
+	if authStore != nil {
+		mux.HandleFunc("GET /api/v1/auth/keys", auth.HandleListKeys(authStore))
+		mux.HandleFunc("POST /api/v1/auth/keys", auth.HandleCreateKey(authStore))
+		mux.HandleFunc("DELETE /api/v1/auth/keys/{id}", auth.HandleDeleteKey(authStore))
+	}
 
 	// ── Approval queue API ───────────────────────────────────
 	mux.HandleFunc("GET /api/v1/approvals", func(w http.ResponseWriter, r *http.Request) {
