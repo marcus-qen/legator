@@ -137,7 +137,7 @@ func buildFleetContext(inv fleet.FleetInventory) string {
 	}
 
 	for _, probe := range inv.Probes {
-		line := fmt.Sprintf("- %s (%s) status=%s os=%s/%s policy=%s cpus=%d ram=%dMB",
+		line := fmt.Sprintf("- %s (%s) status=%s os=%s/%s policy=%s cpus=%d ram=%dMB disk=%dGB",
 			probe.ID,
 			hostnameOrID(probe.Hostname, probe.ID),
 			probe.Status,
@@ -146,6 +146,7 @@ func buildFleetContext(inv fleet.FleetInventory) string {
 			probe.PolicyLevel,
 			probe.CPUs,
 			probe.RAMBytes/(1024*1024),
+			probe.DiskBytes/(1024*1024*1024),
 		)
 		if len(probe.Tags) > 0 {
 			line += " tags=" + strings.Join(probe.Tags, ",")
