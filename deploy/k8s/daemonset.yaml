@@ -32,7 +32,7 @@ spec:
       - name: harbor-pull-secret
       containers:
       - name: probe
-        image: harbor.lab.k-dev.uk/legator/probe:latest
+        image: harbor.lab.k-dev.uk/legator/probe:v1.0.0-alpha.10
         env:
         - name: LEGATOR_SERVER_URL
           valueFrom:
@@ -45,9 +45,9 @@ spec:
               name: legator-probe-config
               key: token
         - name: LEGATOR_PROBE_TAGS
-          value: "kubernetes,daemonset,worker"
+          value: kubernetes,daemonset,worker
         - name: LEGATOR_CONFIG_DIR
-          value: "/etc/legator"
+          value: /etc/legator
         - name: NODE_NAME
           valueFrom:
             fieldRef:
@@ -72,10 +72,14 @@ spec:
             memory: 128Mi
         securityContext:
           readOnlyRootFilesystem: true
-          runAsNonRoot: false
+          runAsNonRoot: true
+          runAsUser: 65534
           allowPrivilegeEscalation: false
+          seccompProfile:
+            type: RuntimeDefault
           capabilities:
-            drop: ["ALL"]
+            drop:
+            - ALL
       volumes:
       - name: config
         emptyDir: {}
