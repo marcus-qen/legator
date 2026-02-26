@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Legator · Audit Log</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; background: #0d1117; color: #c9d1d9; min-height: 100vh; }
+      a { color: #58a6ff; text-decoration: none; }
+      .app { max-width: 1200px; margin: 0 auto; padding: 20px; }
+      .back { display: inline-block; margin-bottom: 16px; font-size: 13px; color: #8b949e; }
+      header { padding: 24px 0; border-bottom: 1px solid #21262d; margin-bottom: 24px; }
+      header h1 { font-size: 24px; color: #58a6ff; }
+      header p { color: #8b949e; font-size: 14px; margin-top: 4px; }
+      .panel { background: #161b22; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; }
+      table { width: 100%; border-collapse: collapse; }
+      th { text-align: left; padding: 10px 16px; font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #21262d; background: #0d1117; position: sticky; top: 0; }
+      td { padding: 8px 16px; border-bottom: 1px solid #21262d; font-size: 12px; }
+      .type-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }
+      .type-command { background: rgba(88,166,255,0.15); color: #58a6ff; }
+      .type-register { background: rgba(63,185,80,0.15); color: #3fb950; }
+      .type-approval { background: rgba(210,153,34,0.15); color: #d29922; }
+      .type-policy { background: rgba(163,113,247,0.15); color: #a371f7; }
+      .type-default { background: rgba(72,79,88,0.15); color: #8b949e; }
+      .empty { text-align: center; padding: 40px; color: #484f58; }
+      .table-wrap { overflow-x: auto; max-height: 80vh; overflow-y: auto; }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <a href="/" class="back">← Back to Fleet</a>
+      <header>
+        <h1>📋 Audit Log</h1>
+        <p>Immutable record of all fleet actions</p>
+      </header>
+      <section class="panel">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Type</th>
+                <th>Probe</th>
+                <th>Actor</th>
+                <th>Summary</th>
+              </tr>
+            </thead>
+            <tbody id="audit-body">
+              <tr><td colspan="5" class="empty">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+    <script>
+      function typeClass(t) {
+        t = (t||'').toLowerCase();
+        if (t.includes('command')) return 'type-command';
+        if (t.includes('register')) return 'type-register';
+        if (t.includes('approval')) return 'type-approval';
+        if (t.includes('policy')) return 'type-policy';
+        return 'type-default';
+      }
+      function fmtTime(v) {
+        if (!v) return '—';
+        const d = new Date(v);
+        return d.toLocaleString();
+      }
+      function refresh() {
+        fetch('/api/v1/audit?limit=200', {cache:'no-store'}).then(r=>r.json()).then(events => {
+          const tb = document.getElementById('audit-body');
+          if (!events || !events.length) {
+            tb.innerHTML = '<tr><td colspan="5" class="empty">No audit events recorded yet.</td></tr>';
+            return;
+          }
+          // Sort newest first
+          events.sort((a,b) => new Date(b.timestamp||0) - new Date(a.timestamp||0));
+          tb.innerHTML = events.map(e => `
+            <tr>
+              <td>${fmtTime(e.timestamp)}</td>
+              <td><span class="type-badge ${typeClass(e.type)}">${e.type||'—'}</span></td>
+              <td>${e.probe_id||'—'}</td>
+              <td>${e.actor||'system'}</td>
+              <td>${e.summary||'—'}</td>
+            </tr>
+          `).join('');
+        }).catch(()=>{
+          document.getElementById('audit-body').innerHTML = '<tr><td colspan="5" class="empty">Failed to load audit events.</td></tr>';
+        });
+      }
+      refresh();
+      setInterval(refresh, 10000);
+    </script>
+  </body>
+</html>

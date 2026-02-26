@@ -963,6 +963,33 @@ func main() {
 
 	mux.HandleFunc("GET /ws/probe", hub.HandleProbeWS)
 
+	
+	// ── Binary download (for install script) ─────────────────
+	mux.HandleFunc("GET /download/{filename}", func(w http.ResponseWriter, r *http.Request) {
+		filename := r.PathValue("filename")
+		// Serve from <data-dir>/releases/ directory
+		releasesDir := filepath.Join(cfg.DataDir, "releases")
+		filePath := filepath.Join(releasesDir, filepath.Base(filename))
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(filename)))
+		http.ServeFile(w, r, filePath)
+	})
+
+	// ── Install script ───────────────────────────────────────
+	mux.HandleFunc("GET /install.sh", func(w http.ResponseWriter, r *http.Request) {
+		installScript := filepath.Join("install", "install.sh")
+		if _, err := os.Stat(installScript); os.IsNotExist(err) {
+			http.Error(w, "install script not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		http.ServeFile(w, r, installScript)
+	})
+
 	// ── Static assets ────────────────────────────────────────
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join("web", "static")))))
 
@@ -1072,6 +1099,33 @@ func main() {
 		if err := tmpl.ExecuteTemplate(w, "chat.html", data); err != nil {
 			logger.Error("failed to render chat", zap.String("probe", id), zap.Error(err))
 			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
+	})
+
+
+	// ── Approval queue UI ────────────────────────────────────
+	mux.HandleFunc("GET /approvals", func(w http.ResponseWriter, r *http.Request) {
+		if tmpl == nil {
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, "<h1>Approval Queue</h1><p>Template not loaded</p>")
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := tmpl.ExecuteTemplate(w, "approvals.html", nil); err != nil {
+			http.Error(w, err.Error(), 500)
+		}
+	})
+
+	// ── Audit log UI ─────────────────────────────────────────
+	mux.HandleFunc("GET /audit", func(w http.ResponseWriter, r *http.Request) {
+		if tmpl == nil {
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, "<h1>Audit Log</h1><p>Template not loaded</p>")
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := tmpl.ExecuteTemplate(w, "audit.html", nil); err != nil {
+			http.Error(w, err.Error(), 500)
 		}
 	})
 
