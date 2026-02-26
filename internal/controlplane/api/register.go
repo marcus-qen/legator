@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -55,7 +56,53 @@ func NewTokenStore() *TokenStore {
 func (ts *TokenStore) SetServerURL(url string) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
-	ts.serverURL = url
+	ts.serverURL = strings.TrimRight(strings.TrimSpace(url), "/")
+}
+
+func installCommand(serverURL, token string) string {
+	serverURL = strings.TrimRight(strings.TrimSpace(serverURL), "/")
+	if serverURL == "" || token == "" {
+		return ""
+	}
+	return fmt.Sprintf(
+		"curl -sSL %s/install.sh | sudo bash -s -- --server %s --token %s",
+		serverURL, serverURL, token,
+	)
+}
+
+func requestBaseURL(r *http.Request) string {
+	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		host = strings.TrimSpace(r.Host)
+	}
+	if host == "" {
+		return ""
+	}
+
+	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
+		return strings.TrimRight(host, "/")
+	}
+
+	scheme := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))
+	if scheme == "" {
+		if r.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+	return scheme + "://" + host
+}
+
+func tokenWithInstallCommand(token *Token, fallbackBaseURL string) Token {
+	if token == nil {
+		return Token{}
+	}
+	copy := *token
+	if copy.InstallCommand == "" {
+		copy.InstallCommand = installCommand(fallbackBaseURL, copy.Value)
+	}
+	return copy
 }
 
 // Generate creates a new registration token valid for 30 minutes.
@@ -77,10 +124,7 @@ func (ts *TokenStore) Generate() *Token {
 	}
 
 	if ts.serverURL != "" {
-		token.InstallCommand = fmt.Sprintf(
-			"curl -sSL %s/install.sh | sudo bash -s -- --server %s --token %s",
-			ts.serverURL, ts.serverURL, token.Value,
-		)
+		token.InstallCommand = installCommand(ts.serverURL, token.Value)
 	}
 
 	ts.tokens[token.Value] = token
@@ -199,9 +243,10 @@ func HandleRegister(ts *TokenStore, fm fleet.Fleet, logger *zap.Logger) http.Han
 func HandleGenerateToken(ts *TokenStore, logger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := ts.Generate()
-		logger.Info("token generated", zap.String("expires", token.Expires.Format(time.RFC3339)))
+		out := tokenWithInstallCommand(token, requestBaseURL(r))
+		logger.Info("token generated", zap.String("expires", out.Expires.Format(time.RFC3339)))
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(token)
+		_ = json.NewEncoder(w).Encode(out)
 	}
 }
 
@@ -209,10 +254,16 @@ func HandleGenerateToken(ts *TokenStore, logger *zap.Logger) http.HandlerFunc {
 func HandleListTokens(ts *TokenStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		active := ts.ListActive()
+		baseURL := requestBaseURL(r)
+		tokens := make([]Token, 0, len(active))
+		for _, t := range active {
+			tokens = append(tokens, tokenWithInstallCommand(t, baseURL))
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"tokens": active,
-			"count":  len(active),
+			"tokens": tokens,
+			"count":  len(tokens),
 			"total":  ts.Count(),
 		})
 	}
@@ -266,9 +317,10 @@ func HandleRegisterWithAudit(ts *TokenStore, fm fleet.Fleet, al AuditRecorder, l
 func HandleGenerateTokenWithAudit(ts *TokenStore, al AuditRecorder, logger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := ts.Generate()
+		out := tokenWithInstallCommand(token, requestBaseURL(r))
 		al.Emit(audit.EventTokenGenerated, "", "api", "Registration token generated")
-		logger.Info("token generated", zap.String("expires", token.Expires.Format("2006-01-02T15:04:05Z")))
+		logger.Info("token generated", zap.String("expires", out.Expires.Format("2006-01-02T15:04:05Z")))
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(token)
+		_ = json.NewEncoder(w).Encode(out)
 	}
 }

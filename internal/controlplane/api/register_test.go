@@ -281,3 +281,60 @@ func TestTokenInstallCommandEmpty(t *testing.T) {
 		t.Errorf("install_command should be empty when no server URL, got: %s", token.InstallCommand)
 	}
 }
+
+func TestGenerateTokenHandlerAddsInstallCommandFromRequestHost(t *testing.T) {
+	ts := NewTokenStore() // no configured external URL
+	handler := HandleGenerateToken(ts, testLogger())
+
+	req := httptest.NewRequest("POST", "/api/v1/tokens", nil)
+	req.Host = "legator.test:8080"
+	w := httptest.NewRecorder()
+	handler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var token Token
+	if err := json.NewDecoder(w.Body).Decode(&token); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if token.InstallCommand == "" {
+		t.Fatal("expected install_command to be populated from request host")
+	}
+	if !strings.Contains(token.InstallCommand, "http://legator.test:8080/install.sh") {
+		t.Fatalf("unexpected install_command: %s", token.InstallCommand)
+	}
+}
+
+func TestHandleListTokensAddsInstallCommandFromRequestHost(t *testing.T) {
+	ts := NewTokenStore() // no configured external URL
+	ts.Generate()
+
+	handler := HandleListTokens(ts)
+	req := httptest.NewRequest("GET", "/api/v1/tokens", nil)
+	req.Host = "cp.local"
+	w := httptest.NewRecorder()
+	handler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp struct {
+		Tokens []Token `json:"tokens"`
+		Count  int     `json:"count"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Count != 1 || len(resp.Tokens) != 1 {
+		t.Fatalf("expected one token in response, got count=%d len=%d", resp.Count, len(resp.Tokens))
+	}
+	if resp.Tokens[0].InstallCommand == "" {
+		t.Fatal("expected install_command in listed token")
+	}
+	if !strings.Contains(resp.Tokens[0].InstallCommand, "http://cp.local/install.sh") {
+		t.Fatalf("unexpected install_command: %s", resp.Tokens[0].InstallCommand)
+	}
+}

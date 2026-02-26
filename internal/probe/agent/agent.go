@@ -41,9 +41,15 @@ func New(cfg *Config, logger *zap.Logger) *Agent {
 
 	client := connection.NewClient(wsURL, cfg.ProbeID, cfg.APIKey, logger.Named("ws"))
 
-	// Default policy: observe only
+	policyLevel := cfg.PolicyLevel
+	if policyLevel == "" {
+		policyLevel = protocol.CapObserve
+	}
 	policy := executor.Policy{
-		Level: protocol.CapObserve,
+		Level:   policyLevel,
+		Allowed: append([]string(nil), cfg.PolicyAllowed...),
+		Blocked: append([]string(nil), cfg.PolicyBlocked...),
+		Paths:   append([]string(nil), cfg.PolicyPaths...),
 	}
 	exec := executor.New(policy, logger.Named("exec"))
 
@@ -167,6 +173,16 @@ func (a *Agent) handleMessage(env protocol.Envelope) {
 			Blocked: policy.Blocked,
 			Paths:   policy.Paths,
 		}, a.logger.Named("exec"))
+
+		// Persist policy to config for restart safety.
+		a.config.PolicyID = policy.PolicyID
+		a.config.PolicyLevel = policy.Level
+		a.config.PolicyAllowed = append([]string(nil), policy.Allowed...)
+		a.config.PolicyBlocked = append([]string(nil), policy.Blocked...)
+		a.config.PolicyPaths = append([]string(nil), policy.Paths...)
+		if err := a.config.Save(a.config.ConfigDir); err != nil {
+			a.logger.Error("failed to persist policy update", zap.Error(err))
+		}
 
 	case protocol.MsgUpdate:
 		data, _ := json.Marshal(env.Payload)

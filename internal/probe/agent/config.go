@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/marcus-qen/legator/internal/protocol"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,7 +23,14 @@ type Config struct {
 	APIKey     string `yaml:"api_key"`
 	PolicyID   string `yaml:"policy_id,omitempty"`
 	SigningKey string `yaml:"signing_key,omitempty"` // master signing key
-	ConfigDir  string `yaml:"-"`                     // not persisted
+
+	// Last applied local policy (persisted for restart safety).
+	PolicyLevel   protocol.CapabilityLevel `yaml:"policy_level,omitempty"`
+	PolicyAllowed []string                 `yaml:"policy_allowed,omitempty"`
+	PolicyBlocked []string                 `yaml:"policy_blocked,omitempty"`
+	PolicyPaths   []string                 `yaml:"policy_paths,omitempty"`
+
+	ConfigDir string `yaml:"-"` // not persisted
 }
 
 // ConfigPath returns the full path to the config file.
@@ -44,6 +52,9 @@ func LoadConfig(configDir string) (*Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	if configDir == "" {
+		configDir = DefaultConfigDir
 	}
 	cfg.ConfigDir = configDir
 	return &cfg, nil
