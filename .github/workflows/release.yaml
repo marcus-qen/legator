@@ -53,14 +53,14 @@ jobs:
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b
         with:
           files: |
-            bin/control-plane-linux-amd64
-            bin/control-plane-linux-arm64
-            bin/probe-linux-amd64
-            bin/probe-linux-arm64
-            bin/probe-darwin-arm64
-            bin/legatorctl-linux-amd64
-            bin/legatorctl-linux-arm64
-            bin/legatorctl-darwin-arm64
+            bin/legator-control-plane-linux-amd64
+            bin/legator-control-plane-linux-arm64
+            bin/legator-probe-linux-amd64
+            bin/legator-probe-linux-arm64
+            bin/legator-probe-darwin-arm64
+            bin/legator-ctl-linux-amd64
+            bin/legator-ctl-linux-arm64
+            bin/legator-ctl-darwin-arm64
             bin/checksums.txt
             install/install.sh
           body_path: release-notes.md
