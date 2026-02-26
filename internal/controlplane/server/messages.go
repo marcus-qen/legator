@@ -2,8 +2,10 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
+	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/protocol"
 	"go.uber.org/zap"
 )
@@ -23,6 +25,8 @@ func (s *Server) handleProbeMessage(probeID string, env protocol.Envelope) {
 			_ = s.fleetMgr.Heartbeat(probeID, &hb)
 			s.emitAudit(audit.EventProbeRegistered, probeID, "system", "Auto-registered via heartbeat")
 		}
+
+		s.publishEvent(events.ProbeConnected, probeID, fmt.Sprintf("Probe %s heartbeat", probeID), nil)
 
 	case protocol.MsgInventory:
 		data, _ := json.Marshal(env.Payload)
@@ -59,6 +63,12 @@ func (s *Server) handleProbeMessage(probeID string, env protocol.Envelope) {
 		if err := s.cmdTracker.Complete(result.RequestID, &result); err != nil {
 			s.logger.Debug("no waiting caller for result", zap.String("request_id", result.RequestID))
 		}
+		evtType := events.CommandCompleted
+		if result.ExitCode != 0 {
+			evtType = events.CommandFailed
+		}
+		s.publishEvent(evtType, probeID, fmt.Sprintf("Command %s exit=%d", result.RequestID, result.ExitCode),
+			map[string]any{"request_id": result.RequestID, "exit_code": result.ExitCode})
 
 	case protocol.MsgOutputChunk:
 		data, _ := json.Marshal(env.Payload)

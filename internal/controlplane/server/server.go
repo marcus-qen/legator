@@ -20,6 +20,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/chat"
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
 	"github.com/marcus-qen/legator/internal/controlplane/config"
+	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/llm"
 	"github.com/marcus-qen/legator/internal/controlplane/metrics"
@@ -66,6 +67,9 @@ type Server struct {
 	webhookNotifier *webhook.Notifier
 	webhookStore    *webhook.Store
 
+	// Events
+	eventBus *events.Bus
+
 	// LLM
 	taskRunner *llm.TaskRunner
 
@@ -82,6 +86,8 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 		cfg:    cfg,
 		logger: logger,
 	}
+
+	s.eventBus = events.NewBus(256)
 
 	if err := s.initFleet(); err != nil {
 		return nil, err
@@ -469,6 +475,16 @@ func (s *Server) metricsAuditCounter() metrics.AuditCounter {
 		return s.auditStore
 	}
 	return s.auditLog
+}
+
+// publishEvent emits an event to the bus for SSE subscribers.
+func (s *Server) publishEvent(typ events.EventType, probeID, summary string, detail interface{}) {
+	s.eventBus.Publish(events.Event{
+		Type:    typ,
+		ProbeID: probeID,
+		Summary: summary,
+		Detail:  detail,
+	})
 }
 
 // dispatchAndWait sends a command to a probe and waits for the result.

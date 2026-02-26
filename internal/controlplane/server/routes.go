@@ -16,6 +16,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
+	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/metrics"
 	"github.com/marcus-qen/legator/internal/protocol"
@@ -62,6 +63,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Audit
 	mux.HandleFunc("GET /api/v1/audit", s.handleAuditLog)
+
+	// Events SSE stream
+	mux.HandleFunc("GET /api/v1/events", s.handleEventsSSE)
 
 	// Commands
 	mux.HandleFunc("GET /api/v1/commands/pending", s.handlePendingCommands)
@@ -220,6 +224,8 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.emitAudit(audit.EventCommandSent, id, "api", fmt.Sprintf("Command dispatched: %s", cmd.Command))
+	s.publishEvent(events.CommandDispatched, id, fmt.Sprintf("Command dispatched: %s", cmd.Command),
+		map[string]string{"request_id": cmd.RequestID, "command": cmd.Command})
 
 	if !wantWait {
 		w.Header().Set("Content-Type", "application/json")
@@ -534,6 +540,7 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 
 	s.emitAudit(audit.EventApprovalDecided, req.ProbeID, body.DecidedBy,
 		fmt.Sprintf("Approval %s for: %s", body.Decision, req.Command.Command))
+	s.publishEvent(events.ApprovalDecided, req.ProbeID, fmt.Sprintf("Approval %s: %s", body.Decision, req.Command.Command), nil)
 
 	if req.Decision == approval.DecisionApproved {
 		if err := s.hub.SendTo(req.ProbeID, protocol.MsgCommand, *req.Command); err != nil {
@@ -607,6 +614,42 @@ func (s *Server) handleSSEStream(w http.ResponseWriter, r *http.Request) {
 			if chunk.Final {
 				return
 			}
+		}
+	}
+}
+
+// ── Events SSE ───────────────────────────────────────────────
+
+func (s *Server) handleEventsSSE(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, `{"error":"streaming not supported"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	subID := fmt.Sprintf("sse-%d", time.Now().UnixNano())
+	ch := s.eventBus.Subscribe(subID)
+	defer s.eventBus.Unsubscribe(subID)
+
+	// Send initial keepalive
+	fmt.Fprintf(w, ": connected\n\n")
+	flusher.Flush()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case evt, ok := <-ch:
+			if !ok {
+				return
+			}
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, evt.JSON())
+			flusher.Flush()
 		}
 	}
 }
