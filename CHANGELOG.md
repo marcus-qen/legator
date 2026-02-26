@@ -1,5 +1,35 @@
 # Changelog
 
+## v1.0.0-alpha.3 (2026-02-26)
+
+Hardening, observability, and build reliability.
+
+### Build & Release
+- **Makefile** with configurable `GO` variable, all targets: build, test, lint, e2e, release-build, clean
+- **Version metadata hardening** — `init()` defaults to `dev`/`unknown`/binary-modtime when ldflags absent
+- CI workflows aligned to use Makefile targets with explicit ldflags
+- Version metadata validation test
+
+### Observability
+- **Webhook delivery metrics** — `legator_webhooks_sent_total`, `legator_webhooks_errors_total`, `legator_webhook_duration_seconds` (Prometheus histogram)
+- **Webhook delivery diagnostics** — `GET /api/v1/webhooks/deliveries` with masked URLs, timing, status codes
+- In-memory ring buffer (100 entries) for fast delivery history
+- `DeliveryObserver` pattern decouples metrics from notifier
+
+### Real-time UI
+- **Probe detail incremental SSE** — status badge, health, last-seen, system fields update via DOM patching (no full reload)
+- WebSocket lifecycle hooks emit `probe.connected`/`probe.disconnected` events with status payload
+- Connection indicator badge (live/reconnecting) with bounded exponential backoff
+- Template anchor tests ensure SSE wiring survives refactors
+
+### Documentation
+- Deployment guide with systemd, Caddy, probe install, and upgrade procedures
+- Alpha.2 changelog section
+
+### Stats
+- 95 Go files, 28 test suites, 29 e2e tests
+- Makefile-driven builds with deterministic version injection
+
 ## v1.0.0-alpha.2 (2026-02-26)
 
 Auth hardening, observability, and public deployment.
