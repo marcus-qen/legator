@@ -30,7 +30,7 @@ jobs:
         run: go test ./...
 
       - name: Build all binaries
-        run: make build-all
+        run: make release-build GO=go VERSION="${{ github.ref_name }}"
 
       - name: Generate checksums
         run: |

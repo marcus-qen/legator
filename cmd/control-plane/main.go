@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/marcus-qen/legator/internal/controlplane/config"
 	"github.com/marcus-qen/legator/internal/controlplane/server"
@@ -14,10 +15,33 @@ import (
 )
 
 var (
-	version = "dev"
-	commit  = "none"
-	date    = "unknown"
+	version string
+	commit  string
+	date    string
 )
+
+func init() {
+	if version == "" {
+		version = "dev"
+	}
+	if commit == "" {
+		commit = "unknown"
+	}
+	if date == "" {
+		date = buildTimestamp()
+	}
+}
+
+func buildTimestamp() string {
+	exePath, err := os.Executable()
+	if err == nil {
+		if info, statErr := os.Stat(exePath); statErr == nil {
+			return info.ModTime().UTC().Format(time.RFC3339)
+		}
+	}
+
+	return time.Now().UTC().Format(time.RFC3339)
+}
 
 func main() {
 	logger, _ := zap.NewProduction()

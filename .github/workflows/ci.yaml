@@ -34,8 +34,12 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
-      - name: Build control-plane and probe
-        run: make build-cp build-probe
+      - name: Build binaries
+        run: |
+          make build GO=go \
+            VERSION="${GITHUB_REF_NAME:-dev}" \
+            COMMIT="${GITHUB_SHA::7}" \
+            DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
       - name: Upload binaries
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -44,6 +48,7 @@ jobs:
           path: |
             bin/control-plane
             bin/probe
+            bin/legatorctl
 
   lint:
     name: Lint
