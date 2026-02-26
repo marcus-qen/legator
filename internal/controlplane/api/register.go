@@ -25,12 +25,13 @@ type AuditRecorder interface {
 	Emit(typ audit.EventType, probeID, actor, summary string)
 }
 
-// Token represents a single-use registration token.
+// Token represents a registration token.
 type Token struct {
 	Value          string    `json:"token"`
 	Created        time.Time `json:"created"`
 	Expires        time.Time `json:"expires"`
 	Used           bool      `json:"used"`
+	MultiUse       bool      `json:"multi_use,omitempty"`
 	InstallCommand string    `json:"install_command,omitempty"`
 }
 
@@ -105,8 +106,18 @@ func tokenWithInstallCommand(token *Token, fallbackBaseURL string) Token {
 	return copy
 }
 
+// GenerateOptions controls token generation behavior.
+type GenerateOptions struct {
+	MultiUse bool
+}
+
 // Generate creates a new registration token valid for 30 minutes.
 func (ts *TokenStore) Generate() *Token {
+	return ts.GenerateWithOptions(GenerateOptions{})
+}
+
+// GenerateWithOptions creates a new registration token using options.
+func (ts *TokenStore) GenerateWithOptions(opts GenerateOptions) *Token {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 
@@ -118,9 +129,10 @@ func (ts *TokenStore) Generate() *Token {
 	sig := hex.EncodeToString(mac.Sum(nil))[:16]
 
 	token := &Token{
-		Value:   fmt.Sprintf("prb_%s_%d_%s", id, now.Unix(), sig),
-		Created: now,
-		Expires: now.Add(30 * time.Minute),
+		Value:    fmt.Sprintf("prb_%s_%d_%s", id, now.Unix(), sig),
+		Created:  now,
+		Expires:  now.Add(30 * time.Minute),
+		MultiUse: opts.MultiUse,
 	}
 
 	if ts.serverURL != "" {
@@ -140,14 +152,19 @@ func (ts *TokenStore) Consume(value string) bool {
 	if !ok {
 		return false
 	}
-	if t.Used || time.Now().UTC().After(t.Expires) {
+	if time.Now().UTC().After(t.Expires) {
 		return false
 	}
-	t.Used = true
+	if t.Used {
+		return false
+	}
+	if !t.MultiUse {
+		t.Used = true
+	}
 	return true
 }
 
-// ListActive returns all tokens that are unexpired and unused.
+// ListActive returns all tokens that are still valid for registration.
 func (ts *TokenStore) ListActive() []*Token {
 	ts.mu.RLock()
 	defer ts.mu.RUnlock()
@@ -242,9 +259,13 @@ func HandleRegister(ts *TokenStore, fm fleet.Fleet, logger *zap.Logger) http.Han
 // HandleGenerateToken returns an HTTP handler for creating registration tokens.
 func HandleGenerateToken(ts *TokenStore, logger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := ts.Generate()
+		multiUse := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("multi_use")), "true")
+		token := ts.GenerateWithOptions(GenerateOptions{MultiUse: multiUse})
 		out := tokenWithInstallCommand(token, requestBaseURL(r))
-		logger.Info("token generated", zap.String("expires", out.Expires.Format(time.RFC3339)))
+		logger.Info("token generated",
+			zap.String("expires", out.Expires.Format(time.RFC3339)),
+			zap.Bool("multi_use", out.MultiUse),
+		)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(out)
 	}
@@ -316,10 +337,14 @@ func HandleRegisterWithAudit(ts *TokenStore, fm fleet.Fleet, al AuditRecorder, l
 // HandleGenerateTokenWithAudit wraps HandleGenerateToken with audit logging.
 func HandleGenerateTokenWithAudit(ts *TokenStore, al AuditRecorder, logger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := ts.Generate()
+		multiUse := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("multi_use")), "true")
+		token := ts.GenerateWithOptions(GenerateOptions{MultiUse: multiUse})
 		out := tokenWithInstallCommand(token, requestBaseURL(r))
 		al.Emit(audit.EventTokenGenerated, "", "api", "Registration token generated")
-		logger.Info("token generated", zap.String("expires", out.Expires.Format("2006-01-02T15:04:05Z")))
+		logger.Info("token generated",
+			zap.String("expires", out.Expires.Format("2006-01-02T15:04:05Z")),
+			zap.Bool("multi_use", out.MultiUse),
+		)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(out)
 	}
