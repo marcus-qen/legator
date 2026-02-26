@@ -82,7 +82,11 @@ func (e *Engine) Start() {
 		e.subCh = e.bus.Subscribe(e.subID)
 	}
 
-	go e.loop()
+	stopCh := e.stopCh
+	tickCh := e.ticker.C
+	subCh := e.subCh
+
+	go e.loop(stopCh, tickCh, subCh)
 	go e.safeEvaluate("startup")
 }
 
@@ -107,14 +111,14 @@ func (e *Engine) Stop() {
 	e.subCh = nil
 }
 
-func (e *Engine) loop() {
+func (e *Engine) loop(stopCh <-chan struct{}, tickCh <-chan time.Time, subCh <-chan events.Event) {
 	for {
 		select {
-		case <-e.stopCh:
+		case <-stopCh:
 			return
-		case <-e.ticker.C:
+		case <-tickCh:
 			e.safeEvaluate("ticker")
-		case evt, ok := <-e.subCh:
+		case evt, ok := <-subCh:
 			if !ok {
 				return
 			}

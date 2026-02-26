@@ -1,57 +1,38 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Legator Login</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <link rel="stylesheet" href="/static/style.css" />
-  </head>
-  <body>
-    <main class="login-shell">
-      <section class="login-card">
-        <div class="login-brand">
-          <span class="mark"><i data-lucide="cpu" class="icon-20"></i></span>
-          <div>
-            <h1>Legator</h1>
-            <p class="subtitle">Control Plane Login</p>
-          </div>
-        </div>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{if .Title}}{{.Title}}{{else}}Legator Login{{end}}</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="login-page">
+  <main class="login-card">
+    <div class="login-brand">LEGATOR</div>
+    <p class="muted">Control Plane Login</p>
 
-        {{if .Error}}
-        <div class="error-banner">{{.Error}}</div>
-        {{end}}
+    {{if .Error}}
+    <div class="tag tag-offline" style="display:block; margin: 12px 0;">{{.Error}}</div>
+    {{end}}
 
-        {{if .OIDCEnabled}}
-        <a class="btn btn-primary w-full justify-center py-2.5" href="/auth/oidc/login">Sign in with {{.OIDCProviderName}}</a>
-        <div class="divider"><span>or</span></div>
-        {{end}}
+    {{if .OIDCEnabled}}
+    <a class="btn btn-primary" style="width:100%; justify-content:center;" href="/auth/oidc/login">Sign in with {{.OIDCProviderName}}</a>
+    <div class="divider"><span>or</span></div>
+    {{end}}
 
-        <form method="POST" action="/login" class="space-y-3">
-          <div>
-            <label class="form-label" for="username">Username</label>
-            <input id="username" name="username" type="text" autocomplete="username" value="{{.Username}}" required />
-          </div>
+    <form method="POST" action="/login" class="feed" autocomplete="off">
+      <label>
+        <span class="muted">Username</span>
+        <input id="username" name="username" type="text" class="input" autocomplete="username" value="{{.Username}}" required />
+      </label>
 
-          <div>
-            <label class="form-label" for="password">Password</label>
-            <input id="password" name="password" type="password" autocomplete="current-password" required />
-          </div>
+      <label>
+        <span class="muted">Password</span>
+        <input id="password" name="password" type="password" class="input" autocomplete="current-password" required />
+      </label>
 
-          <button type="submit" class="btn btn-primary w-full justify-center py-2.5">Sign in</button>
-        </form>
-
-        <div class="login-foot">Legator multi-user access</div>
-      </section>
-    </main>
-
-    <script>
-      if (window.lucide) {
-        window.lucide.createIcons();
-      }
-    </script>
-  </body>
+      <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center;">Sign in</button>
+    </form>
+  </main>
+</body>
 </html>

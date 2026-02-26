@@ -1,207 +1,125 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Legator · Audit Log</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <link rel="stylesheet" href="/static/style.css" />
-  </head>
-  <body>
-    <div class="app-layout">
-      <aside class="sidebar" id="app-sidebar">
-        <div class="sidebar-brand">
-          <span class="brand-mark"><i data-lucide="cpu" class="icon-18"></i></span>
-          <div class="brand-copy">
-            <strong>Legator</strong>
-            <span>Control Plane</span>
-          </div>
-        </div>
+{{define "title"}}Audit — Legator{{end}}
 
-        <nav class="sidebar-nav">
-          <a class="sidebar-link" href="/">
-            <i data-lucide="server" class="icon-16"></i>
-            <span>Fleet</span>
-            <span class="count" data-badge="probes">0</span>
-          </a>
-          <a class="sidebar-link" href="#" data-nav-chat>
-            <i data-lucide="message-square" class="icon-16"></i>
-            <span>Chat</span>
-          </a>
-          <a class="sidebar-link" href="/approvals">
-            <i data-lucide="shield-check" class="icon-16"></i>
-            <span>Approvals</span>
-            <span class="count" data-badge="approvals">0</span>
-          </a>
-          <a class="sidebar-link active" href="/audit">
-            <i data-lucide="scroll-text" class="icon-16"></i>
-            <span>Audit</span>
-          </a>
-          <a class="sidebar-link" href="/alerts">
-            <i data-lucide="bell" class="icon-16"></i>
-            <span>Alerts</span>
-          </a>
-          <a class="sidebar-link" href="/">
-            <i data-lucide="settings" class="icon-16"></i>
-            <span>Settings</span>
-          </a>
-        </nav>
+{{define "header"}}
+<div>
+  <h1 class="page-title">Audit</h1>
+  <span class="page-meta">Immutable timeline</span>
+</div>
+{{end}}
 
-        <div class="sidebar-footer">
-          {{if .CurrentUser}}
-          <div class="user-chip">
-            <div class="meta">
-              <strong>{{.CurrentUser.Username}}</strong>
-              <span>Signed in</span>
-            </div>
-            <span class="role-badge role-{{if .CurrentUser.Role}}{{.CurrentUser.Role}}{{else}}unknown{{end}}">{{if .CurrentUser.Role}}{{.CurrentUser.Role}}{{else}}viewer{{end}}</span>
-          </div>
-          {{end}}
-          <form method="POST" action="/logout" class="logout-form">
-            <button type="submit" class="btn btn-ghost w-full justify-center">
-              <i data-lucide="log-out" class="icon-14"></i>
-              Logout
-            </button>
-          </form>
-        </div>
-      </aside>
+{{define "content"}}
+<section class="panel">
+  <div class="filters">
+    <input id="filter-text" type="text" placeholder="Filter by probe, actor, summary…" class="input" />
+    <select id="filter-type" class="input">
+      <option value="">All event types</option>
+      <option value="command">Command</option>
+      <option value="probe">Probe</option>
+      <option value="approval">Approval</option>
+      <option value="policy">Policy</option>
+    </select>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Type</th>
+          <th>Probe</th>
+          <th>Actor</th>
+          <th>Summary</th>
+        </tr>
+      </thead>
+      <tbody id="audit-body">
+        <tr><td colspan="5" class="empty-state">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{{end}}
 
-      <div class="sidebar-overlay" data-sidebar-close></div>
+{{define "scripts"}}
+<script>
+(() => {
+  let latestEvents = [];
 
-      <main class="main-content">
-        <header class="page-header">
-          <div>
-            <button class="sidebar-toggle" data-sidebar-toggle aria-label="Toggle navigation">
-              <i data-lucide="menu" class="icon-16"></i>
-            </button>
-            <h1 class="page-title">Audit Log</h1>
-            <p class="page-subtitle">Immutable timeline of actions, decisions, and automation across the fleet.</p>
-          </div>
-        </header>
+  function typeClass(type) {
+    const t = (type || '').toLowerCase();
+    if (t.includes('command')) return 'tag-online';
+    if (t.includes('register') || t.includes('probe')) return 'tag-pending';
+    if (t.includes('approval')) return 'tag-degraded';
+    if (t.includes('policy')) return 'tag-offline';
+    return '';
+  }
 
-        <section class="panel">
-          <div class="audit-filters">
-            <input id="filter-text" type="text" placeholder="Filter by probe, actor, summary…" class="form-control" />
-            <select id="filter-type" class="form-control">
-              <option value="">All event types</option>
-              <option value="command">Command</option>
-              <option value="probe">Probe</option>
-              <option value="approval">Approval</option>
-              <option value="policy">Policy</option>
-            </select>
-          </div>
+  function fmtTime(value) {
+    if (!value) return '—';
+    return new Date(value).toLocaleString();
+  }
 
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th><span class="sort-head">Time <i data-lucide="chevrons-up-down" class="icon-14"></i></span></th>
-                  <th>Type</th>
-                  <th>Probe</th>
-                  <th>Actor</th>
-                  <th>Summary</th>
-                </tr>
-              </thead>
-              <tbody id="audit-body">
-                <tr><td colspan="5" class="empty-state">Loading…</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </main>
-    </div>
+  function matchesFilters(event) {
+    const textFilter = (document.getElementById('filter-text').value || '').trim().toLowerCase();
+    const typeFilter = (document.getElementById('filter-type').value || '').trim().toLowerCase();
 
-    <script src="/static/app.js"></script>
-    <script>
-      let latestEvents = [];
+    const type = (event.type || '').toLowerCase();
+    const probe = (event.probe_id || '').toLowerCase();
+    const actor = (event.actor || '').toLowerCase();
+    const summary = (event.summary || '').toLowerCase();
 
-      function typeClass(t) {
-        t = (t || '').toLowerCase();
-        if (t.includes('command')) return 'type-command';
-        if (t.includes('register') || t.includes('probe')) return 'type-register';
-        if (t.includes('approval')) return 'type-approval';
-        if (t.includes('policy')) return 'type-policy';
-        return 'type-default';
-      }
+    if (typeFilter && !type.includes(typeFilter)) return false;
+    if (!textFilter) return true;
 
-      function fmtTime(v) {
-        if (!v) return '—';
-        return new Date(v).toLocaleString();
-      }
+    return type.includes(textFilter) || probe.includes(textFilter) || actor.includes(textFilter) || summary.includes(textFilter);
+  }
 
-      function matchesFilters(event) {
-        const textFilter = (document.getElementById('filter-text').value || '').trim().toLowerCase();
-        const typeFilter = (document.getElementById('filter-type').value || '').trim().toLowerCase();
+  function render(events) {
+    const body = document.getElementById('audit-body');
+    const filtered = (events || []).filter(matchesFilters);
 
-        const type = (event.type || '').toLowerCase();
-        const probe = (event.probe_id || '').toLowerCase();
-        const actor = (event.actor || '').toLowerCase();
-        const summary = (event.summary || '').toLowerCase();
+    if (!filtered.length) {
+      body.innerHTML = '<tr><td colspan="5" class="empty-state">No matching audit events.</td></tr>';
+      return;
+    }
 
-        if (typeFilter && !type.includes(typeFilter)) {
-          return false;
-        }
+    body.innerHTML = filtered.map((event, idx) => `
+      <tr class="probe-row" onclick="toggleAuditDetail(${idx})">
+        <td>${fmtTime(event.timestamp)}</td>
+        <td><span class="tag ${typeClass(event.type)}">${event.type || '—'}</span></td>
+        <td>${event.probe_id || '—'}</td>
+        <td>${event.actor || 'system'}</td>
+        <td>${event.summary || '—'}</td>
+      </tr>
+      <tr id="audit-detail-${idx}" style="display:none;">
+        <td colspan="5"><pre class="chat-code">${JSON.stringify(event, null, 2)}</pre></td>
+      </tr>
+    `).join('');
+  }
 
-        if (!textFilter) {
-          return true;
-        }
+  window.toggleAuditDetail = function (idx) {
+    const row = document.getElementById('audit-detail-' + idx);
+    if (!row) return;
+    row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+  };
 
-        return type.includes(textFilter) || probe.includes(textFilter) || actor.includes(textFilter) || summary.includes(textFilter);
-      }
+  function refresh() {
+    fetch('/api/v1/audit?limit=300', { cache: 'no-store' })
+      .then((resp) => resp.json())
+      .then((payload) => {
+        const events = Array.isArray(payload) ? payload : (payload && Array.isArray(payload.events) ? payload.events : []);
+        events.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+        latestEvents = events;
+        render(latestEvents);
+      })
+      .catch(() => {
+        document.getElementById('audit-body').innerHTML = '<tr><td colspan="5" class="empty-state">Failed to load audit events.</td></tr>';
+      });
+  }
 
-      function render(events) {
-        const tb = document.getElementById('audit-body');
-        const filtered = (events || []).filter(matchesFilters);
+  document.getElementById('filter-text').addEventListener('input', () => render(latestEvents));
+  document.getElementById('filter-type').addEventListener('change', () => render(latestEvents));
 
-        if (!filtered.length) {
-          tb.innerHTML = '<tr><td colspan="5" class="empty-state">No matching audit events.</td></tr>';
-          return;
-        }
-
-        tb.innerHTML = filtered.map((e, idx) => `
-          <tr class="probe-row" onclick="toggleDetail(${idx})">
-            <td>${fmtTime(e.timestamp)}</td>
-            <td><span class="type-badge ${typeClass(e.type)}">${e.type || '—'}</span></td>
-            <td>${e.probe_id || '—'}</td>
-            <td>${e.actor || 'system'}</td>
-            <td>${e.summary || '—'}</td>
-          </tr>
-          <tr id="audit-detail-${idx}" class="audit-detail-row" style="display:none;">
-            <td colspan="5"><pre class="audit-detail">${JSON.stringify(e, null, 2)}</pre></td>
-          </tr>
-        `).join('');
-      }
-
-      window.toggleDetail = function (idx) {
-        const row = document.getElementById('audit-detail-' + idx);
-        if (!row) return;
-        row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
-      };
-
-      function refresh() {
-        fetch('/api/v1/audit?limit=300', { cache: 'no-store' }).then((r) => r.json()).then((events) => {
-          if (!events || !events.length) {
-            latestEvents = [];
-            render([]);
-            return;
-          }
-
-          events.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
-          latestEvents = events;
-          render(latestEvents);
-        }).catch(() => {
-          document.getElementById('audit-body').innerHTML = '<tr><td colspan="5" class="empty-state">Failed to load audit events.</td></tr>';
-        });
-      }
-
-      document.getElementById('filter-text').addEventListener('input', () => render(latestEvents));
-      document.getElementById('filter-type').addEventListener('change', () => render(latestEvents));
-
-      refresh();
-      setInterval(refresh, 10000);
-    </script>
-  </body>
-</html>
+  refresh();
+  setInterval(refresh, 10000);
+})();
+</script>
+{{end}}
