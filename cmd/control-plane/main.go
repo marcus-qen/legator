@@ -271,7 +271,25 @@ func main() {
 		}
 	}
 
-	webhookNotifier := webhook.NewNotifier()
+	// Webhook notifier: persistent when data dir available
+	var webhookNotifier *webhook.Notifier
+	var webhookStore *webhook.Store
+	webhookDBPath := filepath.Join(cfg.DataDir, "webhook.db")
+	if err := os.MkdirAll(cfg.DataDir, 0750); err == nil {
+		store, err := webhook.NewStore(webhookDBPath)
+		if err != nil {
+			logger.Warn("cannot open webhook database, falling back to in-memory",
+				zap.String("path", webhookDBPath), zap.Error(err))
+			webhookNotifier = webhook.NewNotifier()
+		} else {
+			webhookStore = store
+			webhookNotifier = store.Notifier()
+			logger.Info("webhook store opened", zap.String("path", webhookDBPath))
+			defer webhookStore.Close()
+		}
+	} else {
+		webhookNotifier = webhook.NewNotifier()
+	}
 
 	// Start offline checker
 	go offlineChecker(ctx, fleetMgr, webhookNotifier)
@@ -1057,6 +1075,7 @@ func main() {
 		zap.Bool("audit_persistent", auditStore != nil),
 		zap.Bool("fleet_persistent", fleetStore != nil),
 		zap.Bool("chat_persistent", chatStore != nil),
+		zap.Bool("webhook_persistent", webhookStore != nil),
 	)
 
 	go func() {
