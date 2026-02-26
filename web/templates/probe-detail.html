@@ -15,7 +15,12 @@
       .header { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 20px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; }
       .header-left h1 { font-size: 20px; color: #c9d1d9; }
       .header-left .meta { font-size: 12px; color: #8b949e; margin-top: 4px; }
-      .header-right { display: flex; gap: 12px; align-items: center; }
+      .header-right { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+      .user-nav { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; color: #8b949e; }
+      .user-nav strong { color: #c9d1d9; }
+      .user-nav form { margin: 0; }
+      .user-nav button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px; padding: 3px 8px; font-size: 11px; cursor: pointer; }
+      .user-nav button:hover { border-color: #58a6ff; }
       .badge { display: inline-block; padding: 4px 12px; border-radius: 16px; font-size: 12px; font-weight: 600; }
       .badge-online { background: rgba(63,185,80,0.15); color: #3fb950; }
       .badge-offline { background: rgba(248,81,73,0.15); color: #f85149; }
@@ -87,6 +92,12 @@
           <div class="meta-note" id="probe-refresh-note" role="status" aria-live="polite"></div>
         </div>
         <div class="header-right">
+          {{if .CurrentUser}}
+          <div class="user-nav">
+            <span>{{.CurrentUser.Username}}</span>
+            <form method="POST" action="/logout"><button type="submit">Logout</button></form>
+          </div>
+          {{end}}
           <span id="probe-status-badge" class="badge badge-{{$statusClass}}">{{humanizeStatus .Probe.Status}}</span>
           <span id="probe-health-badge" class="health-badge {{$healthClass}}">Health: <span id="probe-health-score">{{$healthScore}}</span>/100</span>
           <span id="probe-conn-badge" class="conn-badge conn-reconnecting" role="status" aria-live="polite">reconnecting</span>

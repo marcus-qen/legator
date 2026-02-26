@@ -28,6 +28,17 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /version", s.handleVersion)
 
+	// Login/session
+	mux.HandleFunc("GET /login", auth.HandleLoginPage(filepath.Join("web", "templates")))
+	mux.HandleFunc("POST /login", auth.HandleLogin(s.userAuth, s.sessionCreator))
+	mux.HandleFunc("POST /logout", auth.HandleLogout(s.sessionDeleter))
+
+	// Current user + RBAC user management (Track 2 stubs)
+	mux.HandleFunc("GET /api/v1/me", auth.HandleMe())
+	mux.HandleFunc("GET /api/v1/users", s.withPermission(auth.PermAdmin, s.handleListUsers))
+	mux.HandleFunc("POST /api/v1/users", s.withPermission(auth.PermAdmin, s.handleCreateUser))
+	mux.HandleFunc("DELETE /api/v1/users/{id}", s.withPermission(auth.PermAdmin, s.handleDeleteUser))
+
 	// Fleet API
 	mux.HandleFunc("GET /api/v1/probes", s.handleListProbes)
 	mux.HandleFunc("GET /api/v1/probes/{id}", s.handleGetProbe)
@@ -134,22 +145,47 @@ func (s *Server) withPermission(perm auth.Permission, next http.HandlerFunc) htt
 }
 
 func (s *Server) requirePermission(w http.ResponseWriter, r *http.Request, perm auth.Permission) bool {
-	if s.authStore == nil {
+	if s.authStore == nil && s.sessionValidator == nil {
 		return true
 	}
 
-	key := auth.FromContext(r.Context())
-	if key == nil {
+	if !auth.IsAuthenticated(r.Context()) {
 		http.Error(w, `{"error":"authentication required"}`, http.StatusUnauthorized)
 		return false
 	}
 
-	if !auth.HasPermission(key, perm) {
+	if !auth.HasPermissionFromContext(r.Context(), perm) {
 		http.Error(w, `{"error":"insufficient permissions","required":"`+string(perm)+`"}`, http.StatusForbidden)
 		return false
 	}
 
 	return true
+}
+
+func (s *Server) currentTemplateUser(r *http.Request) *TemplateUser {
+	user := auth.UserFromContext(r.Context())
+	if user == nil {
+		return nil
+	}
+	return &TemplateUser{Username: user.Username, Role: user.Role}
+}
+
+func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotImplemented)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": "user management is not implemented in this track"})
+}
+
+func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotImplemented)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": "user management is not implemented in this track"})
+}
+
+func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotImplemented)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": "user management is not implemented in this track"})
 }
 
 // ── Health / Version ─────────────────────────────────────────
@@ -877,8 +913,9 @@ func (s *Server) handleFleetPage(w http.ResponseWriter, r *http.Request) {
 			Degraded: counts["degraded"],
 			Total:    len(probes),
 		},
-		Version: Version,
-		Commit:  Commit,
+		Version:     Version,
+		Commit:      Commit,
+		CurrentUser: s.currentTemplateUser(r),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -910,8 +947,9 @@ func (s *Server) handleProbeDetailPage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	data := ProbePageData{
-		Probe:  ps,
-		Uptime: calculateUptime(ps.Registered),
+		Probe:       ps,
+		Uptime:      calculateUptime(ps.Registered),
+		CurrentUser: s.currentTemplateUser(r),
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "probe-detail.html", data); err != nil {
 		s.logger.Error("failed to render probe detail", zap.String("probe", id), zap.Error(err))
@@ -941,8 +979,9 @@ func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	data := ProbePageData{
-		Probe:  ps,
-		Uptime: calculateUptime(ps.Registered),
+		Probe:       ps,
+		Uptime:      calculateUptime(ps.Registered),
+		CurrentUser: s.currentTemplateUser(r),
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "chat.html", data); err != nil {
 		s.logger.Error("failed to render chat", zap.String("probe", id), zap.Error(err))
@@ -960,7 +999,12 @@ func (s *Server) handleApprovalsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tmpl.ExecuteTemplate(w, "approvals.html", nil); err != nil {
+	data := struct {
+		CurrentUser *TemplateUser
+	}{
+		CurrentUser: s.currentTemplateUser(r),
+	}
+	if err := s.tmpl.ExecuteTemplate(w, "approvals.html", data); err != nil {
 		http.Error(w, err.Error(), 500)
 	}
 }
@@ -975,7 +1019,12 @@ func (s *Server) handleAuditPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tmpl.ExecuteTemplate(w, "audit.html", nil); err != nil {
+	data := struct {
+		CurrentUser *TemplateUser
+	}{
+		CurrentUser: s.currentTemplateUser(r),
+	}
+	if err := s.tmpl.ExecuteTemplate(w, "audit.html", data); err != nil {
 		http.Error(w, err.Error(), 500)
 	}
 }

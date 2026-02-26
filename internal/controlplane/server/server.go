@@ -59,6 +59,13 @@ type Server struct {
 	chatStore  *chat.Store
 	authStore  *auth.KeyStore
 
+	// Multi-user auth adapters (wired by Track 1 implementation)
+	userAuth           auth.UserAuthenticator
+	sessionCreator     auth.SessionCreator
+	sessionValidator   auth.SessionValidator
+	sessionDeleter     auth.SessionDeleter
+	permissionResolver auth.UserPermissionResolver
+
 	// Policy
 	policyStore      policy.PolicyManager
 	policyPersistent *policy.PersistentStore
@@ -109,15 +116,19 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.registerRoutes(mux)
 
 	var handler http.Handler = mux
-	if s.authStore != nil {
-		handler = auth.Middleware(s.authStore, []string{
+	if s.authStore != nil || s.sessionValidator != nil {
+		authMiddleware := auth.NewMiddleware(s.authStore, []string{
 			"/healthz",
 			"/version",
 			"/api/v1/register",
 			"/download/*",
 			"/install.sh",
+			"/login",
+			"/logout",
 			"/static/*",
-		})(handler)
+		})
+		authMiddleware.SetSessionAuth(s.sessionValidator, s.permissionResolver)
+		handler = authMiddleware.Wrap(handler)
 	}
 
 	s.httpServer = &http.Server{
