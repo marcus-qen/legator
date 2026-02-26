@@ -212,3 +212,47 @@ func TestHandleMeReturnsUserFromContext(t *testing.T) {
 		t.Fatalf("unexpected /me payload: %#v", got)
 	}
 }
+
+func TestHandleLoginPageShowsOIDCButtonWhenEnabled(t *testing.T) {
+	h := HandleLoginPage(filepath.Join("..", "..", "..", "web", "templates"), LoginPageOptions{
+		OIDCEnabled:      true,
+		OIDCProviderName: "Keycloak",
+	})
+	req := httptest.NewRequest(http.MethodGet, "/login", nil)
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Sign in with Keycloak") {
+		t.Fatalf("expected OIDC button in login page, got: %s", body)
+	}
+	if !strings.Contains(body, "href=\"/auth/oidc/login\"") {
+		t.Fatalf("expected OIDC login link, got: %s", body)
+	}
+	if !strings.Contains(body, "<span>or</span>") {
+		t.Fatalf("expected divider when OIDC enabled, got: %s", body)
+	}
+}
+
+func TestHandleLoginPageUnchangedWhenOIDCDisabled(t *testing.T) {
+	h := HandleLoginPage(filepath.Join("..", "..", "..", "web", "templates"), LoginPageOptions{OIDCEnabled: false})
+	req := httptest.NewRequest(http.MethodGet, "/login", nil)
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if strings.Contains(body, "Sign in with") {
+		t.Fatalf("did not expect OIDC button when disabled: %s", body)
+	}
+	if strings.Contains(body, "href=\"/auth/oidc/login\"") {
+		t.Fatalf("did not expect OIDC login route when disabled: %s", body)
+	}
+}

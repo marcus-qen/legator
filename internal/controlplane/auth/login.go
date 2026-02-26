@@ -12,22 +12,36 @@ import (
 
 const sessionMaxAgeSeconds = 86400
 
+// LoginPageOptions configures optional login-page features.
+type LoginPageOptions struct {
+	OIDCEnabled      bool
+	OIDCProviderName string
+}
+
 // LoginPageData is the template context for login.html.
 type LoginPageData struct {
-	Title    string
-	Username string
-	Error    string
+	Title            string
+	Username         string
+	Error            string
+	OIDCEnabled      bool
+	OIDCProviderName string
 }
 
 // HandleLoginPage renders the login page.
-func HandleLoginPage(templateDir string) http.HandlerFunc {
+func HandleLoginPage(templateDir string, opts ...LoginPageOptions) http.HandlerFunc {
+	options := resolveLoginOptions(opts...)
 	return func(w http.ResponseWriter, r *http.Request) {
-		renderLoginPage(w, templateDir, LoginPageData{Title: "Legator Login"}, http.StatusOK)
+		renderLoginPage(w, templateDir, LoginPageData{
+			Title:            "Legator Login",
+			OIDCEnabled:      options.OIDCEnabled,
+			OIDCProviderName: options.OIDCProviderName,
+		}, http.StatusOK)
 	}
 }
 
 // HandleLogin processes a username/password login form.
-func HandleLogin(userAuth UserAuthenticator, sessionCreator SessionCreator) http.HandlerFunc {
+func HandleLogin(userAuth UserAuthenticator, sessionCreator SessionCreator, opts ...LoginPageOptions) http.HandlerFunc {
+	options := resolveLoginOptions(opts...)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if userAuth == nil || sessionCreator == nil {
 			http.Error(w, `{"error":"login unavailable"}`, http.StatusServiceUnavailable)
@@ -38,8 +52,10 @@ func HandleLogin(userAuth UserAuthenticator, sessionCreator SessionCreator) http
 
 		if err := r.ParseForm(); err != nil {
 			renderLoginPage(w, templateDir, LoginPageData{
-				Title: "Legator Login",
-				Error: "Invalid login form",
+				Title:            "Legator Login",
+				Error:            "Invalid login form",
+				OIDCEnabled:      options.OIDCEnabled,
+				OIDCProviderName: options.OIDCProviderName,
 			}, http.StatusBadRequest)
 			return
 		}
@@ -48,9 +64,11 @@ func HandleLogin(userAuth UserAuthenticator, sessionCreator SessionCreator) http
 		password := r.FormValue("password")
 		if username == "" || password == "" {
 			renderLoginPage(w, templateDir, LoginPageData{
-				Title:    "Legator Login",
-				Username: username,
-				Error:    "Username and password are required",
+				Title:            "Legator Login",
+				Username:         username,
+				Error:            "Username and password are required",
+				OIDCEnabled:      options.OIDCEnabled,
+				OIDCProviderName: options.OIDCProviderName,
 			}, http.StatusUnauthorized)
 			return
 		}
@@ -62,9 +80,11 @@ func HandleLogin(userAuth UserAuthenticator, sessionCreator SessionCreator) http
 				errMsg = err.Error()
 			}
 			renderLoginPage(w, templateDir, LoginPageData{
-				Title:    "Legator Login",
-				Username: username,
-				Error:    errMsg,
+				Title:            "Legator Login",
+				Username:         username,
+				Error:            errMsg,
+				OIDCEnabled:      options.OIDCEnabled,
+				OIDCProviderName: options.OIDCProviderName,
 			}, http.StatusUnauthorized)
 			return
 		}
@@ -72,9 +92,11 @@ func HandleLogin(userAuth UserAuthenticator, sessionCreator SessionCreator) http
 		token, err := sessionCreator.Create(user.ID)
 		if err != nil || strings.TrimSpace(token) == "" {
 			renderLoginPage(w, templateDir, LoginPageData{
-				Title:    "Legator Login",
-				Username: username,
-				Error:    "Failed to create session",
+				Title:            "Legator Login",
+				Username:         username,
+				Error:            "Failed to create session",
+				OIDCEnabled:      options.OIDCEnabled,
+				OIDCProviderName: options.OIDCProviderName,
 			}, http.StatusInternalServerError)
 			return
 		}
@@ -165,4 +187,15 @@ func defaultLoginTemplateDir() string {
 		}
 	}
 	return filepath.Join("web", "templates")
+}
+
+func resolveLoginOptions(opts ...LoginPageOptions) LoginPageOptions {
+	if len(opts) == 0 {
+		return LoginPageOptions{}
+	}
+	resolved := opts[0]
+	if strings.TrimSpace(resolved.OIDCProviderName) == "" {
+		resolved.OIDCProviderName = "OIDC"
+	}
+	return resolved
 }

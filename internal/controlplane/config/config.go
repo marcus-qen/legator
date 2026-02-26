@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+
+	"github.com/marcus-qen/legator/internal/controlplane/oidc"
 )
 
 // Config holds all control plane configuration.
@@ -22,6 +24,9 @@ type Config struct {
 
 	// Auth
 	AuthEnabled bool `json:"auth_enabled"`
+
+	// OIDC settings (optional)
+	OIDC oidc.Config `json:"oidc,omitempty"`
 
 	// Signing key for HMAC (hex-encoded, 64+ chars)
 	SigningKey string `json:"signing_key,omitempty"`
@@ -58,6 +63,7 @@ func Default() Config {
 		ListenAddr: ":8080",
 		DataDir:    "/var/lib/legator",
 		LogLevel:   "info",
+		OIDC:       oidc.DefaultConfig(),
 		RateLimit: RateLimitConfig{
 			RequestsPerMinute: 120,
 		},
@@ -121,6 +127,8 @@ func Load(path string) (Config, error) {
 	if v := os.Getenv("LEGATOR_EXTERNAL_URL"); v != "" {
 		cfg.ExternalURL = v
 	}
+
+	cfg.OIDC = oidc.ApplyEnv(cfg.OIDC)
 
 	return cfg, nil
 }

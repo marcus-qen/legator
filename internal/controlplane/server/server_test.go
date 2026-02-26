@@ -775,3 +775,27 @@ func TestHandleEventsSSE_BasicConnectivity(t *testing.T) {
 		t.Fatalf("expected Cache-Control no-cache, got %q", cc)
 	}
 }
+
+func TestOIDCDisabledRoutesNotRegisteredAndLoginUnchanged(t *testing.T) {
+	t.Setenv("LEGATOR_LLM_PROVIDER", "")
+	t.Setenv("LEGATOR_SIGNING_KEY", strings.Repeat("a", 64))
+
+	cfg := config.Config{
+		ListenAddr: ":0",
+		DataDir:    t.TempDir(),
+	}
+	logger := zap.NewNop()
+	srv, err := New(cfg, logger)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	defer srv.Close()
+
+	oidcReq := httptest.NewRequest(http.MethodGet, "/auth/oidc/login", nil)
+	oidcRec := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(oidcRec, oidcReq)
+	if oidcRec.Code != http.StatusNotFound {
+		t.Fatalf("expected /auth/oidc/login to be unregistered (404), got %d", oidcRec.Code)
+	}
+
+}

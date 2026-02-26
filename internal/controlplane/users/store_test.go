@@ -207,3 +207,30 @@ func TestCount(t *testing.T) {
 		t.Fatalf("expected count=1, got %d", got)
 	}
 }
+
+func TestCreateWithIDAndUpdateProfile(t *testing.T) {
+	store, err := NewStore(tempDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	u, err := store.CreateWithID("oidc:sub-123", "alice", "Alice", "secret123", "viewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.ID != "oidc:sub-123" {
+		t.Fatalf("expected explicit ID to be used, got %s", u.ID)
+	}
+
+	if err := store.UpdateProfile(u.ID, "alice-renamed", "Alice Renamed"); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := store.Get(u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Username != "alice-renamed" || updated.DisplayName != "Alice Renamed" {
+		t.Fatalf("unexpected updated profile: %+v", updated)
+	}
+}

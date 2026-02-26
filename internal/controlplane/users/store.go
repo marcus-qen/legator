@@ -68,10 +68,22 @@ func NewStore(dbPath string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-// Create creates a new user with a bcrypt password hash.
+// Create creates a new user with a generated UUID ID and bcrypt password hash.
 func (s *Store) Create(username, displayName, password, role string) (*User, error) {
+	return s.CreateWithID(uuid.NewString(), username, displayName, password, role)
+}
+
+// CreateWithID creates a new user with an explicit ID.
+func (s *Store) CreateWithID(id, username, displayName, password, role string) (*User, error) {
 	if !validRole(role) {
 		return nil, ErrInvalidRole
+	}
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return nil, fmt.Errorf("username required")
+	}
+	if id == "" {
+		id = uuid.NewString()
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -81,7 +93,7 @@ func (s *Store) Create(username, displayName, password, role string) (*User, err
 
 	now := time.Now().UTC()
 	u := &User{
-		ID:           uuid.NewString(),
+		ID:           id,
 		Username:     username,
 		DisplayName:  displayName,
 		PasswordHash: string(hash),
@@ -169,6 +181,24 @@ func (s *Store) UpdateRole(id, role string) error {
 	res, err := s.db.Exec(`UPDATE users SET role = ? WHERE id = ?`, role, id)
 	if err != nil {
 		return fmt.Errorf("update role: %w", err)
+	}
+
+	return checkRowsAffected(res, ErrUserNotFound)
+}
+
+// UpdateProfile updates username and display name.
+func (s *Store) UpdateProfile(id, username, displayName string) error {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return fmt.Errorf("username required")
+	}
+
+	res, err := s.db.Exec(`UPDATE users SET username = ?, display_name = ? WHERE id = ?`, username, displayName, id)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed: users.username") {
+			return ErrUsernameAlreadyUsed
+		}
+		return fmt.Errorf("update profile: %w", err)
 	}
 
 	return checkRowsAffected(res, ErrUserNotFound)

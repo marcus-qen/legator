@@ -22,11 +22,12 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/config"
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
-	"github.com/marcus-qen/legator/internal/controlplane/session"
-	"github.com/marcus-qen/legator/internal/controlplane/users"
 	"github.com/marcus-qen/legator/internal/controlplane/llm"
 	"github.com/marcus-qen/legator/internal/controlplane/metrics"
+	"github.com/marcus-qen/legator/internal/controlplane/oidc"
 	"github.com/marcus-qen/legator/internal/controlplane/policy"
+	"github.com/marcus-qen/legator/internal/controlplane/session"
+	"github.com/marcus-qen/legator/internal/controlplane/users"
 	"github.com/marcus-qen/legator/internal/controlplane/webhook"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
 	"github.com/marcus-qen/legator/internal/protocol"
@@ -69,6 +70,7 @@ type Server struct {
 	sessionValidator   auth.SessionValidator
 	sessionDeleter     auth.SessionDeleter
 	permissionResolver auth.UserPermissionResolver
+	oidcProvider       *oidc.Provider
 
 	// Policy
 	policyStore      policy.PolicyManager
@@ -133,6 +135,8 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 			"/ws/probe",
 			"/login",
 			"/logout",
+			"/auth/oidc/login",
+			"/auth/oidc/callback",
 			"/static/*",
 		})
 		authMiddleware.SetSessionAuth(s.sessionValidator, s.permissionResolver)
@@ -466,7 +470,7 @@ func (s *Server) wireChatLLM() {
 }
 
 func (s *Server) initAuth() {
-	if os.Getenv("LEGATOR_AUTH") != "true" && os.Getenv("LEGATOR_AUTH") != "1" {
+	if !s.cfg.AuthEnabled {
 		return
 	}
 
@@ -537,6 +541,16 @@ func (s *Server) initAuth() {
 	s.sessionValidator = sessAdapter
 	s.sessionDeleter = sessAdapter
 	s.permissionResolver = &roleResolver{}
+
+	if s.cfg.OIDC.Enabled {
+		provider, err := oidc.NewProvider(context.Background(), s.cfg.OIDC, s.logger)
+		if err != nil {
+			s.logger.Warn("failed to initialize oidc provider", zap.Error(err))
+		} else {
+			s.oidcProvider = provider
+			s.logger.Info("oidc provider enabled", zap.String("provider", provider.ProviderName()))
+		}
+	}
 
 	// Start session cleanup goroutine
 	go func() {

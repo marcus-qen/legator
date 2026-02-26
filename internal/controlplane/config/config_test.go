@@ -17,20 +17,30 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.LogLevel != "info" {
 		t.Errorf("expected info, got %s", cfg.LogLevel)
 	}
+	if cfg.OIDC.DefaultRole != "viewer" {
+		t.Errorf("expected OIDC default role viewer, got %s", cfg.OIDC.DefaultRole)
+	}
 }
 
 func TestLoadFromFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
-	os.WriteFile(path, []byte(`{
+	if err := os.WriteFile(path, []byte(`{
 		"listen_addr": ":9090",
 		"data_dir": "/tmp/test",
 		"auth_enabled": true,
+		"oidc": {
+			"enabled": true,
+			"provider_url": "https://id.example.com/realms/dev",
+			"client_id": "legator"
+		},
 		"llm": {
 			"provider": "openai",
 			"model": "gpt-4"
 		}
-	}`), 0644)
+	}`), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -49,12 +59,23 @@ func TestLoadFromFile(t *testing.T) {
 	if cfg.LLM.Provider != "openai" {
 		t.Errorf("expected openai, got %s", cfg.LLM.Provider)
 	}
+	if !cfg.OIDC.Enabled {
+		t.Fatal("expected oidc enabled")
+	}
+	if cfg.OIDC.ProviderURL != "https://id.example.com/realms/dev" {
+		t.Fatalf("unexpected oidc provider url: %s", cfg.OIDC.ProviderURL)
+	}
+	if cfg.OIDC.ClientID != "legator" {
+		t.Fatalf("unexpected oidc client id: %s", cfg.OIDC.ClientID)
+	}
 }
 
 func TestEnvOverridesFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
-	os.WriteFile(path, []byte(`{"listen_addr": ":9090"}`), 0644)
+	if err := os.WriteFile(path, []byte(`{"listen_addr": ":9090"}`), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
 
 	t.Setenv("LEGATOR_LISTEN_ADDR", ":7070")
 	t.Setenv("LEGATOR_AUTH", "true")
@@ -119,5 +140,45 @@ func TestHasTLS(t *testing.T) {
 	cfg.TLSKey = "/path/key.pem"
 	if !cfg.HasTLS() {
 		t.Error("should have TLS with both cert and key")
+	}
+}
+
+func TestOIDCEnvOverrides(t *testing.T) {
+	t.Setenv("LEGATOR_OIDC_ENABLED", "true")
+	t.Setenv("LEGATOR_OIDC_PROVIDER_URL", "https://keycloak.example.com/realms/dev")
+	t.Setenv("LEGATOR_OIDC_CLIENT_ID", "legator")
+	t.Setenv("LEGATOR_OIDC_CLIENT_SECRET", "shh")
+	t.Setenv("LEGATOR_OIDC_REDIRECT_URL", "https://legator.example.com/auth/oidc/callback")
+	t.Setenv("LEGATOR_OIDC_SCOPES", "openid,email,profile,groups")
+	t.Setenv("LEGATOR_OIDC_ROLE_CLAIM", "groups")
+	t.Setenv("LEGATOR_OIDC_ROLE_MAPPING", "platform-admins=admin,developers=operator")
+	t.Setenv("LEGATOR_OIDC_DEFAULT_ROLE", "viewer")
+	t.Setenv("LEGATOR_OIDC_AUTO_CREATE_USERS", "false")
+	t.Setenv("LEGATOR_OIDC_PROVIDER_NAME", "Keycloak")
+
+	cfg := LoadFromEnv()
+	if !cfg.OIDC.Enabled {
+		t.Fatal("expected oidc enabled from env")
+	}
+	if cfg.OIDC.ProviderURL != "https://keycloak.example.com/realms/dev" {
+		t.Fatalf("unexpected provider URL: %s", cfg.OIDC.ProviderURL)
+	}
+	if cfg.OIDC.ClientID != "legator" || cfg.OIDC.ClientSecret != "shh" {
+		t.Fatalf("unexpected client credentials: %#v", cfg.OIDC)
+	}
+	if cfg.OIDC.RedirectURL != "https://legator.example.com/auth/oidc/callback" {
+		t.Fatalf("unexpected redirect URL: %s", cfg.OIDC.RedirectURL)
+	}
+	if len(cfg.OIDC.Scopes) != 4 {
+		t.Fatalf("expected 4 scopes, got %d", len(cfg.OIDC.Scopes))
+	}
+	if cfg.OIDC.RoleMapping["platform-admins"] != "admin" {
+		t.Fatalf("role mapping not loaded: %#v", cfg.OIDC.RoleMapping)
+	}
+	if cfg.OIDC.AutoCreateUsers {
+		t.Fatal("expected auto_create_users=false from env")
+	}
+	if cfg.OIDC.ProviderName != "Keycloak" {
+		t.Fatalf("expected provider name Keycloak, got %s", cfg.OIDC.ProviderName)
 	}
 }

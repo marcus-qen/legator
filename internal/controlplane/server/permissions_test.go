@@ -19,6 +19,7 @@ func newAuthTestServer(t *testing.T) *Server {
 	cfg := config.Default()
 	cfg.ListenAddr = "127.0.0.1:0"
 	cfg.DataDir = t.TempDir()
+	cfg.AuthEnabled = true
 
 	srv, err := New(cfg, zap.NewNop())
 	if err != nil {
