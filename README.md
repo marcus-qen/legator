@@ -104,6 +104,9 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 | Probe self-update | ✅ |
 | Tags + group commands | ✅ |
 | Multi-user RBAC | ✅ |
+| OIDC/SSO authentication | ✅ |
+| Consistent JSON error API | ✅ |
+| Dark UI with centered chat | ✅ |
 | API key management | ✅ |
 | Webhook notifications | ✅ |
 | Prometheus metrics | ✅ |
@@ -118,6 +121,11 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 | `LEGATOR_DATA_DIR` | `/var/lib/legator` | SQLite databases location |
 | `LEGATOR_SIGNING_KEY` | auto-generated | HMAC key for command signing (hex, 64+ chars) |
 | `LEGATOR_AUTH` | `false` | Enable authentication |
+| `LEGATOR_OIDC_ENABLED` | `false` | Enable OIDC authentication |
+| `LEGATOR_OIDC_PROVIDER_URL` | — | OIDC provider URL (e.g. Keycloak realm) |
+| `LEGATOR_OIDC_CLIENT_ID` | — | OIDC client ID |
+| `LEGATOR_OIDC_CLIENT_SECRET` | — | OIDC client secret |
+| `LEGATOR_OIDC_REDIRECT_URL` | — | OIDC callback URL |
 | `LEGATOR_LLM_PROVIDER` | — | LLM provider (e.g. `openai`) |
 | `LEGATOR_LLM_BASE_URL` | — | LLM API base URL |
 | `LEGATOR_LLM_API_KEY` | — | LLM API key |
@@ -149,9 +157,9 @@ make build-release    # Cross-compile release binaries (linux amd64+arm64)
 
 ## Status
 
-**v1.0.0-alpha.4** — working control plane + probe runtime with multi-user RBAC.
+**v1.0.0-alpha.6** — production-grade control plane with SSO, error resilience, and polished dark UI.
 
-~106 Go files · 30 test suites · 29/29 e2e · lint clean
+~110 Go files · 35 test suites · 29/29 e2e · lint clean
 
 ## License
 

@@ -173,6 +173,38 @@ curl -sf -X POST http://localhost:8080/api/v1/approvals/<id>/decide \
 
 Or use the web UI at `/approvals`.
 
+## Configure SSO (Optional)
+
+If you use Keycloak, Auth0, or any OIDC provider, add this to your `legator.json`:
+
+```json
+{
+  "oidc": {
+    "enabled": true,
+    "provider_url": "https://keycloak.example.com/realms/my-realm",
+    "client_id": "legator",
+    "client_secret": "your-client-secret",
+    "redirect_url": "https://legator.example.com/auth/oidc/callback",
+    "role_mapping": {
+      "admins": "admin",
+      "developers": "operator"
+    }
+  }
+}
+```
+
+Or via environment variables:
+
+```bash
+export LEGATOR_OIDC_ENABLED=true
+export LEGATOR_OIDC_PROVIDER_URL="https://keycloak.example.com/realms/my-realm"
+export LEGATOR_OIDC_CLIENT_ID="legator"
+export LEGATOR_OIDC_CLIENT_SECRET="your-client-secret"
+export LEGATOR_OIDC_REDIRECT_URL="https://legator.example.com/auth/oidc/callback"
+```
+
+The login page will show a "Sign in with SSO" button alongside the local login form.
+
 ## Chat (requires LLM configuration)
 
 Talk to your probes in natural language:

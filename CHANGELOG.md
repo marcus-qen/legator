@@ -1,132 +1,83 @@
 # Changelog
 
-## v1.0.0-alpha.3 (2026-02-26)
+All notable changes to Legator are documented here.
 
-Hardening, observability, and build reliability.
+## [v1.0.0-alpha.6] — 2026-02-26
 
-### Build & Release
-- **Makefile** with configurable `GO` variable, all targets: build, test, lint, e2e, release-build, clean
-- **Version metadata hardening** — `init()` defaults to `dev`/`unknown`/binary-modtime when ldflags absent
-- CI workflows aligned to use Makefile targets with explicit ldflags
-- Version metadata validation test
+### Added
+- OIDC authentication (optional SSO via Keycloak, Auth0, Okta, Google, etc.)
+- Consistent JSON error responses with error codes across all API endpoints
+- Graceful LLM-down handling (user-friendly message instead of 500)
+- WebSocket resilience (malformed JSON survived, connections not dropped)
+- Dark UI with centered chat layout (Claude Desktop-inspired)
+- Warm colour palette and typography polish
+- Chat slide-over context panel (hidden by default)
+- Textarea input with auto-resize, Enter to send
+- Empty state with "Ask this probe anything" prompt
+- Configuration reference documentation
+- Security model documentation
+- This changelog
 
-### Observability
-- **Webhook delivery metrics** — `legator_webhooks_sent_total`, `legator_webhooks_errors_total`, `legator_webhook_duration_seconds` (Prometheus histogram)
-- **Webhook delivery diagnostics** — `GET /api/v1/webhooks/deliveries` with masked URLs, timing, status codes
-- In-memory ring buffer (100 entries) for fast delivery history
-- `DeliveryObserver` pattern decouples metrics from notifier
+### Fixed
+- Chat history race condition (history skipped when WebSocket connected first)
+- WebSocket "Disconnected" indicator showing before connection attempted
+- Context panel excessive vertical space
+- Responsive breakpoint too aggressive (changed from 1180px to 900px)
+- Tailwind CDN removed from production (replaced with hand-written utility classes)
 
-### Real-time UI
-- **Probe detail incremental SSE** — status badge, health, last-seen, system fields update via DOM patching (no full reload)
-- WebSocket lifecycle hooks emit `probe.connected`/`probe.disconnected` events with status payload
-- Connection indicator badge (live/reconnecting) with bounded exponential backoff
-- Template anchor tests ensure SSE wiring survives refactors
+## [v1.0.0-alpha.5] — 2026-02-26
 
-### Documentation
-- Deployment guide with systemd, Caddy, probe install, and upgrade procedures
-- Alpha.2 changelog section
+### Added
+- Token lifecycle hardening with list tokens API
+- Command classifier with defence-in-depth policy enforcement
+- Install script hardening with SHA256 verification
+- Request-derived install commands in registration response
+- Policy persistence across probe restarts
+- README rewrite, getting-started guide, and architecture documentation
 
-### Stats
-- 95 Go files, 28 test suites, 29 e2e tests
-- Makefile-driven builds with deterministic version injection
+## [v1.0.0-alpha.4] — 2026-02-26
 
-## v1.0.0-alpha.2 (2026-02-26)
+### Added
+- Multi-user RBAC (admin, operator, viewer roles)
+- Login UI with session-based authentication
+- User management API (create, list, delete)
+- Probe WebSocket authentication (API key verification)
+- Multi-user RBAC design document
 
-Auth hardening, observability, and public deployment.
+## [v1.0.0-alpha.3] — 2026-02-26
 
-### Security
-- **Scoped API key permissions** — PermFleetRead, PermFleetWrite, PermCommandExec, ApprovalRead/Write, AuditRead, WebhookManage, Admin
-- Auth middleware with skip paths for health/version/probe WS/registration/static
-- 401/403 enforcement with permission matrix tests
+### Added
+- Build/version injection hardening with Makefile
+- Webhook delivery metrics and diagnostics endpoint
+- Incremental SSE updates on probe detail page
+- Deployment and upgrade guide
 
-### Observability
-- **Event bus → webhook integration** — all fleet events (connect, disconnect, offline, commands) automatically trigger webhooks
-- Webhook forwarder goroutine replaces direct calls; single dispatch path
-- **Real-time SSE on probe detail page** — status badge, health, last-seen update live
-- WebSocket lifecycle hooks emit probe.connected/probe.disconnected events with status/last_seen payload
+## [v1.0.0-alpha.2] — 2026-02-26
 
-### Infrastructure
-- **Public Caddy route** — `legator.lab.k-dev.uk` direct to control plane (no Pomerium, no SSH tunnel)
-- Probe connects via WSS through public URL
-
-### Testing
-- **31 new server package tests** across 3 files (server_test.go, messages_test.go, templates_test.go)
-- Template anchor tests ensure SSE wiring survives refactors
-- Probe delete + fleet cleanup endpoint tests
-
-### UI
-- Chat page context panel with probe system info
-- Fleet table chat buttons
-- Probe detail incremental DOM updates (no full-page reload)
-- Connection indicator badge (live/reconnecting)
-
-### Operations
+### Added
+- Real-time SSE updates on probe detail page
+- Webhook notifier (wired to event bus)
+- Scoped API key permissions on all routes
+- Server package unit tests (31 tests)
+- Chat page with probe context panel
 - Probe delete and fleet cleanup endpoints
-- WebSocket keepalive improvements
+- WebSocket keepalive and LLM chat integration
 
-### Stats
-- 94 Go files, 27 test suites, 29 e2e tests
-- 10 multi-arch release assets
-## v1.0.0-alpha.1 (2026-02-26)
+## [v1.0.0-alpha.1] — 2026-02-26
 
-First release of the standalone Legator control plane. Complete rewrite from the K8s-native runtime (v0.1–v0.9.2) to a universal fleet management system.
-
-### Control Plane
-- Standalone Go binary (14MB), no K8s dependency
-- Web dashboard with dark theme, real-time SSE updates, live activity feed
-- 35+ REST API endpoints for fleet management
-- WebSocket hub for probe connections
-- Persistent SQLite stores: fleet, audit, chat, webhooks, policies, auth
-- Config file support (legator.json) + environment variable overrides
-
-### Fleet Management
-- Probe registration with single-use tokens
-- Real-time health scoring and offline detection
-- Tag-based grouping and group command dispatch
-- Fleet summary and Prometheus-compatible metrics endpoint
-
-### Security & Policy
-- Three capability levels: observe / diagnose / remediate
-- Defence in depth: policy enforced at both control plane and probe
-- HMAC-SHA256 command signing with per-probe key derivation
-- Risk-gated approval queue with auto-expiry
-- Multi-user auth with API keys and per-key rate limiting
-- API key rotation pushed to probes in real-time
-- Credential sanitisation in command output
-
-### Chat & AI
-- Per-probe persistent chat sessions (REST + WebSocket)
-- LLM integration via any OpenAI-compatible API
-- Chat context includes probe inventory and policy level
-- LLM-issued commands go through the approval queue
-
-### Operations
-- Webhook notifications (probe offline, command failure) with HMAC signing
-- Full audit log with filtering by probe, type, time range
-- SSE streaming for command output
-- Probe self-update with SHA256 checksum verification
-- Event bus with SSE endpoint for real-time dashboard
-
-### Probe Agent
-- Static Go binary (7MB), zero dependencies
-- Systemd service management (install/remove/status)
-- System inventory scanner (hostname, CPUs, RAM, services, packages)
-- Command execution with streaming output
-- Policy enforcement at probe level
-- Auto-reconnect with jitter and backoff
-- Local health status endpoint
-- Config file support with --config-dir flag
-
-### CLI (legatorctl)
-- Fleet listing and probe detail
-- Multi-arch builds: linux/amd64, linux/arm64, darwin/arm64
-
-### CI/CD
-- GitHub Actions: test, build, lint, e2e
-- Release workflow: multi-arch binaries + GitHub Release on tag
-- One-liner install script with architecture detection
-
-### Stats
-- 90 Go files, ~15.7k lines
-- 26 test suites, 27 end-to-end tests
-- 30 packages
+### Added
+- Standalone Go control plane (no Kubernetes dependency)
+- Probe agent (systemd service, WebSocket connection, heartbeat)
+- Fleet management (register, list, health scoring, tags)
+- Command dispatch with HMAC-SHA256 signing
+- Output streaming (SSE)
+- LLM-powered chat per probe
+- Policy engine (observe/diagnose/remediate)
+- Approval queue with risk classification
+- Audit log (SQLite, immutable)
+- Web UI (fleet dashboard, probe detail, chat)
+- REST API (35+ endpoints)
+- Prometheus metrics
+- Event bus (pub/sub)
+- CI/CD (test, build, lint, e2e, multi-arch release)
+- Install script for one-liner probe deployment
