@@ -17,11 +17,12 @@ const (
 
 // Config holds the probe's persistent configuration.
 type Config struct {
-	ServerURL string `yaml:"server_url"`
-	ProbeID   string `yaml:"probe_id"`
-	APIKey    string `yaml:"api_key"`
-	PolicyID  string `yaml:"policy_id,omitempty"`
-	ConfigDir string `yaml:"-"` // not persisted
+	ServerURL  string `yaml:"server_url"`
+	ProbeID    string `yaml:"probe_id"`
+	APIKey     string `yaml:"api_key"`
+	PolicyID   string `yaml:"policy_id,omitempty"`
+	SigningKey string `yaml:"signing_key,omitempty"` // master signing key
+	ConfigDir  string `yaml:"-"`                     // not persisted
 }
 
 // ConfigPath returns the full path to the config file.

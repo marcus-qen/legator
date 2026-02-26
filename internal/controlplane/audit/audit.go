@@ -140,4 +140,3 @@ func (l *Log) MarshalJSON() ([]byte, error) {
 	defer l.mu.RUnlock()
 	return json.Marshal(l.events)
 }
-

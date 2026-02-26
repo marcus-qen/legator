@@ -9,6 +9,7 @@ import (
 	"github.com/marcus-qen/legator/internal/probe/executor"
 	"github.com/marcus-qen/legator/internal/probe/inventory"
 	"github.com/marcus-qen/legator/internal/protocol"
+	"github.com/marcus-qen/legator/internal/shared/signing"
 	"go.uber.org/zap"
 )
 
@@ -21,6 +22,7 @@ type Agent struct {
 	config   *Config
 	client   *connection.Client
 	executor *executor.Executor
+	verifier *signing.Signer
 	logger   *zap.Logger
 }
 
@@ -42,10 +44,18 @@ func New(cfg *Config, logger *zap.Logger) *Agent {
 	}
 	exec := executor.New(policy, logger.Named("exec"))
 
+	var verifier *signing.Signer
+	if cfg.SigningKey != "" {
+		key := signing.DeriveProbeKey([]byte(cfg.SigningKey), cfg.ProbeID)
+		verifier = signing.NewSigner(key)
+		logger.Info("command signature verification enabled")
+	}
+
 	return &Agent{
 		config:   cfg,
 		client:   client,
 		executor: exec,
+		verifier: verifier,
 		logger:   logger,
 	}
 }
@@ -95,7 +105,23 @@ func (a *Agent) handleMessage(env protocol.Envelope) {
 			return
 		}
 
-		// TODO: verify env.Signature (HMAC check)
+		if a.verifier != nil {
+			if env.Signature == "" {
+				a.logger.Warn("unsigned command rejected", zap.String("request_id", cmd.RequestID))
+				_ = a.client.Send(protocol.MsgCommandResult, &protocol.CommandResultPayload{
+					RequestID: cmd.RequestID, ExitCode: -1, Stderr: "command rejected: missing signature",
+				})
+				return
+			}
+			if err := a.verifier.Verify(env.ID, cmd, env.Signature); err != nil {
+				a.logger.Warn("invalid command signature", zap.String("request_id", cmd.RequestID), zap.Error(err))
+				_ = a.client.Send(protocol.MsgCommandResult, &protocol.CommandResultPayload{
+					RequestID: cmd.RequestID, ExitCode: -1, Stderr: "command rejected: invalid signature",
+				})
+				return
+			}
+			a.logger.Debug("command signature verified", zap.String("request_id", cmd.RequestID))
+		}
 
 		a.logger.Info("executing command",
 			zap.String("request_id", cmd.RequestID),
@@ -171,4 +197,3 @@ func (a *Agent) inventoryLoop(ctx context.Context) {
 		}
 	}
 }
-

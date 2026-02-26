@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -24,6 +26,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/llm"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
 	"github.com/marcus-qen/legator/internal/protocol"
+	"github.com/marcus-qen/legator/internal/shared/signing"
 	"go.uber.org/zap"
 )
 
@@ -207,6 +210,25 @@ func main() {
 	hub = cpws.NewHub(logger.Named("ws"), func(probeID string, env protocol.Envelope) {
 		handleProbeMessage(fleetMgr, emitAudit, recordAudit, cmdTracker, logger, probeID, env)
 	})
+
+	signingKeyHex := os.Getenv("LEGATOR_SIGNING_KEY")
+	var signingKey []byte
+	if signingKeyHex != "" {
+		var err error
+		signingKey, err = hex.DecodeString(signingKeyHex)
+		if err != nil || len(signingKey) < 32 {
+			logger.Fatal("LEGATOR_SIGNING_KEY must be >= 64 hex chars (32 bytes)")
+		}
+		logger.Info("command signing enabled (key from environment)")
+	} else {
+		signingKey = make([]byte, 32)
+		if _, err := rand.Read(signingKey); err != nil {
+			logger.Fatal("failed to generate signing key", zap.Error(err))
+		}
+		logger.Info("command signing enabled (auto-generated key)",
+			zap.String("key_hex", hex.EncodeToString(signingKey)))
+	}
+	hub.SetSigner(signing.NewSigner(signingKey))
 
 	// Start offline checker
 	go offlineChecker(ctx, fleetMgr)

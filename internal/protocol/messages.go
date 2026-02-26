@@ -9,11 +9,11 @@ type MessageType string
 
 const (
 	// Probe → Control Plane
-	MsgRegister     MessageType = "register"
-	MsgHeartbeat    MessageType = "heartbeat"
-	MsgInventory    MessageType = "inventory"
+	MsgRegister      MessageType = "register"
+	MsgHeartbeat     MessageType = "heartbeat"
+	MsgInventory     MessageType = "inventory"
 	MsgCommandResult MessageType = "command_result"
-	MsgError        MessageType = "error"
+	MsgError         MessageType = "error"
 
 	// Control Plane → Probe
 	MsgRegistered   MessageType = "registered"
@@ -34,11 +34,11 @@ type Envelope struct {
 
 // RegisterPayload is sent by the probe on initial connection.
 type RegisterPayload struct {
-	Token    string    `json:"token"`              // Single-use registration token
-	Hostname string    `json:"hostname"`
-	OS       string    `json:"os"`
-	Arch     string    `json:"arch"`
-	Version  string    `json:"version"`
+	Token    string            `json:"token"` // Single-use registration token
+	Hostname string            `json:"hostname"`
+	OS       string            `json:"os"`
+	Arch     string            `json:"arch"`
+	Version  string            `json:"version"`
 	Labels   map[string]string `json:"labels,omitempty"`
 }
 
@@ -51,22 +51,22 @@ type RegisteredPayload struct {
 
 // HeartbeatPayload is sent by the probe every 30s.
 type HeartbeatPayload struct {
-	ProbeID   string    `json:"probe_id"`
-	Uptime    int64     `json:"uptime_seconds"`
+	ProbeID   string     `json:"probe_id"`
+	Uptime    int64      `json:"uptime_seconds"`
 	Load      [3]float64 `json:"load_avg"`
-	MemUsed   uint64    `json:"mem_used_bytes"`
-	MemTotal  uint64    `json:"mem_total_bytes"`
-	DiskUsed  uint64    `json:"disk_used_bytes"`
-	DiskTotal uint64    `json:"disk_total_bytes"`
+	MemUsed   uint64     `json:"mem_used_bytes"`
+	MemTotal  uint64     `json:"mem_total_bytes"`
+	DiskUsed  uint64     `json:"disk_used_bytes"`
+	DiskTotal uint64     `json:"disk_total_bytes"`
 }
 
 // CapabilityLevel controls what a probe is allowed to do.
 type CapabilityLevel string
 
 const (
-	CapObserve    CapabilityLevel = "observe"
-	CapDiagnose   CapabilityLevel = "diagnose"
-	CapRemediate  CapabilityLevel = "remediate"
+	CapObserve   CapabilityLevel = "observe"
+	CapDiagnose  CapabilityLevel = "diagnose"
+	CapRemediate CapabilityLevel = "remediate"
 )
 
 // CommandPayload is sent from the control plane to execute on the probe.
@@ -75,7 +75,7 @@ type CommandPayload struct {
 	Command   string          `json:"command"`
 	Args      []string        `json:"args,omitempty"`
 	Timeout   time.Duration   `json:"timeout"`
-	Level     CapabilityLevel `json:"level"` // Required capability level
+	Level     CapabilityLevel `json:"level"`  // Required capability level
 	Stream    bool            `json:"stream"` // Stream output vs wait for completion
 }
 
@@ -91,28 +91,28 @@ type CommandResultPayload struct {
 
 // InventoryPayload is the probe's full system inventory.
 type InventoryPayload struct {
-	ProbeID    string            `json:"probe_id"`
-	Hostname   string            `json:"hostname"`
-	OS         string            `json:"os"`
-	Arch       string            `json:"arch"`
-	Kernel     string            `json:"kernel"`
-	CPUs       int               `json:"cpus"`
-	MemTotal   uint64            `json:"mem_total_bytes"`
-	DiskTotal  uint64            `json:"disk_total_bytes"`
-	Interfaces []NetInterface    `json:"interfaces,omitempty"`
-	Packages   []Package         `json:"packages,omitempty"`
-	Services   []Service         `json:"services,omitempty"`
-	Users      []User            `json:"users,omitempty"`
-	Labels     map[string]string `json:"labels,omitempty"`
-	CollectedAt time.Time        `json:"collected_at"`
+	ProbeID     string            `json:"probe_id"`
+	Hostname    string            `json:"hostname"`
+	OS          string            `json:"os"`
+	Arch        string            `json:"arch"`
+	Kernel      string            `json:"kernel"`
+	CPUs        int               `json:"cpus"`
+	MemTotal    uint64            `json:"mem_total_bytes"`
+	DiskTotal   uint64            `json:"disk_total_bytes"`
+	Interfaces  []NetInterface    `json:"interfaces,omitempty"`
+	Packages    []Package         `json:"packages,omitempty"`
+	Services    []Service         `json:"services,omitempty"`
+	Users       []User            `json:"users,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	CollectedAt time.Time         `json:"collected_at"`
 }
 
 // NetInterface represents a network interface.
 type NetInterface struct {
-	Name    string   `json:"name"`
-	MAC     string   `json:"mac,omitempty"`
-	Addrs   []string `json:"addrs,omitempty"`
-	State   string   `json:"state"`
+	Name  string   `json:"name"`
+	MAC   string   `json:"mac,omitempty"`
+	Addrs []string `json:"addrs,omitempty"`
+	State string   `json:"state"`
 }
 
 // Package represents an installed package.
@@ -125,7 +125,7 @@ type Package struct {
 // Service represents a system service.
 type Service struct {
 	Name    string `json:"name"`
-	State   string `json:"state"`   // running, stopped, failed
+	State   string `json:"state"` // running, stopped, failed
 	Enabled bool   `json:"enabled"`
 }
 
@@ -141,7 +141,7 @@ type User struct {
 type PolicyUpdatePayload struct {
 	PolicyID string          `json:"policy_id"`
 	Level    CapabilityLevel `json:"level"`
-	Allowed  []string        `json:"allowed,omitempty"`  // Command allowlist
-	Blocked  []string        `json:"blocked,omitempty"`  // Command blocklist
-	Paths    []string        `json:"paths,omitempty"`    // Protected paths
+	Allowed  []string        `json:"allowed,omitempty"` // Command allowlist
+	Blocked  []string        `json:"blocked,omitempty"` // Command blocklist
+	Paths    []string        `json:"paths,omitempty"`   // Protected paths
 }

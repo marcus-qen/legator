@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"runtime"
 	"os"
+	"runtime"
 	"time"
 
 	"go.uber.org/zap"

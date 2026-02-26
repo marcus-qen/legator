@@ -44,10 +44,10 @@ type CompletionResponse struct {
 
 // ProviderConfig holds connection details for a model provider.
 type ProviderConfig struct {
-	Name    string `json:"name" yaml:"name"`       // e.g. "openai", "ollama", "anthropic"
+	Name    string `json:"name" yaml:"name"`         // e.g. "openai", "ollama", "anthropic"
 	BaseURL string `json:"base_url" yaml:"base_url"` // e.g. "https://api.openai.com/v1"
 	APIKey  string `json:"api_key,omitempty" yaml:"api_key,omitempty"`
-	Model   string `json:"model" yaml:"model"`     // e.g. "gpt-4o", "llama3.1"
+	Model   string `json:"model" yaml:"model"` // e.g. "gpt-4o", "llama3.1"
 }
 
 // Provider is the interface for model providers.

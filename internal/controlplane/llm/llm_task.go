@@ -20,24 +20,24 @@ type CommandRequest struct {
 
 // TaskResult is the complete result of a task execution.
 type TaskResult struct {
-	Task       string         `json:"task"`
-	ProbeID    string         `json:"probe_id"`
-	Steps      []TaskStep     `json:"steps"`
-	Summary    string         `json:"summary"`
-	StartedAt  time.Time      `json:"started_at"`
-	FinishedAt time.Time      `json:"finished_at"`
-	Error      string         `json:"error,omitempty"`
+	Task       string     `json:"task"`
+	ProbeID    string     `json:"probe_id"`
+	Steps      []TaskStep `json:"steps"`
+	Summary    string     `json:"summary"`
+	StartedAt  time.Time  `json:"started_at"`
+	FinishedAt time.Time  `json:"finished_at"`
+	Error      string     `json:"error,omitempty"`
 }
 
 // TaskStep records one command execution in the task.
 type TaskStep struct {
-	Command  string `json:"command"`
+	Command  string   `json:"command"`
 	Args     []string `json:"args,omitempty"`
-	Reason   string `json:"reason"`
-	ExitCode int    `json:"exit_code"`
-	Stdout   string `json:"stdout"`
-	Stderr   string `json:"stderr"`
-	Duration int64  `json:"duration_ms"`
+	Reason   string   `json:"reason"`
+	ExitCode int      `json:"exit_code"`
+	Stdout   string   `json:"stdout"`
+	Stderr   string   `json:"stderr"`
+	Duration int64    `json:"duration_ms"`
 }
 
 // CommandDispatcher sends a command to a probe and waits for the result.
@@ -45,10 +45,10 @@ type CommandDispatcher func(probeID string, cmd *protocol.CommandPayload) (*prot
 
 // TaskRunner executes natural-language tasks against probes using an LLM.
 type TaskRunner struct {
-	provider   Provider
-	dispatch   CommandDispatcher
-	logger     *zap.Logger
-	maxSteps   int
+	provider Provider
+	dispatch CommandDispatcher
+	logger   *zap.Logger
+	maxSteps int
 }
 
 // NewTaskRunner creates a TaskRunner.

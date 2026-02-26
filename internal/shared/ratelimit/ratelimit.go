@@ -162,9 +162,9 @@ func (l *Limiter) RecordComplete(agentKey string) {
 
 // Stats returns current limiter state (for metrics/status).
 type Stats struct {
-	ConcurrentTotal int
+	ConcurrentTotal   int
 	ConcurrentByAgent map[string]int
-	RunsLastHour    int
+	RunsLastHour      int
 }
 
 // GetStats returns current limiter statistics.

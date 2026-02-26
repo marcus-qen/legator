@@ -31,7 +31,9 @@ func mockOpenAIServer(responses []string) *httptest.Server {
 				FinishReason string `json:"finish_reason"`
 			}{
 				{
-					Message:      struct{ Content string `json:"content"` }{Content: content},
+					Message: struct {
+						Content string `json:"content"`
+					}{Content: content},
 					FinishReason: "stop",
 				},
 			},

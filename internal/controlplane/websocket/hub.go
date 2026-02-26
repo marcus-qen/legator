@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/marcus-qen/legator/internal/protocol"
+	"github.com/marcus-qen/legator/internal/shared/signing"
 	"go.uber.org/zap"
 )
 
@@ -31,10 +32,11 @@ type ProbeConn struct {
 
 // Hub manages all connected probes.
 type Hub struct {
-	probes  map[string]*ProbeConn
-	mu      sync.RWMutex
-	logger  *zap.Logger
-	onMsg   func(probeID string, env protocol.Envelope) // callback for incoming messages
+	probes map[string]*ProbeConn
+	mu     sync.RWMutex
+	logger *zap.Logger
+	onMsg  func(probeID string, env protocol.Envelope) // callback for incoming messages
+	signer *signing.Signer                             // nil = signing disabled
 }
 
 // NewHub creates a new Hub.
@@ -44,6 +46,11 @@ func NewHub(logger *zap.Logger, onMsg func(string, protocol.Envelope)) *Hub {
 		logger: logger,
 		onMsg:  onMsg,
 	}
+}
+
+// SetSigner enables command signing on outgoing messages.
+func (h *Hub) SetSigner(s *signing.Signer) {
+	h.signer = s
 }
 
 // HandleProbeWS is the HTTP handler for probe WebSocket connections.
@@ -130,6 +137,14 @@ func (h *Hub) SendTo(probeID string, msgType protocol.MessageType, payload any) 
 		Type:      msgType,
 		Timestamp: time.Now().UTC(),
 		Payload:   payload,
+	}
+
+	if h.signer != nil && msgType == protocol.MsgCommand {
+		sig, err := h.signer.Sign(env.ID, payload)
+		if err != nil {
+			return fmt.Errorf("sign command: %w", err)
+		}
+		env.Signature = sig
 	}
 
 	data, err := json.Marshal(env)

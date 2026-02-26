@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	maxOutputSize = 1 << 20 // 1MB per stream
+	maxOutputSize  = 1 << 20 // 1MB per stream
 	defaultTimeout = 30 * time.Second
 )
 
