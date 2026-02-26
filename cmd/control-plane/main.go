@@ -20,15 +20,16 @@ import (
 
 	"github.com/marcus-qen/legator/internal/controlplane/api"
 	"github.com/marcus-qen/legator/internal/controlplane/approval"
-	"github.com/marcus-qen/legator/internal/controlplane/auth"
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
+	"github.com/marcus-qen/legator/internal/controlplane/auth"
 	"github.com/marcus-qen/legator/internal/controlplane/chat"
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
+	"github.com/marcus-qen/legator/internal/controlplane/config"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/llm"
 	"github.com/marcus-qen/legator/internal/controlplane/metrics"
-	"github.com/marcus-qen/legator/internal/controlplane/webhook"
 	"github.com/marcus-qen/legator/internal/controlplane/policy"
+	"github.com/marcus-qen/legator/internal/controlplane/webhook"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
 	"github.com/marcus-qen/legator/internal/protocol"
 	"github.com/marcus-qen/legator/internal/shared/signing"
@@ -344,15 +345,15 @@ func main() {
 			logger.Named("chat-llm"),
 		)
 
-			// Wire responder to whichever is available
-	setResponder := func(fn chat.ResponderFunc) {
-		if chatStore != nil {
-			chatStore.SetResponder(fn)
-		} else {
-			chatMgr.SetResponder(fn)
+		// Wire responder to whichever is available
+		setResponder := func(fn chat.ResponderFunc) {
+			if chatStore != nil {
+				chatStore.SetResponder(fn)
+			} else {
+				chatMgr.SetResponder(fn)
+			}
 		}
-	}
-	setResponder(func(probeID, userMessage string, history []chat.Message) string {
+		setResponder(func(probeID, userMessage string, history []chat.Message) string {
 			// Convert chat.Message to llm.ChatMessage
 			llmHistory := make([]llm.ChatMessage, len(history))
 			for i, m := range history {
@@ -1297,21 +1298,34 @@ func calculateUptime(start time.Time) string {
 	return strings.Join(parts, " ")
 }
 
-type Config struct {
-	ListenAddr string
-	DataDir    string
-}
-
-func loadConfig() (*Config, error) {
-	addr := os.Getenv("LEGATOR_LISTEN_ADDR")
-	if addr == "" {
-		addr = ":8080"
+func loadConfig() (*config.Config, error) {
+	// Check for --config flag
+	configPath := ""
+	for i, arg := range os.Args {
+		if arg == "--config" && i+1 < len(os.Args) {
+			configPath = os.Args[i+1]
+		}
 	}
-	dataDir := os.Getenv("LEGATOR_DATA_DIR")
-	if dataDir == "" {
-		dataDir = "/var/lib/legator"
+	// Handle init-config subcommand
+	for _, arg := range os.Args {
+		if arg == "init-config" {
+			cfg := config.Default()
+			path := "legator.json"
+			if configPath != "" {
+				path = configPath
+			}
+			if err := cfg.Save(path); err != nil {
+				return nil, fmt.Errorf("save config: %w", err)
+			}
+			fmt.Printf("Config written to %s\n", path)
+			os.Exit(0)
+		}
 	}
-	return &Config{ListenAddr: addr, DataDir: dataDir}, nil
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return nil, err
+	}
+	return &cfg, nil
 }
 
 // hubConnectedAdapter adapts Hub.Connected() []string to metrics.HubStats.Connected() int.

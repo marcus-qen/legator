@@ -1,149 +1,155 @@
 #!/usr/bin/env bash
-# Legator Probe — One-liner installer
-#
-# Usage:
-#   curl -sSL https://cp.example.com/install.sh | sudo bash -s -- \
-#     --server https://cp.example.com \
-#     --token prb_a8f3d1e9c2b4_1772060000_hmac_7f2a
-#
-# What this does:
-#   1. Detects OS and architecture
-#   2. Downloads the probe binary
-#   3. Verifies SHA256 checksum
-#   4. Installs to /usr/local/bin/probe
-#   5. Runs `probe init` to register with the control plane
-#   6. Installs and starts the systemd service
-
+# Legator Probe Installer
+# Usage: curl -sSL https://your-server/install.sh | sudo bash -s -- --server URL --token TOKEN
 set -euo pipefail
 
-PROBE_BIN="/usr/local/bin/probe"
-PROBE_CONFIG_DIR="/etc/probe"
-PROBE_DATA_DIR="/var/lib/probe"
-PROBE_LOG_DIR="/var/log/probe"
+VERSION="${LEGATOR_VERSION:-latest}"
+INSTALL_DIR="/usr/local/bin"
+CONFIG_DIR="/etc/legator"
+DATA_DIR="/var/lib/legator"
+LOG_DIR="/var/log/legator"
+SERVICE_USER="legator"
 
-# --- Parse arguments ---
+# Parse arguments
 SERVER=""
 TOKEN=""
+ARCH=""
+
 while [[ $# -gt 0 ]]; do
-  case $1 in
+  case "$1" in
     --server|-s) SERVER="$2"; shift 2 ;;
     --token|-t)  TOKEN="$2"; shift 2 ;;
-    --help|-h)   usage; exit 0 ;;
-    *)           echo "Unknown argument: $1"; exit 1 ;;
+    --arch)      ARCH="$2"; shift 2 ;;
+    --version)   VERSION="$2"; shift 2 ;;
+    --help|-h)
+      echo "Usage: install.sh --server <url> --token <token> [--arch <arch>] [--version <ver>]"
+      exit 0
+      ;;
+    *) echo "Unknown option: $1"; exit 1 ;;
   esac
 done
 
 if [[ -z "$SERVER" || -z "$TOKEN" ]]; then
   echo "Error: --server and --token are required"
-  echo ""
-  echo "Usage:"
-  echo "  curl -sSL https://cp.example.com/install.sh | sudo bash -s -- \\"
-  echo "    --server https://cp.example.com \\"
-  echo "    --token prb_xxx"
+  echo "Usage: install.sh --server <url> --token <token>"
   exit 1
 fi
 
-# --- Detect OS and architecture ---
-detect_platform() {
-  OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-  ARCH="$(uname -m)"
-
-  case "$OS" in
-    linux)  OS="linux" ;;
-    darwin) OS="darwin" ;;
-    *)      echo "Unsupported OS: $OS"; exit 1 ;;
-  esac
-
-  case "$ARCH" in
+# Detect architecture
+if [[ -z "$ARCH" ]]; then
+  case "$(uname -m)" in
     x86_64|amd64)  ARCH="amd64" ;;
     aarch64|arm64) ARCH="arm64" ;;
-    armv7l)        ARCH="armv7" ;;
-    *)             echo "Unsupported architecture: $ARCH"; exit 1 ;;
-  esac
-
-  echo "Detected platform: ${OS}/${ARCH}"
-}
-
-# --- Check prerequisites ---
-check_prereqs() {
-  if [[ "$(id -u)" -ne 0 ]]; then
-    echo "Error: this script must be run as root (use sudo)"
-    exit 1
-  fi
-
-  for cmd in curl sha256sum; do
-    if ! command -v "$cmd" &>/dev/null; then
-      echo "Error: $cmd is required but not found"
+    armv7l|armhf)  ARCH="arm" ;;
+    *)
+      echo "Unsupported architecture: $(uname -m)"
       exit 1
-    fi
-  done
-}
+      ;;
+  esac
+fi
 
-# --- Download and verify ---
-download_probe() {
-  local url="${SERVER}/download/probe-${OS}-${ARCH}"
-  local checksum_url="${SERVER}/download/probe-${OS}-${ARCH}.sha256"
+OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+if [[ "$OS" != "linux" ]]; then
+  echo "Unsupported OS: $OS (only Linux supported)"
+  exit 1
+fi
 
-  echo "Downloading probe binary..."
-  curl -sSL -o "${PROBE_BIN}.tmp" "$url"
+BINARY="legator-probe-${OS}-${ARCH}"
+DOWNLOAD_URL="${SERVER}/download/${BINARY}"
+CHECKSUM_URL="${SERVER}/download/${BINARY}.sha256"
 
-  echo "Downloading checksum..."
-  local expected
-  expected=$(curl -sSL "$checksum_url" | awk '{print $1}')
+echo "╔══════════════════════════════════════════╗"
+echo "║        Legator Probe Installer           ║"
+echo "╚══════════════════════════════════════════╝"
+echo ""
+echo "Server:   ${SERVER}"
+echo "OS/Arch:  ${OS}/${ARCH}"
+echo "Version:  ${VERSION}"
+echo ""
 
-  echo "Verifying SHA256..."
-  local actual
-  actual=$(sha256sum "${PROBE_BIN}.tmp" | awk '{print $1}')
+# Check root
+if [[ $EUID -ne 0 ]]; then
+  echo "Error: This installer must be run as root (use sudo)"
+  exit 1
+fi
 
-  if [[ "$expected" != "$actual" ]]; then
-    echo "CHECKSUM MISMATCH!"
-    echo "  Expected: $expected"
-    echo "  Got:      $actual"
-    rm -f "${PROBE_BIN}.tmp"
-    exit 1
+# Create service user
+if ! id -u "${SERVICE_USER}" &>/dev/null; then
+  echo "→ Creating service user: ${SERVICE_USER}"
+  useradd --system --no-create-home --shell /usr/sbin/nologin "${SERVICE_USER}"
+fi
+
+# Create directories
+echo "→ Creating directories"
+mkdir -p "${CONFIG_DIR}" "${DATA_DIR}" "${LOG_DIR}"
+chown "${SERVICE_USER}:${SERVICE_USER}" "${DATA_DIR}" "${LOG_DIR}"
+
+# Download binary
+echo "→ Downloading probe binary"
+if command -v curl &>/dev/null; then
+  curl -fsSL -o "/tmp/${BINARY}" "${DOWNLOAD_URL}"
+  if curl -fsSL -o "/tmp/${BINARY}.sha256" "${CHECKSUM_URL}" 2>/dev/null; then
+    echo "→ Verifying checksum"
+    cd /tmp && sha256sum -c "${BINARY}.sha256"
   fi
+elif command -v wget &>/dev/null; then
+  wget -q -O "/tmp/${BINARY}" "${DOWNLOAD_URL}"
+else
+  echo "Error: curl or wget required"
+  exit 1
+fi
 
-  mv "${PROBE_BIN}.tmp" "$PROBE_BIN"
-  chmod 0755 "$PROBE_BIN"
-  echo "Binary installed to ${PROBE_BIN}"
-}
+# Install binary
+echo "→ Installing binary to ${INSTALL_DIR}"
+install -m 755 "/tmp/${BINARY}" "${INSTALL_DIR}/legator-probe"
+rm -f "/tmp/${BINARY}" "/tmp/${BINARY}.sha256"
 
-# --- Create directories ---
-setup_dirs() {
-  mkdir -p "$PROBE_CONFIG_DIR" "$PROBE_DATA_DIR" "$PROBE_LOG_DIR"
-  chmod 0700 "$PROBE_CONFIG_DIR"
-}
+# Register with control plane
+echo "→ Registering with control plane"
+"${INSTALL_DIR}/legator-probe" init --server "${SERVER}" --token "${TOKEN}"
 
-# --- Register with control plane ---
-register_probe() {
-  echo "Registering with control plane..."
-  "$PROBE_BIN" init --server "$SERVER" --token "$TOKEN"
-}
+# Install systemd service
+echo "→ Installing systemd service"
+cat > /etc/systemd/system/legator-probe.service << EOF
+[Unit]
+Description=Legator Probe Agent
+After=network-online.target
+Wants=network-online.target
+Documentation=https://legator.io/docs
 
-# --- Install systemd service ---
-install_service() {
-  "$PROBE_BIN" service install
-  echo "Service installed and started."
-}
+[Service]
+Type=simple
+User=${SERVICE_USER}
+Group=${SERVICE_USER}
+ExecStart=${INSTALL_DIR}/legator-probe run
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=legator-probe
 
-# --- Main ---
-main() {
-  echo "=== Legator Probe Installer ==="
-  echo ""
-  check_prereqs
-  detect_platform
-  setup_dirs
-  download_probe
-  register_probe
-  install_service
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=${DATA_DIR} ${LOG_DIR} ${CONFIG_DIR}
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
 
-  echo ""
-  echo "✅ Probe installed and registered."
-  echo "   Config:  ${PROBE_CONFIG_DIR}/config.yaml"
-  echo "   Binary:  ${PROBE_BIN}"
-  echo "   Service: systemctl status probe-agent"
-  echo ""
-  echo "The probe is now reporting to ${SERVER}."
-}
+[Install]
+WantedBy=multi-user.target
+EOF
 
-main
+systemctl daemon-reload
+systemctl enable legator-probe
+systemctl start legator-probe
+
+echo ""
+echo "✅ Legator probe installed and running!"
+echo ""
+echo "   Status:    systemctl status legator-probe"
+echo "   Logs:      journalctl -u legator-probe -f"
+echo "   Config:    ${CONFIG_DIR}/"
+echo "   Uninstall: legator-probe uninstall"
