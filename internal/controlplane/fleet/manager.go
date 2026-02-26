@@ -176,6 +176,21 @@ func (m *Manager) MarkOffline(threshold time.Duration) {
 	}
 }
 
+// SetOnline marks a probe online and refreshes last-seen.
+func (m *Manager) SetOnline(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	ps, ok := m.probes[id]
+	if !ok {
+		return fmt.Errorf("unknown probe: %s", id)
+	}
+
+	ps.Status = "online"
+	ps.LastSeen = time.Now().UTC()
+	return nil
+}
+
 // Count returns the number of probes in each status.
 func (m *Manager) Count() map[string]int {
 	m.mu.RLock()
