@@ -1,6 +1,8 @@
 package server
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -75,5 +77,34 @@ func TestCalculateUptime(t *testing.T) {
 	got := calculateUptime(start)
 	if !strings.Contains(got, "1d") || !strings.Contains(got, "2h") || !strings.Contains(got, "3m") {
 		t.Fatalf("expected uptime to contain 1d 2h 3m, got %q", got)
+	}
+}
+
+func TestProbeDetailTemplateIncludesIncrementalSSEAnchors(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "web", "templates", "probe-detail.html")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read probe detail template: %v", err)
+	}
+
+	html := string(content)
+	required := []string{
+		`id="probe-status-badge"`,
+		`id="probe-health-badge"`,
+		`id="probe-last-seen"`,
+		`id="probe-uptime"`,
+		`id="probe-conn-badge"`,
+		`id="probe-hostname-field"`,
+		`id="probe-memory-field"`,
+		`new EventSource('/api/v1/events')`,
+		`['probe.connected', 'probe.disconnected', 'probe.offline']`,
+		`['command.completed', 'command.failed']`,
+		"fetch(`/api/v1/probes/${encodeURIComponent(PROBE_ID)}`",
+	}
+
+	for _, snippet := range required {
+		if !strings.Contains(html, snippet) {
+			t.Fatalf("template missing expected snippet: %s", snippet)
+		}
 	}
 }

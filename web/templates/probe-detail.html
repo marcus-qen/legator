@@ -25,6 +25,10 @@
       .health-good { background: rgba(63,185,80,0.15); color: #3fb950; }
       .health-warn { background: rgba(210,153,34,0.15); color: #d29922; }
       .health-crit { background: rgba(248,81,73,0.15); color: #f85149; }
+      .conn-badge { padding: 4px 10px; border-radius: 16px; font-size: 11px; font-weight: 600; border: 1px solid #30363d; color: #8b949e; }
+      .conn-live { border-color: rgba(63,185,80,0.4); color: #3fb950; background: rgba(63,185,80,0.12); }
+      .conn-reconnecting { border-color: rgba(210,153,34,0.4); color: #d29922; background: rgba(210,153,34,0.12); }
+      .meta-note { margin-top: 8px; font-size: 11px; color: #d29922; display: none; }
       .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
       .panel { background: #161b22; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; }
       .panel h2 { font-size: 14px; padding: 12px 16px; border-bottom: 1px solid #21262d; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; }
@@ -48,19 +52,44 @@
     </style>
   </head>
   <body>
-    <div class="app">
+    <div class="app" data-probe-id="{{.Probe.ID}}">
       <a href="/" class="back">← Back to Fleet</a>
+
+      {{$statusClass := statusClass .Probe.Status}}
+      {{$healthScore := 18}}
+      {{$healthClass := "health-crit"}}
+      {{if .Probe.Health}}
+        {{$healthScore = .Probe.Health.Score}}
+        {{if ge .Probe.Health.Score 80}}
+          {{$healthClass = "health-good"}}
+        {{else if ge .Probe.Health.Score 50}}
+          {{$healthClass = "health-warn"}}
+        {{else}}
+          {{$healthClass = "health-crit"}}
+        {{end}}
+      {{else if eq $statusClass "online"}}
+        {{$healthScore = 100}}
+        {{$healthClass = "health-good"}}
+      {{else if eq $statusClass "degraded"}}
+        {{$healthScore = 63}}
+        {{$healthClass = "health-warn"}}
+      {{else if eq $statusClass "pending"}}
+        {{$healthScore = 49}}
+        {{$healthClass = "health-warn"}}
+      {{end}}
 
       <div class="header">
         <div class="header-left">
-          <h1>{{if .Probe.Inventory}}{{.Probe.Inventory.Hostname}}{{else}}{{.Probe.Hostname}}{{end}}</h1>
-          <div class="meta">
-            ID: {{.Probe.ID}} · Policy: {{.Probe.PolicyLevel}} · Last seen {{formatLastSeen .Probe.LastSeen}} · Uptime {{.Uptime}}
+          <h1 id="probe-hostname-title">{{if .Probe.Inventory}}{{if .Probe.Inventory.Hostname}}{{.Probe.Inventory.Hostname}}{{else}}{{if .Probe.Hostname}}{{.Probe.Hostname}}{{else}}(unknown){{end}}{{end}}{{else}}{{if .Probe.Hostname}}{{.Probe.Hostname}}{{else}}(unknown){{end}}{{end}}</h1>
+          <div class="meta" id="probe-meta-line">
+            ID: <span id="probe-id" data-probe-id="{{.Probe.ID}}">{{.Probe.ID}}</span> · Policy: <span id="probe-policy">{{.Probe.PolicyLevel}}</span> · Last seen <span id="probe-last-seen">{{formatLastSeen .Probe.LastSeen}}</span> · Uptime <span id="probe-uptime">{{.Uptime}}</span>
           </div>
+          <div class="meta-note" id="probe-refresh-note" role="status" aria-live="polite"></div>
         </div>
         <div class="header-right">
-          <span class="badge badge-{{statusClass .Probe.Status}}">{{humanizeStatus .Probe.Status}}</span>
-          {{if .Probe.Health}}<span class="health-badge {{if ge .Probe.Health.Score 80}}health-good{{else if ge .Probe.Health.Score 50}}health-warn{{else}}health-crit{{end}}">Health: {{.Probe.Health.Score}}/100</span>{{end}}
+          <span id="probe-status-badge" class="badge badge-{{$statusClass}}">{{humanizeStatus .Probe.Status}}</span>
+          <span id="probe-health-badge" class="health-badge {{$healthClass}}">Health: <span id="probe-health-score">{{$healthScore}}</span>/100</span>
+          <span id="probe-conn-badge" class="conn-badge conn-reconnecting" role="status" aria-live="polite">reconnecting</span>
         </div>
       </div>
 
@@ -69,19 +98,19 @@
           <h2>System</h2>
           <dl class="kv">
             <dt>Hostname</dt>
-            <dd>{{if .Probe.Inventory}}{{.Probe.Inventory.Hostname}}{{else}}{{.Probe.Hostname}}{{end}}</dd>
+            <dd id="probe-hostname-field">{{if .Probe.Inventory}}{{if .Probe.Inventory.Hostname}}{{.Probe.Inventory.Hostname}}{{else}}{{if .Probe.Hostname}}{{.Probe.Hostname}}{{else}}-{{end}}{{end}}{{else}}{{if .Probe.Hostname}}{{.Probe.Hostname}}{{else}}-{{end}}{{end}}</dd>
             <dt>OS</dt>
-            <dd>{{if .Probe.Inventory}}{{.Probe.Inventory.OS}}{{else}}{{.Probe.OS}}{{end}}</dd>
+            <dd id="probe-os-field">{{if .Probe.Inventory}}{{if .Probe.Inventory.OS}}{{.Probe.Inventory.OS}}{{else}}{{if .Probe.OS}}{{.Probe.OS}}{{else}}-{{end}}{{end}}{{else}}{{if .Probe.OS}}{{.Probe.OS}}{{else}}-{{end}}{{end}}</dd>
             <dt>Arch</dt>
-            <dd>{{if .Probe.Inventory}}{{.Probe.Inventory.Arch}}{{else}}{{.Probe.Arch}}{{end}}</dd>
+            <dd id="probe-arch-field">{{if .Probe.Inventory}}{{if .Probe.Inventory.Arch}}{{.Probe.Inventory.Arch}}{{else}}{{if .Probe.Arch}}{{.Probe.Arch}}{{else}}-{{end}}{{end}}{{else}}{{if .Probe.Arch}}{{.Probe.Arch}}{{else}}-{{end}}{{end}}</dd>
             <dt>Kernel</dt>
-            <dd>{{if .Probe.Inventory}}{{.Probe.Inventory.Kernel}}{{else}}-{{end}}</dd>
+            <dd id="probe-kernel-field">{{if .Probe.Inventory}}{{if .Probe.Inventory.Kernel}}{{.Probe.Inventory.Kernel}}{{else}}-{{end}}{{else}}-{{end}}</dd>
             <dt>CPUs</dt>
-            <dd>{{if .Probe.Inventory}}{{.Probe.Inventory.CPUs}}{{else}}-{{end}}</dd>
+            <dd id="probe-cpus-field">{{if .Probe.Inventory}}{{.Probe.Inventory.CPUs}}{{else}}-{{end}}</dd>
             <dt>Memory</dt>
-            <dd>{{if .Probe.Inventory}}{{humanBytes .Probe.Inventory.MemTotal}}{{else}}-{{end}}</dd>
+            <dd id="probe-memory-field">{{if .Probe.Inventory}}{{humanBytes .Probe.Inventory.MemTotal}}{{else}}-{{end}}</dd>
             <dt>Disk</dt>
-            <dd>{{if .Probe.Inventory}}{{humanBytes .Probe.Inventory.DiskTotal}}{{else}}-{{end}}</dd>
+            <dd id="probe-disk-field">{{if .Probe.Inventory}}{{humanBytes .Probe.Inventory.DiskTotal}}{{else}}-{{end}}</dd>
           </dl>
         </div>
 
@@ -125,78 +154,342 @@
       </div>
     </div>
     <script>
-      const PROBE_ID = '{{.Probe.ID}}';
+      (function () {
+        const PROBE_ID = '{{.Probe.ID}}';
+        const MAX_FETCH_FAILURES = 5;
+        const MAX_SSE_FAILURES = 8;
+        const BASE_RECONNECT_MS = 1000;
+        const MAX_RECONNECT_MS = 30000;
+        const REFRESH_INTERVAL_MS = 30000;
 
-      // ── Live indicators ──
-      const statusBadge = document.querySelector('.badge');
-      const healthBadge = document.querySelector('.health-badge');
-      const metaDiv = document.querySelector('.meta');
-
-      function updateStatus(status) {
-        if (!statusBadge) return;
-        statusBadge.className = 'badge badge-' + statusClass(status);
-        statusBadge.textContent = humanize(status);
-      }
-
-      function statusClass(s) {
-        if (s === 'online') return 'online';
-        if (s === 'offline') return 'offline';
-        if (s === 'degraded') return 'degraded';
-        return 'pending';
-      }
-
-      function humanize(s) {
-        return s.charAt(0).toUpperCase() + s.slice(1);
-      }
-
-      function updateLastSeen() {
-        if (!metaDiv) return;
-        const text = metaDiv.textContent;
-        metaDiv.textContent = text.replace(/Last seen [^·]+/, 'Last seen just now ');
-      }
-
-      // ── SSE connection ──
-      let es = null;
-      let reconnectTimer = null;
-
-      function connectSSE() {
-        if (es) { es.close(); }
-
-        es = new EventSource('/api/v1/events');
-
-        es.onerror = () => {
-          if (!reconnectTimer) {
-            reconnectTimer = setTimeout(() => { reconnectTimer = null; connectSSE(); }, 5000);
-          }
+        const state = {
+          source: null,
+          reconnectTimer: null,
+          reconnectAttempt: 0,
+          periodicRefresh: null,
+          fetchInFlight: false,
+          fetchFailures: 0,
+          sseFailures: 0,
+          hardReloadScheduled: false,
         };
 
-        const types = ['probe.connected','probe.disconnected','probe.offline',
-                       'command.dispatched','command.completed','command.failed',
-                       'policy.changed'];
-        types.forEach(t => {
-          es.addEventListener(t, e => {
-            try {
-              const evt = JSON.parse(e.data);
-              if (evt.probe_id !== PROBE_ID) return;
+        const refs = {
+          statusBadge: document.getElementById('probe-status-badge'),
+          healthBadge: document.getElementById('probe-health-badge'),
+          healthScore: document.getElementById('probe-health-score'),
+          lastSeen: document.getElementById('probe-last-seen'),
+          uptime: document.getElementById('probe-uptime'),
+          policy: document.getElementById('probe-policy'),
+          hostTitle: document.getElementById('probe-hostname-title'),
+          hostField: document.getElementById('probe-hostname-field'),
+          osField: document.getElementById('probe-os-field'),
+          archField: document.getElementById('probe-arch-field'),
+          kernelField: document.getElementById('probe-kernel-field'),
+          cpusField: document.getElementById('probe-cpus-field'),
+          memoryField: document.getElementById('probe-memory-field'),
+          diskField: document.getElementById('probe-disk-field'),
+          connBadge: document.getElementById('probe-conn-badge'),
+          refreshNote: document.getElementById('probe-refresh-note'),
+        };
 
-              // Update status on connect/disconnect
-              if (t === 'probe.connected') {
-                updateStatus('online');
-                updateLastSeen();
-              } else if (t === 'probe.disconnected' || t === 'probe.offline') {
-                updateStatus('offline');
-              }
+        function setText(node, value) {
+          if (!node) return;
+          node.textContent = value;
+        }
 
-              // Refresh full page data periodically (inventory might have changed)
-              if (t === 'probe.connected') {
-                setTimeout(() => { location.reload(); }, 3000);
-              }
-            } catch(err) {}
+        function normalizeStatus(value) {
+          const status = (value || 'pending').toString().toLowerCase();
+          if (status === 'online' || status === 'offline' || status === 'degraded') {
+            return status;
+          }
+          return 'pending';
+        }
+
+        function statusClass(status) {
+          return 'badge-' + normalizeStatus(status);
+        }
+
+        function humanizeStatus(value) {
+          const status = normalizeStatus(value);
+          return status.charAt(0).toUpperCase() + status.slice(1);
+        }
+
+        function fallbackHealth(status) {
+          const normalized = normalizeStatus(status);
+          if (normalized === 'online') return {score: 100, className: 'health-good'};
+          if (normalized === 'degraded') return {score: 63, className: 'health-warn'};
+          if (normalized === 'pending') return {score: 49, className: 'health-warn'};
+          return {score: 18, className: 'health-crit'};
+        }
+
+        function healthPayload(probe, status) {
+          if (probe && probe.health && typeof probe.health.score === 'number' && Number.isFinite(probe.health.score)) {
+            const score = Math.max(0, Math.min(100, Math.round(probe.health.score)));
+            if (score >= 80) return {score: score, className: 'health-good'};
+            if (score >= 50) return {score: score, className: 'health-warn'};
+            return {score: score, className: 'health-crit'};
+          }
+          return fallbackHealth(status);
+        }
+
+        function isoOrFallback(raw) {
+          if (!raw) return '-';
+          const ts = new Date(raw);
+          if (Number.isNaN(ts.getTime())) return String(raw);
+          return ts.toISOString();
+        }
+
+        function formatUptime(registered) {
+          if (!registered) return 'n/a';
+          const ts = new Date(registered);
+          if (Number.isNaN(ts.getTime())) return 'n/a';
+
+          let seconds = Math.max(0, Math.floor((Date.now() - ts.getTime()) / 1000));
+          if (seconds < 60) return `${seconds}s`;
+
+          const minutes = Math.floor(seconds / 60);
+          const secs = seconds % 60;
+          const hours = Math.floor(minutes / 60);
+          const mins = minutes % 60;
+          const days = Math.floor(hours / 24);
+          const hrs = hours % 24;
+
+          const parts = [];
+          if (days > 0) parts.push(`${days}d`);
+          if (hrs > 0) parts.push(`${hrs}h`);
+          if (mins > 0) parts.push(`${mins}m`);
+          if (!parts.length) parts.push(`${secs}s`);
+          return parts.join(' ');
+        }
+
+        function humanBytes(value) {
+          const bytes = Number(value);
+          if (!Number.isFinite(bytes) || bytes <= 0) return '-';
+          const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+          let val = bytes;
+          let unit = 0;
+          while (unit < units.length - 1 && val >= 1024) {
+            val /= 1024;
+            unit += 1;
+          }
+          if (unit === 0) return `${Math.round(val)} ${units[unit]}`;
+          return `${val.toFixed(1)} ${units[unit]}`;
+        }
+
+        function setConnectionState(isLive) {
+          if (!refs.connBadge) return;
+          refs.connBadge.classList.remove('conn-live', 'conn-reconnecting');
+          if (isLive) {
+            refs.connBadge.classList.add('conn-live');
+            refs.connBadge.textContent = 'live';
+          } else {
+            refs.connBadge.classList.add('conn-reconnecting');
+            refs.connBadge.textContent = 'reconnecting';
+          }
+        }
+
+        function setRefreshNote(message) {
+          if (!refs.refreshNote) return;
+          refs.refreshNote.textContent = message || '';
+          refs.refreshNote.style.display = message ? 'block' : 'none';
+        }
+
+        function applyStatus(status) {
+          if (!refs.statusBadge) return;
+          refs.statusBadge.className = `badge ${statusClass(status)}`;
+          refs.statusBadge.textContent = humanizeStatus(status);
+        }
+
+        function applyHealth(health) {
+          if (!refs.healthBadge || !health) return;
+          refs.healthBadge.className = `health-badge ${health.className}`;
+          setText(refs.healthScore, String(health.score));
+        }
+
+        function applyLastSeen(raw) {
+          setText(refs.lastSeen, isoOrFallback(raw));
+        }
+
+        function extractEventStatus(eventType, evt) {
+          const detail = evt && evt.detail && typeof evt.detail === 'object' ? evt.detail : {};
+          if (typeof detail.status === 'string' && detail.status) {
+            return detail.status;
+          }
+          if (eventType === 'probe.connected') return 'online';
+          if (eventType === 'probe.disconnected') return 'degraded';
+          if (eventType === 'probe.offline') return 'offline';
+          return 'pending';
+        }
+
+        function extractEventLastSeen(evt) {
+          const detail = evt && evt.detail && typeof evt.detail === 'object' ? evt.detail : {};
+          if (typeof detail.last_seen === 'string' && detail.last_seen) {
+            return detail.last_seen;
+          }
+          if (evt && typeof evt.timestamp === 'string' && evt.timestamp) {
+            return evt.timestamp;
+          }
+          return new Date().toISOString();
+        }
+
+        function applyProbeSnapshot(probe) {
+          if (!probe || typeof probe !== 'object') return;
+
+          const status = normalizeStatus(probe.status);
+          applyStatus(status);
+          applyHealth(healthPayload(probe, status));
+          applyLastSeen(probe.last_seen);
+          setText(refs.uptime, formatUptime(probe.registered));
+          if (probe.policy_level) {
+            setText(refs.policy, probe.policy_level);
+          }
+
+          const inv = probe.inventory && typeof probe.inventory === 'object' ? probe.inventory : null;
+          const hostname = inv && inv.hostname ? inv.hostname : (probe.hostname || '-');
+          const osName = inv && inv.os ? inv.os : (probe.os || '-');
+          const arch = inv && inv.arch ? inv.arch : (probe.arch || '-');
+          const kernel = inv && inv.kernel ? inv.kernel : '-';
+          const cpus = inv && Number.isFinite(Number(inv.cpus)) ? String(Number(inv.cpus)) : '-';
+          const memory = inv ? humanBytes(inv.mem_total_bytes) : '-';
+          const disk = inv ? humanBytes(inv.disk_total_bytes) : '-';
+
+          setText(refs.hostTitle, hostname || '(unknown)');
+          setText(refs.hostField, hostname || '-');
+          setText(refs.osField, osName || '-');
+          setText(refs.archField, arch || '-');
+          setText(refs.kernelField, kernel);
+          setText(refs.cpusField, cpus);
+          setText(refs.memoryField, memory);
+          setText(refs.diskField, disk);
+        }
+
+        function parseEventData(raw) {
+          if (!raw) return null;
+          try {
+            return JSON.parse(raw);
+          } catch (_) {
+            return null;
+          }
+        }
+
+        function maybeHardReload(reason) {
+          if (state.hardReloadScheduled) return;
+          if (state.fetchFailures < MAX_FETCH_FAILURES || state.sseFailures < MAX_SSE_FAILURES) return;
+          state.hardReloadScheduled = true;
+          setRefreshNote(`Live updates stalled (${reason}); refreshing page…`);
+          window.setTimeout(function () {
+            window.location.reload();
+          }, 400);
+        }
+
+        async function refreshProbe(reason) {
+          if (state.fetchInFlight) return;
+          state.fetchInFlight = true;
+          try {
+            const response = await fetch(`/api/v1/probes/${encodeURIComponent(PROBE_ID)}`, {
+              cache: 'no-store',
+              headers: { 'Accept': 'application/json' },
+            });
+            if (!response.ok) throw new Error(`status ${response.status}`);
+            const payload = await response.json();
+            applyProbeSnapshot(payload);
+            state.fetchFailures = 0;
+            if (state.sseFailures < MAX_SSE_FAILURES) setRefreshNote('');
+          } catch (error) {
+            state.fetchFailures += 1;
+            setRefreshNote(`Probe refresh failed (${reason}): ${error.message}`);
+            maybeHardReload('api');
+          } finally {
+            state.fetchInFlight = false;
+          }
+        }
+
+        function handleProbeEvent(eventType, evt) {
+          if (!evt || evt.probe_id !== PROBE_ID) return;
+          const status = extractEventStatus(eventType, evt);
+          applyStatus(status);
+          applyHealth(fallbackHealth(status));
+          applyLastSeen(extractEventLastSeen(evt));
+        }
+
+        function closeSource() {
+          if (state.source) {
+            state.source.close();
+            state.source = null;
+          }
+        }
+
+        function scheduleReconnect() {
+          if (state.reconnectTimer) return;
+          const exp = Math.min(state.reconnectAttempt, 6);
+          const delay = Math.min(MAX_RECONNECT_MS, BASE_RECONNECT_MS * (2 ** exp));
+          state.reconnectAttempt += 1;
+          state.reconnectTimer = window.setTimeout(function () {
+            state.reconnectTimer = null;
+            connectSSE();
+          }, delay);
+        }
+
+        function connectSSE() {
+          if (state.source) return;
+
+          setConnectionState(false);
+          const source = new EventSource('/api/v1/events');
+          state.source = source;
+
+          source.onopen = function () {
+            if (state.source !== source) return;
+            state.reconnectAttempt = 0;
+            state.sseFailures = 0;
+            setConnectionState(true);
+          };
+
+          source.onerror = function () {
+            if (state.source !== source) return;
+            state.sseFailures += 1;
+            closeSource();
+            setConnectionState(false);
+            scheduleReconnect();
+            maybeHardReload('sse');
+          };
+
+          ['probe.connected', 'probe.disconnected', 'probe.offline'].forEach(function (eventType) {
+            source.addEventListener(eventType, function (e) {
+              const evt = parseEventData(e.data);
+              handleProbeEvent(eventType, evt);
+            });
           });
-        });
-      }
 
-      connectSSE();
+          ['command.completed', 'command.failed'].forEach(function (eventType) {
+            source.addEventListener(eventType, function (e) {
+              const evt = parseEventData(e.data);
+              if (!evt || evt.probe_id !== PROBE_ID) return;
+              void refreshProbe(eventType);
+            });
+          });
+        }
+
+        function teardown() {
+          if (state.reconnectTimer) {
+            window.clearTimeout(state.reconnectTimer);
+            state.reconnectTimer = null;
+          }
+          if (state.periodicRefresh) {
+            window.clearInterval(state.periodicRefresh);
+            state.periodicRefresh = null;
+          }
+          closeSource();
+        }
+
+        state.periodicRefresh = window.setInterval(function () {
+          void refreshProbe('periodic');
+        }, REFRESH_INTERVAL_MS);
+
+        window.addEventListener('beforeunload', teardown);
+
+        void refreshProbe('initial');
+        connectSSE();
+      })();
     </script>
   </body>
 </html>

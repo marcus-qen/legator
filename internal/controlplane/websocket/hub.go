@@ -32,12 +32,14 @@ type ProbeConn struct {
 
 // Hub manages all connected probes.
 type Hub struct {
-	probes  map[string]*ProbeConn
-	mu      sync.RWMutex
-	logger  *zap.Logger
-	onMsg   func(probeID string, env protocol.Envelope) // callback for incoming messages
-	signer  *signing.Signer                             // nil = signing disabled
-	streams *streamRegistry                             // output chunk subscribers
+	probes       map[string]*ProbeConn
+	mu           sync.RWMutex
+	logger       *zap.Logger
+	onMsg        func(probeID string, env protocol.Envelope) // callback for incoming messages
+	onConnect    func(probeID string)
+	onDisconnect func(probeID string)
+	signer       *signing.Signer // nil = signing disabled
+	streams      *streamRegistry // output chunk subscribers
 }
 
 // NewHub creates a new Hub.
@@ -53,6 +55,14 @@ func NewHub(logger *zap.Logger, onMsg func(string, protocol.Envelope)) *Hub {
 // SetSigner enables command signing on outgoing messages.
 func (h *Hub) SetSigner(s *signing.Signer) {
 	h.signer = s
+}
+
+// SetLifecycleHooks installs optional callbacks for connect/disconnect transitions.
+func (h *Hub) SetLifecycleHooks(onConnect, onDisconnect func(probeID string)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onConnect = onConnect
+	h.onDisconnect = onDisconnect
 }
 
 // SubscribeStream returns a subscriber for streaming output of a command.
@@ -97,6 +107,9 @@ func (h *Hub) HandleProbeWS(w http.ResponseWriter, r *http.Request) {
 	h.mu.Unlock()
 
 	h.logger.Info("probe connected", zap.String("probe_id", probeID))
+	if h.onConnect != nil {
+		h.onConnect(probeID)
+	}
 
 	defer func() {
 		conn.Close()
@@ -106,6 +119,9 @@ func (h *Hub) HandleProbeWS(w http.ResponseWriter, r *http.Request) {
 		}
 		h.mu.Unlock()
 		h.logger.Info("probe disconnected", zap.String("probe_id", probeID))
+		if h.onDisconnect != nil {
+			h.onDisconnect(probeID)
+		}
 	}()
 
 	// Set up ping/pong keepalive

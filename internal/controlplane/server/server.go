@@ -345,6 +345,15 @@ func (s *Server) initHub() {
 	s.hub = cpws.NewHub(s.logger.Named("ws"), func(probeID string, env protocol.Envelope) {
 		s.handleProbeMessage(probeID, env)
 	})
+	s.hub.SetLifecycleHooks(func(probeID string) {
+		now := time.Now().UTC()
+		s.publishEvent(events.ProbeConnected, probeID, fmt.Sprintf("Probe %s connected", probeID),
+			map[string]string{"status": "online", "last_seen": now.Format(time.RFC3339)})
+	}, func(probeID string) {
+		now := time.Now().UTC()
+		s.publishEvent(events.ProbeDisconnected, probeID, fmt.Sprintf("Probe %s disconnected", probeID),
+			map[string]string{"status": "degraded", "last_seen": now.Format(time.RFC3339)})
+	})
 
 	// Signing key: config file > env var > auto-generated
 	signingKeyHex := s.cfg.SigningKey
@@ -538,7 +547,7 @@ func (s *Server) offlineChecker(ctx context.Context) {
 				if ps.Status == "offline" && !lastOffline[ps.ID] {
 					s.publishEvent(events.ProbeOffline, ps.ID,
 						fmt.Sprintf("Probe %s (%s) went offline", ps.ID, ps.Hostname),
-						map[string]string{"last_seen": ps.LastSeen.Format(time.RFC3339)})
+						map[string]string{"status": "offline", "last_seen": ps.LastSeen.Format(time.RFC3339)})
 				}
 				lastOffline[ps.ID] = (ps.Status == "offline")
 			}

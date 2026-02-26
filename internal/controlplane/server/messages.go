@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/events"
@@ -26,7 +27,8 @@ func (s *Server) handleProbeMessage(probeID string, env protocol.Envelope) {
 			s.emitAudit(audit.EventProbeRegistered, probeID, "system", "Auto-registered via heartbeat")
 		}
 
-		s.publishEvent(events.ProbeConnected, probeID, fmt.Sprintf("Probe %s heartbeat", probeID), nil)
+		s.publishEvent(events.ProbeConnected, probeID, fmt.Sprintf("Probe %s heartbeat", probeID),
+			map[string]string{"status": "online", "last_seen": time.Now().UTC().Format(time.RFC3339)})
 
 	case protocol.MsgInventory:
 		data, _ := json.Marshal(env.Payload)
@@ -97,5 +99,3 @@ func (s *Server) handleProbeMessage(probeID string, env protocol.Envelope) {
 		)
 	}
 }
-
-
