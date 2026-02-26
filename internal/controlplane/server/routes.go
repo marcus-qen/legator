@@ -158,6 +158,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Static assets
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join("web", "static")))))
 
+	// Landing page (testing)
+	mux.Handle("GET /site/", http.StripPrefix("/site/", http.FileServer(http.Dir(filepath.Join("web", "site")))))
+
 	// Web UI pages
 	mux.HandleFunc("GET /", s.handleFleetPage)
 	mux.HandleFunc("GET /fleet/chat", s.handleFleetChatPage)
