@@ -130,6 +130,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 			"/api/v1/register",
 			"/download/*",
 			"/install.sh",
+			"/ws/probe",
 			"/login",
 			"/logout",
 			"/static/*",
