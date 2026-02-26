@@ -122,3 +122,48 @@ func TestChatResponder_WithHistory(t *testing.T) {
 		t.Fatal("empty reply")
 	}
 }
+
+func TestExtractCommand_ExactJSON(t *testing.T) {
+	req, found := extractCommand(`{"command": "df", "args": ["/"], "reason": "check disk"}`)
+	if !found {
+		t.Fatal("expected to find command")
+	}
+	if req.Command != "df" {
+		t.Fatalf("expected df, got %s", req.Command)
+	}
+}
+
+func TestExtractCommand_EmbeddedJSON(t *testing.T) {
+	input := `Since the server is under an "observe" policy level, I will check the disk space now.
+
+{"command": "df", "args": ["/"], "reason": "to check free disk space on the root filesystem"}`
+
+	req, found := extractCommand(input)
+	if !found {
+		t.Fatal("expected to find embedded command")
+	}
+	if req.Command != "df" {
+		t.Fatalf("expected df, got %s", req.Command)
+	}
+	if len(req.Args) != 1 || req.Args[0] != "/" {
+		t.Fatalf("unexpected args: %v", req.Args)
+	}
+}
+
+func TestExtractCommand_NoCommand(t *testing.T) {
+	_, found := extractCommand("The server has been running for 42 days with no issues.")
+	if found {
+		t.Fatal("should not find command in plain text")
+	}
+}
+
+func TestExtractCommand_EmbeddedCommandInSentence(t *testing.T) {
+	input := `Let me check that for you: {"command": "uptime", "args": [], "reason": "check uptime"} now.`
+	req, found := extractCommand(input)
+	if !found {
+		t.Fatal("expected to find command")
+	}
+	if req.Command != "uptime" {
+		t.Fatalf("expected uptime, got %s", req.Command)
+	}
+}

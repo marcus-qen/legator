@@ -18,15 +18,20 @@ Your capabilities:
 2. Run shell commands on the server to gather information or make changes.
 3. Explain results clearly and suggest next steps.
 
-RULES:
-- To run a command, respond with EXACTLY this JSON (no markdown, no backticks):
-  {"command": "the-command", "args": ["arg1", "arg2"], "reason": "why"}
-- To reply conversationally (no command), just write plain text.
-- Be concise and practical. You're talking to an experienced operator.
-- Respect the probe's policy level. At "observe" level, only read-only commands.
+IMPORTANT: Each response must be EITHER a command OR conversational text. Never mix them.
+
+To run a command, your ENTIRE response must be this JSON and nothing else:
+{"command": "the-command", "args": ["arg1", "arg2"], "reason": "why"}
+
+To reply conversationally (no command needed), write plain text only.
+
+Additional rules:
+- Be concise and practical. You are talking to an experienced operator.
+- Respect the probe policy level. At "observe" level, only read-only commands.
 - At "diagnose" level, add diagnostic tools. At "remediate", you can make changes.
 - NEVER run destructive commands without explicit confirmation.
-- If you run a command, you'll receive the result and should provide a useful summary.`
+- After receiving command results, summarize them clearly for the operator.
+- If you need to run a command to answer a question, run it first (JSON only), then you will get the result and can explain it.`
 
 // ChatResponder generates LLM-backed replies for probe chat sessions.
 type ChatResponder struct {
@@ -121,9 +126,9 @@ func (cr *ChatResponder) Respond(
 		content := strings.TrimSpace(resp.Content)
 		messages = append(messages, Message{Role: RoleAssistant, Content: content})
 
-		// Try to parse as command request
-		var cmdReq CommandRequest
-		if err := json.Unmarshal([]byte(content), &cmdReq); err != nil || cmdReq.Command == "" {
+		// Try to parse as command request (exact JSON or embedded JSON)
+		cmdReq, found := extractCommand(content)
+		if !found {
 			// Not a command — this is the conversational reply
 			return content, nil
 		}
@@ -168,6 +173,42 @@ func (cr *ChatResponder) Respond(
 	}
 
 	return "I reached the maximum number of command iterations for this message. Please send another message to continue.", nil
+}
+
+// extractCommand tries to parse a command from the response.
+// First tries exact JSON parse, then looks for embedded JSON object.
+func extractCommand(content string) (CommandRequest, bool) {
+	// Try exact parse first
+	var req CommandRequest
+	if err := json.Unmarshal([]byte(content), &req); err == nil && req.Command != "" {
+		return req, true
+	}
+
+	// Try to find embedded JSON: look for {"command": ...}
+	start := strings.Index(content, `{"command"`)
+	if start == -1 {
+		return CommandRequest{}, false
+	}
+
+	// Find matching closing brace
+	depth := 0
+	for i := start; i < len(content); i++ {
+		switch content[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				candidate := content[start : i+1]
+				if err := json.Unmarshal([]byte(candidate), &req); err == nil && req.Command != "" {
+					return req, true
+				}
+				return CommandRequest{}, false
+			}
+		}
+	}
+
+	return CommandRequest{}, false
 }
 
 func min(a, b int) int {

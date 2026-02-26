@@ -108,6 +108,32 @@ func (h *Hub) HandleProbeWS(w http.ResponseWriter, r *http.Request) {
 		h.logger.Info("probe disconnected", zap.String("probe_id", probeID))
 	}()
 
+	// Set up ping/pong keepalive
+	conn.SetPongHandler(func(string) error {
+		pc.mu.Lock()
+		pc.LastSeen = time.Now().UTC()
+		pc.mu.Unlock()
+		return conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+	})
+	_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+
+	// Server-side ping loop
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				pc.mu.Lock()
+				err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second))
+				pc.mu.Unlock()
+				if err != nil {
+					return
+				}
+			}
+		}
+	}()
+
 	// Read loop
 	for {
 		_, msg, err := conn.ReadMessage()

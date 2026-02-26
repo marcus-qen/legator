@@ -195,6 +195,19 @@ func (c *Client) heartbeatLoop(ctx context.Context) {
 }
 
 func (c *Client) sendHeartbeat() error {
+	// Send WebSocket ping frame to keep connection alive.
+	// The server auto-responds with Pong, which resets our read deadline
+	// via the PongHandler.
+	c.mu.Lock()
+	conn := c.conn
+	c.mu.Unlock()
+	if conn != nil {
+		_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+		if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			return fmt.Errorf("ping: %w", err)
+		}
+	}
+
 	hb := protocol.HeartbeatPayload{
 		ProbeID: c.probeID,
 	}
