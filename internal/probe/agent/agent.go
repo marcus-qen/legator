@@ -8,6 +8,7 @@ import (
 	"github.com/marcus-qen/legator/internal/probe/connection"
 	"github.com/marcus-qen/legator/internal/probe/executor"
 	"github.com/marcus-qen/legator/internal/probe/inventory"
+	"github.com/marcus-qen/legator/internal/probe/updater"
 	"github.com/marcus-qen/legator/internal/protocol"
 	"github.com/marcus-qen/legator/internal/shared/signing"
 	"go.uber.org/zap"
@@ -23,6 +24,7 @@ type Agent struct {
 	client   *connection.Client
 	executor *executor.Executor
 	verifier *signing.Signer
+	updater  *updater.Updater
 	logger   *zap.Logger
 }
 
@@ -56,6 +58,7 @@ func New(cfg *Config, logger *zap.Logger) *Agent {
 		client:   client,
 		executor: exec,
 		verifier: verifier,
+		updater:  updater.New(logger.Named("updater")),
 		logger:   logger,
 	}
 }
@@ -164,6 +167,30 @@ func (a *Agent) handleMessage(env protocol.Envelope) {
 			Paths:   policy.Paths,
 		}, a.logger.Named("exec"))
 
+	case protocol.MsgUpdate:
+		data, _ := json.Marshal(env.Payload)
+		var upd protocol.UpdatePayload
+		if err := json.Unmarshal(data, &upd); err != nil {
+			a.logger.Warn("invalid update payload", zap.Error(err))
+			return
+		}
+		a.logger.Info("update command received",
+			zap.String("version", upd.Version),
+			zap.String("url", upd.URL),
+		)
+		result := a.updater.Apply(upd.URL, upd.Checksum, upd.Version)
+		_ = a.client.Send(protocol.MsgCommandResult, &protocol.CommandResultPayload{
+			RequestID: env.ID,
+			ExitCode:  boolToExit(!result.Success),
+			Stdout:    result.Message,
+		})
+		if result.Success && upd.Restart {
+			a.logger.Info("restarting probe after update")
+			if err := a.updater.Restart(); err != nil {
+				a.logger.Error("restart failed", zap.Error(err))
+			}
+		}
+
 	case protocol.MsgPing:
 		_ = a.client.Send(protocol.MsgPong, nil)
 
@@ -204,4 +231,11 @@ func (a *Agent) inventoryLoop(ctx context.Context) {
 			a.sendInventory()
 		}
 	}
+}
+
+func boolToExit(failed bool) int {
+	if failed {
+		return 1
+	}
+	return 0
 }

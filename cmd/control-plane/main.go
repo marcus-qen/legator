@@ -511,6 +511,40 @@ func main() {
 	})
 
 	// ── WebSocket endpoint for probes ────────────────────────
+	// Probe update
+	mux.HandleFunc("POST /api/v1/probes/{id}/update", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		_, ok := fleetMgr.Get(id)
+		if !ok {
+			http.Error(w, `{"error":"probe not found"}`, http.StatusNotFound)
+			return
+		}
+
+		var upd protocol.UpdatePayload
+		if err := json.NewDecoder(r.Body).Decode(&upd); err != nil {
+			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+			return
+		}
+		if upd.URL == "" {
+			http.Error(w, `{"error":"url is required"}`, http.StatusBadRequest)
+			return
+		}
+
+		if err := hub.SendTo(id, protocol.MsgUpdate, upd); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadGateway)
+			return
+		}
+
+		emitAudit(audit.EventCommandSent, id, "api",
+			fmt.Sprintf("Update dispatched: %s → %s", upd.Version, upd.URL))
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status":  "dispatched",
+			"version": upd.Version,
+		})
+	})
+
 	// Chat API
 	mux.HandleFunc("GET /api/v1/probes/{id}/chat", chatMgr.HandleGetMessages)
 	mux.HandleFunc("POST /api/v1/probes/{id}/chat", chatMgr.HandleSendMessage)

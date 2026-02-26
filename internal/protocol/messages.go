@@ -21,6 +21,7 @@ const (
 	MsgPolicyUpdate MessageType = "policy_update"
 	MsgPing         MessageType = "ping"
 	MsgPong         MessageType = "pong"
+	MsgUpdate       MessageType = "update" // Control Plane → Probe: update binary
 
 	// Bidirectional
 	MsgOutputChunk MessageType = "output_chunk"
@@ -138,6 +139,14 @@ type User struct {
 	UID    int      `json:"uid"`
 	Groups []string `json:"groups,omitempty"`
 	Shell  string   `json:"shell"`
+}
+
+// UpdatePayload tells the probe to download and install a new binary.
+type UpdatePayload struct {
+	URL      string `json:"url"`      // Download URL for new binary
+	Checksum string `json:"checksum"` // SHA256 hex digest
+	Version  string `json:"version"`  // Target version string
+	Restart  bool   `json:"restart"`  // Restart after update
 }
 
 // OutputChunkPayload streams incremental output from a running command.
