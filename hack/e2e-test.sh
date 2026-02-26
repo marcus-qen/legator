@@ -341,9 +341,22 @@ else
 fi
 
 
-# 26. Prometheus metrics endpoint
+
+# 26. Probe health endpoint
 echo ""
-echo "26. Prometheus metrics endpoint..."
+echo "26. Probe health endpoint..."
+HEALTH=$(curl -sf "$CP_URL/api/v1/probes/$PROBE_ID/health")
+HEALTH_SCORE=$(echo "$HEALTH" | python3 -c "import sys,json; print(json.load(sys.stdin).get('score', -1))" 2>/dev/null || echo "-1")
+HEALTH_STATUS=$(echo "$HEALTH" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status', ''))" 2>/dev/null || echo "")
+if [[ "$HEALTH_SCORE" -ge 0 ]]; then
+  pass "Health endpoint returns score=$HEALTH_SCORE status=$HEALTH_STATUS"
+else
+  fail "Health endpoint failed: $HEALTH"
+fi
+
+# 27. Prometheus metrics endpoint
+echo ""
+echo "27. Prometheus metrics endpoint..."
 METRICS=$(curl -sf "$CP_URL/api/v1/metrics")
 if echo "$METRICS" | grep -q "legator_probes_registered"; then
   pass "Metrics endpoint returns Prometheus format"
@@ -355,14 +368,14 @@ fi
 
 # 27. Metrics include websocket connections
 echo ""
-echo "27. Metrics include websocket connections..."
+echo "28. Metrics include websocket connections..."
 if echo "$METRICS" | grep -q "legator_websocket_connections"; then
   pass "Metrics include websocket connections"
 else
   fail "Metrics missing websocket connections"
 fi
 
-# 28. Summary
+# 29. Summary
 echo ""
 echo "=========================="
 echo "Results: $PASSED passed, $FAILED failed"

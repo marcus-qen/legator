@@ -371,6 +371,20 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(ps)
 	})
+	mux.HandleFunc("GET /api/v1/probes/{id}/health", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		ps, ok := fleetMgr.Get(id)
+		if !ok {
+			http.Error(w, `{"error":"probe not found"}`, http.StatusNotFound)
+			return
+		}
+		health := ps.Health
+		if health == nil {
+			health = &fleet.HealthScore{Score: 0, Status: "unknown", Warnings: []string{"no heartbeat data yet"}}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(health)
+	})
 	mux.HandleFunc("POST /api/v1/probes/{id}/command", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		ps, ok := fleetMgr.Get(id)

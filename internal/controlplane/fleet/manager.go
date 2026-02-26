@@ -24,6 +24,8 @@ type ProbeState struct {
 	Inventory   *protocol.InventoryPayload `json:"inventory,omitempty"`
 	Labels      map[string]string          `json:"labels,omitempty"`
 	Tags        []string                   `json:"tags,omitempty"`
+	Health      *HealthScore               `json:"health,omitempty"`
+	lastHB      *protocol.HeartbeatPayload
 }
 
 // Manager tracks all probes in the fleet.
@@ -77,7 +79,18 @@ func (m *Manager) Heartbeat(id string, hb *protocol.HeartbeatPayload) error {
 		return fmt.Errorf("unknown probe: %s", id)
 	}
 	ps.LastSeen = time.Now().UTC()
-	ps.Status = "online"
+	ps.lastHB = hb
+
+	// Compute health score
+	h := ScoreHealth(hb, ps.Inventory)
+	ps.Health = &h
+
+	// Auto-detect degraded status
+	if h.Status == "critical" || h.Status == "degraded" {
+		ps.Status = "degraded"
+	} else {
+		ps.Status = "online"
+	}
 	return nil
 }
 
