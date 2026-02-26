@@ -324,7 +324,11 @@ func (s *Server) initHub() {
 		s.handleProbeMessage(probeID, env)
 	})
 
-	signingKeyHex := os.Getenv("LEGATOR_SIGNING_KEY")
+	// Signing key: config file > env var > auto-generated
+	signingKeyHex := s.cfg.SigningKey
+	if signingKeyHex == "" {
+		signingKeyHex = os.Getenv("LEGATOR_SIGNING_KEY")
+	}
 	var signingKey []byte
 	if signingKeyHex != "" {
 		var err error

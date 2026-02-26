@@ -36,7 +36,7 @@ func main() {
 	case "service":
 		err = cmdService(os.Args[2:])
 	case "status":
-		err = cmdStatus()
+		err = cmdStatus(os.Args[2:])
 	case "uninstall":
 		err = cmdUninstall(ctx)
 	case "version":
@@ -68,10 +68,30 @@ Commands:
   health     Show probe health score (probe health <id>)
   uninstall  Deregister and remove all probe files
   version    Print version information
-  help       Show this help`)
+  help       Show this help
+
+Global flags:
+  --config-dir <path>   Config directory (default /etc/probe)`)
+}
+
+// parseConfigDir extracts --config-dir from args, returning the dir and remaining args.
+func parseConfigDir(args []string) (string, []string) {
+	configDir := ""
+	var remaining []string
+	for i := 0; i < len(args); i++ {
+		if (args[i] == "--config-dir" || args[i] == "-c") && i+1 < len(args) {
+			configDir = args[i+1]
+			i++
+		} else {
+			remaining = append(remaining, args[i])
+		}
+	}
+	return configDir, remaining
 }
 
 func cmdInit(ctx context.Context, args []string) error {
+	configDir, args := parseConfigDir(args)
+
 	var server, token string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -88,7 +108,7 @@ func cmdInit(ctx context.Context, args []string) error {
 		}
 	}
 	if server == "" || token == "" {
-		return fmt.Errorf("--server and --token are required\n\nUsage: probe init --server https://cp.example.com --token prb_xxx")
+		return fmt.Errorf("--server and --token are required\n\nUsage: probe init --server https://cp.example.com --token prb_xxx [--config-dir /path]")
 	}
 
 	logger, _ := zap.NewProduction()
@@ -100,24 +120,17 @@ func cmdInit(ctx context.Context, args []string) error {
 		return err
 	}
 
-	if err := cfg.Save(""); err != nil {
+	if err := cfg.Save(configDir); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
 
 	fmt.Printf("✅ Registered as probe %s\n", cfg.ProbeID)
-	fmt.Printf("   Config saved to %s\n", agent.ConfigPath(""))
+	fmt.Printf("   Config saved to %s\n", agent.ConfigPath(configDir))
 	return nil
 }
 
 func cmdRun(ctx context.Context, args []string) error {
-	// Parse optional --config-dir
-	configDir := ""
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--config-dir" && i+1 < len(args) {
-			configDir = args[i+1]
-			i++
-		}
-	}
+	configDir, _ := parseConfigDir(args)
 
 	cfg, err := agent.LoadConfig(configDir)
 	if err != nil {
@@ -147,8 +160,9 @@ func cmdService(args []string) error {
 	}
 }
 
-func cmdStatus() error {
-	cfg, err := agent.LoadConfig("")
+func cmdStatus(args []string) error {
+	configDir, _ := parseConfigDir(args)
+	cfg, err := agent.LoadConfig(configDir)
 	if err != nil {
 		return fmt.Errorf("not configured: %w", err)
 	}
