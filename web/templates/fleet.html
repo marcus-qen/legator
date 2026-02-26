@@ -27,9 +27,9 @@
             <span>Fleet</span>
             <span class="count" data-badge="probes">{{.Summary.Total}}</span>
           </a>
-          <a class="sidebar-link" href="#" data-nav-chat>
+          <a class="sidebar-link" href="/fleet/chat" data-nav-chat>
             <i data-lucide="message-square" class="icon-16"></i>
-            <span>Chat</span>
+            <span>Fleet Chat</span>
           </a>
           <a class="sidebar-link" href="/approvals">
             <i data-lucide="shield-check" class="icon-16"></i>
@@ -77,6 +77,7 @@
             <p class="page-subtitle">Live posture of every probe · Version <span id="version">{{.Version}}</span></p>
           </div>
           <div class="page-actions">
+            <a class="btn" href="/fleet/chat"><i data-lucide="message-square" class="icon-14"></i>Fleet Chat</a>
             <a class="btn" href="/approvals"><i data-lucide="shield-check" class="icon-14"></i>Review approvals</a>
             <a class="btn" href="/audit"><i data-lucide="scroll-text" class="icon-14"></i>Audit log</a>
           </div>

@@ -1285,7 +1285,8 @@ select:focus {
   min-width: 0;
 }
 
-#probe-context-panel {
+#probe-context-panel,
+#fleet-context-panel {
   position: fixed;
   top: 0;
   right: 0;
@@ -1303,7 +1304,8 @@ select:focus {
   display: flex;
   flex-direction: column;
 }
-
+#probe-context-panel .panel-header,
+#fleet-context-panel .panel-header {
 #probe-context-panel .panel-header {
   border-bottom: 1px solid var(--border);
   padding: 14px 16px;
@@ -1330,7 +1332,8 @@ select:focus {
 body.context-open .context-backdrop {
   opacity: 1;
   pointer-events: auto;
-}
+body.context-open #probe-context-panel,
+body.context-open #fleet-context-panel {
 
 body.context-open #probe-context-panel {
   transform: translateX(0);
@@ -1370,6 +1373,71 @@ body.context-open #probe-context-panel {
   color: #86efac;
 }
 
+
+.fleet-context-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px;
+  overflow: auto;
+}
+
+.fleet-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.fleet-summary-grid .ctx-item {
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #1b1a19;
+}
+
+.fleet-summary-grid .ctx-label,
+.fleet-summary-grid .ctx-value {
+  display: block;
+  border: 0;
+  padding: 6px 10px;
+}
+
+.fleet-summary-grid .ctx-label {
+  color: var(--muted);
+}
+
+.fleet-probe-cards {
+  display: grid;
+  gap: 10px;
+}
+
+.fleet-probe-card {
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #1b1a19;
+  color: var(--text);
+  text-decoration: none;
+  padding: 10px;
+}
+
+.fleet-probe-card:hover {
+  border-color: var(--border-hover);
+}
+
+.fleet-probe-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.fleet-probe-meta {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
 .ctx-value.offline {
   color: #fca5a5;
 }
@@ -1603,7 +1671,8 @@ details.approval-extra summary {
   }
 
   .chat-main {
-    min-height: calc(100vh - 28px);
+  #probe-context-panel,
+  #fleet-context-panel {
   }
 
   #probe-context-panel {

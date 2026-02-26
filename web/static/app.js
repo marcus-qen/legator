@@ -41,7 +41,7 @@
           setBadge('[data-badge="probes"]', probes.length);
 
           const chatLink = document.querySelector('[data-nav-chat]');
-          if (chatLink && probes.length > 0 && probes[0].id) {
+          if (chatLink && (chatLink.getAttribute("href") === "#" || chatLink.dataset.chatAutolink === "true") && probes.length > 0 && probes[0].id) {
             chatLink.href = `/probe/${encodeURIComponent(probes[0].id)}/chat`;
           }
         }
