@@ -340,7 +340,29 @@ else
   fail "Probe policy level is $PROBE_LEVEL (expected diagnose)"
 fi
 
-# 26. Summary
+
+# 26. Prometheus metrics endpoint
+echo ""
+echo "26. Prometheus metrics endpoint..."
+METRICS=$(curl -sf "$CP_URL/api/v1/metrics")
+if echo "$METRICS" | grep -q "legator_probes_registered"; then
+  pass "Metrics endpoint returns Prometheus format"
+  METRIC_PROBES=$(echo "$METRICS" | grep "legator_probes_registered " | awk '{print $2}')
+  echo "  Registered probes: $METRIC_PROBES"
+else
+  fail "Metrics endpoint missing expected metrics"
+fi
+
+# 27. Metrics include websocket connections
+echo ""
+echo "27. Metrics include websocket connections..."
+if echo "$METRICS" | grep -q "legator_websocket_connections"; then
+  pass "Metrics include websocket connections"
+else
+  fail "Metrics missing websocket connections"
+fi
+
+# 28. Summary
 echo ""
 echo "=========================="
 echo "Results: $PASSED passed, $FAILED failed"

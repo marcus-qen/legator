@@ -25,6 +25,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/llm"
+	"github.com/marcus-qen/legator/internal/controlplane/metrics"
 	"github.com/marcus-qen/legator/internal/controlplane/policy"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
 	"github.com/marcus-qen/legator/internal/protocol"
@@ -441,6 +442,21 @@ func main() {
 	}
 	mux.HandleFunc("POST /api/v1/register", api.HandleRegisterWithAudit(tokenStore, fleetMgr, auditRecorder, logger.Named("register")))
 	mux.HandleFunc("POST /api/v1/tokens", api.HandleGenerateTokenWithAudit(tokenStore, auditRecorder, logger.Named("tokens")))
+
+	// ── Metrics (Prometheus-compatible) ──────────────────────
+	var metricsAuditCounter metrics.AuditCounter
+	if auditStore != nil {
+		metricsAuditCounter = auditStore
+	} else {
+		metricsAuditCounter = auditLog
+	}
+	metricsCollector := metrics.NewCollector(
+		fleetMgr,
+		&hubConnectedAdapter{hub: hub},
+		approvalQueue,
+		metricsAuditCounter,
+	)
+	mux.HandleFunc("GET /api/v1/metrics", metricsCollector.Handler())
 
 	// ── Fleet summary ────────────────────────────────────────
 	mux.HandleFunc("GET /api/v1/fleet/summary", func(w http.ResponseWriter, r *http.Request) {
@@ -1171,4 +1187,13 @@ func loadConfig() (*Config, error) {
 		dataDir = "/var/lib/legator"
 	}
 	return &Config{ListenAddr: addr, DataDir: dataDir}, nil
+}
+
+// hubConnectedAdapter adapts Hub.Connected() []string to metrics.HubStats.Connected() int.
+type hubConnectedAdapter struct {
+	hub *cpws.Hub
+}
+
+func (a *hubConnectedAdapter) Connected() int {
+	return len(a.hub.Connected())
 }
