@@ -63,6 +63,9 @@ Commands:
   run        Start the agent loop (runs as systemd service)
   service    Manage the systemd service (install|remove|status)
   status     Show local probe status
+  list       List all probes in the fleet (--url, --format json)
+  info       Show detailed probe info (probe info <id>)
+  health     Show probe health score (probe health <id>)
   uninstall  Deregister and remove all probe files
   version    Print version information
   help       Show this help`)
