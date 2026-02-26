@@ -188,11 +188,12 @@ func (ts *TokenStore) Count() int {
 
 // RegisterRequest is the probe registration request.
 type RegisterRequest struct {
-	Token    string `json:"token"`
-	Hostname string `json:"hostname"`
-	OS       string `json:"os"`
-	Arch     string `json:"arch"`
-	Version  string `json:"version"`
+	Token    string   `json:"token"`
+	Hostname string   `json:"hostname"`
+	OS       string   `json:"os"`
+	Arch     string   `json:"arch"`
+	Version  string   `json:"version"`
+	Tags     []string `json:"tags,omitempty"`
 }
 
 // RegisterResponse is returned on successful registration.
@@ -236,6 +237,9 @@ func HandleRegister(ts *TokenStore, fm fleet.Fleet, logger *zap.Logger) http.Han
 		// Register in fleet
 		fm.Register(probeID, req.Hostname, req.OS, req.Arch)
 		_ = fm.SetAPIKey(probeID, apiKey)
+		if len(req.Tags) > 0 {
+			_ = fm.SetTags(probeID, req.Tags)
+		}
 
 		logger.Info("probe registered",
 			zap.String("probe_id", probeID),
@@ -313,6 +317,9 @@ func HandleRegisterWithAudit(ts *TokenStore, fm fleet.Fleet, al AuditRecorder, l
 
 		fm.Register(probeID, req.Hostname, req.OS, req.Arch)
 		_ = fm.SetAPIKey(probeID, apiKey)
+		if len(req.Tags) > 0 {
+			_ = fm.SetTags(probeID, req.Tags)
+		}
 
 		al.Record(audit.Event{
 			Type:    audit.EventProbeRegistered,

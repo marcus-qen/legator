@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,43 +15,28 @@ func TestAutoInitConfigFromEnvRegistersWhenConfigMissing(t *testing.T) {
 	configDir := t.TempDir()
 
 	var registerCalled bool
-	var tagsCalled bool
 	var gotHostname string
 	var gotTags []string
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/register":
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/register" {
 			registerCalled = true
-			body, err := io.ReadAll(r.Body)
-			if err != nil {
-				t.Fatalf("read register body: %v", err)
+			var req struct {
+				Hostname string   `json:"hostname"`
+				Tags     []string `json:"tags"`
 			}
-			var req map[string]any
-			if err := json.Unmarshal(body, &req); err != nil {
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				t.Fatalf("decode register body: %v", err)
 			}
-			if hostname, ok := req["hostname"].(string); ok {
-				gotHostname = hostname
-			}
+			gotHostname = req.Hostname
+			gotTags = req.Tags
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"probe_id":  "probe-auto-1",
 				"api_key":   "lgk_auto_probe",
 				"policy_id": "default-observe",
 			})
-		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/probes/probe-auto-1/tags":
-			tagsCalled = true
-			var payload struct {
-				Tags []string `json:"tags"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-				t.Fatalf("decode tags body: %v", err)
-			}
-			gotTags = payload.Tags
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]any{"tags": payload.Tags})
-		default:
+		} else {
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 	}))
@@ -69,9 +53,6 @@ func TestAutoInitConfigFromEnvRegistersWhenConfigMissing(t *testing.T) {
 
 	if !registerCalled {
 		t.Fatal("expected registration call")
-	}
-	if !tagsCalled {
-		t.Fatal("expected tags call")
 	}
 	if gotHostname != "worker-a" {
 		t.Fatalf("expected hostname override worker-a, got %q", gotHostname)

@@ -15,11 +15,12 @@ import (
 )
 
 type registerRequest struct {
-	Token    string `json:"token"`
-	Hostname string `json:"hostname"`
-	OS       string `json:"os"`
-	Arch     string `json:"arch"`
-	Version  string `json:"version"`
+	Token    string   `json:"token"`
+	Hostname string   `json:"hostname"`
+	OS       string   `json:"os"`
+	Arch     string   `json:"arch"`
+	Version  string   `json:"version"`
+	Tags     []string `json:"tags,omitempty"`
 }
 
 type registerResponse struct {
@@ -52,6 +53,7 @@ func RegisterWithOptions(ctx context.Context, serverURL, token string, logger *z
 		OS:       runtime.GOOS,
 		Arch:     runtime.GOARCH,
 		Version:  "dev",
+		Tags:     normalizeTags(opts.Tags),
 	}
 
 	body, err := json.Marshal(req)
@@ -84,13 +86,6 @@ func RegisterWithOptions(ctx context.Context, serverURL, token string, logger *z
 	var regResp registerResponse
 	if err := json.NewDecoder(resp.Body).Decode(&regResp); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
-	}
-
-	tags := normalizeTags(opts.Tags)
-	if len(tags) > 0 {
-		if err := setProbeTags(ctx, serverURL, regResp.ProbeID, regResp.APIKey, tags); err != nil {
-			return nil, fmt.Errorf("set probe tags: %w", err)
-		}
 	}
 
 	logger.Info("registered successfully",
@@ -129,43 +124,4 @@ func normalizeTags(tags []string) []string {
 	return result
 }
 
-func setProbeTags(ctx context.Context, serverURL, probeID, apiKey string, tags []string) error {
-	payload := struct {
-		Tags []string `json:"tags"`
-	}{
-		Tags: tags,
-	}
 
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal tags request: %w", err)
-	}
-
-	url := strings.TrimRight(serverURL, "/") + "/api/v1/probes/" + probeID + "/tags"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("create tags request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("send tags request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		var errResp struct {
-			Error string `json:"error"`
-		}
-		_ = json.NewDecoder(resp.Body).Decode(&errResp)
-		if errResp.Error == "" {
-			errResp.Error = resp.Status
-		}
-		return fmt.Errorf("tags update failed (%d): %s", resp.StatusCode, errResp.Error)
-	}
-
-	return nil
-}
