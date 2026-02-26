@@ -78,11 +78,12 @@ func (s *Store) Manager() *Manager {
 
 // ── Delegated reads (in-memory) ─────────────────────────────
 
-func (s *Store) Get(id string) (*ProbeState, bool)  { return s.mgr.Get(id) }
-func (s *Store) List() []*ProbeState                { return s.mgr.List() }
-func (s *Store) Count() map[string]int              { return s.mgr.Count() }
-func (s *Store) ListByTag(tag string) []*ProbeState { return s.mgr.ListByTag(tag) }
-func (s *Store) TagCounts() map[string]int          { return s.mgr.TagCounts() }
+func (s *Store) Get(id string) (*ProbeState, bool)               { return s.mgr.Get(id) }
+func (s *Store) List() []*ProbeState                             { return s.mgr.List() }
+func (s *Store) Inventory(filter InventoryFilter) FleetInventory { return s.mgr.Inventory(filter) }
+func (s *Store) Count() map[string]int                           { return s.mgr.Count() }
+func (s *Store) ListByTag(tag string) []*ProbeState              { return s.mgr.ListByTag(tag) }
+func (s *Store) TagCounts() map[string]int                       { return s.mgr.TagCounts() }
 
 // ── Mutations (memory + disk) ───────────────────────────────
 

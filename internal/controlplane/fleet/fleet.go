@@ -14,6 +14,7 @@ type Fleet interface {
 	UpdateInventory(id string, inv *protocol.InventoryPayload) error
 	Get(id string) (*ProbeState, bool)
 	List() []*ProbeState
+	Inventory(filter InventoryFilter) FleetInventory
 	SetPolicy(id string, level protocol.CapabilityLevel) error
 	SetAPIKey(id, apiKey string) error
 	MarkOffline(threshold time.Duration)

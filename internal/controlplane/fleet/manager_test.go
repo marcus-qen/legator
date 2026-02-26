@@ -160,3 +160,59 @@ func TestSetAPIKey(t *testing.T) {
 		t.Fatal("expected error for unknown probe")
 	}
 }
+
+func TestInventoryAggregatesAndFilters(t *testing.T) {
+	m := NewManager(testLogger())
+
+	m.Register("probe-1", "web-01", "linux", "amd64")
+	m.Register("probe-2", "db-01", "linux", "amd64")
+	m.Register("probe-3", "win-01", "windows", "amd64")
+
+	_ = m.SetTags("probe-1", []string{"prod", "k8s-host"})
+	_ = m.SetTags("probe-2", []string{"prod"})
+	_ = m.SetTags("probe-3", []string{"lab"})
+
+	_ = m.UpdateInventory("probe-1", &protocol.InventoryPayload{CPUs: 4, MemTotal: 8 * 1024 * 1024 * 1024, DiskTotal: 120 * 1024 * 1024 * 1024, OS: "linux"})
+	_ = m.UpdateInventory("probe-2", &protocol.InventoryPayload{CPUs: 2, MemTotal: 4 * 1024 * 1024 * 1024, DiskTotal: 80 * 1024 * 1024 * 1024, OS: "linux"})
+	_ = m.UpdateInventory("probe-3", &protocol.InventoryPayload{CPUs: 8, MemTotal: 16 * 1024 * 1024 * 1024, DiskTotal: 240 * 1024 * 1024 * 1024, OS: "windows"})
+
+	m.mu.Lock()
+	m.probes["probe-2"].Status = "degraded"
+	m.probes["probe-3"].Status = "offline"
+	m.mu.Unlock()
+
+	all := m.Inventory(InventoryFilter{})
+	if all.Aggregates.TotalProbes != 3 {
+		t.Fatalf("expected 3 probes, got %d", all.Aggregates.TotalProbes)
+	}
+	if all.Aggregates.Online != 1 {
+		t.Fatalf("expected 1 online probe, got %d", all.Aggregates.Online)
+	}
+	if all.Aggregates.TotalCPUs != 14 {
+		t.Fatalf("expected 14 total CPUs, got %d", all.Aggregates.TotalCPUs)
+	}
+	if all.Aggregates.TotalRAMBytes != 28*1024*1024*1024 {
+		t.Fatalf("unexpected total ram: %d", all.Aggregates.TotalRAMBytes)
+	}
+	if all.Aggregates.ProbesByOS["linux"] != 2 || all.Aggregates.ProbesByOS["windows"] != 1 {
+		t.Fatalf("unexpected os aggregates: %#v", all.Aggregates.ProbesByOS)
+	}
+	if all.Aggregates.TagDistribution["prod"] != 2 || all.Aggregates.TagDistribution["k8s-host"] != 1 || all.Aggregates.TagDistribution["lab"] != 1 {
+		t.Fatalf("unexpected tag distribution: %#v", all.Aggregates.TagDistribution)
+	}
+
+	onlineOnly := m.Inventory(InventoryFilter{Status: "ONLINE"})
+	if len(onlineOnly.Probes) != 1 || onlineOnly.Probes[0].ID != "probe-1" {
+		t.Fatalf("expected probe-1 in online filter, got %#v", onlineOnly.Probes)
+	}
+
+	prodOnly := m.Inventory(InventoryFilter{Tag: "PrOd"})
+	if len(prodOnly.Probes) != 2 {
+		t.Fatalf("expected 2 prod probes, got %d", len(prodOnly.Probes))
+	}
+
+	none := m.Inventory(InventoryFilter{Tag: "prod", Status: "offline"})
+	if len(none.Probes) != 0 || none.Aggregates.TotalProbes != 0 {
+		t.Fatalf("expected no probes for prod+offline, got %#v", none)
+	}
+}
