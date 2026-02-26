@@ -35,6 +35,12 @@ type FleetPageData struct {
 	CurrentUser *TemplateUser
 }
 
+// FleetChatPageData is passed to fleet-chat.html template.
+type FleetChatPageData struct {
+	Inventory   fleet.FleetInventory
+	CurrentUser *TemplateUser
+}
+
 // ProbePageData is passed to probe-detail.html and chat.html templates.
 type ProbePageData struct {
 	Probe       *fleet.ProbeState

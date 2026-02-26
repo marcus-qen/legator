@@ -424,23 +424,30 @@ func (s *Server) wireChatLLM() {
 		return
 	}
 
-	chatResponder := llm.NewChatResponder(
-		llm.NewOpenAIProvider(llm.ProviderConfig{
-			Name:    os.Getenv("LEGATOR_LLM_PROVIDER"),
-			BaseURL: os.Getenv("LEGATOR_LLM_BASE_URL"),
-			APIKey:  os.Getenv("LEGATOR_LLM_API_KEY"),
-			Model:   os.Getenv("LEGATOR_LLM_MODEL"),
-		}),
-		func(probeID string, cmd *protocol.CommandPayload) (*protocol.CommandResultPayload, error) {
-			return s.dispatchAndWait(probeID, cmd)
-		},
-		s.logger.Named("chat-llm"),
-	)
+	provider := llm.NewOpenAIProvider(llm.ProviderConfig{
+		Name:    os.Getenv("LEGATOR_LLM_PROVIDER"),
+		BaseURL: os.Getenv("LEGATOR_LLM_BASE_URL"),
+		APIKey:  os.Getenv("LEGATOR_LLM_API_KEY"),
+		Model:   os.Getenv("LEGATOR_LLM_MODEL"),
+	})
+	dispatch := func(probeID string, cmd *protocol.CommandPayload) (*protocol.CommandResultPayload, error) {
+		return s.dispatchAndWait(probeID, cmd)
+	}
+
+	chatResponder := llm.NewChatResponder(provider, dispatch, s.logger.Named("chat-llm"))
+	fleetResponder := llm.NewFleetChatResponder(provider, s.fleetMgr, dispatch, s.logger.Named("fleet-chat-llm"))
 
 	responder := func(probeID, userMessage string, history []chat.Message) (string, error) {
 		llmHistory := make([]llm.ChatMessage, len(history))
 		for i, m := range history {
 			llmHistory[i] = llm.ChatMessage{Role: m.Role, Content: m.Content}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+
+		if probeID == "fleet" {
+			return fleetResponder.Respond(ctx, llmHistory, userMessage)
 		}
 
 		var inv *protocol.InventoryPayload
@@ -449,9 +456,6 @@ func (s *Server) wireChatLLM() {
 			inv = ps.Inventory
 			level = ps.PolicyLevel
 		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
 
 		return chatResponder.Respond(ctx, probeID, llmHistory, userMessage, inv, level)
 	}

@@ -58,6 +58,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/probes/{id}/task", s.handleTask)
 	mux.HandleFunc("DELETE /api/v1/probes/{id}", s.handleDeleteProbe)
 	mux.HandleFunc("GET /api/v1/fleet/summary", s.handleFleetSummary)
+	mux.HandleFunc("GET /api/v1/fleet/inventory", s.handleFleetInventory)
 	mux.HandleFunc("GET /api/v1/fleet/tags", s.handleFleetTags)
 	mux.HandleFunc("GET /api/v1/fleet/by-tag/{tag}", s.handleListByTag)
 	mux.HandleFunc("POST /api/v1/fleet/by-tag/{tag}/command", s.handleGroupCommand)
@@ -124,6 +125,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/v1/probes/{id}/chat", s.withPermission(auth.PermFleetRead, s.chatMgr.HandleSendMessage))
 		mux.HandleFunc("GET /ws/chat", s.withPermission(auth.PermFleetRead, s.chatMgr.HandleChatWS))
 	}
+	mux.HandleFunc("GET /api/v1/fleet/chat", s.withPermission(auth.PermFleetRead, s.handleFleetGetMessages))
+	mux.HandleFunc("POST /api/v1/fleet/chat", s.withPermission(auth.PermFleetRead, s.handleFleetSendMessage))
+	mux.HandleFunc("GET /ws/fleet-chat", s.withPermission(auth.PermFleetRead, s.handleFleetChatWS))
 
 	// WebSocket for probes
 	mux.HandleFunc("GET /ws/probe", s.hub.HandleProbeWS)
@@ -137,6 +141,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Web UI pages
 	mux.HandleFunc("GET /", s.handleFleetPage)
+	mux.HandleFunc("GET /fleet/chat", s.handleFleetChatPage)
 	mux.HandleFunc("GET /probe/{id}", s.handleProbeDetailPage)
 	mux.HandleFunc("GET /probe/{id}/chat", s.handleChatPage)
 	mux.HandleFunc("GET /approvals", s.handleApprovalsPage)
@@ -564,6 +569,20 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
+}
+
+func (s *Server) handleFleetInventory(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
+
+	inv := s.fleetMgr.Inventory(fleet.InventoryFilter{
+		Tag:    r.URL.Query().Get("tag"),
+		Status: r.URL.Query().Get("status"),
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(inv)
 }
 
 func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
@@ -1006,6 +1025,70 @@ func (s *Server) handleProbeDetailPage(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "probe-detail.html", data); err != nil {
 		s.logger.Error("failed to render probe detail", zap.String("probe", id), zap.Error(err))
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "internal error")
+	}
+}
+
+func (s *Server) handleFleetGetMessages(w http.ResponseWriter, r *http.Request) {
+	request := cloneFleetChatAPIRequest(r)
+	if s.chatStore != nil {
+		s.chatStore.HandleGetMessages(w, request)
+		return
+	}
+	s.chatMgr.HandleGetMessages(w, request)
+}
+
+func (s *Server) handleFleetSendMessage(w http.ResponseWriter, r *http.Request) {
+	request := cloneFleetChatAPIRequest(r)
+	if s.chatStore != nil {
+		s.chatStore.HandleSendMessage(w, request)
+		return
+	}
+	s.chatMgr.HandleSendMessage(w, request)
+}
+
+func (s *Server) handleFleetChatWS(w http.ResponseWriter, r *http.Request) {
+	request := r.Clone(r.Context())
+	urlCopy := *r.URL
+	q := urlCopy.Query()
+	q.Set("probe_id", "fleet")
+	urlCopy.RawQuery = q.Encode()
+	request.URL = &urlCopy
+
+	if s.chatStore != nil {
+		s.chatStore.HandleChatWS(w, request)
+		return
+	}
+	s.chatMgr.HandleChatWS(w, request)
+}
+
+func cloneFleetChatAPIRequest(r *http.Request) *http.Request {
+	request := r.Clone(r.Context())
+	urlCopy := *r.URL
+	urlCopy.Path = "/api/v1/probes/fleet/chat"
+	request.URL = &urlCopy
+	return request
+}
+
+func (s *Server) handleFleetChatPage(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
+
+	inv := s.fleetMgr.Inventory(fleet.InventoryFilter{})
+	if s.tmpl == nil {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<h1>Fleet Chat</h1><p>Template not loaded</p>`)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data := FleetChatPageData{
+		Inventory:   inv,
+		CurrentUser: s.currentTemplateUser(r),
+	}
+	if err := s.tmpl.ExecuteTemplate(w, "fleet-chat.html", data); err != nil {
+		s.logger.Error("failed to render fleet chat", zap.Error(err))
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "internal error")
 	}
 }

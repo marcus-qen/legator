@@ -152,3 +152,18 @@ func TestPermissionsFleetReadCannotReadWebhookDeliveries(t *testing.T) {
 		t.Fatalf("expected 403, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestPermissionsFleetReadCanAccessFleetInventoryAndChat(t *testing.T) {
+	srv := newAuthTestServer(t)
+	token := createAPIKey(t, srv, "fleet-read", auth.PermFleetRead)
+
+	inv := makeRequest(t, srv, http.MethodGet, "/api/v1/fleet/inventory", token, "")
+	if inv.Code == http.StatusUnauthorized || inv.Code == http.StatusForbidden {
+		t.Fatalf("expected fleet inventory access, got %d body=%s", inv.Code, inv.Body.String())
+	}
+
+	history := makeRequest(t, srv, http.MethodGet, "/api/v1/fleet/chat", token, "")
+	if history.Code == http.StatusUnauthorized || history.Code == http.StatusForbidden {
+		t.Fatalf("expected fleet chat read access, got %d body=%s", history.Code, history.Body.String())
+	}
+}

@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/marcus-qen/legator/internal/controlplane/approval"
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
+	"github.com/marcus-qen/legator/internal/controlplane/chat"
 	"github.com/marcus-qen/legator/internal/controlplane/config"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/policy"
@@ -798,4 +799,102 @@ func TestOIDCDisabledRoutesNotRegisteredAndLoginUnchanged(t *testing.T) {
 		t.Fatalf("expected /auth/oidc/login to be unregistered (404), got %d", oidcRec.Code)
 	}
 
+}
+
+func TestHandleFleetInventory_WithFilters(t *testing.T) {
+	srv := newTestServer(t)
+
+	srv.fleetMgr.Register("probe-1", "web-01", "linux", "amd64")
+	srv.fleetMgr.Register("probe-2", "db-01", "linux", "amd64")
+
+	_ = srv.fleetMgr.SetTags("probe-1", []string{"prod", "k8s-host"})
+	_ = srv.fleetMgr.SetTags("probe-2", []string{"prod"})
+	_ = srv.fleetMgr.UpdateInventory("probe-1", &protocol.InventoryPayload{CPUs: 4, MemTotal: 8 * 1024 * 1024 * 1024, OS: "linux"})
+	_ = srv.fleetMgr.UpdateInventory("probe-2", &protocol.InventoryPayload{CPUs: 2, MemTotal: 4 * 1024 * 1024 * 1024, OS: "linux"})
+
+	ps, ok := srv.fleetMgr.Get("probe-2")
+	if !ok {
+		t.Fatal("expected probe-2 to exist")
+	}
+	ps.Status = "offline"
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/fleet/inventory?tag=prod&status=online", nil)
+	rr := httptest.NewRecorder()
+
+	srv.handleFleetInventory(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var payload fleet.FleetInventory
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if len(payload.Probes) != 1 || payload.Probes[0].ID != "probe-1" {
+		t.Fatalf("unexpected probe list: %#v", payload.Probes)
+	}
+	if payload.Aggregates.TotalProbes != 1 || payload.Aggregates.Online != 1 {
+		t.Fatalf("unexpected aggregates: %#v", payload.Aggregates)
+	}
+	if payload.Aggregates.TotalCPUs != 4 {
+		t.Fatalf("expected 4 CPUs, got %d", payload.Aggregates.TotalCPUs)
+	}
+	if payload.Aggregates.TotalRAMBytes != 8*1024*1024*1024 {
+		t.Fatalf("unexpected total RAM: %d", payload.Aggregates.TotalRAMBytes)
+	}
+}
+
+func TestHandleFleetChatSendAndGet(t *testing.T) {
+	srv := newTestServer(t)
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/chat", strings.NewReader(`{"content":"fleet hello"}`))
+	postRR := httptest.NewRecorder()
+	srv.handleFleetSendMessage(postRR, postReq)
+	if postRR.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", postRR.Code, postRR.Body.String())
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/fleet/chat?limit=20", nil)
+	getRR := httptest.NewRecorder()
+	srv.handleFleetGetMessages(getRR, getReq)
+	if getRR.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", getRR.Code, getRR.Body.String())
+	}
+
+	var history []chat.Message
+	if err := json.NewDecoder(getRR.Body).Decode(&history); err != nil {
+		t.Fatalf("decode fleet chat history: %v", err)
+	}
+	if len(history) < 2 {
+		t.Fatalf("expected at least 2 chat messages, got %d", len(history))
+	}
+
+	var persisted []chat.Message
+	if srv.chatStore != nil {
+		persisted = srv.chatStore.GetMessages("fleet", 20)
+	} else {
+		persisted = srv.chatMgr.GetMessages("fleet", 20)
+	}
+	if len(persisted) < 2 {
+		t.Fatalf("expected persisted fleet chat messages, got %d", len(persisted))
+	}
+}
+
+func TestHandleFleetChatPage_RendersTemplate(t *testing.T) {
+	srv := newTestServer(t)
+	srv.fleetMgr.Register("probe-1", "web-01", "linux", "amd64")
+
+	req := httptest.NewRequest(http.MethodGet, "/fleet/chat", nil)
+	rr := httptest.NewRecorder()
+
+	srv.handleFleetChatPage(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "Fleet Chat") {
+		t.Fatalf("expected fleet chat page content, got: %s", rr.Body.String())
+	}
 }
