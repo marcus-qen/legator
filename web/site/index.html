@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Legator — Self-hosted Fleet Management</title>
+    <style>
+      :root {
+        --bg: #0f1117;
+        --panel: #161a22;
+        --text: #e5e7eb;
+        --muted: #9ca3af;
+        --amber: #f59e0b;
+        --amber-2: #f8b73e;
+        --border: #293041;
+        --card: #141824;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        font-family: Inter, "Segoe UI", Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.6;
+      }
+
+      img {
+        max-width: 100%;
+      }
+
+      a {
+        color: var(--amber);
+        text-decoration: none;
+      }
+
+      a:hover {
+        text-decoration: underline;
+      }
+
+      .container {
+        width: min(1100px, calc(100% - 2rem));
+        margin: 0 auto;
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        backdrop-filter: blur(12px);
+        background: color-mix(in srgb, var(--bg) 82%, transparent);
+        border-bottom: 1px solid var(--border);
+      }
+
+      .topbar-inner {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.85rem 0;
+      }
+
+      .brand {
+        font-weight: 800;
+        letter-spacing: 0.02em;
+        color: var(--text);
+        font-size: 1.1rem;
+      }
+
+      .brand span {
+        color: var(--amber);
+      }
+
+      .nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.9rem;
+        justify-content: flex-end;
+      }
+
+      .nav a {
+        color: var(--text);
+        font-size: 0.95rem;
+      }
+
+      .hero {
+        position: relative;
+        padding: 6rem 0 4.8rem;
+        overflow: hidden;
+      }
+
+      .hero::before,
+      .hero::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: -1;
+      }
+
+      .hero::before {
+        background:
+          radial-gradient(circle at 20% 20%, rgba(245, 158, 11, 0.16), transparent 42%),
+          radial-gradient(circle at 80% 10%, rgba(56, 189, 248, 0.11), transparent 38%),
+          linear-gradient(120deg, rgba(245, 158, 11, 0.08), rgba(15, 17, 23, 0) 55%, rgba(56, 189, 248, 0.06));
+      }
+
+      .hero::after {
+        background-image: linear-gradient(to right, rgba(255,255,255,.05) 1px, transparent 1px),
+          linear-gradient(to bottom, rgba(255,255,255,.04) 1px, transparent 1px);
+        background-size: 34px 34px;
+        opacity: 0.22;
+      }
+
+      .hero-content {
+        position: relative;
+        z-index: 1;
+        max-width: 760px;
+      }
+
+      .kicker {
+        display: inline-block;
+        border: 1px solid rgba(245, 158, 11, 0.45);
+        color: var(--amber-2);
+        border-radius: 999px;
+        padding: 0.35rem 0.8rem;
+        font-size: 0.82rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0.7rem 0;
+        font-size: clamp(2rem, 4vw, 3.4rem);
+        letter-spacing: 0.01em;
+      }
+
+      .subtitle {
+        color: #cfd4dc;
+        max-width: 68ch;
+      }
+
+      .cta-row {
+        margin-top: 1.7rem;
+        display: flex;
+        gap: 0.85rem;
+        flex-wrap: wrap;
+      }
+
+      .btn {
+        border: 1px solid transparent;
+        border-radius: 0.7rem;
+        padding: 0.7rem 1.1rem;
+        display: inline-flex;
+        align-items: center;
+        font-weight: 600;
+        transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+      }
+
+      .btn:hover {
+        transform: translateY(-1px);
+      }
+
+      .btn-primary {
+        background: linear-gradient(135deg, var(--amber), #d97706);
+        color: #111827;
+      }
+
+      .btn-secondary {
+        border-color: var(--border);
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      .section {
+        padding: 3.5rem 0;
+      }
+
+      .section-title {
+        margin: 0;
+        font-size: clamp(1.4rem, 2.4vw, 2rem);
+      }
+
+      .section-copy {
+        margin-top: 0.55rem;
+        color: var(--muted);
+        max-width: 74ch;
+      }
+
+      .panel-grid {
+        margin-top: 1.5rem;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 1rem;
+      }
+
+      .card {
+        border: 1px solid var(--border);
+        border-radius: 0.85rem;
+        padding: 1.1rem;
+        background: linear-gradient(150deg, rgba(255, 255, 255, 0.02), rgba(245, 158, 11, 0.03));
+        color: var(--text);
+        opacity: 0;
+        transform: translateY(18px);
+      }
+
+      .card.visible {
+        animation: fadeInUp 0.6s cubic-bezier(0.21, 1, 0.37, 1) forwards;
+      }
+
+      .card h3 {
+        margin: 0.2rem 0;
+      }
+
+      .card p {
+        margin: 0;
+        color: #c8ced7;
+      }
+
+      .icon {
+        font-size: 1.3rem;
+        margin-bottom: 0.4rem;
+        display: inline-block;
+      }
+
+      .timeline {
+        display: grid;
+        gap: 0.9rem;
+      }
+
+      .step {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 0.9rem;
+        align-items: center;
+      }
+
+      .step-number {
+        width: 2.2rem;
+        height: 2.2rem;
+        border-radius: 999px;
+        display: grid;
+        place-items: center;
+        background: #2c2f3b;
+        border: 1px solid var(--amber);
+        color: var(--amber);
+        font-weight: 700;
+      }
+
+      .step .card {
+        margin: 0;
+        width: 100%;
+        opacity: 1;
+        transform: none;
+      }
+
+      .install-block {
+        background: var(--panel);
+        border: 1px dashed var(--border);
+        border-radius: 0.95rem;
+        padding: 1rem;
+      }
+
+      pre {
+        margin: 0.7rem 0;
+        background: #0b0f19;
+        border-radius: 0.65rem;
+        padding: 0.9rem;
+        border: 1px solid #1c2232;
+        overflow-x: auto;
+        font-size: 0.95rem;
+        color: #d4d9e2;
+      }
+
+      .muted-note {
+        color: var(--muted);
+      }
+
+      .arch {
+        border: 1px solid var(--border);
+        border-radius: 0.95rem;
+        background: var(--card);
+        padding: 1rem;
+        overflow: auto;
+      }
+
+      .arch pre {
+        margin: 0;
+        border-radius: 0.45rem;
+      }
+
+      .small {
+        font-size: 0.9rem;
+      }
+
+      footer {
+        margin-top: 4rem;
+        border-top: 1px solid var(--border);
+        padding: 1.5rem 0 2rem;
+        color: var(--muted);
+      }
+
+      .footer-grid {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+
+      .links {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        color: #111827;
+        padding: 0.4rem 0.75rem;
+        border-radius: 999px;
+        background: linear-gradient(120deg, var(--amber), #eab308);
+        font-weight: 700;
+        font-size: 0.82rem;
+      }
+
+      @media (max-width: 640px) {
+        .topbar-inner {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 0.5rem;
+        }
+
+        .nav {
+          justify-content: flex-start;
+        }
+
+        .hero {
+          padding-top: 4.9rem;
+        }
+      }
+
+      @keyframes fadeInUp {
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="container topbar-inner">
+        <a class="brand" href="#">Lega<span>tor</span></a>
+        <nav class="nav" aria-label="Primary">
+          <a href="#features">Features</a>
+          <a href="#how-it-works">How it works</a>
+          <a href="#install">Install</a>
+          <a href="#architecture">Architecture</a>
+          <a href="#docs">Docs</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="container">
+          <div class="hero-content">
+            <span class="kicker">Open-source Fleet Control Plane</span>
+            <h1>Legator</h1>
+            <p class="subtitle">Self-hosted fleet management with AI-powered probes</p>
+            <p class="subtitle">
+              Deploy AI agents across your infrastructure. Observe, diagnose, and remediate — with policy-driven
+              guardrails and full audit trails.
+            </p>
+            <div class="cta-row">
+              <a class="btn btn-primary" href="#install">Get Started</a>
+              <a class="btn btn-secondary" href="https://github.com/marcus-qen/legator" target="_blank" rel="noreferrer">View on GitHub</a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" class="section">
+        <div class="container">
+          <h2 class="section-title">Features</h2>
+          <p class="section-copy">Legator is built to be practical: lightweight, transparent, and a little less drama than enterprise dashboards.</p>
+
+          <div class="panel-grid" id="featureCards">
+            <article class="card">
+              <div class="icon" aria-hidden="true">🔍</div>
+              <h3>Fleet Visibility</h3>
+              <p>Real-time status, health scoring, and inventory across all your machines.</p>
+            </article>
+
+            <article class="card">
+              <div class="icon" aria-hidden="true">🤖</div>
+              <h3>AI-Powered Chat</h3>
+              <p>Ask questions about your fleet in natural language. Legator dispatches commands and summarises results.</p>
+            </article>
+
+            <article class="card">
+              <div class="icon" aria-hidden="true">🛡️</div>
+              <h3>Policy Guardrails</h3>
+              <p>Observe, Diagnose, or Remediate levels. Defence-in-depth enforcement at both control plane and probe.</p>
+            </article>
+
+            <article class="card">
+              <div class="icon" aria-hidden="true">🔔</div>
+              <h3>Alert Rules</h3>
+              <p>
+                Get notified when probes go offline, disks fill up, or CPU spikes. Webhook delivery with HMAC signing.
+              </p>
+            </article>
+
+            <article class="card">
+              <div class="icon" aria-hidden="true">🔑</div>
+              <h3>Built-in Auth</h3>
+              <p>Local accounts + OIDC SSO (Keycloak, Google, etc). API keys with scoped permissions.</p>
+            </article>
+
+            <article class="card">
+              <div class="icon" aria-hidden="true">📋</div>
+              <h3>Full Audit Trail</h3>
+              <p>Every command, policy change, and login is recorded. Searchable, filterable, exportable.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="how-it-works" class="section">
+        <div class="container">
+          <h2 class="section-title">How it works</h2>
+          <p class="section-copy">No hand-holding, no wizard cult. Three steps and you are in.</p>
+
+          <div class="timeline">
+            <div class="step">
+              <div class="step-number">1</div>
+              <article class="card">
+                <h3>Install the control plane</h3>
+                <p>Run the control plane on one server. Single binary, around 14MB.</p>
+              </article>
+            </div>
+
+            <div class="step">
+              <div class="step-number">2</div>
+              <article class="card">
+                <h3>Deploy probes</h3>
+                <p>Install probe daemons on your machines with a short command. Each probe is a ~7MB binary.</p>
+              </article>
+            </div>
+
+            <div class="step">
+              <div class="step-number">3</div>
+              <article class="card">
+                <h3>Manage the fleet</h3>
+                <p>Operate from the web dashboard or API: observe, diagnose, and remediate.</p>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="install" class="section">
+        <div class="container">
+          <h2 class="section-title">Install</h2>
+          <p class="section-copy">Use this one-liner to register a probe (replace placeholders first):</p>
+          <div class="install-block">
+            <pre><code>curl -sSL https://your-server/install.sh | sudo bash -s -- --server https://your-server --token YOUR_TOKEN</code></pre>
+            <p class="muted-note">
+              Replace <code>your-server</code> with your control plane URL and <code>YOUR_TOKEN</code> with a registration token.
+            </p>
+            <p>
+              Need the full story? <a href="#docs">Read the docs</a>.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="architecture" class="section">
+        <div class="container">
+          <h2 class="section-title">Architecture</h2>
+          <p class="section-copy">A simple split-brain-resistant design: small binaries, clear trust boundaries, observable state.</p>
+
+          <div class="arch">
+            <pre>Control Plane: Go binary, SQLite databases, REST API + WebSocket, web dashboard
+Probes: lightweight Go binary, auto-reconnect, heartbeat, inventory scanner, command executor
+Connection: persistent WebSocket (WSS), heartbeat every 30s, auto-reconnect with jitter</pre>
+          </div>
+        </div>
+      </section>
+
+      <section id="docs" class="section">
+        <div class="container">
+          <h2 class="section-title">Documentation</h2>
+          <p class="section-copy">
+            Placeholder docs section for now. Point this to your generated docs host when it goes live.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="container footer-grid">
+        <div>
+          <p>Built by <strong>Marcus Qen</strong></p>
+          <p class="small">Legator is open-source and aimed at people who run their own gear.</p>
+        </div>
+        <div class="links">
+          <a href="https://github.com/marcus-qen/legator" target="_blank" rel="noreferrer">GitHub</a>
+          <a href="#docs">Documentation</a>
+          <a href="LICENSE">License (MIT)</a>
+        </div>
+        <span class="badge">Legator v1.0.0-alpha</span>
+      </div>
+    </footer>
+
+    <script>
+      (() => {
+        const cards = document.querySelectorAll(#featureCards .card);
+        const observer = new IntersectionObserver(
+          (entries) => {
+            entries.forEach((entry, idx) => {
+              if (entry.isIntersecting) {
+                entry.target.style.animationDelay = `${idx * 0.09}s`;
+                entry.target.classList.add(visible);
+                observer.unobserve(entry.target);
+              }
+            });
+          },
+          { threshold: 0.2 }
+        );
+
+        cards.forEach((card) => observer.observe(card));
+      })();
+    </script>
+  </body>
+</html>
