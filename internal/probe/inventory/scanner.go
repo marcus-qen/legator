@@ -26,6 +26,7 @@ func Scan(probeID string) (*protocol.InventoryPayload, error) {
 		CPUs:        runtime.NumCPU(),
 		CollectedAt: time.Now().UTC(),
 		Labels:      map[string]string{},
+		Metadata:    map[string]string{},
 	}
 
 	inv.MemTotal = memTotal()
@@ -34,6 +35,13 @@ func Scan(probeID string) (*protocol.InventoryPayload, error) {
 	inv.Services = services()
 	inv.Users = users()
 	inv.Packages = packages()
+
+	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+		inv.Metadata["k8s_node"] = os.Getenv("NODE_NAME")
+		inv.Metadata["k8s_pod"] = os.Getenv("POD_NAME")
+		inv.Metadata["k8s_namespace"] = os.Getenv("POD_NAMESPACE")
+		inv.Metadata["k8s_cluster"] = "true"
+	}
 
 	return inv, nil
 }
