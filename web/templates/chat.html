@@ -23,6 +23,32 @@
         gap: 0.8rem;
       }
 
+      .user-nav {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.75rem;
+        color: var(--muted);
+      }
+
+      .user-nav strong {
+        color: var(--text);
+      }
+
+      .user-nav form { margin: 0; }
+
+      .user-nav button {
+        background: #21262d;
+        border: 1px solid #30363d;
+        color: var(--text);
+        border-radius: 6px;
+        padding: 0.2rem 0.5rem;
+        font-size: 0.72rem;
+        cursor: pointer;
+      }
+
+      .user-nav button:hover { border-color: var(--blue); }
+
       .chat-title {
         margin: 0 0 0.35rem 0;
         font-size: 1.6rem;
@@ -320,6 +346,12 @@
             </span>
           </p>
         </div>
+        {{if .CurrentUser}}
+        <div class="user-nav">
+          <span>{{.CurrentUser.Username}}</span>
+          <form method="POST" action="/logout"><button type="submit">Logout</button></form>
+        </div>
+        {{end}}
       </section>
 
 

@@ -20,18 +20,26 @@ type FleetSummary struct {
 	Total    int
 }
 
+// TemplateUser describes the logged-in user shown in page chrome.
+type TemplateUser struct {
+	Username string
+	Role     string
+}
+
 // FleetPageData is passed to the fleet.html template.
 type FleetPageData struct {
-	Probes  []*fleet.ProbeState
-	Summary FleetSummary
-	Version string
-	Commit  string
+	Probes      []*fleet.ProbeState
+	Summary     FleetSummary
+	Version     string
+	Commit      string
+	CurrentUser *TemplateUser
 }
 
 // ProbePageData is passed to probe-detail.html and chat.html templates.
 type ProbePageData struct {
-	Probe  *fleet.ProbeState
-	Uptime string
+	Probe       *fleet.ProbeState
+	Uptime      string
+	CurrentUser *TemplateUser
 }
 
 func templateFuncs() template.FuncMap {
@@ -118,5 +126,3 @@ func calculateUptime(start time.Time) string {
 	}
 	return strings.Join(parts, " ")
 }
-
-

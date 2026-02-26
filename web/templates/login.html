@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Legator Login</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        min-height: 100vh;
+        font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+        background: #0d1117;
+        color: #c9d1d9;
+        display: grid;
+        place-items: center;
+        padding: 20px;
+      }
+      .login-card {
+        width: 100%;
+        max-width: 420px;
+        background: #161b22;
+        border: 1px solid #21262d;
+        border-radius: 10px;
+        padding: 28px 24px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+      }
+      h1 {
+        font-size: 24px;
+        color: #58a6ff;
+        margin-bottom: 6px;
+      }
+      p.subtitle {
+        font-size: 13px;
+        color: #8b949e;
+        margin-bottom: 18px;
+      }
+      .error {
+        margin-bottom: 14px;
+        border: 1px solid rgba(248,81,73,0.45);
+        background: rgba(248,81,73,0.12);
+        color: #ffb4ae;
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-size: 12px;
+      }
+      label {
+        display: block;
+        font-size: 12px;
+        color: #8b949e;
+        margin-bottom: 6px;
+      }
+      input {
+        width: 100%;
+        border: 1px solid #30363d;
+        background: #0d1117;
+        color: #c9d1d9;
+        border-radius: 8px;
+        padding: 10px 12px;
+        margin-bottom: 14px;
+        font-size: 14px;
+      }
+      input:focus {
+        outline: none;
+        border-color: #58a6ff;
+        box-shadow: 0 0 0 2px rgba(88,166,255,0.2);
+      }
+      button {
+        width: 100%;
+        border: 1px solid #238636;
+        background: #238636;
+        color: #fff;
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:hover { background: #2ea043; }
+      .foot {
+        margin-top: 14px;
+        font-size: 11px;
+        color: #484f58;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="login-card">
+      <h1>⚡ Legator</h1>
+      <p class="subtitle">Control Plane Login</p>
+
+      {{if .Error}}
+      <div class="error">{{.Error}}</div>
+      {{end}}
+
+      <form method="POST" action="/login">
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text" autocomplete="username" value="{{.Username}}" required />
+
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+
+        <button type="submit">Sign in</button>
+      </form>
+
+      <div class="foot">Legator multi-user access</div>
+    </main>
+  </body>
+</html>
