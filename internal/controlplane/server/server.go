@@ -127,6 +127,9 @@ func (s *Server) Run(ctx context.Context) error {
 	// Start offline checker
 	go s.offlineChecker(ctx)
 
+	// Forward event bus events to webhooks
+	go s.webhookForwarder(ctx)
+
 	s.logger.Info("starting control plane",
 		zap.String("addr", s.cfg.ListenAddr),
 		zap.String("version", Version),
@@ -507,7 +510,7 @@ func (s *Server) dispatchAndWait(probeID string, cmd *protocol.CommandPayload) (
 	}
 }
 
-// offlineChecker runs the periodic offline detection + webhook notifications.
+// offlineChecker runs the periodic offline detection and publishes events.
 func (s *Server) offlineChecker(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -520,12 +523,31 @@ func (s *Server) offlineChecker(ctx context.Context) {
 			s.fleetMgr.MarkOffline(60 * time.Second)
 			for _, ps := range s.fleetMgr.List() {
 				if ps.Status == "offline" && !lastOffline[ps.ID] {
-					s.webhookNotifier.Notify("probe.offline", ps.ID,
+					s.publishEvent(events.ProbeOffline, ps.ID,
 						fmt.Sprintf("Probe %s (%s) went offline", ps.ID, ps.Hostname),
 						map[string]string{"last_seen": ps.LastSeen.Format(time.RFC3339)})
 				}
 				lastOffline[ps.ID] = (ps.Status == "offline")
 			}
+		}
+	}
+}
+
+// webhookForwarder subscribes to the event bus and forwards events to registered webhooks.
+func (s *Server) webhookForwarder(ctx context.Context) {
+	ch := s.eventBus.Subscribe("webhook-forwarder")
+	defer s.eventBus.Unsubscribe("webhook-forwarder")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case evt, ok := <-ch:
+			if !ok {
+				return
+			}
+			// Forward to webhook notifier (non-blocking, Notify spawns goroutines)
+			s.webhookNotifier.Notify(string(evt.Type), evt.ProbeID, evt.Summary, evt.Detail)
 		}
 	}
 }
