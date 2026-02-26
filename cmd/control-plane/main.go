@@ -255,7 +255,25 @@ func main() {
 	// Start offline checker
 	go offlineChecker(ctx, fleetMgr)
 
-	chatMgr := chat.NewManager(logger.Named("chat"))
+	// Chat: persistent when data dir is available
+	var chatMgr *chat.Manager
+	var chatStore *chat.Store
+	chatDBPath := filepath.Join(cfg.DataDir, "chat.db")
+	if err := os.MkdirAll(cfg.DataDir, 0750); err == nil {
+		store, err := chat.NewStore(chatDBPath, logger.Named("chat"))
+		if err != nil {
+			logger.Warn("cannot open chat database, falling back to in-memory",
+				zap.String("path", chatDBPath), zap.Error(err))
+			chatMgr = chat.NewManager(logger.Named("chat"))
+		} else {
+			chatStore = store
+			chatMgr = store.Manager()
+			logger.Info("chat store opened", zap.String("path", chatDBPath))
+			defer chatStore.Close()
+		}
+	} else {
+		chatMgr = chat.NewManager(logger.Named("chat"))
+	}
 
 	// Wire chat to LLM if task runner is available
 	if taskRunner != nil {
@@ -287,7 +305,15 @@ func main() {
 			logger.Named("chat-llm"),
 		)
 
-		chatMgr.SetResponder(func(probeID, userMessage string, history []chat.Message) string {
+			// Wire responder to whichever is available
+	setResponder := func(fn chat.ResponderFunc) {
+		if chatStore != nil {
+			chatStore.SetResponder(fn)
+		} else {
+			chatMgr.SetResponder(fn)
+		}
+	}
+	setResponder(func(probeID, userMessage string, history []chat.Message) string {
 			// Convert chat.Message to llm.ChatMessage
 			llmHistory := make([]llm.ChatMessage, len(history))
 			for i, m := range history {
@@ -806,9 +832,16 @@ func main() {
 	})
 
 	// Chat API
-	mux.HandleFunc("GET /api/v1/probes/{id}/chat", chatMgr.HandleGetMessages)
-	mux.HandleFunc("POST /api/v1/probes/{id}/chat", chatMgr.HandleSendMessage)
-	mux.HandleFunc("GET /ws/chat", chatMgr.HandleChatWS)
+	// Chat handlers — use store for persistence, fall back to manager
+	if chatStore != nil {
+		mux.HandleFunc("GET /api/v1/probes/{id}/chat", chatStore.HandleGetMessages)
+		mux.HandleFunc("POST /api/v1/probes/{id}/chat", chatStore.HandleSendMessage)
+		mux.HandleFunc("GET /ws/chat", chatStore.HandleChatWS)
+	} else {
+		mux.HandleFunc("GET /api/v1/probes/{id}/chat", chatMgr.HandleGetMessages)
+		mux.HandleFunc("POST /api/v1/probes/{id}/chat", chatMgr.HandleSendMessage)
+		mux.HandleFunc("GET /ws/chat", chatMgr.HandleChatWS)
+	}
 
 	// SSE endpoint for streaming command output
 	mux.HandleFunc("GET /api/v1/commands/{requestId}/stream", func(w http.ResponseWriter, r *http.Request) {
@@ -974,6 +1007,7 @@ func main() {
 		zap.String("version", version),
 		zap.Bool("audit_persistent", auditStore != nil),
 		zap.Bool("fleet_persistent", fleetStore != nil),
+		zap.Bool("chat_persistent", chatStore != nil),
 	)
 
 	go func() {
