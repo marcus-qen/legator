@@ -13,6 +13,7 @@ import (
 	"time"
 
 	gooidc "github.com/coreos/go-oidc/v3/oidc"
+	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
 	"github.com/marcus-qen/legator/internal/controlplane/users"
 	"go.uber.org/zap"
@@ -40,12 +41,18 @@ type SessionCreator interface {
 	Create(userID string) (token string, err error)
 }
 
+// AuditRecorder records audit events for OIDC logins.
+type AuditRecorder interface {
+	Record(evt audit.Event)
+}
+
 // Provider handles OIDC login + callback processing.
 type Provider struct {
 	config   Config
 	verifier *gooidc.IDTokenVerifier
 	oauth2   oauth2.Config
 	logger   *zap.Logger
+	Auditor  AuditRecorder // optional; set after construction
 }
 
 type callbackState struct {
@@ -201,34 +208,44 @@ func (p *Provider) HandleCallback(userStore UserStore, sessionCreator SessionCre
 			oauth2.SetAuthURLParam("code_verifier", stored.CodeVerifier),
 		)
 		if err != nil {
+			p.emitAuditFailed("unknown", "oidc", "token exchange failed", r.RemoteAddr)
 			http.Error(w, "oidc token exchange failed", http.StatusUnauthorized)
 			return
 		}
 
 		rawIDToken, _ := tok.Extra("id_token").(string)
 		if strings.TrimSpace(rawIDToken) == "" {
+			p.emitAuditFailed("unknown", "oidc", "no id_token in response", r.RemoteAddr)
 			http.Error(w, "oidc provider did not return id_token", http.StatusUnauthorized)
 			return
 		}
 
 		idToken, err := p.verifier.Verify(r.Context(), rawIDToken)
 		if err != nil {
+			p.emitAuditFailed("unknown", "oidc", "invalid id_token", r.RemoteAddr)
 			http.Error(w, "invalid oidc id_token", http.StatusUnauthorized)
 			return
 		}
 		if strings.TrimSpace(idToken.Nonce) == "" || idToken.Nonce != stored.Nonce {
+			p.emitAuditFailed("unknown", "oidc", "invalid nonce", r.RemoteAddr)
 			http.Error(w, "invalid oidc nonce", http.StatusUnauthorized)
 			return
 		}
 
 		claims := map[string]any{}
 		if err := idToken.Claims(&claims); err != nil {
+			p.emitAuditFailed("unknown", "oidc", "invalid claims", r.RemoteAddr)
 			http.Error(w, "invalid oidc claims", http.StatusUnauthorized)
 			return
 		}
 
 		user, err := p.reconcileUser(r.Context(), userStore, claims)
 		if err != nil {
+			username := claimString(claims, "preferred_username")
+			if username == "" {
+				username = claimString(claims, "sub")
+			}
+			p.emitAuditFailed(username, "oidc", err.Error(), r.RemoteAddr)
 			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
 		}
@@ -237,6 +254,23 @@ func (p *Provider) HandleCallback(userStore UserStore, sessionCreator SessionCre
 		if err != nil || strings.TrimSpace(sessionToken) == "" {
 			http.Error(w, "failed to create session", http.StatusInternalServerError)
 			return
+		}
+
+		// Audit: successful OIDC login
+		if p.Auditor != nil {
+			p.Auditor.Record(audit.Event{
+				Timestamp: time.Now().UTC(),
+				Type:      audit.EventLoginSuccess,
+				Actor:     user.ID,
+				Summary:   "Login succeeded for " + user.Username + " (oidc)",
+				Detail: map[string]string{
+					"method":      "oidc",
+					"user_id":     user.ID,
+					"username":    user.Username,
+					"role":        user.Role,
+					"remote_addr": r.RemoteAddr,
+				},
+			})
 		}
 
 		http.SetCookie(w, &http.Cookie{
@@ -251,6 +285,24 @@ func (p *Provider) HandleCallback(userStore UserStore, sessionCreator SessionCre
 		})
 		http.Redirect(w, r, "/", http.StatusFound)
 	}
+}
+
+// emitAuditFailed records a failed login attempt to the audit log.
+func (p *Provider) emitAuditFailed(username, method, reason, remoteAddr string) {
+	if p.Auditor == nil {
+		return
+	}
+	p.Auditor.Record(audit.Event{
+		Timestamp: time.Now().UTC(),
+		Type:      audit.EventLoginFailed,
+		Actor:     username,
+		Summary:   "Login failed for " + username + " (" + method + "): " + reason,
+		Detail: map[string]string{
+			"method":      method,
+			"reason":      reason,
+			"remote_addr": remoteAddr,
+		},
+	})
 }
 
 func (p *Provider) reconcileUser(_ context.Context, store UserStore, claims map[string]any) (*users.User, error) {

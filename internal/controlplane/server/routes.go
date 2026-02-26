@@ -37,7 +37,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("GET /auth/oidc/callback", s.oidcProvider.HandleCallback(s.userStore, s.sessionCreator))
 	}
 	mux.HandleFunc("GET /login", auth.HandleLoginPage(filepath.Join("web", "templates"), loginOpts))
-	mux.HandleFunc("POST /login", auth.HandleLogin(s.userAuth, s.sessionCreator, loginOpts))
+	mux.HandleFunc("POST /login", auth.HandleLoginWithAudit(s.userAuth, s.sessionCreator, s.auditRecorder(), loginOpts))
 	mux.HandleFunc("POST /logout", auth.HandleLogout(s.sessionDeleter))
 
 	// Current user + RBAC user management (Track 2 stubs)

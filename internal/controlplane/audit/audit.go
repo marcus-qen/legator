@@ -142,3 +142,9 @@ func (l *Log) MarshalJSON() ([]byte, error) {
 	defer l.mu.RUnlock()
 	return json.Marshal(l.events)
 }
+
+// Login audit event types.
+const (
+	EventLoginSuccess EventType = "auth.login"
+	EventLoginFailed  EventType = "auth.login_failed"
+)

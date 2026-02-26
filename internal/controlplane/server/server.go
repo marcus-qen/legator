@@ -543,6 +543,7 @@ func (s *Server) initAuth() {
 			s.logger.Warn("failed to initialize oidc provider", zap.Error(err))
 		} else {
 			s.oidcProvider = provider
+			s.oidcProvider.Auditor = s.auditRecorder()
 			s.logger.Info("oidc provider enabled", zap.String("provider", provider.ProviderName()))
 		}
 	}

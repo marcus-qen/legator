@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/marcus-qen/legator/internal/controlplane/audit"
 )
 
 const sessionMaxAgeSeconds = 86400
@@ -27,6 +29,11 @@ type LoginPageData struct {
 	OIDCProviderName string
 }
 
+// LoginAuditRecorder records login audit events.
+type LoginAuditRecorder interface {
+	Record(evt audit.Event)
+}
+
 // HandleLoginPage renders the login page.
 func HandleLoginPage(templateDir string, opts ...LoginPageOptions) http.HandlerFunc {
 	options := resolveLoginOptions(opts...)
@@ -39,8 +46,13 @@ func HandleLoginPage(templateDir string, opts ...LoginPageOptions) http.HandlerF
 	}
 }
 
-// HandleLogin processes a username/password login form.
+// HandleLogin processes a username/password login form (no audit).
 func HandleLogin(userAuth UserAuthenticator, sessionCreator SessionCreator, opts ...LoginPageOptions) http.HandlerFunc {
+	return HandleLoginWithAudit(userAuth, sessionCreator, nil, opts...)
+}
+
+// HandleLoginWithAudit processes a login form and records audit events.
+func HandleLoginWithAudit(userAuth UserAuthenticator, sessionCreator SessionCreator, auditor LoginAuditRecorder, opts ...LoginPageOptions) http.HandlerFunc {
 	options := resolveLoginOptions(opts...)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if userAuth == nil || sessionCreator == nil {
@@ -79,6 +91,15 @@ func HandleLogin(userAuth UserAuthenticator, sessionCreator SessionCreator, opts
 			if err != nil && strings.TrimSpace(err.Error()) != "" {
 				errMsg = err.Error()
 			}
+			if auditor != nil {
+				auditor.Record(audit.Event{
+					Timestamp: time.Now().UTC(),
+					Type:      audit.EventLoginFailed,
+					Actor:     username,
+					Summary:   "Login failed for " + username + " (local)",
+					Detail:    map[string]string{"method": "local", "remote_addr": r.RemoteAddr},
+				})
+			}
 			renderLoginPage(w, templateDir, LoginPageData{
 				Title:            "Legator Login",
 				Username:         username,
@@ -99,6 +120,16 @@ func HandleLogin(userAuth UserAuthenticator, sessionCreator SessionCreator, opts
 				OIDCProviderName: options.OIDCProviderName,
 			}, http.StatusInternalServerError)
 			return
+		}
+
+		if auditor != nil {
+			auditor.Record(audit.Event{
+				Timestamp: time.Now().UTC(),
+				Type:      audit.EventLoginSuccess,
+				Actor:     user.ID,
+				Summary:   "Login succeeded for " + username + " (local)",
+				Detail:    map[string]string{"method": "local", "user_id": user.ID, "username": username, "remote_addr": r.RemoteAddr},
+			})
 		}
 
 		http.SetCookie(w, &http.Cookie{
