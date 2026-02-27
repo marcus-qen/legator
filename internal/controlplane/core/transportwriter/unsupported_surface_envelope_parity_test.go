@@ -16,6 +16,42 @@ func TestUnsupportedSurfaceEnvelopeFactory_Semantics(t *testing.T) {
 	assertUnsupportedEnvelopeSemantics(t, envelope, message)
 }
 
+func TestUnsupportedSurfaceMessageFormatter_Parity(t *testing.T) {
+	tests := []struct {
+		name    string
+		scope   string
+		surface string
+		want    string
+	}{
+		{
+			name:    "approval_decide_dispatch",
+			scope:   "approval decide dispatch",
+			surface: "bogus",
+			want:    "unsupported approval decide dispatch surface \"bogus\"",
+		},
+		{
+			name:    "command_invoke",
+			scope:   "command invoke",
+			surface: "bogus",
+			want:    "unsupported command invoke surface \"bogus\"",
+		},
+		{
+			name:    "command_dispatch",
+			scope:   "command dispatch",
+			surface: "bogus",
+			want:    "unsupported command dispatch surface \"bogus\"",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := transportwriter.UnsupportedSurfaceMessage(tt.scope, tt.surface); got != tt.want {
+				t.Fatalf("unexpected unsupported-surface message: got %q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestUnsupportedSurfaceEnvelopeParity_ApprovalAndCommandCodecs(t *testing.T) {
 	t.Run("approval_codec", func(t *testing.T) {
 		const message = "unsupported approval decide dispatch surface \"bogus\""

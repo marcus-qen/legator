@@ -1,8 +1,6 @@
 package commanddispatch
 
 import (
-	"fmt"
-
 	"github.com/marcus-qen/legator/internal/controlplane/core/projectiondispatch"
 	"github.com/marcus-qen/legator/internal/controlplane/core/transportwriter"
 	"github.com/marcus-qen/legator/internal/protocol"
@@ -139,6 +137,6 @@ func dispatchUnsupportedCommandSurface(surface ProjectionDispatchSurface, writer
 }
 
 func unsupportedCommandDispatchResponseEnvelope(surface ProjectionDispatchSurface) *transportwriter.ResponseEnvelope {
-	message := fmt.Sprintf("unsupported command dispatch surface %q", string(surface))
+	message := transportwriter.UnsupportedSurfaceMessage("command dispatch", string(surface))
 	return transportwriter.UnsupportedSurfaceEnvelope(message)
 }

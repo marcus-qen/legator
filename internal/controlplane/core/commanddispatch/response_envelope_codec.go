@@ -1,7 +1,6 @@
 package commanddispatch
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/marcus-qen/legator/internal/controlplane/core/transportwriter"
@@ -79,6 +78,6 @@ func encodeCommandInvokeMCPEnvelope(projection *CommandInvokeProjection) *transp
 }
 
 func unsupportedCommandInvokeResponseEnvelope(surface string) *transportwriter.ResponseEnvelope {
-	message := fmt.Sprintf("unsupported command invoke surface %q", surface)
+	message := transportwriter.UnsupportedSurfaceMessage("command invoke", surface)
 	return transportwriter.UnsupportedSurfaceEnvelope(message)
 }
