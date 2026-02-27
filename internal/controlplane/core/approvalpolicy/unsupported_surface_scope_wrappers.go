@@ -13,8 +13,10 @@ func unsupportedDecideApprovalSurfaceEnvelope(surface string) *transportwriter.R
 }
 
 func dispatchUnsupportedDecideApprovalSurfaceFallback(surface string, writer DecideApprovalResponseDispatchWriter) {
-	transportwriter.WriteUnsupportedSurfaceFallback(
-		unsupportedDecideApprovalSurfaceEnvelope(surface),
-		newDecideApprovalUnsupportedSurfaceFallbackWriter(writer),
+	transportwriter.DispatchUnsupportedSurfaceFallback(
+		surface,
+		unsupportedDecideApprovalSurfaceEnvelope,
+		writer,
+		newDecideApprovalUnsupportedSurfaceFallbackWriter,
 	)
 }
