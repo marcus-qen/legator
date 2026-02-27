@@ -7,6 +7,16 @@ type UnsupportedSurfaceFallbackWriter struct {
 	WriteMCPError  func(error)
 }
 
+// AdaptUnsupportedSurfaceFallbackWriter builds unsupported-surface fallback
+// callbacks from domain HTTP + MCP writers using the shared HTTP-error adapter
+// and direct MCP passthrough.
+func AdaptUnsupportedSurfaceFallbackWriter[T any](writeHTTPError func(*T), constructHTTPError func(status int, code, message string) *T, writeMCPError func(error)) UnsupportedSurfaceFallbackWriter {
+	return UnsupportedSurfaceFallbackWriter{
+		WriteHTTPError: AdaptHTTPErrorWriter(writeHTTPError, constructHTTPError),
+		WriteMCPError:  writeMCPError,
+	}
+}
+
 // WriteUnsupportedSurfaceFallback emits unsupported-surface errors with the
 // shared precedence policy: HTTP callback first, then MCP callback.
 func WriteUnsupportedSurfaceFallback(envelope *ResponseEnvelope, writer UnsupportedSurfaceFallbackWriter) bool {
