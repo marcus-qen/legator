@@ -5,6 +5,9 @@
   - Added `internal/controlplane/core/approvalpolicy` service as the first reusable core boundary for approval + policy orchestration.
   - Moved approval submission/wait orchestration out of server route/task closures into the new core service (behavior preserved).
   - Moved policy-apply orchestration (template lookup, fleet policy update, push fallback) behind the same core service.
+- **Kernel split S4 (approval decision side-effect hooks)**
+  - Moved approval decision audit/event sequencing into `internal/controlplane/core/approvalpolicy` hooks so routes no longer own ordering.
+  - Wired default hooks to existing approval-decided + approved-dispatch audit/event emissions with no API response changes.
 
 ### Added
 - Parity tests for the extracted core service and server policy-apply paths (not found + offline apply-local behavior).

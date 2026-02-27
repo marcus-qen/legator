@@ -2,6 +2,7 @@ package approvalpolicy
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -139,6 +140,225 @@ func TestDispatchApprovedCommand(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected dispatch error")
 	}
+}
+
+func TestDecideAndDispatch_HookOrder(t *testing.T) {
+	queue := approval.NewQueue(15*time.Minute, 16)
+	fleetMgr := fleet.NewManager(zap.NewNop())
+	policies := policy.NewStore()
+
+	order := make([]string, 0, 3)
+	svc := NewService(queue, fleetMgr, policies, WithDecisionHooks(DecisionHookFuncs{
+		OnDecisionRecordedFn: func(*ApprovalDecisionResult) error {
+			order = append(order, "hook:decision")
+			return nil
+		},
+		OnApprovedDispatchFn: func(*ApprovalDecisionResult) error {
+			order = append(order, "hook:dispatch")
+			return nil
+		},
+	}))
+
+	req, err := queue.Submit("probe-a", &protocol.CommandPayload{RequestID: "req-order", Command: "systemctl restart nginx"}, "manual", "high", "api")
+	if err != nil {
+		t.Fatalf("submit approval: %v", err)
+	}
+
+	result, err := svc.DecideAndDispatch(req.ID, approval.DecisionApproved, "operator", func(probeID string, cmd protocol.CommandPayload) error {
+		order = append(order, "dispatch")
+		if probeID != "probe-a" || cmd.RequestID != "req-order" {
+			t.Fatalf("unexpected dispatch args: probe=%s cmd=%+v", probeID, cmd)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("DecideAndDispatch returned error: %v", err)
+	}
+	if result == nil || result.Request == nil {
+		t.Fatal("expected decision result")
+	}
+
+	want := []string{"hook:decision", "dispatch", "hook:dispatch"}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("unexpected invocation order: got=%v want=%v", order, want)
+	}
+}
+
+func TestDecideAndDispatch_DeniedSkipsDispatchHook(t *testing.T) {
+	queue := approval.NewQueue(15*time.Minute, 16)
+	fleetMgr := fleet.NewManager(zap.NewNop())
+	policies := policy.NewStore()
+
+	order := make([]string, 0, 2)
+	svc := NewService(queue, fleetMgr, policies, WithDecisionHooks(DecisionHookFuncs{
+		OnDecisionRecordedFn: func(*ApprovalDecisionResult) error {
+			order = append(order, "hook:decision")
+			return nil
+		},
+		OnApprovedDispatchFn: func(*ApprovalDecisionResult) error {
+			order = append(order, "hook:dispatch")
+			return nil
+		},
+	}))
+
+	req, err := queue.Submit("probe-a", &protocol.CommandPayload{RequestID: "req-denied", Command: "systemctl restart nginx"}, "manual", "high", "api")
+	if err != nil {
+		t.Fatalf("submit approval: %v", err)
+	}
+
+	dispatchCalled := false
+	result, err := svc.DecideAndDispatch(req.ID, approval.DecisionDenied, "operator", func(string, protocol.CommandPayload) error {
+		dispatchCalled = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("DecideAndDispatch returned error: %v", err)
+	}
+	if dispatchCalled {
+		t.Fatal("expected denied decision to skip dispatch")
+	}
+	if result == nil || result.Request == nil || result.Request.Decision != approval.DecisionDenied {
+		t.Fatalf("unexpected decision result: %+v", result)
+	}
+
+	want := []string{"hook:decision"}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("unexpected invocation order: got=%v want=%v", order, want)
+	}
+}
+
+func TestDecideAndDispatch_FailureSemantics(t *testing.T) {
+	t.Run("decision hook failure stops before dispatch", func(t *testing.T) {
+		queue := approval.NewQueue(15*time.Minute, 16)
+		fleetMgr := fleet.NewManager(zap.NewNop())
+		policies := policy.NewStore()
+
+		hookFailure := errors.New("audit down")
+		svc := NewService(queue, fleetMgr, policies, WithDecisionHooks(DecisionHookFuncs{
+			OnDecisionRecordedFn: func(*ApprovalDecisionResult) error { return hookFailure },
+		}))
+
+		req, err := queue.Submit("probe-a", &protocol.CommandPayload{RequestID: "req-hook-fail", Command: "systemctl restart nginx"}, "manual", "high", "api")
+		if err != nil {
+			t.Fatalf("submit approval: %v", err)
+		}
+
+		dispatchCalled := false
+		result, err := svc.DecideAndDispatch(req.ID, approval.DecisionApproved, "operator", func(string, protocol.CommandPayload) error {
+			dispatchCalled = true
+			return nil
+		})
+		if err == nil {
+			t.Fatal("expected hook error")
+		}
+		var hookErr *DecisionHookError
+		if !errors.As(err, &hookErr) {
+			t.Fatalf("expected DecisionHookError, got %T", err)
+		}
+		if hookErr.Stage != DecisionHookStageDecisionRecorded {
+			t.Fatalf("expected decision-recorded stage, got %s", hookErr.Stage)
+		}
+		if !errors.Is(err, hookFailure) {
+			t.Fatalf("expected wrapped hook failure, got %v", err)
+		}
+		if dispatchCalled {
+			t.Fatal("dispatch should not run after decision hook failure")
+		}
+		if result == nil || result.Request == nil || result.Request.Decision != approval.DecisionApproved {
+			t.Fatalf("decision should still be recorded before hook failure, got %+v", result)
+		}
+	})
+
+	t.Run("dispatch failure skips post-dispatch hook", func(t *testing.T) {
+		queue := approval.NewQueue(15*time.Minute, 16)
+		fleetMgr := fleet.NewManager(zap.NewNop())
+		policies := policy.NewStore()
+
+		order := make([]string, 0, 2)
+		dispatchFailure := errors.New("not connected")
+		svc := NewService(queue, fleetMgr, policies, WithDecisionHooks(DecisionHookFuncs{
+			OnDecisionRecordedFn: func(*ApprovalDecisionResult) error {
+				order = append(order, "hook:decision")
+				return nil
+			},
+			OnApprovedDispatchFn: func(*ApprovalDecisionResult) error {
+				order = append(order, "hook:dispatch")
+				return nil
+			},
+		}))
+
+		req, err := queue.Submit("probe-a", &protocol.CommandPayload{RequestID: "req-dispatch-fail", Command: "systemctl restart nginx"}, "manual", "high", "api")
+		if err != nil {
+			t.Fatalf("submit approval: %v", err)
+		}
+
+		_, err = svc.DecideAndDispatch(req.ID, approval.DecisionApproved, "operator", func(string, protocol.CommandPayload) error {
+			order = append(order, "dispatch")
+			return dispatchFailure
+		})
+		if err == nil {
+			t.Fatal("expected dispatch error")
+		}
+		var dispatchErr *ApprovedDispatchError
+		if !errors.As(err, &dispatchErr) {
+			t.Fatalf("expected ApprovedDispatchError, got %T", err)
+		}
+		if !errors.Is(err, dispatchFailure) {
+			t.Fatalf("expected wrapped dispatch failure, got %v", err)
+		}
+
+		want := []string{"hook:decision", "dispatch"}
+		if !reflect.DeepEqual(order, want) {
+			t.Fatalf("unexpected invocation order: got=%v want=%v", order, want)
+		}
+	})
+
+	t.Run("post-dispatch hook failure returns hook error", func(t *testing.T) {
+		queue := approval.NewQueue(15*time.Minute, 16)
+		fleetMgr := fleet.NewManager(zap.NewNop())
+		policies := policy.NewStore()
+
+		order := make([]string, 0, 3)
+		hookFailure := errors.New("event bus down")
+		svc := NewService(queue, fleetMgr, policies, WithDecisionHooks(DecisionHookFuncs{
+			OnDecisionRecordedFn: func(*ApprovalDecisionResult) error {
+				order = append(order, "hook:decision")
+				return nil
+			},
+			OnApprovedDispatchFn: func(*ApprovalDecisionResult) error {
+				order = append(order, "hook:dispatch")
+				return hookFailure
+			},
+		}))
+
+		req, err := queue.Submit("probe-a", &protocol.CommandPayload{RequestID: "req-post-hook-fail", Command: "systemctl restart nginx"}, "manual", "high", "api")
+		if err != nil {
+			t.Fatalf("submit approval: %v", err)
+		}
+
+		_, err = svc.DecideAndDispatch(req.ID, approval.DecisionApproved, "operator", func(string, protocol.CommandPayload) error {
+			order = append(order, "dispatch")
+			return nil
+		})
+		if err == nil {
+			t.Fatal("expected hook error")
+		}
+		var hookErr *DecisionHookError
+		if !errors.As(err, &hookErr) {
+			t.Fatalf("expected DecisionHookError, got %T", err)
+		}
+		if hookErr.Stage != DecisionHookStageDispatchComplete {
+			t.Fatalf("expected dispatch-complete stage, got %s", hookErr.Stage)
+		}
+		if !errors.Is(err, hookFailure) {
+			t.Fatalf("expected wrapped hook failure, got %v", err)
+		}
+
+		want := []string{"hook:decision", "dispatch", "hook:dispatch"}
+		if !reflect.DeepEqual(order, want) {
+			t.Fatalf("unexpected invocation order: got=%v want=%v", order, want)
+		}
+	})
 }
 
 func TestApplyPolicyTemplate(t *testing.T) {
