@@ -20,6 +20,9 @@
 - **Kernel split S8 (approval decide renderer/projection split)**
   - Extracted approval decide response projection + HTTP renderer abstraction so handleDecideApproval only orchestrates decode/core decision while transport writing is contract-driven.
   - Added renderer parity tests in approvalpolicy/server to lock unchanged decide status codes, error wording, and {status,request} response fields for future MCP projection reuse.
+- **Kernel split S9 (approval decide MCP renderer parity)**
+  - Added MCP approval-decide renderer wired to the shared `approvalpolicy` decide transport projection so HTTP and MCP consume one core projection contract path.
+  - Added MCP parity tests for `{status,request}` success payloads and approved-dispatch failure wording without changing existing HTTP/MCP behavior.
 
 ### Added
 - Parity tests for the extracted core service and server policy-apply paths (not found + offline apply-local behavior).

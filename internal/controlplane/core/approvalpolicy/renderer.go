@@ -1,6 +1,9 @@
 package approvalpolicy
 
-import "net/http"
+import (
+	"errors"
+	"net/http"
+)
 
 // DecideApprovalProjection is the transport-agnostic decide response projection.
 // HTTP and MCP renderers can consume this shared envelope.
@@ -15,6 +18,14 @@ func (p *DecideApprovalProjection) HTTPError() (*HTTPErrorContract, bool) {
 		return nil, false
 	}
 	return p.Err, true
+}
+
+// MCPError returns a projected MCP error, when present.
+func (p *DecideApprovalProjection) MCPError() error {
+	if httpErr, ok := p.HTTPError(); ok {
+		return errors.New(httpErr.Message)
+	}
+	return nil
 }
 
 // ProjectDecideApprovalTransport maps the decide transport contract to a reusable
