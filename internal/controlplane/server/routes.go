@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/marcus-qen/legator/internal/controlplane/api"
-	"github.com/marcus-qen/legator/internal/controlplane/approval"
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
 	coreapprovalpolicy "github.com/marcus-qen/legator/internal/controlplane/core/approvalpolicy"
@@ -867,33 +866,22 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 
-	var body struct {
-		Decision  string `json:"decision"`
-		DecidedBy string `json:"decided_by"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
-		return
-	}
-	if body.Decision == "" || body.DecidedBy == "" {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "decision and decided_by are required")
+	body, httpErr := coreapprovalpolicy.DecodeDecideApprovalRequest(r.Body)
+	if httpErr != nil {
+		writeJSONError(w, httpErr.Status, httpErr.Code, httpErr.Message)
 		return
 	}
 
-	decision, err := s.approvalCore.DecideAndDispatch(id, approval.Decision(body.Decision), body.DecidedBy, func(probeID string, cmd protocol.CommandPayload) error {
+	decision, err := s.approvalCore.DecideAndDispatch(id, body.Decision, body.DecidedBy, func(probeID string, cmd protocol.CommandPayload) error {
 		return s.dispatchCore.Dispatch(probeID, cmd)
 	})
 	if httpErr, ok := coreapprovalpolicy.DecideApprovalHTTPError(err); ok {
 		writeJSONError(w, httpErr.Status, httpErr.Code, httpErr.Message)
 		return
 	}
-	req := decision.Request
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status":  string(req.Decision),
-		"request": req,
-	})
+	_ = json.NewEncoder(w).Encode(coreapprovalpolicy.EncodeDecideApprovalSuccess(decision))
 }
 
 // ── Audit ────────────────────────────────────────────────────

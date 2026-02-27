@@ -737,6 +737,138 @@ func TestHandleDecideApproval(t *testing.T) {
 	}
 }
 
+func TestHandleDecideApproval_SuccessContractParityDenied(t *testing.T) {
+	srv := newTestServer(t)
+
+	req, err := srv.approvalQueue.Submit(
+		"probe-decide-denied-parity",
+		&protocol.CommandPayload{RequestID: "req-decide-denied-parity", Command: "systemctl restart nginx"},
+		"manual",
+		"high",
+		"api",
+	)
+	if err != nil {
+		t.Fatalf("submit approval: %v", err)
+	}
+
+	httpReq := httptest.NewRequest(http.MethodPost, "/api/v1/approvals/"+req.ID+"/decide", strings.NewReader(`{"decision":"denied","decided_by":"operator"}`))
+	httpReq.SetPathValue("id", req.ID)
+	rr := httptest.NewRecorder()
+	srv.handleDecideApproval(rr, httpReq)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var got map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode decide response: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected exactly 2 top-level fields {status,request}, got %#v", got)
+	}
+	if got["status"] != string(approval.DecisionDenied) {
+		t.Fatalf("expected denied status, got %#v", got)
+	}
+
+	request, ok := got["request"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected object request payload, got %#v", got["request"])
+	}
+	if request["id"] != req.ID {
+		t.Fatalf("expected request id %q, got %#v", req.ID, request["id"])
+	}
+	if request["decision"] != string(approval.DecisionDenied) {
+		t.Fatalf("expected request decision denied, got %#v", request["decision"])
+	}
+	if _, ok := request["command"].(map[string]any); !ok {
+		t.Fatalf("expected request.command object, got %#v", request["command"])
+	}
+}
+
+func TestHandleDecideApproval_SuccessContractParityApproved(t *testing.T) {
+	srv := newTestServer(t)
+	srv.fleetMgr.Register("probe-decide-approved-parity", "host", "linux", "amd64")
+
+	conn, cleanup := connectProbeWS(t, srv, "probe-decide-approved-parity")
+	defer cleanup()
+
+	probeErr := make(chan error, 1)
+	go func() {
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			probeErr <- fmt.Errorf("read command envelope: %w", err)
+			return
+		}
+
+		var env protocol.Envelope
+		if err := json.Unmarshal(msg, &env); err != nil {
+			probeErr <- fmt.Errorf("decode command envelope: %w", err)
+			return
+		}
+		if env.Type != protocol.MsgCommand {
+			probeErr <- fmt.Errorf("expected command message, got %s", env.Type)
+			return
+		}
+
+		probeErr <- nil
+	}()
+
+	req, err := srv.approvalQueue.Submit(
+		"probe-decide-approved-parity",
+		&protocol.CommandPayload{RequestID: "req-decide-approved-parity", Command: "systemctl restart nginx"},
+		"manual",
+		"high",
+		"api",
+	)
+	if err != nil {
+		t.Fatalf("submit approval: %v", err)
+	}
+
+	httpReq := httptest.NewRequest(http.MethodPost, "/api/v1/approvals/"+req.ID+"/decide", strings.NewReader(`{"decision":"approved","decided_by":"operator"}`))
+	httpReq.SetPathValue("id", req.ID)
+	rr := httptest.NewRecorder()
+	srv.handleDecideApproval(rr, httpReq)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var got map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode decide response: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected exactly 2 top-level fields {status,request}, got %#v", got)
+	}
+	if got["status"] != string(approval.DecisionApproved) {
+		t.Fatalf("expected approved status, got %#v", got)
+	}
+
+	request, ok := got["request"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected object request payload, got %#v", got["request"])
+	}
+	if request["id"] != req.ID {
+		t.Fatalf("expected request id %q, got %#v", req.ID, request["id"])
+	}
+	if request["decision"] != string(approval.DecisionApproved) {
+		t.Fatalf("expected request decision approved, got %#v", request["decision"])
+	}
+	if _, ok := request["command"].(map[string]any); !ok {
+		t.Fatalf("expected request.command object, got %#v", request["command"])
+	}
+
+	select {
+	case err := <-probeErr:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for approved dispatch command")
+	}
+}
+
 func TestHandleDecideApproval_InvalidDecisionErrorMapping(t *testing.T) {
 	srv := newTestServer(t)
 
