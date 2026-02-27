@@ -22,6 +22,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
 	"github.com/marcus-qen/legator/internal/controlplane/chat"
+	"github.com/marcus-qen/legator/internal/controlplane/cloudconnectors"
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
 	"github.com/marcus-qen/legator/internal/controlplane/config"
 	"github.com/marcus-qen/legator/internal/controlplane/events"
@@ -99,6 +100,9 @@ type Server struct {
 	modelDockStore    *modeldock.Store
 	modelDockHandlers *modeldock.Handler
 
+	cloudConnectorStore    *cloudconnectors.Store
+	cloudConnectorHandlers *cloudconnectors.Handler
+
 	// Templates
 	pages *pageTemplates
 
@@ -154,6 +158,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initChat()
 	s.initPolicy()
 	s.initModelDock()
+	s.initCloudConnectors()
 	s.initLLM()
 	s.initHub()
 	s.wireChatLLM()
@@ -260,6 +265,9 @@ func (s *Server) Close() {
 	}
 	if s.modelDockStore != nil {
 		s.modelDockStore.Close()
+	}
+	if s.cloudConnectorStore != nil {
+		s.cloudConnectorStore.Close()
 	}
 	if s.userStore != nil {
 		s.userStore.Close()
@@ -414,6 +422,26 @@ func (s *Server) initModelDock() {
 		s.logger.Warn("failed to sync model provider from store", zap.Error(err))
 	}
 	s.logger.Info("model dock store opened", zap.String("path", modelDockDBPath))
+}
+
+func (s *Server) initCloudConnectors() {
+	cloudDBPath := filepath.Join(s.cfg.DataDir, "cloud.db")
+	if err := os.MkdirAll(s.cfg.DataDir, 0750); err != nil {
+		s.logger.Warn("cannot create data dir, cloud connectors disabled",
+			zap.String("dir", s.cfg.DataDir), zap.Error(err))
+		return
+	}
+
+	store, err := cloudconnectors.NewStore(cloudDBPath)
+	if err != nil {
+		s.logger.Warn("cannot open cloud connectors database, cloud connectors disabled",
+			zap.String("path", cloudDBPath), zap.Error(err))
+		return
+	}
+
+	s.cloudConnectorStore = store
+	s.cloudConnectorHandlers = cloudconnectors.NewHandler(store, cloudconnectors.NewCLIAdapter())
+	s.logger.Info("cloud connector store opened", zap.String("path", cloudDBPath))
 }
 
 func (s *Server) initLLM() {
@@ -695,7 +723,7 @@ func (s *Server) loadTemplates() {
 	tmplDir := filepath.Join("web", "templates")
 	pt := &pageTemplates{templates: make(map[string]pageTemplate)}
 
-	pages := []string{"fleet", "probe-detail", "chat", "fleet-chat", "approvals", "audit", "alerts", "model-dock"}
+	pages := []string{"fleet", "probe-detail", "chat", "fleet-chat", "approvals", "audit", "alerts", "model-dock", "cloud-connectors"}
 	for _, page := range pages {
 		t, err := template.New("").Funcs(templateFuncs()).ParseFiles(
 			filepath.Join(tmplDir, "_base.html"),
