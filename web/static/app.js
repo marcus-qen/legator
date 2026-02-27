@@ -96,6 +96,51 @@
     };
   }
 
+  function initResizable() {
+    document.querySelectorAll('.drag-handle').forEach((handle) => {
+      let startX;
+      let leftEl;
+      let rightEl;
+      let leftStart;
+      let rightStart;
+
+      handle.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        handle.classList.add('active');
+        startX = event.clientX;
+        leftEl = handle.previousElementSibling;
+        rightEl = handle.nextElementSibling;
+
+        if (!leftEl || !rightEl) {
+          handle.classList.remove('active');
+          return;
+        }
+
+        leftStart = leftEl.getBoundingClientRect().width;
+        rightStart = rightEl.getBoundingClientRect().width;
+
+        const onMove = (moveEvent) => {
+          const dx = moveEvent.clientX - startX;
+          const leftMin = parseInt(getComputedStyle(leftEl).minWidth, 10) || 180;
+          const rightMin = parseInt(getComputedStyle(rightEl).minWidth, 10) || 200;
+          const newLeft = Math.max(leftMin, leftStart + dx);
+          const newRight = Math.max(rightMin, rightStart - dx);
+          leftEl.style.flexBasis = newLeft + 'px';
+          rightEl.style.flexBasis = newRight + 'px';
+        };
+
+        const onUp = () => {
+          handle.classList.remove('active');
+          document.removeEventListener('pointermove', onMove);
+          document.removeEventListener('pointerup', onUp);
+        };
+
+        document.addEventListener('pointermove', onMove);
+        document.addEventListener('pointerup', onUp);
+      });
+    });
+  }
+
   function showToast(message, kind = 'info', timeoutMs = 3000) {
     const toast = document.getElementById('toast');
     if (!toast) return;
@@ -124,5 +169,6 @@
     showToast,
     updateBadges,
     connectSSE,
+    initResizable,
   };
 })();
