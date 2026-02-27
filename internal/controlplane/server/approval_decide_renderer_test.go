@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -110,4 +111,69 @@ func TestOrchestrateDecideApprovalHTTP_RegistryParityWithDirectTarget(t *testing
 	if viaRegistry.Success.Request.ID != direct.Success.Request.ID || viaRegistry.Success.Request.Decision != direct.Success.Request.Decision {
 		t.Fatalf("expected request id/decision parity, registry=%+v direct=%+v", viaRegistry.Success.Request, direct.Success.Request)
 	}
+}
+
+func TestRenderDecideApprovalHTTP_DispatchAdapterParityWithLegacyRenderer(t *testing.T) {
+	cases := []struct {
+		name       string
+		projection *coreapprovalpolicy.DecideApprovalProjection
+	}{
+		{
+			name: "success projection",
+			projection: coreapprovalpolicy.ProjectDecideApprovalTransport(coreapprovalpolicy.EncodeDecideApprovalTransport(
+				&coreapprovalpolicy.ApprovalDecisionResult{Request: &approval.Request{ID: "req-http-legacy", Decision: approval.DecisionDenied}},
+				nil,
+			)),
+		},
+		{
+			name:       "dispatch failure projection",
+			projection: coreapprovalpolicy.ProjectDecideApprovalTransport(coreapprovalpolicy.EncodeDecideApprovalTransport(nil, &coreapprovalpolicy.ApprovedDispatchError{Err: errors.New("probe probe-http-legacy not connected")})),
+		},
+		{
+			name:       "nil projection",
+			projection: nil,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			legacyRR := httptest.NewRecorder()
+			legacyRenderDecideApprovalHTTP(legacyRR, tc.projection)
+
+			adapterRR := httptest.NewRecorder()
+			renderDecideApprovalHTTP(adapterRR, tc.projection)
+
+			if adapterRR.Code != legacyRR.Code {
+				t.Fatalf("expected status parity, adapter=%d legacy=%d", adapterRR.Code, legacyRR.Code)
+			}
+			if got, want := adapterRR.Header().Get("Content-Type"), legacyRR.Header().Get("Content-Type"); got != want {
+				t.Fatalf("expected content-type parity, adapter=%q legacy=%q", got, want)
+			}
+
+			var adapterBody any
+			if err := json.NewDecoder(adapterRR.Body).Decode(&adapterBody); err != nil {
+				t.Fatalf("decode adapter body: %v", err)
+			}
+			var legacyBody any
+			if err := json.NewDecoder(legacyRR.Body).Decode(&legacyBody); err != nil {
+				t.Fatalf("decode legacy body: %v", err)
+			}
+			if !reflect.DeepEqual(adapterBody, legacyBody) {
+				t.Fatalf("expected body parity, adapter=%#v legacy=%#v", adapterBody, legacyBody)
+			}
+		})
+	}
+}
+
+func legacyRenderDecideApprovalHTTP(w http.ResponseWriter, projection *coreapprovalpolicy.DecideApprovalProjection) {
+	if projection == nil {
+		projection = coreapprovalpolicy.ProjectDecideApprovalTransport(nil)
+	}
+	if httpErr, ok := projection.HTTPError(); ok {
+		writeJSONError(w, httpErr.Status, httpErr.Code, httpErr.Message)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(projection.Success)
 }

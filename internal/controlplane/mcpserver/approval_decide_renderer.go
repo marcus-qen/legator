@@ -14,14 +14,22 @@ type approvalDecideResponseRenderer interface {
 type approvalDecideMCPRenderer struct{}
 
 func (approvalDecideMCPRenderer) RenderMCP(projection *coreapprovalpolicy.DecideApprovalProjection) (*mcp.CallToolResult, any, error) {
-	if projection == nil {
-		projection = coreapprovalpolicy.ProjectDecideApprovalTransport(nil)
-	}
-	if err := projection.MCPError(); err != nil {
-		return nil, nil, err
-	}
+	var (
+		result *mcp.CallToolResult
+		meta   any
+		err    error
+	)
 
-	return jsonToolResult(projection.Success)
+	coreapprovalpolicy.DispatchDecideApprovalResponseForSurface(projection, coreapprovalpolicy.DecideApprovalRenderSurfaceMCP, coreapprovalpolicy.DecideApprovalResponseDispatchWriter{
+		WriteMCPError: func(dispatchErr error) {
+			err = dispatchErr
+		},
+		WriteSuccess: func(success *coreapprovalpolicy.DecideApprovalSuccess) {
+			result, meta, err = jsonToolResult(success)
+		},
+	})
+
+	return result, meta, err
 }
 
 // orchestrateDecideApprovalMCP is the MCP-side seam for shared decide flow
