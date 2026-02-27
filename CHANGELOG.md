@@ -49,6 +49,9 @@
 - **Kernel split S26 (typed unsupported-surface scopes + parity locks)**
   - Added typed unsupported-surface scope constants in `transportwriter` and routed approval + command unsupported-surface message generation through typed scopes (raw scope literals removed from core call sites).
   - Added strict parity coverage to lock exact scope literal values, rendered unsupported-surface message strings, and HTTP-first/MCP-fallback behavior semantics.
+- **Kernel split S27 (domain scope wrappers for unsupported-surface messages)**
+  - Added tiny approval/command domain wrapper helpers for unsupported-surface scope constants so core call sites no longer reference `transportwriter` scope constants directly.
+  - Preserved exact unsupported-surface message text and HTTP-first/MCP-fallback behavior, with focused parity tests for approval + command wrappers.
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
 - **Kernel split S13 (approval decide render-target registry boundary)**
