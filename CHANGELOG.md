@@ -17,6 +17,9 @@
 - **Kernel split S7 (approval decide transport adapter contract)**
   - Added a unified decide transport adapter contract in internal/controlplane/core/approvalpolicy (single success/error envelope, HTTP/MCP-ready) and refactored handleDecideApproval to consume adapter output with near-zero branching.
   - Added transport-contract parity coverage across decode, success, invalid-decision, dispatch-failure, and hook-failure decide scenarios.
+- **Kernel split S8 (approval decide renderer/projection split)**
+  - Extracted approval decide response projection + HTTP renderer abstraction so handleDecideApproval only orchestrates decode/core decision while transport writing is contract-driven.
+  - Added renderer parity tests in approvalpolicy/server to lock unchanged decide status codes, error wording, and {status,request} response fields for future MCP projection reuse.
 
 ### Added
 - Parity tests for the extracted core service and server policy-apply paths (not found + offline apply-local behavior).

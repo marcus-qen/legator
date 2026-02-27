@@ -871,13 +871,7 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 			return s.dispatchCore.Dispatch(probeID, cmd)
 		})
 	})
-	if httpErr, ok := contract.HTTPError(); ok {
-		writeJSONError(w, httpErr.Status, httpErr.Code, httpErr.Message)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(contract.Success)
+	renderDecideApprovalHTTP(w, contract)
 }
 
 // ── Audit ────────────────────────────────────────────────────
