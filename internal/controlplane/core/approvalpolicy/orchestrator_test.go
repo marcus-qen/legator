@@ -131,8 +131,9 @@ func TestResolveDecideApprovalRenderTarget_RegistryParity(t *testing.T) {
 
 func TestOrchestrateDecideApprovalForSurface_ParityWithDirectTarget(t *testing.T) {
 	body := `{"decision":"denied","decided_by":"operator"}`
+	request := &approval.Request{ID: "req-registry-parity", Decision: approval.DecisionDenied}
 	decide := func(*DecideApprovalRequest) (*ApprovalDecisionResult, error) {
-		return &ApprovalDecisionResult{Request: &approval.Request{ID: "req-registry-parity", Decision: approval.DecisionDenied}}, nil
+		return &ApprovalDecisionResult{Request: request}, nil
 	}
 
 	tests := []struct {
@@ -164,14 +165,8 @@ func TestOrchestrateDecideApprovalForSurface_ParityWithDirectTarget(t *testing.T
 			if viaRegistry.Success == nil || direct.Success == nil {
 				t.Fatalf("expected success projections, registry=%+v direct=%+v", viaRegistry, direct)
 			}
-			if viaRegistry.Success.Status != direct.Success.Status {
-				t.Fatalf("expected status parity, registry=%q direct=%q", viaRegistry.Success.Status, direct.Success.Status)
-			}
-			if viaRegistry.Success.Request == nil || direct.Success.Request == nil {
-				t.Fatalf("expected request parity, registry=%+v direct=%+v", viaRegistry.Success, direct.Success)
-			}
-			if viaRegistry.Success.Request.ID != direct.Success.Request.ID || viaRegistry.Success.Request.Decision != direct.Success.Request.Decision {
-				t.Fatalf("expected request id/decision parity, registry=%+v direct=%+v", viaRegistry.Success.Request, direct.Success.Request)
+			if *viaRegistry.Success != *direct.Success {
+				t.Fatalf("expected identical success projection, registry=%+v direct=%+v", viaRegistry.Success, direct.Success)
 			}
 		})
 	}

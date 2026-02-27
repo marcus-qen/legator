@@ -35,6 +35,9 @@
 - **Kernel split S14 (surface-neutral decide response dispatch adapter)**
   - Added a shared decide response dispatch adapter in internal/controlplane/core/approvalpolicy so HTTP/MCP shells now provide only transport writers while centralized surface policy selects success/error emission behavior.
   - Added dispatch-adapter parity tests to lock unchanged HTTP/MCP decide outputs, status/error mapping, and error wording.
+- **Kernel split S15 (projection dispatch policy registry generalization)**
+  - Generalized projection dispatch policy registry/adapter selection into reusable `internal/controlplane/core/projectiondispatch` utilities and applied them to approval-decide render-target + dispatch policy selection with parity tests.
+  - Added non-invasive command-dispatch/read surface registry hooks for upcoming extractions without changing current command behavior.
 
 ### Added
 - Parity tests for the extracted core service and server policy-apply paths (not found + offline apply-local behavior).

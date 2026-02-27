@@ -864,12 +864,13 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(w, r, auth.PermApprovalWrite) {
 		return
 	}
-	invokeInput := coreapprovalpolicy.AssembleDecideApprovalInvokeHTTP(r.PathValue("id"), r.Body)
-	projection := coreapprovalpolicy.InvokeDecideApproval(invokeInput, func(id string, body *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error) {
+	id := r.PathValue("id")
+
+	projection := orchestrateDecideApprovalHTTP(r.Body, func(body *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error) {
 		return s.approvalCore.DecideAndDispatch(id, body.Decision, body.DecidedBy, func(probeID string, cmd protocol.CommandPayload) error {
 			return s.dispatchCore.Dispatch(probeID, cmd)
 		})
-	}, coreapprovalpolicy.DecideApprovalRenderSurfaceHTTP)
+	})
 	renderDecideApprovalHTTP(w, projection)
 }
 
