@@ -45,6 +45,9 @@ type Config struct {
 
 	// External URL for install commands (e.g. https://legator.example.com)
 	ExternalURL string `json:"external_url,omitempty"`
+
+	// MCP endpoint enablement
+	MCPEnabled bool `json:"mcp_enabled"`
 }
 
 // LLMConfig configures the LLM provider.
@@ -67,6 +70,7 @@ func Default() Config {
 		DataDir:    "/var/lib/legator",
 		LogLevel:   "info",
 		OIDC:       oidc.DefaultConfig(),
+		MCPEnabled: true,
 		RateLimit: RateLimitConfig{
 			RequestsPerMinute: 120,
 		},
@@ -132,6 +136,9 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("LEGATOR_EXTERNAL_URL"); v != "" {
 		cfg.ExternalURL = v
+	}
+	if v := os.Getenv("LEGATOR_MCP_ENABLED"); v != "" {
+		cfg.MCPEnabled = v == "true" || v == "1"
 	}
 
 	cfg.OIDC = oidc.ApplyEnv(cfg.OIDC)

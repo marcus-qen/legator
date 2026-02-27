@@ -108,6 +108,11 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Events SSE stream
 	mux.HandleFunc("GET /api/v1/events", s.handleEventsSSE)
 
+	if s.mcpServer != nil {
+		mux.Handle("GET /mcp", s.mcpServer.Handler())
+		mux.Handle("POST /mcp", s.mcpServer.Handler())
+	}
+
 	// Commands
 	mux.HandleFunc("GET /api/v1/commands/pending", s.handlePendingCommands)
 	mux.HandleFunc("GET /api/v1/commands/{requestId}/stream", s.handleSSEStream)
