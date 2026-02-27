@@ -47,6 +47,9 @@
 - **Kernel split S18 (command invoke render-dispatch adapter)**
   - Added a shared command invoke render-dispatch adapter in `internal/controlplane/core/commanddispatch` so HTTP/MCP shells now provide transport writers only while core owns sequencing + fallback policy.
   - Refactored HTTP command dispatch and MCP run-command renderers to consume the adapter with strict parity tests preserving existing JSON/tool error semantics.
+- **Kernel split S19 (command transport response codecs)**
+  - Added shared core response codecs for command invoke HTTP JSON response/error payloads and MCP text/error payloads in `internal/controlplane/core/commanddispatch`.
+  - Refactored HTTP command dispatch and MCP run-command renderers into pure transport wiring over codec outputs, with strict legacy-vs-codec parity tests to preserve status, payload shape, and error wording semantics.
 
 ### Added
 - Parity tests for the extracted core service and server policy-apply paths (not found + offline apply-local behavior).

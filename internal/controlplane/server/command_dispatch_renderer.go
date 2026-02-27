@@ -5,26 +5,17 @@ import (
 	"net/http"
 
 	corecommanddispatch "github.com/marcus-qen/legator/internal/controlplane/core/commanddispatch"
-	"github.com/marcus-qen/legator/internal/protocol"
 )
 
 func renderDispatchCommandHTTP(w http.ResponseWriter, projection *corecommanddispatch.CommandInvokeProjection) {
-	corecommanddispatch.DispatchCommandInvokeProjection(projection, corecommanddispatch.CommandInvokeRenderDispatchWriter{
-		WriteHTTPError: func(httpErr *corecommanddispatch.HTTPErrorContract) {
-			if !httpErr.SuppressWrite {
-				writeJSONError(w, httpErr.Status, httpErr.Code, httpErr.Message)
-			}
-		},
-		WriteHTTPDispatched: func(requestID string) {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]string{
-				"status":     "dispatched",
-				"request_id": requestID,
-			})
-		},
-		WriteHTTPResult: func(result *protocol.CommandResultPayload) {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(result)
-		},
-	})
+	response := corecommanddispatch.EncodeCommandInvokeHTTPJSONResponse(projection)
+	if response.SuppressWrite || !response.HasBody {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if response.Status != 0 && response.Status != http.StatusOK {
+		w.WriteHeader(response.Status)
+	}
+	_ = json.NewEncoder(w).Encode(response.Body)
 }
