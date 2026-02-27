@@ -38,7 +38,7 @@ var defaultCommandReadPolicyRegistry = projectiondispatch.NewPolicyRegistry(map[
 func DispatchCommandErrorsForSurface(envelope *CommandResultEnvelope, surface ProjectionDispatchSurface, writer CommandProjectionDispatchWriter) bool {
 	resolved, ok := ResolveCommandDispatchProjectionSurface(surface)
 	if !ok {
-		dispatchUnsupportedCommandSurface(surface, writer)
+		dispatchUnsupportedCommandDispatchSurfaceFallback(surface, writer)
 		return true
 	}
 
@@ -58,7 +58,7 @@ func DispatchCommandErrorsForSurface(envelope *CommandResultEnvelope, surface Pr
 func DispatchCommandReadForSurface(result *protocol.CommandResultPayload, surface ProjectionDispatchSurface, writer CommandProjectionDispatchWriter) {
 	resolved, ok := ResolveCommandReadProjectionSurface(surface)
 	if !ok {
-		dispatchUnsupportedCommandSurface(surface, writer)
+		dispatchUnsupportedCommandDispatchSurfaceFallback(surface, writer)
 		return
 	}
 
@@ -116,24 +116,10 @@ func dispatchCommandReadMCP(result *protocol.CommandResultPayload, writer comman
 }
 
 func dispatchUnsupportedCommandSurfaceAdapter(surface ProjectionDispatchSurface, writer commandDispatchAdapterWriter) {
-	dispatchUnsupportedCommandSurface(surface, writer.writer)
+	dispatchUnsupportedCommandDispatchSurfaceFallback(surface, writer.writer)
 	if writer.handled != nil {
 		*writer.handled = true
 	}
-}
-
-func dispatchUnsupportedCommandSurface(surface ProjectionDispatchSurface, writer CommandProjectionDispatchWriter) {
-	envelope := unsupportedCommandDispatchResponseEnvelope(surface)
-	fallbackWriter := transportwriter.UnsupportedSurfaceFallbackWriter{WriteMCPError: writer.WriteMCPError}
-	if writer.WriteHTTPError != nil {
-		fallbackWriter.WriteHTTPError = func(err *transportwriter.HTTPError) {
-			if err == nil {
-				return
-			}
-			writer.WriteHTTPError(&HTTPErrorContract{Status: err.Status, Code: err.Code, Message: err.Message})
-		}
-	}
-	transportwriter.WriteUnsupportedSurfaceFallback(envelope, fallbackWriter)
 }
 
 func unsupportedCommandDispatchResponseEnvelope(surface ProjectionDispatchSurface) *transportwriter.ResponseEnvelope {

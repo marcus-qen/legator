@@ -55,6 +55,9 @@
 - **Kernel split S28 (domain envelope wrappers for unsupported-surface fallbacks)**
   - Added tiny approval/command domain wrapper helpers for unsupported-surface envelope construction and routed approval/command codecs + adapters through those wrappers instead of direct `transportwriter.UnsupportedSurfaceEnvelope(...)` calls.
   - Added strict parity coverage to lock exact unsupported-surface envelope semantics (`500 internal_error` + unchanged MCP error text) and HTTP-first/MCP-fallback behavior.
+- **Kernel split S29 (domain fallback dispatch wrappers)**
+  - Added tiny domain-level unsupported-surface fallback dispatch wrappers for approval + command flows and routed remaining adapter fallback wiring through these wrappers.
+  - Added strict fallback-dispatch parity tests to lock HTTP-first then MCP fallback precedence with unchanged `status/code/message` semantics.
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
 - **Kernel split S13 (approval decide render-target registry boundary)**

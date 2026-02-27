@@ -70,6 +70,37 @@ func TestUnsupportedCommandDispatchResponseEnvelope_FallbackParity(t *testing.T)
 	}
 }
 
+func TestDispatchUnsupportedCommandDispatchSurfaceFallback_ParityAndPrecedence(t *testing.T) {
+	const wantMessage = "unsupported command dispatch surface \"bogus\""
+	surface := ProjectionDispatchSurface("bogus")
+
+	httpCalled, mcpCalled := false, false
+	dispatchUnsupportedCommandDispatchSurfaceFallback(surface, CommandProjectionDispatchWriter{
+		WriteHTTPError: func(err *HTTPErrorContract) {
+			httpCalled = true
+			if err == nil || err.Status != http.StatusInternalServerError || err.Code != "internal_error" || err.Message != wantMessage {
+				t.Fatalf("unexpected unsupported-surface HTTP fallback: %+v", err)
+			}
+		},
+		WriteMCPError: func(err error) {
+			mcpCalled = err != nil
+		},
+	})
+	if !httpCalled || mcpCalled {
+		t.Fatalf("fallback precedence mismatch: http=%v mcp=%v", httpCalled, mcpCalled)
+	}
+
+	var got error
+	dispatchUnsupportedCommandDispatchSurfaceFallback(surface, CommandProjectionDispatchWriter{
+		WriteMCPError: func(err error) {
+			got = err
+		},
+	})
+	if got == nil || got.Error() != wantMessage {
+		t.Fatalf("unexpected unsupported-surface MCP fallback: %v", got)
+	}
+}
+
 func assertUnsupportedSurfaceEnvelopeParity(t *testing.T, got, want *transportwriter.ResponseEnvelope, wantMessage string) {
 	t.Helper()
 	if got == nil || want == nil {
