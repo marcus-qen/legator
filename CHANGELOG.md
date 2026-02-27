@@ -58,6 +58,9 @@
 - **Kernel split S29 (domain fallback dispatch wrappers)**
   - Added tiny domain-level unsupported-surface fallback dispatch wrappers for approval + command flows and routed remaining adapter fallback wiring through these wrappers.
   - Added strict fallback-dispatch parity tests to lock HTTP-first then MCP fallback precedence with unchanged `status/code/message` semantics.
+- **Kernel split S30 (shared HTTP-error contract adapter)**
+  - Added shared `transportwriter` helper(s) to convert `transportwriter.HTTPError` into domain `HTTPErrorContract` values and writer callbacks.
+  - Reused the shared adapter in approval + command wrappers, preserving exact `status/code/message` conversion and HTTP-first/MCP-fallback behavior with strict legacy-parity tests.
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
 - **Kernel split S13 (approval decide render-target registry boundary)**
