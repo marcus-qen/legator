@@ -569,6 +569,41 @@ else
   fail "Discovery scan endpoint returned $DISCOVERY_SCAN_CODE"
 fi
 
+# 43. Audit export JSONL
+echo ""
+echo "43. Audit export JSONL..."
+AUDIT_JSONL_HEADERS=$(mktemp)
+AUDIT_JSONL_BODY=$(mktemp)
+curl -s -D "$AUDIT_JSONL_HEADERS" -o "$AUDIT_JSONL_BODY" "$CP_URL/api/v1/audit/export"
+if grep -qi '^Content-Type: application/x-ndjson' "$AUDIT_JSONL_HEADERS" && [[ $(wc -c < "$AUDIT_JSONL_BODY") -gt 0 ]]; then
+  pass "Audit JSONL export returns NDJSON and non-empty body"
+else
+  fail "Audit JSONL export invalid (headers=$(tr '\n' ' ' < "$AUDIT_JSONL_HEADERS"), bytes=$(wc -c < "$AUDIT_JSONL_BODY"))"
+fi
+
+# 44. Audit export CSV
+echo ""
+echo "44. Audit export CSV..."
+AUDIT_CSV_HEADERS=$(mktemp)
+AUDIT_CSV_BODY=$(mktemp)
+curl -s -D "$AUDIT_CSV_HEADERS" -o "$AUDIT_CSV_BODY" "$CP_URL/api/v1/audit/export/csv"
+CSV_HEADER=$(head -n 1 "$AUDIT_CSV_BODY" | tr -d '\r')
+if grep -qi '^Content-Type: text/csv' "$AUDIT_CSV_HEADERS" && [[ "$CSV_HEADER" == "id,timestamp,type,probe_id,actor,summary" ]]; then
+  pass "Audit CSV export returns CSV with expected headers"
+else
+  fail "Audit CSV export invalid (content-type=$(grep -i '^Content-Type:' "$AUDIT_CSV_HEADERS" | head -n1), header=$CSV_HEADER)"
+fi
+
+# 45. Audit purge endpoint
+echo ""
+echo "45. Audit purge endpoint..."
+AUDIT_PURGE=$(curl -s -X DELETE "$CP_URL/api/v1/audit/purge?older_than=0s")
+if echo "$AUDIT_PURGE" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert "deleted" in d' 2>/dev/null; then
+  pass "Audit purge endpoint returns deleted count"
+else
+  fail "Audit purge response invalid: $AUDIT_PURGE"
+fi
+
 echo ""
 echo "=========================="
 echo "Results: $PASSED passed, $FAILED failed"

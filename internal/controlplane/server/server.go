@@ -215,6 +215,26 @@ func (s *Server) Run(ctx context.Context) error {
 	// Forward event bus events to webhooks
 	go s.webhookForwarder(ctx)
 
+	if s.auditStore != nil && strings.TrimSpace(s.cfg.AuditRetention) != "" {
+		retention, err := parseHumanDuration(s.cfg.AuditRetention)
+		if err != nil {
+			s.logger.Warn("invalid audit retention; auto-purge disabled",
+				zap.String("audit_retention", s.cfg.AuditRetention),
+				zap.Error(err),
+			)
+		} else if retention > 0 {
+			interval := 24 * time.Hour
+			if retention < interval {
+				interval = retention
+			}
+			go s.auditStore.PurgeLoop(ctx, retention, interval)
+			s.logger.Info("audit retention enabled",
+				zap.Duration("retention", retention),
+				zap.Duration("interval", interval),
+			)
+		}
+	}
+
 	s.logger.Info("starting control plane",
 		zap.String("addr", s.cfg.ListenAddr),
 		zap.String("version", Version),

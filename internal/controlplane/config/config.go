@@ -40,6 +40,9 @@ type Config struct {
 	// Log level (debug, info, warn, error)
 	LogLevel string `json:"log_level"`
 
+	// Audit retention window (e.g. "30d", "90d"). Empty disables auto-purge.
+	AuditRetention string `json:"audit_retention,omitempty"`
+
 	// External URL for install commands (e.g. https://legator.example.com)
 	ExternalURL string `json:"external_url,omitempty"`
 }
@@ -118,6 +121,9 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("LEGATOR_LOG_LEVEL"); v != "" {
 		cfg.LogLevel = v
+	}
+	if v := os.Getenv("LEGATOR_AUDIT_RETENTION"); v != "" {
+		cfg.AuditRetention = v
 	}
 	if v := os.Getenv("LEGATOR_RATE_LIMIT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {

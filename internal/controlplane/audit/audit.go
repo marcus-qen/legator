@@ -14,16 +14,16 @@ import (
 type EventType string
 
 const (
-	EventProbeRegistered EventType = "probe.registered"
-	EventProbeOffline    EventType = "probe.offline"
-	EventCommandSent     EventType = "command.sent"
-	EventCommandResult   EventType = "command.result"
-	EventPolicyChanged   EventType = "policy.changed"
-	EventApprovalRequest EventType = "approval.requested"
-	EventApprovalDecided EventType = "approval.decided"
-	EventTokenGenerated  EventType = "token.generated"
-	EventInventoryUpdate EventType = "inventory.updated"
-	EventProbeKeyRotated EventType = "probe.key_rotated"
+	EventProbeRegistered   EventType = "probe.registered"
+	EventProbeOffline      EventType = "probe.offline"
+	EventCommandSent       EventType = "command.sent"
+	EventCommandResult     EventType = "command.result"
+	EventPolicyChanged     EventType = "policy.changed"
+	EventApprovalRequest   EventType = "approval.requested"
+	EventApprovalDecided   EventType = "approval.decided"
+	EventTokenGenerated    EventType = "token.generated"
+	EventInventoryUpdate   EventType = "inventory.updated"
+	EventProbeKeyRotated   EventType = "probe.key_rotated"
 	EventProbeDeregistered EventType = "probe.deregistered"
 )
 
@@ -90,6 +90,8 @@ type Filter struct {
 	ProbeID string
 	Type    EventType
 	Since   time.Time
+	Until   time.Time
+	Cursor  string
 	Limit   int
 }
 
@@ -111,6 +113,9 @@ func (l *Log) Query(f Filter) []Event {
 			continue
 		}
 		if !f.Since.IsZero() && evt.Timestamp.Before(f.Since) {
+			continue
+		}
+		if !f.Until.IsZero() && evt.Timestamp.After(f.Until) {
 			continue
 		}
 

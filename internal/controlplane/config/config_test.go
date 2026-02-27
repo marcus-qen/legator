@@ -29,6 +29,7 @@ func TestLoadFromFile(t *testing.T) {
 		"listen_addr": ":9090",
 		"data_dir": "/tmp/test",
 		"auth_enabled": true,
+		"audit_retention": "90d",
 		"oidc": {
 			"enabled": true,
 			"provider_url": "https://id.example.com/realms/dev",
@@ -55,6 +56,9 @@ func TestLoadFromFile(t *testing.T) {
 	}
 	if !cfg.AuthEnabled {
 		t.Error("expected auth enabled")
+	}
+	if cfg.AuditRetention != "90d" {
+		t.Errorf("expected audit retention 90d, got %s", cfg.AuditRetention)
 	}
 	if cfg.LLM.Provider != "openai" {
 		t.Errorf("expected openai, got %s", cfg.LLM.Provider)
@@ -96,6 +100,7 @@ func TestEnvOverridesFile(t *testing.T) {
 func TestLoadFromEnvOnly(t *testing.T) {
 	t.Setenv("LEGATOR_DATA_DIR", "/tmp/env-test")
 	t.Setenv("LEGATOR_LOG_LEVEL", "debug")
+	t.Setenv("LEGATOR_AUDIT_RETENTION", "30d")
 
 	cfg := LoadFromEnv()
 	if cfg.DataDir != "/tmp/env-test" {
@@ -103,6 +108,9 @@ func TestLoadFromEnvOnly(t *testing.T) {
 	}
 	if cfg.LogLevel != "debug" {
 		t.Errorf("expected debug, got %s", cfg.LogLevel)
+	}
+	if cfg.AuditRetention != "30d" {
+		t.Errorf("expected audit retention 30d, got %s", cfg.AuditRetention)
 	}
 }
 

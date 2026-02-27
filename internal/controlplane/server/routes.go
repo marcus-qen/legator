@@ -101,6 +101,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Audit
 	mux.HandleFunc("GET /api/v1/audit", s.handleAuditLog)
+	mux.HandleFunc("GET /api/v1/audit/export", s.handleAuditExportJSONL)
+	mux.HandleFunc("GET /api/v1/audit/export/csv", s.handleAuditExportCSV)
+	mux.HandleFunc("DELETE /api/v1/audit/purge", s.handleAuditPurge)
 
 	// Events SSE stream
 	mux.HandleFunc("GET /api/v1/events", s.handleEventsSSE)
@@ -839,15 +842,175 @@ func (s *Server) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(w, r, auth.PermAuditRead) {
 		return
 	}
-	probeID := r.URL.Query().Get("probe_id")
-	limitStr := r.URL.Query().Get("limit")
-	limit := 50
-	if v, err := strconv.Atoi(limitStr); err == nil && v > 0 {
-		limit = v
+
+	filter, err := auditFilterFromRequest(r, false)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
 	}
-	events := s.queryAudit(audit.Filter{ProbeID: probeID, Limit: limit})
+
+	total := s.countAudit()
+	if filter.Cursor != "" && s.auditStore != nil {
+		pageFilter := filter
+		pageFilter.Limit = filter.Limit + 1 // sentinel row for has_more
+		events, err := s.auditStore.QueryPersisted(pageFilter)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+
+		hasMore := len(events) > filter.Limit
+		if hasMore {
+			events = events[:filter.Limit]
+		}
+
+		nextCursor := ""
+		if hasMore && len(events) > 0 {
+			nextCursor = events[len(events)-1].ID
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"events":      events,
+			"total":       total,
+			"next_cursor": nextCursor,
+			"has_more":    hasMore,
+		})
+		return
+	}
+
+	events := s.queryAudit(filter)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"events": events, "total": s.countAudit()})
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"events":      events,
+		"total":       total,
+		"next_cursor": "",
+		"has_more":    false,
+	})
+}
+
+func (s *Server) handleAuditExportJSONL(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermAuditRead) {
+		return
+	}
+	if s.auditStore == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "audit export requires persistent audit store")
+		return
+	}
+
+	filter, err := auditFilterFromRequest(r, true)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	filename := fmt.Sprintf("legator-audit-%s.jsonl", time.Now().UTC().Format("20060102"))
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+
+	if err := s.auditStore.StreamJSONL(r.Context(), w, filter); err != nil {
+		s.logger.Warn("stream audit jsonl export failed", zap.Error(err))
+	}
+}
+
+func (s *Server) handleAuditExportCSV(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermAuditRead) {
+		return
+	}
+	if s.auditStore == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "audit export requires persistent audit store")
+		return
+	}
+
+	filter, err := auditFilterFromRequest(r, true)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	filename := fmt.Sprintf("legator-audit-%s.csv", time.Now().UTC().Format("20060102"))
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+
+	if err := s.auditStore.StreamCSV(r.Context(), w, filter); err != nil {
+		s.logger.Warn("stream audit csv export failed", zap.Error(err))
+	}
+}
+
+func (s *Server) handleAuditPurge(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermAdmin) {
+		return
+	}
+	if s.auditStore == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "audit purge requires persistent audit store")
+		return
+	}
+
+	raw := strings.TrimSpace(r.URL.Query().Get("older_than"))
+	if raw == "" {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "older_than is required")
+		return
+	}
+
+	olderThan, err := parseHumanDuration(raw)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid older_than duration")
+		return
+	}
+
+	deleted, err := s.auditStore.Purge(olderThan)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"deleted": deleted})
+}
+
+func auditFilterFromRequest(r *http.Request, allowUntil bool) (audit.Filter, error) {
+	filter := audit.Filter{ProbeID: strings.TrimSpace(r.URL.Query().Get("probe_id")), Limit: 50}
+
+	if rawType := strings.TrimSpace(r.URL.Query().Get("type")); rawType != "" {
+		filter.Type = audit.EventType(rawType)
+	}
+	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+		limit, err := strconv.Atoi(rawLimit)
+		if err != nil || limit <= 0 {
+			return filter, fmt.Errorf("invalid limit")
+		}
+		filter.Limit = limit
+	}
+	if rawSince := strings.TrimSpace(r.URL.Query().Get("since")); rawSince != "" {
+		since, err := parseRFC3339(rawSince)
+		if err != nil {
+			return filter, fmt.Errorf("invalid since timestamp")
+		}
+		filter.Since = since
+	}
+	if allowUntil {
+		if rawUntil := strings.TrimSpace(r.URL.Query().Get("until")); rawUntil != "" {
+			until, err := parseRFC3339(rawUntil)
+			if err != nil {
+				return filter, fmt.Errorf("invalid until timestamp")
+			}
+			filter.Until = until
+		}
+	}
+	filter.Cursor = strings.TrimSpace(r.URL.Query().Get("cursor"))
+
+	return filter, nil
+}
+
+func parseRFC3339(raw string) (time.Time, error) {
+	if ts, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return ts.UTC(), nil
+	}
+	ts, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return ts.UTC(), nil
 }
 
 // ── Commands ─────────────────────────────────────────────────
