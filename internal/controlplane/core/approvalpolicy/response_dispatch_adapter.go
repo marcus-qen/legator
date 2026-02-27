@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
+	"github.com/marcus-qen/legator/internal/controlplane/core/projectiondispatch"
 )
 
 // DecideApprovalResponseDispatchWriter provides transport writers used by
@@ -14,37 +16,23 @@ type DecideApprovalResponseDispatchWriter struct {
 	WriteMCPError  func(error)
 }
 
-type decideApprovalResponseDispatchPolicy interface {
-	Dispatch(projection *DecideApprovalProjection, writer DecideApprovalResponseDispatchWriter)
-}
+type decideApprovalResponseDispatchPolicy = projectiondispatch.Policy[*DecideApprovalProjection, DecideApprovalResponseDispatchWriter]
 
-type decideApprovalResponseDispatchPolicyFunc func(projection *DecideApprovalProjection, writer DecideApprovalResponseDispatchWriter)
-
-func (f decideApprovalResponseDispatchPolicyFunc) Dispatch(projection *DecideApprovalProjection, writer DecideApprovalResponseDispatchWriter) {
-	f(projection, writer)
-}
-
-type decideApprovalResponseDispatchPolicyMap map[DecideApprovalRenderSurface]decideApprovalResponseDispatchPolicy
-
-func (m decideApprovalResponseDispatchPolicyMap) Resolve(surface DecideApprovalRenderSurface) (decideApprovalResponseDispatchPolicy, bool) {
-	policy, ok := m[surface]
-	return policy, ok
-}
-
-var defaultDecideApprovalResponseDispatchPolicyRegistry = decideApprovalResponseDispatchPolicyMap{
-	DecideApprovalRenderSurfaceHTTP: decideApprovalResponseDispatchPolicyFunc(dispatchDecideApprovalHTTP),
-	DecideApprovalRenderSurfaceMCP:  decideApprovalResponseDispatchPolicyFunc(dispatchDecideApprovalMCP),
-}
+var defaultDecideApprovalResponseDispatchPolicyRegistry = projectiondispatch.NewPolicyRegistry(map[DecideApprovalRenderSurface]decideApprovalResponseDispatchPolicy{
+	DecideApprovalRenderSurfaceHTTP: projectiondispatch.PolicyFunc[*DecideApprovalProjection, DecideApprovalResponseDispatchWriter](dispatchDecideApprovalHTTP),
+	DecideApprovalRenderSurfaceMCP:  projectiondispatch.PolicyFunc[*DecideApprovalProjection, DecideApprovalResponseDispatchWriter](dispatchDecideApprovalMCP),
+})
 
 // DispatchDecideApprovalResponseForSurface dispatches the shared decide
 // projection to transport writers using centrally-selected surface policy.
 func DispatchDecideApprovalResponseForSurface(projection *DecideApprovalProjection, surface DecideApprovalRenderSurface, writer DecideApprovalResponseDispatchWriter) {
-	policy, ok := defaultDecideApprovalResponseDispatchPolicyRegistry.Resolve(surface)
-	if !ok {
-		dispatchDecideApprovalUnsupportedSurface(surface, writer)
-		return
-	}
-	policy.Dispatch(normalizeDecideApprovalProjection(projection), writer)
+	projectiondispatch.DispatchForSurface(
+		defaultDecideApprovalResponseDispatchPolicyRegistry,
+		surface,
+		normalizeDecideApprovalProjection(projection),
+		writer,
+		dispatchDecideApprovalUnsupportedSurface,
+	)
 }
 
 func dispatchDecideApprovalHTTP(projection *DecideApprovalProjection, writer DecideApprovalResponseDispatchWriter) {

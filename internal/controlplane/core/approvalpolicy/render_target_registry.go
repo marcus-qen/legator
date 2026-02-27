@@ -1,6 +1,10 @@
 package approvalpolicy
 
-import "io"
+import (
+	"io"
+
+	"github.com/marcus-qen/legator/internal/controlplane/core/projectiondispatch"
+)
 
 // DecideApprovalRenderSurface identifies a transport shell that consumes decide
 // projections and is mapped to a render target via the shared registry.
@@ -11,21 +15,10 @@ const (
 	DecideApprovalRenderSurfaceMCP  DecideApprovalRenderSurface = "mcp"
 )
 
-type decideApprovalRenderTargetRegistry interface {
-	Resolve(surface DecideApprovalRenderSurface) (DecideApprovalRenderTarget, bool)
-}
-
-type decideApprovalRenderTargetMap map[DecideApprovalRenderSurface]DecideApprovalRenderTarget
-
-func (m decideApprovalRenderTargetMap) Resolve(surface DecideApprovalRenderSurface) (DecideApprovalRenderTarget, bool) {
-	target, ok := m[surface]
-	return target, ok
-}
-
-var defaultDecideApprovalRenderTargetRegistry decideApprovalRenderTargetRegistry = decideApprovalRenderTargetMap{
+var defaultDecideApprovalRenderTargetRegistry = projectiondispatch.NewPolicyRegistry(map[DecideApprovalRenderSurface]DecideApprovalRenderTarget{
 	DecideApprovalRenderSurfaceHTTP: DecideApprovalRenderTargetHTTP,
 	DecideApprovalRenderSurfaceMCP:  DecideApprovalRenderTargetMCP,
-}
+})
 
 // ResolveDecideApprovalRenderTarget resolves the projection render target for a
 // transport shell using the shared render-target registry.
