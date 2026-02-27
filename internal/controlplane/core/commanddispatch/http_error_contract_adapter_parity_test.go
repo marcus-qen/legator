@@ -42,6 +42,43 @@ func TestAdaptCommandHTTPErrorWriter_ParityWithLegacyInlineConversion(t *testing
 	}
 }
 
+func TestAdaptCommandMCPSuccessPayloadWriter_ParityWithLegacyInlineConversion(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload any
+	}{
+		{name: "typed success payload", payload: "ok"},
+		{name: "typed empty success payload", payload: ""},
+		{name: "untyped nil success payload", payload: nil},
+		{name: "wrong payload type", payload: 42},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotNew string
+			adaptedNew := transportwriter.AdaptSuccessPayloadWriter(func(text string) {
+				gotNew = text
+			}, nil)
+
+			var gotLegacy string
+			adaptedLegacy := legacyCommandMCPSuccessPayloadWriter(func(text string) {
+				gotLegacy = text
+			})
+
+			adaptedNew(tt.payload)
+			adaptedLegacy(tt.payload)
+
+			if gotNew != gotLegacy {
+				t.Fatalf("mcp success conversion parity mismatch: new=%q legacy=%q", gotNew, gotLegacy)
+			}
+		})
+	}
+
+	if got := transportwriter.AdaptSuccessPayloadWriter[string](nil, nil); got != nil {
+		t.Fatalf("expected nil success adapter for nil callback, got type %T", got)
+	}
+}
+
 func TestDispatchUnsupportedCommandDispatchSurfaceFallback_EndToEndParity(t *testing.T) {
 	surface := ProjectionDispatchSurface("bogus")
 
@@ -105,6 +142,16 @@ func legacyCommandHTTPErrorWriter(write func(*HTTPErrorContract)) func(*transpor
 			return
 		}
 		write(&HTTPErrorContract{Status: err.Status, Code: err.Code, Message: err.Message})
+	}
+}
+
+func legacyCommandMCPSuccessPayloadWriter(write func(string)) func(any) {
+	if write == nil {
+		return nil
+	}
+	return func(payload any) {
+		text, _ := payload.(string)
+		write(text)
 	}
 }
 

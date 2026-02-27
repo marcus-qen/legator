@@ -22,22 +22,12 @@ func DispatchDecideApprovalResponseForSurface(projection *DecideApprovalProjecti
 		return
 	}
 
+	successWriter := transportwriter.AdaptSuccessPayloadWriter(writer.WriteSuccess, normalizeDecideApprovalSuccess)
+
 	transportwriter.WriteFromBuilder(transportSurface, builder, transportwriter.WriterKernel{
-		WriteHTTPError: adaptApprovalHTTPErrorWriter(writer.WriteHTTPError),
-		WriteMCPError:  writer.WriteMCPError,
-		WriteHTTPSuccess: func(payload any) {
-			if writer.WriteSuccess == nil {
-				return
-			}
-			success, _ := payload.(*DecideApprovalSuccess)
-			writer.WriteSuccess(normalizeDecideApprovalSuccess(success))
-		},
-		WriteMCPSuccess: func(payload any) {
-			if writer.WriteSuccess == nil {
-				return
-			}
-			success, _ := payload.(*DecideApprovalSuccess)
-			writer.WriteSuccess(normalizeDecideApprovalSuccess(success))
-		},
+		WriteHTTPError:   adaptApprovalHTTPErrorWriter(writer.WriteHTTPError),
+		WriteMCPError:    writer.WriteMCPError,
+		WriteHTTPSuccess: successWriter,
+		WriteMCPSuccess:  successWriter,
 	})
 }
