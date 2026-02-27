@@ -31,7 +31,7 @@ func (b CommandInvokeResponseEnvelopeBuilder) BuildResponseEnvelope(surface tran
 // EncodeCommandInvokeResponseEnvelope normalizes command invoke projections
 // into a writer-kernel response envelope for a concrete transport surface.
 func EncodeCommandInvokeResponseEnvelope(projection *CommandInvokeProjection, surface ProjectionDispatchSurface) *transportwriter.ResponseEnvelope {
-	transportSurface, ok := transportWriterSurfaceForCommandInvoke(surface)
+	transportSurface, ok := ResolveCommandInvokeTransportSurface(surface)
 	if !ok {
 		return unsupportedCommandInvokeResponseEnvelope(string(surface))
 	}
@@ -89,12 +89,4 @@ func unsupportedCommandInvokeResponseEnvelope(surface string) *transportwriter.R
 		},
 		MCPError: errors.New(message),
 	}
-}
-
-func transportWriterSurfaceForCommandInvoke(surface ProjectionDispatchSurface) (transportwriter.Surface, bool) {
-	resolvedSurface, ok := ResolveCommandInvokeProjectionDispatchSurface(surface)
-	if !ok {
-		return "", false
-	}
-	return transportwriter.Surface(resolvedSurface), true
 }

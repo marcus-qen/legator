@@ -43,7 +43,7 @@ func (b DecideApprovalResponseEnvelopeBuilder) BuildResponseEnvelope(surface tra
 // EncodeDecideApprovalResponseEnvelope normalizes approval-decide projections
 // for HTTP/MCP writer-kernel transport rendering.
 func EncodeDecideApprovalResponseEnvelope(projection *DecideApprovalProjection, surface DecideApprovalRenderSurface) *transportwriter.ResponseEnvelope {
-	transportSurface, ok := transportWriterSurfaceForDecideApproval(surface)
+	transportSurface, ok := ResolveDecideApprovalTransportSurface(surface)
 	if !ok {
 		return unsupportedDecideApprovalResponseEnvelope(string(surface))
 	}

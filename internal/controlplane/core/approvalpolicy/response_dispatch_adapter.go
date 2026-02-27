@@ -16,7 +16,7 @@ type DecideApprovalResponseDispatchWriter struct {
 // projection to transport writers using centralized surface normalization.
 func DispatchDecideApprovalResponseForSurface(projection *DecideApprovalProjection, surface DecideApprovalRenderSurface, writer DecideApprovalResponseDispatchWriter) {
 	builder := DecideApprovalResponseEnvelopeBuilder{Projection: projection}
-	transportSurface, ok := transportWriterSurfaceForDecideApproval(surface)
+	transportSurface, ok := ResolveDecideApprovalTransportSurface(surface)
 	if !ok {
 		dispatchDecideApprovalUnsupportedEnvelope(unsupportedDecideApprovalResponseEnvelope(string(surface)), writer)
 		return
@@ -55,12 +55,4 @@ func dispatchDecideApprovalUnsupportedEnvelope(envelope *transportwriter.Respons
 	if writer.WriteMCPError != nil && envelope != nil && envelope.MCPError != nil {
 		writer.WriteMCPError(envelope.MCPError)
 	}
-}
-
-func transportWriterSurfaceForDecideApproval(surface DecideApprovalRenderSurface) (transportwriter.Surface, bool) {
-	resolvedTarget, ok := ResolveDecideApprovalRenderTarget(surface)
-	if !ok {
-		return "", false
-	}
-	return transportwriter.Surface(resolvedTarget), true
 }
