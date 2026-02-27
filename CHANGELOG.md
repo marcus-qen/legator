@@ -11,6 +11,9 @@
 - **Kernel split S5 (approval decide error contract extraction)**
   - Added shared core→API decide-error mapping helper in `internal/controlplane/core/approvalpolicy` and refactored `handleDecideApproval` to decode → core call → contract-driven encode.
   - Preserved decide API outcomes: denied stays 200 with request payload; approved dispatch failures stay 502 with unchanged wording; invalid decision/request errors stay `400 invalid_request`.
+- **Kernel split S6 (approval decide success contract extraction)**
+  - Extracted decide success decode/encode contracts into `internal/controlplane/core/approvalpolicy` and reduced `handleDecideApproval` to contract decode → core call → contract encode.
+  - Added success parity assertions for denied/approved `{status,request}` responses to lock response schema/fields.
 
 ### Added
 - Parity tests for the extracted core service and server policy-apply paths (not found + offline apply-local behavior).
