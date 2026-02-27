@@ -1,12 +1,20 @@
 package connection
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/marcus-qen/legator/internal/protocol"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestClientTypeAndDefaults(t *testing.T) {
@@ -122,4 +130,125 @@ func TestSetAPIKey(t *testing.T) {
 	if c.apiKey != "new-key" {
 		t.Fatalf("expected apiKey to be updated, got %q", c.apiKey)
 	}
+}
+
+func TestRunResetsBackoffAfterSuccessfulConnection(t *testing.T) {
+	var attempts atomic.Int32
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ws/probe" {
+			http.NotFound(w, r)
+			return
+		}
+
+		switch attempts.Add(1) {
+		case 3:
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				t.Errorf("upgrade failed: %v", err)
+				return
+			}
+			go func() {
+				time.Sleep(100 * time.Millisecond)
+				_ = conn.Close()
+			}()
+		default:
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		}
+	}))
+	defer ts.Close()
+
+	core, logs := observer.New(zap.WarnLevel)
+	c := NewClient(wsURL(ts.URL), "probe-conn", "api-key", zap.New(core))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- c.Run(ctx)
+	}()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if logs.FilterMessage("connection lost, reconnecting").Len() >= 3 {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	cancel()
+	err := <-done
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+
+	entries := logs.FilterMessage("connection lost, reconnecting").All()
+	if len(entries) < 3 {
+		t.Fatalf("expected at least 3 reconnect logs, got %d", len(entries))
+	}
+
+	backoffs := make([]time.Duration, 3)
+	for i := 0; i < 3; i++ {
+		v, ok := entries[i].ContextMap()["backoff"]
+		if !ok {
+			t.Fatalf("entry %d missing backoff field", i)
+		}
+		d, ok := v.(time.Duration)
+		if !ok {
+			t.Fatalf("entry %d backoff has unexpected type %T", i, v)
+		}
+		backoffs[i] = d
+	}
+
+	if backoffs[0] != time.Second {
+		t.Fatalf("first backoff = %s, want %s", backoffs[0], time.Second)
+	}
+	if backoffs[1] != 2*time.Second {
+		t.Fatalf("second backoff = %s, want %s", backoffs[1], 2*time.Second)
+	}
+	if backoffs[2] != time.Second {
+		t.Fatalf("third backoff = %s, want %s (backoff should reset after successful connection)", backoffs[2], time.Second)
+	}
+}
+
+func TestConnectAndServeMarksDisconnectedAfterDrop(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ws/probe" {
+			http.NotFound(w, r)
+			return
+		}
+
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade failed: %v", err)
+			return
+		}
+
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			_ = conn.Close()
+		}()
+	}))
+	defer ts.Close()
+
+	c := NewClient(wsURL(ts.URL), "probe-conn", "api-key", zap.NewNop())
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	wasConnected, err := c.connectAndServe(ctx)
+	if err == nil {
+		t.Fatal("expected connectAndServe to return error after connection drop")
+	}
+	if !wasConnected {
+		t.Fatal("expected wasConnected=true when dial/handshake succeeded")
+	}
+	if c.Connected() {
+		t.Fatal("expected Connected() to be false after connection drop")
+	}
+}
+
+func wsURL(httpURL string) string {
+	return "ws" + strings.TrimPrefix(httpURL, "http")
 }
