@@ -14,3 +14,11 @@ func unsupportedCommandInvokeSurfaceMessage(surface string) string {
 func unsupportedCommandDispatchSurfaceMessage(surface ProjectionDispatchSurface) string {
 	return transportwriter.UnsupportedSurfaceMessage(unsupportedCommandDispatchScope, string(surface))
 }
+
+func unsupportedCommandInvokeSurfaceEnvelope(surface string) *transportwriter.ResponseEnvelope {
+	return transportwriter.UnsupportedSurfaceEnvelope(unsupportedCommandInvokeSurfaceMessage(surface))
+}
+
+func unsupportedCommandDispatchSurfaceEnvelope(surface ProjectionDispatchSurface) *transportwriter.ResponseEnvelope {
+	return transportwriter.UnsupportedSurfaceEnvelope(unsupportedCommandDispatchSurfaceMessage(surface))
+}
