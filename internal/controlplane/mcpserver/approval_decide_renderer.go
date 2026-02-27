@@ -25,7 +25,7 @@ func (approvalDecideMCPRenderer) RenderMCP(projection *coreapprovalpolicy.Decide
 }
 
 // orchestrateDecideApprovalMCP is the MCP-side seam for shared decide flow
-// orchestration until a public MCP approval-decide tool is exposed.
+// orchestration used by the MCP approval-decide tool handler.
 func orchestrateDecideApprovalMCP(body io.Reader, decide func(*coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error)) *coreapprovalpolicy.DecideApprovalProjection {
 	return coreapprovalpolicy.OrchestrateDecideApproval(body, decide, coreapprovalpolicy.DecideApprovalRenderTargetMCP)
 }

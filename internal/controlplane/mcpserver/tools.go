@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
+	coreapprovalpolicy "github.com/marcus-qen/legator/internal/controlplane/core/approvalpolicy"
 	corecommanddispatch "github.com/marcus-qen/legator/internal/controlplane/core/commanddispatch"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/protocol"
@@ -38,6 +40,12 @@ type searchAuditInput struct {
 	Type    string `json:"type,omitempty" jsonschema:"optional audit event type filter"`
 	Since   string `json:"since,omitempty" jsonschema:"optional ISO-8601 timestamp filter"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"optional limit (default 50)"`
+}
+
+type decideApprovalInput struct {
+	ApprovalID string `json:"approval_id" jsonschema:"approval request identifier"`
+	Decision   string `json:"decision" jsonschema:"approval decision: approved or denied"`
+	DecidedBy  string `json:"decided_by" jsonschema:"operator identity recording the decision"`
 }
 
 type probeSummary struct {
@@ -78,6 +86,11 @@ func (s *MCPServer) registerTools() {
 		Name:        "legator_search_audit",
 		Description: "Search Legator audit events",
 	}, s.handleSearchAudit)
+
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "legator_decide_approval",
+		Description: "Approve or deny a pending approval request and dispatch on approve",
+	}, s.handleDecideApproval)
 
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "legator_probe_health",
@@ -184,6 +197,33 @@ func (s *MCPServer) handleRunCommand(ctx context.Context, _ *mcp.CallToolRequest
 	}
 
 	return textToolResult(corecommanddispatch.ResultText(envelope.Result)), nil, nil
+}
+
+func (s *MCPServer) handleDecideApproval(_ context.Context, _ *mcp.CallToolRequest, input decideApprovalInput) (*mcp.CallToolResult, any, error) {
+	if s.decideApproval == nil {
+		return nil, nil, fmt.Errorf("approval service unavailable")
+	}
+
+	approvalID := strings.TrimSpace(input.ApprovalID)
+	if approvalID == "" {
+		return nil, nil, fmt.Errorf("approval_id is required")
+	}
+
+	body, err := json.Marshal(struct {
+		Decision  string `json:"decision"`
+		DecidedBy string `json:"decided_by"`
+	}{
+		Decision:  input.Decision,
+		DecidedBy: input.DecidedBy,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode decide approval input: %w", err)
+	}
+
+	projection := orchestrateDecideApprovalMCP(bytes.NewReader(body), func(request *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error) {
+		return s.decideApproval(approvalID, request)
+	})
+	return renderDecideApprovalMCP(projection)
 }
 
 func (s *MCPServer) handleGetInventory(_ context.Context, _ *mcp.CallToolRequest, input probeInfoInput) (*mcp.CallToolResult, any, error) {

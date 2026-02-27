@@ -26,6 +26,8 @@
 - **Kernel split S10 (approval decide orchestration seam)**
   - Extracted shared decide orchestration helper (`decode -> decide -> project -> render-target selection`) in `internal/controlplane/core/approvalpolicy` and refactored HTTP decide route to consume the new helper directly.
   - Added MCP orchestration seam wiring (stub path for future decide tool exposure) plus cross-transport parity tests to lock unchanged decide status/error payload behavior.
+- **Kernel split S11 (approval decide MCP tool exposure)**
+  - Exposed `legator_decide_approval` MCP tool using the shared decide orchestration seam and renderer contracts, with parity tests to lock HTTP+MCP equivalent success/error behavior.
 
 ### Added
 - Parity tests for the extracted core service and server policy-apply paths (not found + offline apply-local behavior).

@@ -183,7 +183,18 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initDispatchCore()
 	if s.cfg.MCPEnabled {
 		mcpserver.Version = Version
-		s.mcpServer = mcpserver.New(s.fleetStore, s.auditStore, s.hub, s.cmdTracker, s.logger)
+		s.mcpServer = mcpserver.New(
+			s.fleetStore,
+			s.auditStore,
+			s.hub,
+			s.cmdTracker,
+			s.logger,
+			func(id string, request *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error) {
+				return s.approvalCore.DecideAndDispatch(id, request.Decision, request.DecidedBy, func(probeID string, cmd protocol.CommandPayload) error {
+					return s.dispatchCore.Dispatch(probeID, cmd)
+				})
+			},
+		)
 		s.logger.Info("mcp server enabled", zap.String("path", "/mcp"), zap.String("version", mcpserver.Version))
 	}
 	s.wireChatLLM()
