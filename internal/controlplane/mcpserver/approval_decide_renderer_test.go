@@ -8,6 +8,7 @@ import (
 
 	"github.com/marcus-qen/legator/internal/controlplane/approval"
 	coreapprovalpolicy "github.com/marcus-qen/legator/internal/controlplane/core/approvalpolicy"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestRenderDecideApprovalMCP_ParitySuccess(t *testing.T) {
@@ -126,4 +127,65 @@ func TestOrchestrateDecideApprovalMCP_RegistryParityWithDirectTarget(t *testing.
 	if viaRegistry.Success.Request.ID != direct.Success.Request.ID || viaRegistry.Success.Request.Decision != direct.Success.Request.Decision {
 		t.Fatalf("expected request id/decision parity, registry=%+v direct=%+v", viaRegistry.Success.Request, direct.Success.Request)
 	}
+}
+
+func TestRenderDecideApprovalMCP_DispatchAdapterParityWithLegacyRenderer(t *testing.T) {
+	cases := []struct {
+		name       string
+		projection *coreapprovalpolicy.DecideApprovalProjection
+	}{
+		{
+			name: "success projection",
+			projection: coreapprovalpolicy.ProjectDecideApprovalTransport(coreapprovalpolicy.EncodeDecideApprovalTransport(
+				&coreapprovalpolicy.ApprovalDecisionResult{Request: &approval.Request{ID: "req-mcp-legacy", Decision: approval.DecisionDenied}},
+				nil,
+			)),
+		},
+		{
+			name:       "dispatch failure projection",
+			projection: coreapprovalpolicy.ProjectDecideApprovalTransport(coreapprovalpolicy.EncodeDecideApprovalTransport(nil, &coreapprovalpolicy.ApprovedDispatchError{Err: errors.New("probe probe-mcp-legacy not connected")})),
+		},
+		{
+			name:       "nil projection",
+			projection: nil,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			legacyResult, legacyMeta, legacyErr := legacyRenderDecideApprovalMCP(tc.projection)
+			adapterResult, adapterMeta, adapterErr := renderDecideApprovalMCP(tc.projection)
+
+			if (adapterErr != nil) != (legacyErr != nil) {
+				t.Fatalf("expected error presence parity, adapter=%v legacy=%v", adapterErr, legacyErr)
+			}
+			if adapterErr != nil && adapterErr.Error() != legacyErr.Error() {
+				t.Fatalf("expected error parity, adapter=%q legacy=%q", adapterErr.Error(), legacyErr.Error())
+			}
+			if adapterMeta != legacyMeta {
+				t.Fatalf("expected metadata parity, adapter=%#v legacy=%#v", adapterMeta, legacyMeta)
+			}
+			if (adapterResult == nil) != (legacyResult == nil) {
+				t.Fatalf("expected result presence parity, adapter=%#v legacy=%#v", adapterResult, legacyResult)
+			}
+			if adapterResult != nil {
+				adapterText := toolText(t, adapterResult)
+				legacyText := toolText(t, legacyResult)
+				if adapterText != legacyText {
+					t.Fatalf("expected payload parity, adapter=%q legacy=%q", adapterText, legacyText)
+				}
+			}
+		})
+	}
+}
+
+func legacyRenderDecideApprovalMCP(projection *coreapprovalpolicy.DecideApprovalProjection) (*mcp.CallToolResult, any, error) {
+	if projection == nil {
+		projection = coreapprovalpolicy.ProjectDecideApprovalTransport(nil)
+	}
+	if err := projection.MCPError(); err != nil {
+		return nil, nil, err
+	}
+
+	return jsonToolResult(projection.Success)
 }

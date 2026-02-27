@@ -14,17 +14,15 @@ type approvalDecideResponseRenderer interface {
 type approvalDecideHTTPRenderer struct{}
 
 func (approvalDecideHTTPRenderer) RenderHTTP(w http.ResponseWriter, projection *coreapprovalpolicy.DecideApprovalProjection) {
-	if projection == nil {
-		projection = coreapprovalpolicy.ProjectDecideApprovalTransport(nil)
-	}
-
-	if httpErr, ok := projection.HTTPError(); ok {
-		writeJSONError(w, httpErr.Status, httpErr.Code, httpErr.Message)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(projection.Success)
+	coreapprovalpolicy.DispatchDecideApprovalResponseForSurface(projection, coreapprovalpolicy.DecideApprovalRenderSurfaceHTTP, coreapprovalpolicy.DecideApprovalResponseDispatchWriter{
+		WriteHTTPError: func(httpErr *coreapprovalpolicy.HTTPErrorContract) {
+			writeJSONError(w, httpErr.Status, httpErr.Code, httpErr.Message)
+		},
+		WriteSuccess: func(success *coreapprovalpolicy.DecideApprovalSuccess) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(success)
+		},
+	})
 }
 
 func renderDecideApprovalHTTP(w http.ResponseWriter, projection *coreapprovalpolicy.DecideApprovalProjection) {
