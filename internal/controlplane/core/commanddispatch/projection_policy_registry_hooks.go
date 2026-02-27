@@ -1,6 +1,9 @@
 package commanddispatch
 
-import "github.com/marcus-qen/legator/internal/controlplane/core/projectiondispatch"
+import (
+	"github.com/marcus-qen/legator/internal/controlplane/core/projectiondispatch"
+	"github.com/marcus-qen/legator/internal/controlplane/core/transportwriter"
+)
 
 // ProjectionDispatchSurface identifies transport shells expected to consume
 // command-dispatch and command-read projections in upcoming kernel splits.
@@ -42,4 +45,10 @@ func ResolveCommandReadProjectionSurface(surface ProjectionDispatchSurface) (Pro
 // command invoke render-dispatch adapter surface selection.
 func ResolveCommandInvokeProjectionDispatchSurface(surface ProjectionDispatchSurface) (ProjectionDispatchSurface, bool) {
 	return defaultCommandInvokeProjectionDispatchSurfaceRegistry.Resolve(surface)
+}
+
+// ResolveCommandInvokeTransportSurface resolves a command invoke surface to the
+// shared transportwriter surface via the shared resolver seam.
+func ResolveCommandInvokeTransportSurface(surface ProjectionDispatchSurface) (transportwriter.Surface, bool) {
+	return transportwriter.ResolveSurfaceToTransport(defaultCommandInvokeProjectionDispatchSurfaceRegistry, surface)
 }

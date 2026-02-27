@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/marcus-qen/legator/internal/controlplane/approval"
+	"github.com/marcus-qen/legator/internal/controlplane/core/transportwriter"
 )
 
 func TestOrchestrateDecideApproval_ParityAcrossTargets(t *testing.T) {
@@ -124,6 +125,30 @@ func TestResolveDecideApprovalRenderTarget_RegistryParity(t *testing.T) {
 			}
 			if tt.ok && got != tt.want {
 				t.Fatalf("unexpected target resolution: got %q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveDecideApprovalTransportSurface_RegistryParity(t *testing.T) {
+	tests := []struct {
+		surface DecideApprovalRenderSurface
+		want    transportwriter.Surface
+		ok      bool
+	}{
+		{surface: DecideApprovalRenderSurfaceHTTP, want: transportwriter.SurfaceHTTP, ok: true},
+		{surface: DecideApprovalRenderSurfaceMCP, want: transportwriter.SurfaceMCP, ok: true},
+		{surface: DecideApprovalRenderSurface("bogus"), ok: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.surface), func(t *testing.T) {
+			got, ok := ResolveDecideApprovalTransportSurface(tt.surface)
+			if ok != tt.ok {
+				t.Fatalf("unexpected resolve presence: got %v want %v", ok, tt.ok)
+			}
+			if tt.ok && got != tt.want {
+				t.Fatalf("unexpected transport surface resolution: got %q want %q", got, tt.want)
 			}
 		})
 	}

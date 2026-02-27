@@ -4,6 +4,7 @@ import (
 	"io"
 
 	"github.com/marcus-qen/legator/internal/controlplane/core/projectiondispatch"
+	"github.com/marcus-qen/legator/internal/controlplane/core/transportwriter"
 )
 
 // DecideApprovalRenderSurface identifies a transport shell that consumes decide
@@ -24,6 +25,12 @@ var defaultDecideApprovalRenderTargetRegistry = projectiondispatch.NewPolicyRegi
 // transport shell using the shared render-target registry.
 func ResolveDecideApprovalRenderTarget(surface DecideApprovalRenderSurface) (DecideApprovalRenderTarget, bool) {
 	return defaultDecideApprovalRenderTargetRegistry.Resolve(surface)
+}
+
+// ResolveDecideApprovalTransportSurface resolves a decide surface to the
+// shared transportwriter surface via the shared resolver seam.
+func ResolveDecideApprovalTransportSurface(surface DecideApprovalRenderSurface) (transportwriter.Surface, bool) {
+	return transportwriter.ResolveSurfaceToTransport(defaultDecideApprovalRenderTargetRegistry, surface)
 }
 
 // OrchestrateDecideApprovalForSurface runs the shared decide orchestration after

@@ -34,6 +34,9 @@
 - **Kernel split S21 (unified response-envelope builders)**
   - Added a shared response-envelope builder interface in `internal/controlplane/core/transportwriter` and implemented builder adapters for approval + command flows before writer-kernel dispatch.
   - Preserved existing HTTP/MCP status codes, payload shapes, and error messages; added builder-level parity tests for approval + command transports.
+- **Kernel split S22 (shared surface→transport resolver seam)**
+  - Extracted a shared surface-to-transport resolver seam in `internal/controlplane/core/transportwriter` and wired both approval + command response flows through it, removing duplicated per-domain mapping helpers.
+  - Added cross-domain parity tests to lock resolver behavior and unsupported-surface fallback precedence (HTTP callback first, MCP fallback second) without changing external HTTP/MCP responses.
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
 - **Kernel split S13 (approval decide render-target registry boundary)**
