@@ -36,7 +36,7 @@ The LLM never touches your servers directly. The probe never reasons independent
 ```
 
 - **Control plane**: standalone Go binary (14MB), runs anywhere
-- **Probe**: static Go binary (7MB), zero dependencies, systemd service
+- **Probe**: static Go binary (7MB), zero dependencies, runs as systemd or Windows service
 - **legatorctl**: CLI for fleet management from the terminal
 - **Connection**: persistent WebSocket, heartbeat every 30s, auto-reconnect with jitter
 
@@ -76,7 +76,12 @@ curl -sSL http://localhost:8080/install.sh | sudo bash -s -- \
   --server http://localhost:8080 --token "$TOKEN"
 
 # Or manual (development)
-./bin/probe run --server http://localhost:8080 --token "$TOKEN"
+./bin/probe init --server http://localhost:8080 --token "$TOKEN"
+./bin/probe run
+
+# Windows (PowerShell as Administrator)
+.\probe.exe init --server http://localhost:8080 --token "$TOKEN"
+.\probe.exe service install
 ```
 
 ### 4. See your fleet
@@ -138,7 +143,7 @@ make all              # Build control-plane, probe, legatorctl
 make test             # Run unit tests
 make e2e              # Full end-to-end flow (29+ checks)
 make lint             # golangci-lint
-make build-release    # Cross-compile release binaries (linux amd64+arm64)
+make release-build    # Cross-compile release binaries (incl. windows/amd64 probe)
 ```
 
 ## API

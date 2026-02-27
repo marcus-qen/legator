@@ -113,15 +113,22 @@ func (e *Executor) Execute(ctx context.Context, cmd *protocol.CommandPayload) *p
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	spec, err := buildExecSpec(cmd)
+	if err != nil {
+		result.ExitCode = -1
+		result.Stderr = err.Error()
+		return result
+	}
+
 	// Execute
 	start := time.Now()
 	var stdout, stderr bytes.Buffer
 
-	c := exec.CommandContext(execCtx, cmd.Command, cmd.Args...)
+	c := exec.CommandContext(execCtx, spec.name, spec.args...)
 	c.Stdout = &stdout
 	c.Stderr = &stderr
 
-	err := c.Run()
+	err = c.Run()
 	result.Duration = time.Since(start).Milliseconds()
 
 	// Capture output (truncate if needed)

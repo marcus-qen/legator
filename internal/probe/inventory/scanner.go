@@ -3,7 +3,7 @@ package inventory
 
 import (
 	"bufio"
-	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"os/user"
@@ -55,6 +55,22 @@ func hostname() string {
 }
 
 func kernel() string {
+	if runtime.GOOS == "windows" {
+		if out, err := exec.Command("cmd", "/C", "ver").Output(); err == nil {
+			v := strings.TrimSpace(string(out))
+			if v != "" {
+				return v
+			}
+		}
+		if out, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "[System.Environment]::OSVersion.VersionString").Output(); err == nil {
+			v := strings.TrimSpace(string(out))
+			if v != "" {
+				return v
+			}
+		}
+		return "unknown"
+	}
+
 	out, err := exec.Command("uname", "-r").Output()
 	if err != nil {
 		return "unknown"
@@ -63,6 +79,15 @@ func kernel() string {
 }
 
 func memTotal() uint64 {
+	if runtime.GOOS == "windows" {
+		if out, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory").Output(); err == nil {
+			if n := parseFirstUint(string(out)); n > 0 {
+				return n
+			}
+		}
+		return 0
+	}
+
 	f, err := os.Open("/proc/meminfo")
 	if err != nil {
 		return 0
@@ -84,6 +109,15 @@ func memTotal() uint64 {
 }
 
 func diskTotal() uint64 {
+	if runtime.GOOS == "windows" {
+		if out, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "(Get-CimInstance Win32_LogicalDisk -Filter \"DriveType=3\" | Measure-Object -Property Size -Sum).Sum").Output(); err == nil {
+			if n := parseFirstUint(string(out)); n > 0 {
+				return n
+			}
+		}
+		return 0
+	}
+
 	out, err := exec.Command("df", "--output=size", "--total", "-B1").Output()
 	if err != nil {
 		return 0
@@ -98,45 +132,46 @@ func diskTotal() uint64 {
 }
 
 func interfaces() []protocol.NetInterface {
-	out, err := exec.Command("ip", "-j", "addr", "show").Output()
-	if err != nil {
-		// Fallback: basic info from /sys
-		return interfacesFallback()
-	}
-	// Parse JSON output from iproute2
-	_ = out // TODO: parse ip -j output
-	return interfacesFallback()
-}
-
-func interfacesFallback() []protocol.NetInterface {
-	entries, err := os.ReadDir("/sys/class/net")
+	nics, err := net.Interfaces()
 	if err != nil {
 		return nil
 	}
-	var result []protocol.NetInterface
-	for _, e := range entries {
-		name := e.Name()
-		if name == "lo" {
+
+	result := make([]protocol.NetInterface, 0, len(nics))
+	for _, nic := range nics {
+		if nic.Flags&net.FlagLoopback != 0 {
 			continue
 		}
-		state := "unknown"
-		if data, err := os.ReadFile(fmt.Sprintf("/sys/class/net/%s/operstate", name)); err == nil {
-			state = strings.TrimSpace(string(data))
+
+		state := "down"
+		if nic.Flags&net.FlagUp != 0 {
+			state = "up"
 		}
-		mac := ""
-		if data, err := os.ReadFile(fmt.Sprintf("/sys/class/net/%s/address", name)); err == nil {
-			mac = strings.TrimSpace(string(data))
+
+		var addrs []string
+		if addrList, err := nic.Addrs(); err == nil {
+			for _, addr := range addrList {
+				addrs = append(addrs, addr.String())
+			}
 		}
+
 		result = append(result, protocol.NetInterface{
-			Name:  name,
-			MAC:   mac,
+			Name:  nic.Name,
+			MAC:   nic.HardwareAddr.String(),
+			Addrs: addrs,
 			State: state,
 		})
 	}
+
 	return result
 }
 
 func services() []protocol.Service {
+	if runtime.GOOS == "windows" {
+		// MVP: optional on Windows; avoid costly/full enumeration for now.
+		return nil
+	}
+
 	out, err := exec.Command("systemctl", "list-units", "--type=service", "--all",
 		"--no-pager", "--no-legend", "--plain").Output()
 	if err != nil {
@@ -161,6 +196,11 @@ func services() []protocol.Service {
 }
 
 func users() []protocol.User {
+	if runtime.GOOS == "windows" {
+		// MVP: optional on Windows.
+		return nil
+	}
+
 	f, err := os.Open("/etc/passwd")
 	if err != nil {
 		return nil
@@ -204,6 +244,11 @@ func users() []protocol.User {
 }
 
 func packages() []protocol.Package {
+	if runtime.GOOS == "windows" {
+		// MVP: optional on Windows.
+		return nil
+	}
+
 	// Try dpkg first (Debian/Ubuntu)
 	if out, err := exec.Command("dpkg-query", "-W", "-f=${Package}\t${Version}\n").Output(); err == nil {
 		return parsePkgList(string(out), "apt")
@@ -230,4 +275,18 @@ func parsePkgList(output, manager string) []protocol.Package {
 		})
 	}
 	return result
+}
+
+func parseFirstUint(raw string) uint64 {
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		line = strings.TrimSuffix(line, "\r")
+		if n, err := strconv.ParseUint(line, 10, 64); err == nil {
+			return n
+		}
+	}
+	return 0
 }
