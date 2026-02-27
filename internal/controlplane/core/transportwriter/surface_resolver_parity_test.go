@@ -2,7 +2,6 @@ package transportwriter_test
 
 import (
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/marcus-qen/legator/internal/controlplane/core/approvalpolicy"
@@ -60,10 +59,11 @@ func TestResolveTransportSurface_ApprovalAndCommandParity(t *testing.T) {
 
 func TestUnsupportedSurfaceFallbackPrecedence_ApprovalAndCommand(t *testing.T) {
 	t.Run("http_writer_precedes_mcp_writer", func(t *testing.T) {
+		const approvalMessage = "unsupported approval decide dispatch surface \"bogus\""
 		approvalHTTP, approvalMCP := false, false
 		approvalpolicy.DispatchDecideApprovalResponseForSurface(nil, approvalpolicy.DecideApprovalRenderSurface("bogus"), approvalpolicy.DecideApprovalResponseDispatchWriter{
 			WriteHTTPError: func(err *approvalpolicy.HTTPErrorContract) {
-				if err == nil || err.Status != http.StatusInternalServerError {
+				if err == nil || err.Status != http.StatusInternalServerError || err.Code != "internal_error" || err.Message != approvalMessage {
 					t.Fatalf("unexpected approval http error: %+v", err)
 				}
 				approvalHTTP = true
@@ -76,10 +76,11 @@ func TestUnsupportedSurfaceFallbackPrecedence_ApprovalAndCommand(t *testing.T) {
 			t.Fatalf("approval fallback precedence mismatch: http=%v mcp=%v", approvalHTTP, approvalMCP)
 		}
 
+		const commandMessage = "unsupported command dispatch surface \"bogus\""
 		commandHTTP, commandMCP := false, false
 		commanddispatch.DispatchCommandInvokeProjection(&commanddispatch.CommandInvokeProjection{Surface: commanddispatch.ProjectionDispatchSurface("bogus")}, commanddispatch.CommandInvokeRenderDispatchWriter{
 			WriteHTTPError: func(err *commanddispatch.HTTPErrorContract) {
-				if err == nil || err.Status != http.StatusInternalServerError {
+				if err == nil || err.Status != http.StatusInternalServerError || err.Code != "internal_error" || err.Message != commandMessage {
 					t.Fatalf("unexpected command http error: %+v", err)
 				}
 				commandHTTP = true
@@ -94,23 +95,25 @@ func TestUnsupportedSurfaceFallbackPrecedence_ApprovalAndCommand(t *testing.T) {
 	})
 
 	t.Run("mcp_writer_used_when_http_writer_absent", func(t *testing.T) {
+		const approvalMessage = "unsupported approval decide dispatch surface \"bogus\""
 		var approvalErr error
 		approvalpolicy.DispatchDecideApprovalResponseForSurface(nil, approvalpolicy.DecideApprovalRenderSurface("bogus"), approvalpolicy.DecideApprovalResponseDispatchWriter{
 			WriteMCPError: func(err error) {
 				approvalErr = err
 			},
 		})
-		if approvalErr == nil || !strings.Contains(approvalErr.Error(), "unsupported approval decide dispatch surface") {
+		if approvalErr == nil || approvalErr.Error() != approvalMessage {
 			t.Fatalf("unexpected approval mcp fallback error: %v", approvalErr)
 		}
 
+		const commandMessage = "unsupported command dispatch surface \"bogus\""
 		var commandErr error
 		commanddispatch.DispatchCommandInvokeProjection(&commanddispatch.CommandInvokeProjection{Surface: commanddispatch.ProjectionDispatchSurface("bogus")}, commanddispatch.CommandInvokeRenderDispatchWriter{
 			WriteMCPError: func(err error) {
 				commandErr = err
 			},
 		})
-		if commandErr == nil || !strings.Contains(commandErr.Error(), "unsupported command dispatch surface") {
+		if commandErr == nil || commandErr.Error() != commandMessage {
 			t.Fatalf("unexpected command mcp fallback error: %v", commandErr)
 		}
 	})

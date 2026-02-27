@@ -3,6 +3,7 @@ package commanddispatch
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -91,5 +92,41 @@ func TestDispatchCommandReadForSurface_Parity(t *testing.T) {
 	})
 	if gotMCPText != "exit_code=2\nboom" {
 		t.Fatalf("unexpected MCP read text: %q", gotMCPText)
+	}
+}
+
+func TestDispatchCommandErrorsForSurface_UnsupportedSurfaceFallback(t *testing.T) {
+	const wantMessage = "unsupported command dispatch surface \"bogus\""
+
+	httpCalled, mcpCalled := false, false
+	handled := DispatchCommandErrorsForSurface(nil, ProjectionDispatchSurface("bogus"), CommandProjectionDispatchWriter{
+		WriteHTTPError: func(contract *HTTPErrorContract) {
+			httpCalled = true
+			if contract == nil || contract.Status != http.StatusInternalServerError || contract.Code != "internal_error" || contract.Message != wantMessage {
+				t.Fatalf("unexpected unsupported-surface HTTP error: %+v", contract)
+			}
+		},
+		WriteMCPError: func(err error) {
+			mcpCalled = err != nil
+		},
+	})
+	if !handled {
+		t.Fatal("expected handled=true for unsupported surface")
+	}
+	if !httpCalled || mcpCalled {
+		t.Fatalf("fallback precedence mismatch: http=%v mcp=%v", httpCalled, mcpCalled)
+	}
+
+	var got error
+	handled = DispatchCommandErrorsForSurface(nil, ProjectionDispatchSurface("bogus"), CommandProjectionDispatchWriter{
+		WriteMCPError: func(err error) {
+			got = err
+		},
+	})
+	if !handled {
+		t.Fatal("expected handled=true for unsupported surface with MCP writer")
+	}
+	if got == nil || got.Error() != wantMessage {
+		t.Fatalf("unexpected unsupported-surface MCP error: %v", got)
 	}
 }
