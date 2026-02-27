@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/metrics"
+	"github.com/marcus-qen/legator/internal/controlplane/modeldock"
 	"github.com/marcus-qen/legator/internal/protocol"
 	"go.uber.org/zap"
 )
@@ -150,6 +152,25 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/fleet/chat", s.withPermission(auth.PermFleetRead, s.handleFleetSendMessage))
 	mux.HandleFunc("GET /ws/fleet-chat", s.withPermission(auth.PermFleetRead, s.handleFleetChatWS))
 
+	// Model Dock API
+	if s.modelDockHandlers != nil {
+		mux.HandleFunc("GET /api/v1/model-profiles", s.withPermission(auth.PermFleetRead, s.modelDockHandlers.HandleListProfiles))
+		mux.HandleFunc("POST /api/v1/model-profiles", s.withPermission(auth.PermFleetRead, s.modelDockHandlers.HandleCreateProfile))
+		mux.HandleFunc("PUT /api/v1/model-profiles/{id}", s.withPermission(auth.PermFleetRead, s.modelDockHandlers.HandleUpdateProfile))
+		mux.HandleFunc("DELETE /api/v1/model-profiles/{id}", s.withPermission(auth.PermFleetRead, s.modelDockHandlers.HandleDeleteProfile))
+		mux.HandleFunc("POST /api/v1/model-profiles/{id}/activate", s.withPermission(auth.PermFleetRead, s.modelDockHandlers.HandleActivateProfile))
+		mux.HandleFunc("GET /api/v1/model-profiles/active", s.withPermission(auth.PermFleetRead, s.modelDockHandlers.HandleGetActiveProfile))
+		mux.HandleFunc("GET /api/v1/model-usage", s.withPermission(auth.PermFleetRead, s.modelDockHandlers.HandleGetUsage))
+	} else {
+		mux.HandleFunc("GET /api/v1/model-profiles", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
+		mux.HandleFunc("POST /api/v1/model-profiles", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
+		mux.HandleFunc("PUT /api/v1/model-profiles/{id}", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
+		mux.HandleFunc("DELETE /api/v1/model-profiles/{id}", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
+		mux.HandleFunc("POST /api/v1/model-profiles/{id}/activate", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
+		mux.HandleFunc("GET /api/v1/model-profiles/active", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
+		mux.HandleFunc("GET /api/v1/model-usage", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
+	}
+
 	// Binary download + install script
 	mux.HandleFunc("GET /download/{filename}", s.handleDownload)
 	mux.HandleFunc("GET /install.sh", s.handleInstallScript)
@@ -168,6 +189,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /approvals", s.handleApprovalsPage)
 	mux.HandleFunc("GET /audit", s.handleAuditPage)
 	mux.HandleFunc("GET /alerts", s.handleAlertsPage)
+	mux.HandleFunc("GET /model-dock", s.handleModelDockPage)
 
 	// WebSocket for probes
 	mux.HandleFunc("GET /ws/probe", s.hub.HandleProbeWS)
@@ -563,7 +585,11 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.taskRunner == nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "no LLM provider configured. Set LEGATOR_LLM_PROVIDER, LEGATOR_LLM_BASE_URL, LEGATOR_LLM_API_KEY, LEGATOR_LLM_MODEL")
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "no active LLM provider configured. Set LEGATOR_LLM_* env vars or activate a model profile in Model Dock")
+		return
+	}
+	if s.taskRunner == s.managedTaskRunner && s.modelProviderMgr != nil && !s.modelProviderMgr.HasActiveProvider() {
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "no active LLM provider configured. Set LEGATOR_LLM_* env vars or activate a model profile in Model Dock")
 		return
 	}
 
@@ -588,6 +614,10 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 	result, err := s.taskRunner.Run(r.Context(), id, req.Task, ps.Inventory, ps.PolicyLevel)
 	if err != nil {
 		s.logger.Warn("task execution error", zap.String("probe", id), zap.Error(err))
+		if errors.Is(err, modeldock.ErrNoActiveProvider) {
+			writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "no active LLM provider configured. Set LEGATOR_LLM_* env vars or activate a model profile in Model Dock")
+			return
+		}
 		writeJSONError(w, http.StatusBadGateway, "llm_unavailable", "LLM provider is unavailable: "+err.Error())
 		return
 	}
@@ -1227,6 +1257,26 @@ func (s *Server) handleAlertsPage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleModelDockPage(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
+	if s.pages == nil {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, "<h1>Model Dock</h1><p>Template not loaded</p>")
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data := BasePage{
+		CurrentUser: s.currentTemplateUser(r),
+		Version:     Version,
+		ActiveNav:   "model-dock",
+	}
+	if err := s.pages.Render(w, "model-dock", data); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
+	}
+}
+
 func (s *Server) handleDeleteProbe(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(w, r, auth.PermFleetWrite) {
 		return
@@ -1286,4 +1336,8 @@ func (s *Server) handleFleetCleanup(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAlertsUnavailable(w http.ResponseWriter, r *http.Request) {
 	writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "alerts engine unavailable")
+}
+
+func (s *Server) handleModelDockUnavailable(w http.ResponseWriter, r *http.Request) {
+	writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "model dock unavailable")
 }
