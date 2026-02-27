@@ -22,12 +22,5 @@ func DispatchDecideApprovalResponseForSurface(projection *DecideApprovalProjecti
 		return
 	}
 
-	successWriter := adaptApprovalSuccessPayloadWriter(writer.WriteSuccess)
-
-	transportwriter.WriteFromBuilder(transportSurface, builder, transportwriter.WriterKernel{
-		WriteHTTPError:   adaptApprovalHTTPErrorWriter(writer.WriteHTTPError),
-		WriteMCPError:    writer.WriteMCPError,
-		WriteHTTPSuccess: successWriter,
-		WriteMCPSuccess:  successWriter,
-	})
+	transportwriter.WriteFromBuilder(transportSurface, builder, newDecideApprovalWriterKernel(writer))
 }
