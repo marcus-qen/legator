@@ -737,6 +737,41 @@ func TestHandleDecideApproval(t *testing.T) {
 	}
 }
 
+func TestHandleDecideApproval_InvalidDecisionErrorMapping(t *testing.T) {
+	srv := newTestServer(t)
+
+	req, err := srv.approvalQueue.Submit(
+		"probe-decide-invalid",
+		&protocol.CommandPayload{RequestID: "req-decide-invalid", Command: "systemctl restart nginx"},
+		"manual",
+		"high",
+		"api",
+	)
+	if err != nil {
+		t.Fatalf("submit approval: %v", err)
+	}
+
+	httpReq := httptest.NewRequest(http.MethodPost, "/api/v1/approvals/"+req.ID+"/decide", strings.NewReader(`{"decision":"maybe","decided_by":"operator"}`))
+	httpReq.SetPathValue("id", req.ID)
+	rr := httptest.NewRecorder()
+	srv.handleDecideApproval(rr, httpReq)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var apiErr APIError
+	if err := json.NewDecoder(rr.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if apiErr.Code != "invalid_request" {
+		t.Fatalf("expected invalid_request code, got %q", apiErr.Code)
+	}
+	if apiErr.Error != "invalid decision \"maybe\": must be approved or denied" {
+		t.Fatalf("unexpected invalid decision message: %q", apiErr.Error)
+	}
+}
+
 func TestHandleDecideApproval_ApprovedDispatchFailure(t *testing.T) {
 	srv := newTestServer(t)
 
@@ -763,8 +798,16 @@ func TestHandleDecideApproval_ApprovedDispatchFailure(t *testing.T) {
 	if rr.Code != http.StatusBadGateway {
 		t.Fatalf("expected 502, got %d: %s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "approved but dispatch failed") {
-		t.Fatalf("expected dispatch failure message, got %s", rr.Body.String())
+
+	var apiErr APIError
+	if err := json.NewDecoder(rr.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if apiErr.Code != "bad_gateway" {
+		t.Fatalf("expected bad_gateway code, got %q", apiErr.Code)
+	}
+	if apiErr.Error != "approved but dispatch failed: probe probe-decide-fail not connected" {
+		t.Fatalf("expected preserved dispatch failure wording, got %q", apiErr.Error)
 	}
 
 	updated, ok := srv.approvalQueue.Get(req.ID)
