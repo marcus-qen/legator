@@ -47,7 +47,10 @@ func TestRenderRunCommandMCP_ParityWithLegacy(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			legacyResult, legacyMeta, legacyErr := legacyRenderRunCommandMCP(tc.envelope)
-			adapterResult, adapterMeta, adapterErr := renderRunCommandMCP(tc.envelope)
+			adapterResult, adapterMeta, adapterErr := renderRunCommandMCP(&corecommanddispatch.CommandInvokeProjection{
+				Surface:  corecommanddispatch.ProjectionDispatchSurfaceMCP,
+				Envelope: tc.envelope,
+			})
 
 			if (legacyErr == nil) != (adapterErr == nil) {
 				t.Fatalf("error presence mismatch: legacy=%v adapter=%v", legacyErr, adapterErr)

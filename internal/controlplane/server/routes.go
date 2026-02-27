@@ -471,9 +471,15 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request")
 		return
 	}
-	if cmd.RequestID == "" {
-		cmd.RequestID = fmt.Sprintf("cmd-%d", time.Now().UnixNano()%100000)
+	wantWait := r.URL.Query().Get("wait") == "true" || r.URL.Query().Get("wait") == "1"
+	wantStream := r.URL.Query().Get("stream") == "true" || r.URL.Query().Get("stream") == "1"
+
+	invokeInput := corecommanddispatch.AssembleCommandInvokeHTTP(id, cmd, wantWait, wantStream)
+	if invokeInput == nil {
+		writeJSONError(w, http.StatusBadGateway, "bad_gateway", "command dispatch failed")
+		return
 	}
+	cmd = invokeInput.Command
 
 	// Check if this command needs approval
 	req, needsApproval, err := s.approvalCore.SubmitCommandApproval(id, &cmd, ps.PolicyLevel, "Manual command dispatch", "api")
@@ -496,28 +502,14 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	wantWait := r.URL.Query().Get("wait") == "true" || r.URL.Query().Get("wait") == "1"
-	wantStream := r.URL.Query().Get("stream") == "true" || r.URL.Query().Get("stream") == "1"
-
-	timeout := 30 * time.Second
-	if cmd.Timeout > 0 {
-		timeout = cmd.Timeout + 5*time.Second
-	}
-
-	policy := corecommanddispatch.DispatchOnlyPolicy(wantStream)
-	if wantWait {
-		policy = corecommanddispatch.WaitPolicy(timeout)
-		policy.StreamOutput = wantStream
-	}
-
-	envelope := s.dispatchCore.DispatchWithPolicy(r.Context(), id, cmd, policy)
-	if envelope != nil && envelope.Dispatched {
+	projection := corecommanddispatch.InvokeCommandForSurface(r.Context(), invokeInput, s.dispatchCore)
+	if projection != nil && projection.Envelope != nil && projection.Envelope.Dispatched {
 		s.emitAudit(audit.EventCommandSent, id, "api", fmt.Sprintf("Command dispatched: %s", cmd.Command))
 		s.publishEvent(events.CommandDispatched, id, fmt.Sprintf("Command dispatched: %s", cmd.Command),
-			map[string]string{"request_id": cmd.RequestID, "command": cmd.Command})
+			map[string]string{"request_id": projection.RequestID, "command": cmd.Command})
 	}
 
-	renderDispatchCommandHTTP(w, cmd.RequestID, envelope, wantWait)
+	renderDispatchCommandHTTP(w, projection)
 }
 
 func (s *Server) handleRotateKey(w http.ResponseWriter, r *http.Request) {

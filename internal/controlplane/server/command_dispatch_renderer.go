@@ -8,13 +8,13 @@ import (
 	"github.com/marcus-qen/legator/internal/protocol"
 )
 
-func renderDispatchCommandHTTP(w http.ResponseWriter, requestID string, envelope *corecommanddispatch.CommandResultEnvelope, wantWait bool) {
-	if envelope == nil {
+func renderDispatchCommandHTTP(w http.ResponseWriter, projection *corecommanddispatch.CommandInvokeProjection) {
+	if projection == nil || projection.Envelope == nil {
 		writeJSONError(w, http.StatusBadGateway, "bad_gateway", "command dispatch failed")
 		return
 	}
 
-	handled := corecommanddispatch.DispatchCommandErrorsForSurface(envelope, corecommanddispatch.ProjectionDispatchSurfaceHTTP, corecommanddispatch.CommandProjectionDispatchWriter{
+	handled := corecommanddispatch.DispatchCommandErrorsForSurface(projection.Envelope, projection.Surface, corecommanddispatch.CommandProjectionDispatchWriter{
 		WriteHTTPError: func(httpErr *corecommanddispatch.HTTPErrorContract) {
 			if !httpErr.SuppressWrite {
 				writeJSONError(w, httpErr.Status, httpErr.Code, httpErr.Message)
@@ -26,15 +26,15 @@ func renderDispatchCommandHTTP(w http.ResponseWriter, requestID string, envelope
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if !wantWait {
+	if !projection.WaitForResult {
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status":     "dispatched",
-			"request_id": requestID,
+			"request_id": projection.RequestID,
 		})
 		return
 	}
 
-	corecommanddispatch.DispatchCommandReadForSurface(envelope.Result, corecommanddispatch.ProjectionDispatchSurfaceHTTP, corecommanddispatch.CommandProjectionDispatchWriter{
+	corecommanddispatch.DispatchCommandReadForSurface(projection.Envelope.Result, projection.Surface, corecommanddispatch.CommandProjectionDispatchWriter{
 		WriteHTTPResult: func(result *protocol.CommandResultPayload) {
 			_ = json.NewEncoder(w).Encode(result)
 		},
