@@ -45,7 +45,7 @@ func EncodeDecideApprovalResponseEnvelope(projection *DecideApprovalProjection, 
 }
 
 func unsupportedDecideApprovalResponseEnvelope(surface string) *transportwriter.ResponseEnvelope {
-	message := transportwriter.UnsupportedSurfaceMessage("approval decide dispatch", surface)
+	message := transportwriter.UnsupportedSurfaceMessage(transportwriter.UnsupportedSurfaceScopeApprovalDecideDispatch, surface)
 	return transportwriter.UnsupportedSurfaceEnvelope(message)
 }
 

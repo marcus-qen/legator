@@ -137,6 +137,6 @@ func dispatchUnsupportedCommandSurface(surface ProjectionDispatchSurface, writer
 }
 
 func unsupportedCommandDispatchResponseEnvelope(surface ProjectionDispatchSurface) *transportwriter.ResponseEnvelope {
-	message := transportwriter.UnsupportedSurfaceMessage("command dispatch", string(surface))
+	message := transportwriter.UnsupportedSurfaceMessage(transportwriter.UnsupportedSurfaceScopeCommandDispatch, string(surface))
 	return transportwriter.UnsupportedSurfaceEnvelope(message)
 }

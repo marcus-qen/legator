@@ -46,6 +46,9 @@
 - **Kernel split S25 (shared unsupported-surface message formatter seam)**
   - Extracted `transportwriter.UnsupportedSurfaceMessage(scope, surface)` and routed approval + command unsupported-surface codecs/adapters through it, removing duplicated message string construction.
   - Added formatter parity coverage to lock exact unsupported-surface message text while preserving existing HTTP/MCP fallback semantics.
+- **Kernel split S26 (typed unsupported-surface scopes + parity locks)**
+  - Added typed unsupported-surface scope constants in `transportwriter` and routed approval + command unsupported-surface message generation through typed scopes (raw scope literals removed from core call sites).
+  - Added strict parity coverage to lock exact scope literal values, rendered unsupported-surface message strings, and HTTP-first/MCP-fallback behavior semantics.
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
 - **Kernel split S13 (approval decide render-target registry boundary)**

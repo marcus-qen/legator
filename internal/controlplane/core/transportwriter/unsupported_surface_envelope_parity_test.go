@@ -19,25 +19,25 @@ func TestUnsupportedSurfaceEnvelopeFactory_Semantics(t *testing.T) {
 func TestUnsupportedSurfaceMessageFormatter_Parity(t *testing.T) {
 	tests := []struct {
 		name    string
-		scope   string
+		scope   transportwriter.UnsupportedSurfaceScope
 		surface string
 		want    string
 	}{
 		{
 			name:    "approval_decide_dispatch",
-			scope:   "approval decide dispatch",
+			scope:   transportwriter.UnsupportedSurfaceScopeApprovalDecideDispatch,
 			surface: "bogus",
 			want:    "unsupported approval decide dispatch surface \"bogus\"",
 		},
 		{
 			name:    "command_invoke",
-			scope:   "command invoke",
+			scope:   transportwriter.UnsupportedSurfaceScopeCommandInvoke,
 			surface: "bogus",
 			want:    "unsupported command invoke surface \"bogus\"",
 		},
 		{
 			name:    "command_dispatch",
-			scope:   "command dispatch",
+			scope:   transportwriter.UnsupportedSurfaceScopeCommandDispatch,
 			surface: "bogus",
 			want:    "unsupported command dispatch surface \"bogus\"",
 		},
@@ -47,6 +47,26 @@ func TestUnsupportedSurfaceMessageFormatter_Parity(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := transportwriter.UnsupportedSurfaceMessage(tt.scope, tt.surface); got != tt.want {
 				t.Fatalf("unexpected unsupported-surface message: got %q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUnsupportedSurfaceScopeConstants_Parity(t *testing.T) {
+	tests := []struct {
+		name  string
+		scope transportwriter.UnsupportedSurfaceScope
+		want  string
+	}{
+		{name: "approval_decide_dispatch", scope: transportwriter.UnsupportedSurfaceScopeApprovalDecideDispatch, want: "approval decide dispatch"},
+		{name: "command_invoke", scope: transportwriter.UnsupportedSurfaceScopeCommandInvoke, want: "command invoke"},
+		{name: "command_dispatch", scope: transportwriter.UnsupportedSurfaceScopeCommandDispatch, want: "command dispatch"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := string(tt.scope); got != tt.want {
+				t.Fatalf("unexpected scope literal: got %q want %q", got, tt.want)
 			}
 		})
 	}
