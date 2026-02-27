@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
@@ -403,5 +404,23 @@ func TestHandleListTokensAddsInstallCommandFromRequestHost(t *testing.T) {
 	}
 	if !strings.Contains(resp.Tokens[0].InstallCommand, "http://cp.local/install.sh") {
 		t.Fatalf("unexpected install_command: %s", resp.Tokens[0].InstallCommand)
+	}
+}
+
+func TestNoExpiryToken(t *testing.T) {
+	ts := NewTokenStore()
+	token := ts.GenerateWithOptions(GenerateOptions{MultiUse: true, NoExpiry: true})
+	if token == nil {
+		t.Fatal("expected token, got nil")
+	}
+	minExpiry := time.Now().Add(99 * 365 * 24 * time.Hour)
+	if token.Expires.Before(minExpiry) {
+		t.Fatalf("expected expiry >99 years from now, got %v", token.Expires)
+	}
+	if !ts.Consume(token.Value) {
+		t.Fatal("expected no-expiry token to be consumable")
+	}
+	if !ts.Consume(token.Value) {
+		t.Fatal("expected multi-use no-expiry token to be consumable again")
 	}
 }

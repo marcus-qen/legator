@@ -109,6 +109,7 @@ func tokenWithInstallCommand(token *Token, fallbackBaseURL string) Token {
 // GenerateOptions controls token generation behavior.
 type GenerateOptions struct {
 	MultiUse bool
+	NoExpiry bool
 }
 
 // Generate creates a new registration token valid for 30 minutes.
@@ -128,10 +129,15 @@ func (ts *TokenStore) GenerateWithOptions(opts GenerateOptions) *Token {
 	mac.Write([]byte(id))
 	sig := hex.EncodeToString(mac.Sum(nil))[:16]
 
+	expiry := now.Add(30 * time.Minute)
+	if opts.NoExpiry {
+		expiry = now.Add(100 * 365 * 24 * time.Hour)
+	}
+
 	token := &Token{
 		Value:    fmt.Sprintf("prb_%s_%d_%s", id, now.Unix(), sig),
 		Created:  now,
-		Expires:  now.Add(30 * time.Minute),
+		Expires:  expiry,
 		MultiUse: opts.MultiUse,
 	}
 
@@ -264,11 +270,13 @@ func HandleRegister(ts *TokenStore, fm fleet.Fleet, logger *zap.Logger) http.Han
 func HandleGenerateToken(ts *TokenStore, logger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		multiUse := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("multi_use")), "true")
-		token := ts.GenerateWithOptions(GenerateOptions{MultiUse: multiUse})
+		noExpiry := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("no_expiry")), "true")
+		token := ts.GenerateWithOptions(GenerateOptions{MultiUse: multiUse, NoExpiry: noExpiry})
 		out := tokenWithInstallCommand(token, requestBaseURL(r))
 		logger.Info("token generated",
 			zap.String("expires", out.Expires.Format(time.RFC3339)),
 			zap.Bool("multi_use", out.MultiUse),
+			zap.Bool("no_expiry", noExpiry),
 		)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(out)
@@ -345,7 +353,8 @@ func HandleRegisterWithAudit(ts *TokenStore, fm fleet.Fleet, al AuditRecorder, l
 func HandleGenerateTokenWithAudit(ts *TokenStore, al AuditRecorder, logger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		multiUse := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("multi_use")), "true")
-		token := ts.GenerateWithOptions(GenerateOptions{MultiUse: multiUse})
+		noExpiry := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("no_expiry")), "true")
+		token := ts.GenerateWithOptions(GenerateOptions{MultiUse: multiUse, NoExpiry: noExpiry})
 		out := tokenWithInstallCommand(token, requestBaseURL(r))
 		al.Emit(audit.EventTokenGenerated, "", "api", "Registration token generated")
 		logger.Info("token generated",
