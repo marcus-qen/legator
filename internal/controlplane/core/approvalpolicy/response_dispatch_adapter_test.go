@@ -3,7 +3,6 @@ package approvalpolicy
 import (
 	"errors"
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/marcus-qen/legator/internal/controlplane/approval"
@@ -106,6 +105,7 @@ func TestDispatchDecideApprovalResponseForSurface_ParityWithProjectionContracts(
 }
 
 func TestDispatchDecideApprovalResponseForSurface_UnsupportedSurfaceFallback(t *testing.T) {
+	const wantMessage = "unsupported approval decide dispatch surface \"bogus\""
 	var (
 		httpErr *HTTPErrorContract
 		mcpErr  error
@@ -119,11 +119,8 @@ func TestDispatchDecideApprovalResponseForSurface_UnsupportedSurfaceFallback(t *
 	if httpErr == nil {
 		t.Fatal("expected unsupported-surface HTTP error")
 	}
-	if httpErr.Status != http.StatusInternalServerError || httpErr.Code != "internal_error" {
+	if httpErr.Status != http.StatusInternalServerError || httpErr.Code != "internal_error" || httpErr.Message != wantMessage {
 		t.Fatalf("unexpected unsupported-surface HTTP error: %+v", httpErr)
-	}
-	if !strings.Contains(httpErr.Message, "unsupported approval decide dispatch surface") {
-		t.Fatalf("unexpected unsupported-surface HTTP message: %q", httpErr.Message)
 	}
 
 	DispatchDecideApprovalResponseForSurface(ProjectDecideApprovalTransport(EncodeDecideApprovalTransport(&ApprovalDecisionResult{}, nil)), DecideApprovalRenderSurface("bogus"), DecideApprovalResponseDispatchWriter{
@@ -134,7 +131,7 @@ func TestDispatchDecideApprovalResponseForSurface_UnsupportedSurfaceFallback(t *
 	if mcpErr == nil {
 		t.Fatal("expected unsupported-surface MCP error")
 	}
-	if !strings.Contains(mcpErr.Error(), "unsupported approval decide dispatch surface") {
+	if mcpErr.Error() != wantMessage {
 		t.Fatalf("unexpected unsupported-surface MCP message: %q", mcpErr.Error())
 	}
 }

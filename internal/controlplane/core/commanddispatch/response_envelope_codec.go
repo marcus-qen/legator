@@ -1,7 +1,6 @@
 package commanddispatch
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 
@@ -81,12 +80,5 @@ func encodeCommandInvokeMCPEnvelope(projection *CommandInvokeProjection) *transp
 
 func unsupportedCommandInvokeResponseEnvelope(surface string) *transportwriter.ResponseEnvelope {
 	message := fmt.Sprintf("unsupported command invoke surface %q", surface)
-	return &transportwriter.ResponseEnvelope{
-		HTTPError: &transportwriter.HTTPError{
-			Status:  http.StatusInternalServerError,
-			Code:    "internal_error",
-			Message: message,
-		},
-		MCPError: errors.New(message),
-	}
+	return transportwriter.UnsupportedSurfaceEnvelope(message)
 }

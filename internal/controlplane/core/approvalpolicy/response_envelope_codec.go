@@ -1,9 +1,7 @@
 package approvalpolicy
 
 import (
-	"errors"
 	"fmt"
-	"net/http"
 
 	"github.com/marcus-qen/legator/internal/controlplane/core/transportwriter"
 )
@@ -52,14 +50,7 @@ func EncodeDecideApprovalResponseEnvelope(projection *DecideApprovalProjection, 
 
 func unsupportedDecideApprovalResponseEnvelope(surface string) *transportwriter.ResponseEnvelope {
 	message := fmt.Sprintf("unsupported approval decide dispatch surface %q", surface)
-	return &transportwriter.ResponseEnvelope{
-		HTTPError: &transportwriter.HTTPError{
-			Status:  http.StatusInternalServerError,
-			Code:    "internal_error",
-			Message: message,
-		},
-		MCPError: errors.New(message),
-	}
+	return transportwriter.UnsupportedSurfaceEnvelope(message)
 }
 
 func normalizeDecideApprovalProjection(projection *DecideApprovalProjection) *DecideApprovalProjection {

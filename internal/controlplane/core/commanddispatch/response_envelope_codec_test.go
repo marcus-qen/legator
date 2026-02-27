@@ -117,3 +117,20 @@ func commandInvokeMCPResponseFromEnvelope(envelope *transportwriter.ResponseEnve
 	}
 	return text, nil
 }
+
+func TestEncodeCommandInvokeResponseEnvelope_UnsupportedSurface(t *testing.T) {
+	const wantMessage = "unsupported command invoke surface \"bogus\""
+	envelope := EncodeCommandInvokeResponseEnvelope(nil, ProjectionDispatchSurface("bogus"))
+	if envelope.HTTPError == nil {
+		t.Fatal("expected unsupported-surface HTTP envelope error")
+	}
+	if envelope.HTTPError.Status != http.StatusInternalServerError || envelope.HTTPError.Code != "internal_error" || envelope.HTTPError.Message != wantMessage {
+		t.Fatalf("unexpected unsupported-surface HTTP envelope error: %+v", envelope.HTTPError)
+	}
+	if envelope.MCPError == nil {
+		t.Fatal("expected unsupported-surface MCP envelope error")
+	}
+	if envelope.MCPError.Error() != wantMessage {
+		t.Fatalf("unexpected unsupported-surface MCP envelope error: %v", envelope.MCPError)
+	}
+}
