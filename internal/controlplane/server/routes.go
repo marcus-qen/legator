@@ -866,22 +866,18 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 
-	body, httpErr := coreapprovalpolicy.DecodeDecideApprovalRequest(r.Body)
-	if httpErr != nil {
-		writeJSONError(w, httpErr.Status, httpErr.Code, httpErr.Message)
-		return
-	}
-
-	decision, err := s.approvalCore.DecideAndDispatch(id, body.Decision, body.DecidedBy, func(probeID string, cmd protocol.CommandPayload) error {
-		return s.dispatchCore.Dispatch(probeID, cmd)
+	contract := coreapprovalpolicy.AdaptDecideApprovalTransport(r.Body, func(body *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error) {
+		return s.approvalCore.DecideAndDispatch(id, body.Decision, body.DecidedBy, func(probeID string, cmd protocol.CommandPayload) error {
+			return s.dispatchCore.Dispatch(probeID, cmd)
+		})
 	})
-	if httpErr, ok := coreapprovalpolicy.DecideApprovalHTTPError(err); ok {
+	if httpErr, ok := contract.HTTPError(); ok {
 		writeJSONError(w, httpErr.Status, httpErr.Code, httpErr.Message)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(coreapprovalpolicy.EncodeDecideApprovalSuccess(decision))
+	_ = json.NewEncoder(w).Encode(contract.Success)
 }
 
 // ── Audit ────────────────────────────────────────────────────

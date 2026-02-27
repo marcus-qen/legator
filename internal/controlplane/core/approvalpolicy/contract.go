@@ -29,46 +29,99 @@ type DecideApprovalSuccess struct {
 	Request *approval.Request `json:"request"`
 }
 
-// DecodeDecideApprovalRequest validates and normalizes approval decision input.
-func DecodeDecideApprovalRequest(body io.Reader) (*DecideApprovalRequest, *HTTPErrorContract) {
+// DecideApprovalTransportContract is the transport adapter contract for decide flows.
+// It carries either a decoded request, a success payload, or an error contract.
+type DecideApprovalTransportContract struct {
+	Request *DecideApprovalRequest
+	Success *DecideApprovalSuccess
+	Err     *HTTPErrorContract
+}
+
+// HTTPError returns a transport-mapped HTTP error, when present.
+func (c *DecideApprovalTransportContract) HTTPError() (*HTTPErrorContract, bool) {
+	if c == nil || c.Err == nil {
+		return nil, false
+	}
+	return c.Err, true
+}
+
+// DecodeDecideApprovalTransport validates and normalizes approval decision input.
+func DecodeDecideApprovalTransport(body io.Reader) *DecideApprovalTransportContract {
 	var payload struct {
 		Decision  string `json:"decision"`
 		DecidedBy string `json:"decided_by"`
 	}
 	if err := json.NewDecoder(body).Decode(&payload); err != nil {
-		return nil, &HTTPErrorContract{
-			Status:  http.StatusBadRequest,
-			Code:    "invalid_request",
-			Message: "invalid request body",
+		return &DecideApprovalTransportContract{
+			Err: &HTTPErrorContract{
+				Status:  http.StatusBadRequest,
+				Code:    "invalid_request",
+				Message: "invalid request body",
+			},
 		}
 	}
 	if payload.Decision == "" || payload.DecidedBy == "" {
-		return nil, &HTTPErrorContract{
-			Status:  http.StatusBadRequest,
-			Code:    "invalid_request",
-			Message: "decision and decided_by are required",
+		return &DecideApprovalTransportContract{
+			Err: &HTTPErrorContract{
+				Status:  http.StatusBadRequest,
+				Code:    "invalid_request",
+				Message: "decision and decided_by are required",
+			},
 		}
 	}
 
-	return &DecideApprovalRequest{
-		Decision:  approval.Decision(payload.Decision),
-		DecidedBy: payload.DecidedBy,
-	}, nil
-}
-
-// EncodeDecideApprovalSuccess maps core decision outcomes to the API success contract.
-func EncodeDecideApprovalSuccess(result *ApprovalDecisionResult) *DecideApprovalSuccess {
-	if result == nil || result.Request == nil {
-		return &DecideApprovalSuccess{}
-	}
-	return &DecideApprovalSuccess{
-		Status:  string(result.Request.Decision),
-		Request: result.Request,
+	return &DecideApprovalTransportContract{
+		Request: &DecideApprovalRequest{
+			Decision:  approval.Decision(payload.Decision),
+			DecidedBy: payload.DecidedBy,
+		},
 	}
 }
 
-// DecideApprovalHTTPError maps DecideAndDispatch errors to API-facing semantics.
-func DecideApprovalHTTPError(err error) (*HTTPErrorContract, bool) {
+// EncodeDecideApprovalTransport maps core decide outcomes to the transport contract.
+func EncodeDecideApprovalTransport(result *ApprovalDecisionResult, err error) *DecideApprovalTransportContract {
+	if httpErr, ok := decideApprovalHTTPError(err); ok {
+		return &DecideApprovalTransportContract{Err: httpErr}
+	}
+
+	success := &DecideApprovalSuccess{}
+	if result != nil && result.Request != nil {
+		success.Status = string(result.Request.Decision)
+		success.Request = result.Request
+	}
+	return &DecideApprovalTransportContract{Success: success}
+}
+
+// AdaptDecideApprovalTransport executes decode + core decision + encode through one transport contract.
+func AdaptDecideApprovalTransport(body io.Reader, decide func(*DecideApprovalRequest) (*ApprovalDecisionResult, error)) *DecideApprovalTransportContract {
+	decoded := DecodeDecideApprovalTransport(body)
+	if _, ok := decoded.HTTPError(); ok {
+		return decoded
+	}
+	if decoded.Request == nil {
+		return &DecideApprovalTransportContract{
+			Err: &HTTPErrorContract{
+				Status:  http.StatusInternalServerError,
+				Code:    "internal_error",
+				Message: "approval decide adapter returned empty request",
+			},
+		}
+	}
+	if decide == nil {
+		return &DecideApprovalTransportContract{
+			Err: &HTTPErrorContract{
+				Status:  http.StatusInternalServerError,
+				Code:    "internal_error",
+				Message: "approval decide adapter is missing core handler",
+			},
+		}
+	}
+
+	result, err := decide(decoded.Request)
+	return EncodeDecideApprovalTransport(result, err)
+}
+
+func decideApprovalHTTPError(err error) (*HTTPErrorContract, bool) {
 	if err == nil {
 		return nil, false
 	}
@@ -96,4 +149,27 @@ func DecideApprovalHTTPError(err error) (*HTTPErrorContract, bool) {
 		Code:    "invalid_request",
 		Message: err.Error(),
 	}, true
+}
+
+// DecodeDecideApprovalRequest preserves the legacy decode split contract.
+func DecodeDecideApprovalRequest(body io.Reader) (*DecideApprovalRequest, *HTTPErrorContract) {
+	contract := DecodeDecideApprovalTransport(body)
+	if httpErr, ok := contract.HTTPError(); ok {
+		return nil, httpErr
+	}
+	return contract.Request, nil
+}
+
+// EncodeDecideApprovalSuccess preserves the legacy success-only contract.
+func EncodeDecideApprovalSuccess(result *ApprovalDecisionResult) *DecideApprovalSuccess {
+	contract := EncodeDecideApprovalTransport(result, nil)
+	if contract.Success == nil {
+		return &DecideApprovalSuccess{}
+	}
+	return contract.Success
+}
+
+// DecideApprovalHTTPError preserves the legacy error-only contract.
+func DecideApprovalHTTPError(err error) (*HTTPErrorContract, bool) {
+	return decideApprovalHTTPError(err)
 }
