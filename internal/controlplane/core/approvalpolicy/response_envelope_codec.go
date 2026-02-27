@@ -1,10 +1,6 @@
 package approvalpolicy
 
-import (
-	"fmt"
-
-	"github.com/marcus-qen/legator/internal/controlplane/core/transportwriter"
-)
+import "github.com/marcus-qen/legator/internal/controlplane/core/transportwriter"
 
 // DecideApprovalResponseEnvelopeBuilder normalizes approval-decide projections
 // into shared writer-kernel response envelopes.
@@ -49,7 +45,7 @@ func EncodeDecideApprovalResponseEnvelope(projection *DecideApprovalProjection, 
 }
 
 func unsupportedDecideApprovalResponseEnvelope(surface string) *transportwriter.ResponseEnvelope {
-	message := fmt.Sprintf("unsupported approval decide dispatch surface %q", surface)
+	message := transportwriter.UnsupportedSurfaceMessage("approval decide dispatch", surface)
 	return transportwriter.UnsupportedSurfaceEnvelope(message)
 }
 
