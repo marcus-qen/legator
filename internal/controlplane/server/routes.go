@@ -883,18 +883,8 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 	decision, err := s.approvalCore.DecideAndDispatch(id, approval.Decision(body.Decision), body.DecidedBy, func(probeID string, cmd protocol.CommandPayload) error {
 		return s.dispatchCore.Dispatch(probeID, cmd)
 	})
-	if err != nil {
-		var dispatchErr *coreapprovalpolicy.ApprovedDispatchError
-		if errors.As(err, &dispatchErr) {
-			writeJSONError(w, http.StatusBadGateway, "bad_gateway", fmt.Sprintf("approved but dispatch failed: %s", dispatchErr.Error()))
-			return
-		}
-		var hookErr *coreapprovalpolicy.DecisionHookError
-		if errors.As(err, &hookErr) {
-			writeJSONError(w, http.StatusInternalServerError, "internal_error", hookErr.Error())
-			return
-		}
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
+	if httpErr, ok := coreapprovalpolicy.DecideApprovalHTTPError(err); ok {
+		writeJSONError(w, httpErr.Status, httpErr.Code, httpErr.Message)
 		return
 	}
 	req := decision.Request

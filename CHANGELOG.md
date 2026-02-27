@@ -8,6 +8,9 @@
 - **Kernel split S4 (approval decision side-effect hooks)**
   - Moved approval decision audit/event sequencing into `internal/controlplane/core/approvalpolicy` hooks so routes no longer own ordering.
   - Wired default hooks to existing approval-decided + approved-dispatch audit/event emissions with no API response changes.
+- **Kernel split S5 (approval decide error contract extraction)**
+  - Added shared core→API decide-error mapping helper in `internal/controlplane/core/approvalpolicy` and refactored `handleDecideApproval` to decode → core call → contract-driven encode.
+  - Preserved decide API outcomes: denied stays 200 with request payload; approved dispatch failures stay 502 with unchanged wording; invalid decision/request errors stay `400 invalid_request`.
 
 ### Added
 - Parity tests for the extracted core service and server policy-apply paths (not found + offline apply-local behavior).
