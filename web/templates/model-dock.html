@@ -1,0 +1,413 @@
+{{define "title"}}Model Dock — Legator{{end}}
+
+{{define "header"}}
+<div>
+  <h1 class="page-title">Model Dock</h1>
+  <span class="page-meta">BYOK provider profiles, active switching, and token usage</span>
+</div>
+<div class="right">
+  <button class="btn" type="button" id="refresh-model-dock">Refresh</button>
+</div>
+{{end}}
+
+{{define "content"}}
+<section class="panel" id="model-dock-summary">
+  <div class="panel-header">
+    <h2 class="panel-title">Active Profile</h2>
+    <span class="panel-sub" id="active-profile-source">loading…</span>
+  </div>
+  <div class="stat-row" id="active-profile-card">
+    <span class="muted">Loading active profile…</span>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Usage (24h)</h2>
+    <span class="panel-sub" id="usage-window-label">window=24h</span>
+  </div>
+  <div class="stat-row" id="usage-totals">
+    <span class="muted">Loading usage…</span>
+  </div>
+  <div class="table-wrap" style="margin-top:10px;">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Profile</th>
+          <th>Feature</th>
+          <th>Requests</th>
+          <th>Prompt</th>
+          <th>Completion</th>
+          <th>Total</th>
+        </tr>
+      </thead>
+      <tbody id="usage-body">
+        <tr><td colspan="6" class="empty-state">Loading usage…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Profiles</h2>
+    <span class="panel-sub" id="profiles-count">0 profiles</span>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Provider</th>
+          <th>Model</th>
+          <th>Base URL</th>
+          <th>API Key</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="profiles-body">
+        <tr><td colspan="7" class="empty-state">Loading profiles…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title" id="profile-form-title">Create Profile</h2>
+    <button type="button" class="btn" id="profile-form-reset">Reset</button>
+  </div>
+  <form id="profile-form" class="feed" autocomplete="off">
+    <input type="hidden" id="profile-id" />
+
+    <label>
+      <span class="muted">Name</span>
+      <input class="input" id="profile-name" required />
+    </label>
+
+    <div class="grid-two" style="grid-template-columns: repeat(auto-fit,minmax(220px,1fr));">
+      <label>
+        <span class="muted">Provider</span>
+        <input class="input" id="profile-provider" placeholder="openai" required />
+      </label>
+      <label>
+        <span class="muted">Model</span>
+        <input class="input" id="profile-model" placeholder="gpt-4o-mini" required />
+      </label>
+    </div>
+
+    <label>
+      <span class="muted">Base URL</span>
+      <input class="input" id="profile-base-url" placeholder="https://api.openai.com/v1" required />
+    </label>
+
+    <label>
+      <span class="muted">API Key <small>(leave blank to keep existing key when editing)</small></span>
+      <input class="input" id="profile-api-key" type="password" placeholder="sk-..." />
+    </label>
+
+    <label>
+      <input type="checkbox" id="profile-is-active" />
+      <span>Set active immediately</span>
+    </label>
+
+    <div class="actions-row">
+      <button class="btn btn-primary" type="submit" id="profile-submit">Create</button>
+      <button class="btn" type="button" id="profile-cancel">Cancel</button>
+    </div>
+  </form>
+</section>
+{{end}}
+
+{{define "scripts"}}
+<script>
+(() => {
+  const state = {
+    profiles: [],
+    active: null,
+    usage: [],
+    totals: null,
+  };
+
+  const profilesBody = document.getElementById('profiles-body');
+  const profilesCount = document.getElementById('profiles-count');
+  const usageBody = document.getElementById('usage-body');
+  const usageTotals = document.getElementById('usage-totals');
+  const activeCard = document.getElementById('active-profile-card');
+  const activeSource = document.getElementById('active-profile-source');
+
+  const form = document.getElementById('profile-form');
+  const formTitle = document.getElementById('profile-form-title');
+  const submitBtn = document.getElementById('profile-submit');
+
+  const idInput = document.getElementById('profile-id');
+  const nameInput = document.getElementById('profile-name');
+  const providerInput = document.getElementById('profile-provider');
+  const modelInput = document.getElementById('profile-model');
+  const baseURLInput = document.getElementById('profile-base-url');
+  const apiKeyInput = document.getElementById('profile-api-key');
+  const activeInput = document.getElementById('profile-is-active');
+
+  function toast(message, kind) {
+    if (window.LegatorUI?.showToast) {
+      window.LegatorUI.showToast(message, kind || 'info');
+    }
+  }
+
+  function esc(value) {
+    return String(value || '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  async function requestJSON(url, options) {
+    const response = await fetch(url, {
+      credentials: 'include',
+      cache: 'no-store',
+      ...options,
+    });
+
+    let payload = null;
+    if (response.status !== 204) {
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+    }
+
+    if (!response.ok) {
+      const message = payload?.error || payload?.message || response.statusText || 'Request failed';
+      throw new Error(message);
+    }
+
+    return payload;
+  }
+
+  function setFormModeEdit(profile) {
+    formTitle.textContent = `Edit Profile: ${profile.name}`;
+    submitBtn.textContent = 'Save';
+
+    idInput.value = profile.id;
+    nameInput.value = profile.name || '';
+    providerInput.value = profile.provider || '';
+    modelInput.value = profile.model || '';
+    baseURLInput.value = profile.base_url || '';
+    apiKeyInput.value = '';
+    activeInput.checked = Boolean(profile.is_active);
+    nameInput.focus();
+  }
+
+  function resetForm() {
+    formTitle.textContent = 'Create Profile';
+    submitBtn.textContent = 'Create';
+    idInput.value = '';
+    form.reset();
+    activeInput.checked = false;
+  }
+
+  function renderActive() {
+    const profile = state.active;
+    if (!profile) {
+      activeSource.textContent = 'none';
+      activeCard.innerHTML = '<span class="muted">No active profile</span>';
+      return;
+    }
+
+    activeSource.textContent = `source=${profile.source || 'db'}`;
+    activeCard.innerHTML = `
+      <span class="tag ${profile.source === 'env' ? 'tag-degraded' : 'tag-online'}">${esc(profile.source || 'db')}</span>
+      <strong>${esc(profile.name || profile.id)}</strong>
+      <span class="muted">${esc(profile.provider)} / ${esc(profile.model)}</span>
+      <span class="id-text">${esc(profile.base_url)}</span>
+      <span class="muted">key: ${esc(profile.api_key_masked || '—')}</span>
+    `;
+  }
+
+  function renderProfiles() {
+    profilesCount.textContent = `${state.profiles.length} profiles`;
+
+    if (!state.profiles.length) {
+      profilesBody.innerHTML = '<tr><td colspan="7" class="empty-state">No stored profiles. Env fallback may still be active.</td></tr>';
+      return;
+    }
+
+    profilesBody.innerHTML = state.profiles.map((profile) => {
+      const activeBadge = profile.is_active
+        ? '<span class="tag tag-online">active</span>'
+        : '<span class="tag">inactive</span>';
+
+      return `
+        <tr>
+          <td>${esc(profile.name)}</td>
+          <td>${esc(profile.provider)}</td>
+          <td>${esc(profile.model)}</td>
+          <td class="id-text">${esc(profile.base_url)}</td>
+          <td>${esc(profile.api_key_masked || '—')}</td>
+          <td>${activeBadge}</td>
+          <td>
+            <div class="actions-row">
+              <button class="btn" type="button" data-action="edit" data-id="${esc(profile.id)}">Edit</button>
+              <button class="btn" type="button" data-action="activate" data-id="${esc(profile.id)}" ${profile.is_active ? 'disabled' : ''}>Activate</button>
+              <button class="btn btn-danger" type="button" data-action="delete" data-id="${esc(profile.id)}">Delete</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function renderUsage() {
+    const totals = state.totals;
+    if (!totals) {
+      usageTotals.innerHTML = '<span class="muted">No usage data yet.</span>';
+    } else {
+      usageTotals.innerHTML = `
+        <span><strong>${totals.requests || 0}</strong> requests</span>
+        <span><strong>${totals.prompt_tokens || 0}</strong> prompt tokens</span>
+        <span><strong>${totals.completion_tokens || 0}</strong> completion tokens</span>
+        <span><strong>${totals.total_tokens || 0}</strong> total tokens</span>
+      `;
+    }
+
+    if (!state.usage.length) {
+      usageBody.innerHTML = '<tr><td colspan="6" class="empty-state">No usage for selected window.</td></tr>';
+      return;
+    }
+
+    usageBody.innerHTML = state.usage.map((item) => {
+      return `
+        <tr>
+          <td>${esc(item.profile_name || item.profile_id)}</td>
+          <td>${esc(item.feature)}</td>
+          <td>${esc(item.requests)}</td>
+          <td>${esc(item.prompt_tokens)}</td>
+          <td>${esc(item.completion_tokens)}</td>
+          <td>${esc(item.total_tokens)}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  async function refreshAll() {
+    const [profilesPayload, activePayload, usagePayload] = await Promise.all([
+      requestJSON('/api/v1/model-profiles'),
+      requestJSON('/api/v1/model-profiles/active').catch(() => ({ profile: null })),
+      requestJSON('/api/v1/model-usage?window=24h'),
+    ]);
+
+    state.profiles = Array.isArray(profilesPayload?.profiles) ? profilesPayload.profiles : [];
+    state.active = activePayload?.profile || null;
+    state.usage = Array.isArray(usagePayload?.usage) ? usagePayload.usage : [];
+    state.totals = usagePayload?.totals || null;
+
+    renderProfiles();
+    renderActive();
+    renderUsage();
+  }
+
+  profilesBody.addEventListener('click', async (event) => {
+    const btn = event.target.closest('button[data-action]');
+    if (!btn) return;
+
+    const action = btn.getAttribute('data-action');
+    const id = btn.getAttribute('data-id');
+    const profile = state.profiles.find((item) => item.id === id);
+
+    if (!profile) return;
+
+    if (action === 'edit') {
+      setFormModeEdit(profile);
+      return;
+    }
+
+    if (action === 'activate') {
+      try {
+        await requestJSON(`/api/v1/model-profiles/${encodeURIComponent(id)}/activate`, { method: 'POST' });
+        toast('Profile activated', 'success');
+        await refreshAll();
+      } catch (error) {
+        toast(`Activate failed: ${error.message}`, 'error');
+      }
+      return;
+    }
+
+    if (action === 'delete') {
+      if (!window.confirm(`Delete profile “${profile.name}”?`)) return;
+      try {
+        await requestJSON(`/api/v1/model-profiles/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        toast('Profile deleted', 'success');
+        if (idInput.value === id) {
+          resetForm();
+        }
+        await refreshAll();
+      } catch (error) {
+        toast(`Delete failed: ${error.message}`, 'error');
+      }
+    }
+  });
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+
+    const id = idInput.value.trim();
+    const payload = {
+      name: nameInput.value.trim(),
+      provider: providerInput.value.trim(),
+      base_url: baseURLInput.value.trim(),
+      model: modelInput.value.trim(),
+      api_key: apiKeyInput.value,
+      is_active: activeInput.checked,
+    };
+
+    const isEdit = Boolean(id);
+    if (!isEdit && !payload.api_key.trim()) {
+      toast('API key is required when creating a profile', 'error');
+      return;
+    }
+
+    try {
+      if (isEdit) {
+        await requestJSON(`/api/v1/model-profiles/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        toast('Profile updated', 'success');
+      } else {
+        await requestJSON('/api/v1/model-profiles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        toast('Profile created', 'success');
+      }
+
+      resetForm();
+      await refreshAll();
+    } catch (error) {
+      toast(`Save failed: ${error.message}`, 'error');
+    }
+  });
+
+  document.getElementById('profile-cancel').addEventListener('click', resetForm);
+  document.getElementById('profile-form-reset').addEventListener('click', resetForm);
+  document.getElementById('refresh-model-dock').addEventListener('click', async () => {
+    try {
+      await refreshAll();
+      toast('Model Dock refreshed', 'success');
+    } catch (error) {
+      toast(`Refresh failed: ${error.message}`, 'error');
+    }
+  });
+
+  refreshAll().catch((error) => {
+    toast(`Failed to load Model Dock: ${error.message}`, 'error');
+  });
+})();
+</script>
+{{end}}

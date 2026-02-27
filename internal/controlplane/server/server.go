@@ -6,12 +6,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/marcus-qen/legator/internal/controlplane/alerts"
@@ -26,6 +28,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/llm"
 	"github.com/marcus-qen/legator/internal/controlplane/metrics"
+	"github.com/marcus-qen/legator/internal/controlplane/modeldock"
 	"github.com/marcus-qen/legator/internal/controlplane/oidc"
 	"github.com/marcus-qen/legator/internal/controlplane/policy"
 	"github.com/marcus-qen/legator/internal/controlplane/session"
@@ -90,7 +93,11 @@ type Server struct {
 	eventBus *events.Bus
 
 	// LLM
-	taskRunner *llm.TaskRunner
+	taskRunner        *llm.TaskRunner
+	managedTaskRunner *llm.TaskRunner
+	modelProviderMgr  *modeldock.ProviderManager
+	modelDockStore    *modeldock.Store
+	modelDockHandlers *modeldock.Handler
 
 	// Templates
 	pages *pageTemplates
@@ -146,6 +153,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initAlerts()
 	s.initChat()
 	s.initPolicy()
+	s.initModelDock()
 	s.initLLM()
 	s.initHub()
 	s.wireChatLLM()
@@ -249,6 +257,9 @@ func (s *Server) Close() {
 	}
 	if s.policyPersistent != nil {
 		s.policyPersistent.Close()
+	}
+	if s.modelDockStore != nil {
+		s.modelDockStore.Close()
 	}
 	if s.userStore != nil {
 		s.userStore.Close()
@@ -374,23 +385,57 @@ func (s *Server) initPolicy() {
 	}
 }
 
-func (s *Server) initLLM() {
-	modelProvider := os.Getenv("LEGATOR_LLM_PROVIDER")
-	if modelProvider == "" {
-		return
-	}
-
-	providerCfg := llm.ProviderConfig{
-		Name:    modelProvider,
+func (s *Server) initModelDock() {
+	envCfg := llm.ProviderConfig{
+		Name:    os.Getenv("LEGATOR_LLM_PROVIDER"),
 		BaseURL: os.Getenv("LEGATOR_LLM_BASE_URL"),
 		APIKey:  os.Getenv("LEGATOR_LLM_API_KEY"),
 		Model:   os.Getenv("LEGATOR_LLM_MODEL"),
 	}
-	provider := llm.NewOpenAIProvider(providerCfg)
-	s.logger.Info("LLM provider configured",
-		zap.String("provider", providerCfg.Name),
-		zap.String("model", providerCfg.Model),
-	)
+	s.modelProviderMgr = modeldock.NewProviderManager(envCfg)
+
+	modelDockDBPath := filepath.Join(s.cfg.DataDir, "modeldock.db")
+	if err := os.MkdirAll(s.cfg.DataDir, 0750); err != nil {
+		s.logger.Warn("cannot create data dir, model dock disabled",
+			zap.String("dir", s.cfg.DataDir), zap.Error(err))
+		return
+	}
+
+	store, err := modeldock.NewStore(modelDockDBPath)
+	if err != nil {
+		s.logger.Warn("cannot open model dock database, model dock disabled",
+			zap.String("path", modelDockDBPath), zap.Error(err))
+		return
+	}
+
+	s.modelDockStore = store
+	s.modelDockHandlers = modeldock.NewHandler(store, s.modelProviderMgr, s.envProfileFromEnv)
+	if err := s.modelProviderMgr.SyncFromStore(store); err != nil && !errors.Is(err, modeldock.ErrNoActiveProvider) {
+		s.logger.Warn("failed to sync model provider from store", zap.Error(err))
+	}
+	s.logger.Info("model dock store opened", zap.String("path", modelDockDBPath))
+}
+
+func (s *Server) initLLM() {
+	if s.modelProviderMgr == nil {
+		s.modelProviderMgr = modeldock.NewProviderManager(llm.ProviderConfig{
+			Name:    os.Getenv("LEGATOR_LLM_PROVIDER"),
+			BaseURL: os.Getenv("LEGATOR_LLM_BASE_URL"),
+			APIKey:  os.Getenv("LEGATOR_LLM_API_KEY"),
+			Model:   os.Getenv("LEGATOR_LLM_MODEL"),
+		})
+	}
+
+	snapshot := s.modelProviderMgr.Snapshot()
+	if snapshot.Provider != "" {
+		s.logger.Info("LLM provider configured",
+			zap.String("provider", snapshot.Provider),
+			zap.String("model", snapshot.Model),
+			zap.String("source", snapshot.Source),
+		)
+	} else {
+		s.logger.Info("LLM provider manager initialized without active provider")
+	}
 
 	approvalWait := 2 * time.Minute
 	if raw := os.Getenv("LEGATOR_TASK_APPROVAL_WAIT"); raw != "" {
@@ -399,8 +444,10 @@ func (s *Server) initLLM() {
 		}
 	}
 
+	taskProvider := s.modelProviderMgr.Provider(modeldock.FeatureTask, s.modelDockStore)
+
 	// dispatch is a closure that will be set after hub init
-	s.taskRunner = llm.NewTaskRunner(provider, func(probeID string, cmd *protocol.CommandPayload) (*protocol.CommandResultPayload, error) {
+	s.taskRunner = llm.NewTaskRunner(taskProvider, func(probeID string, cmd *protocol.CommandPayload) (*protocol.CommandResultPayload, error) {
 		if ps, ok := s.fleetMgr.Get(probeID); ok && approval.NeedsApproval(cmd, ps.PolicyLevel) {
 			risk := approval.ClassifyRisk(cmd)
 			req, err := s.approvalQueue.Submit(probeID, cmd, "LLM task command", risk, "llm-task")
@@ -423,6 +470,7 @@ func (s *Server) initLLM() {
 
 		return s.dispatchAndWait(probeID, cmd)
 	}, s.logger.Named("task"))
+	s.managedTaskRunner = s.taskRunner
 }
 
 func (s *Server) initHub() {
@@ -496,22 +544,19 @@ func (s *Server) initHub() {
 }
 
 func (s *Server) wireChatLLM() {
-	if s.taskRunner == nil {
+	if s.modelProviderMgr == nil {
 		return
 	}
 
-	provider := llm.NewOpenAIProvider(llm.ProviderConfig{
-		Name:    os.Getenv("LEGATOR_LLM_PROVIDER"),
-		BaseURL: os.Getenv("LEGATOR_LLM_BASE_URL"),
-		APIKey:  os.Getenv("LEGATOR_LLM_API_KEY"),
-		Model:   os.Getenv("LEGATOR_LLM_MODEL"),
-	})
 	dispatch := func(probeID string, cmd *protocol.CommandPayload) (*protocol.CommandResultPayload, error) {
 		return s.dispatchAndWait(probeID, cmd)
 	}
 
-	chatResponder := llm.NewChatResponder(provider, dispatch, s.logger.Named("chat-llm"))
-	fleetResponder := llm.NewFleetChatResponder(provider, s.fleetMgr, dispatch, s.logger.Named("fleet-chat-llm"))
+	probeProvider := s.modelProviderMgr.Provider(modeldock.FeatureProbeChat, s.modelDockStore)
+	fleetProvider := s.modelProviderMgr.Provider(modeldock.FeatureFleetChat, s.modelDockStore)
+
+	chatResponder := llm.NewChatResponder(probeProvider, dispatch, s.logger.Named("chat-llm"))
+	fleetResponder := llm.NewFleetChatResponder(fleetProvider, s.fleetMgr, dispatch, s.logger.Named("fleet-chat-llm"))
 
 	responder := func(probeID, userMessage string, history []chat.Message) (string, error) {
 		llmHistory := make([]llm.ChatMessage, len(history))
@@ -541,7 +586,7 @@ func (s *Server) wireChatLLM() {
 	} else {
 		s.chatMgr.SetResponder(responder)
 	}
-	s.logger.Info("chat wired to LLM provider")
+	s.logger.Info("chat wired to LLM provider manager")
 }
 
 func (s *Server) initAuth() {
@@ -650,7 +695,7 @@ func (s *Server) loadTemplates() {
 	tmplDir := filepath.Join("web", "templates")
 	pt := &pageTemplates{templates: make(map[string]pageTemplate)}
 
-	pages := []string{"fleet", "probe-detail", "chat", "fleet-chat", "approvals", "audit", "alerts"}
+	pages := []string{"fleet", "probe-detail", "chat", "fleet-chat", "approvals", "audit", "alerts", "model-dock"}
 	for _, page := range pages {
 		t, err := template.New("").Funcs(templateFuncs()).ParseFiles(
 			filepath.Join(tmplDir, "_base.html"),
@@ -674,6 +719,28 @@ func (s *Server) loadTemplates() {
 }
 
 // ── Internal helpers ─────────────────────────────────────────
+
+func (s *Server) envProfileFromEnv() *modeldock.Profile {
+	provider := strings.TrimSpace(os.Getenv("LEGATOR_LLM_PROVIDER"))
+	if provider == "" {
+		return nil
+	}
+	baseURL := strings.TrimSpace(os.Getenv("LEGATOR_LLM_BASE_URL"))
+	model := strings.TrimSpace(os.Getenv("LEGATOR_LLM_MODEL"))
+	if baseURL == "" || model == "" {
+		return nil
+	}
+	return &modeldock.Profile{
+		ID:       modeldock.EnvProfileID,
+		Name:     "Environment (LEGATOR_LLM_*)",
+		Provider: provider,
+		BaseURL:  baseURL,
+		Model:    model,
+		APIKey:   strings.TrimSpace(os.Getenv("LEGATOR_LLM_API_KEY")),
+		Source:   modeldock.SourceEnv,
+		IsActive: true,
+	}
+}
 
 func (s *Server) emitAudit(typ audit.EventType, probeID, actor, summary string) {
 	if s.auditStore != nil {

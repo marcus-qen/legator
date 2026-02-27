@@ -1309,6 +1309,18 @@ body[data-page='fleet'].fleet-tree-open .fleet-overlay-backdrop {
   pointer-events: auto;
 }
 
+body[data-page='model-dock'] .content {
+  max-width: 1200px;
+}
+
+body[data-page='model-dock'] .data-table {
+  min-width: 900px;
+}
+
+body[data-page='model-dock'] .actions-row {
+  margin: 0;
+}
+
 @media (max-width: 980px) {
   .grid-two {
     grid-template-columns: 1fr;
