@@ -99,6 +99,15 @@
     overlayBackdrop: document.getElementById('fleet-overlay-backdrop'),
   };
 
+  let currentChatProbeId = null;
+  let fleetChatWS = null;
+  let fleetChatReconnectTimer = null;
+  let fleetChatPollTimer = null;
+  let chatHistoryLoaded = false;
+  let chatThinking = false;
+  const chatMessages = [];
+  const chatMessageIds = new Set();
+
   function esc(value) {
     return String(value ?? '')
       .replaceAll('&', '&amp;')
@@ -189,6 +198,366 @@
 
   function getInterfaces(probe) {
     return Array.isArray(probe?.inventory?.interfaces) ? probe.inventory.interfaces : [];
+  }
+
+  function chatMessageKey(message) {
+    if (message && message.id) return `id:${String(message.id)}`;
+    const role = String(message?.role || 'assistant').toLowerCase();
+    const timestamp = String(message?.timestamp || '');
+    const commandId = String(message?.command_id || '');
+    const content = String(message?.content || '');
+    return `fallback:${role}:${timestamp}:${commandId}:${content}`;
+  }
+
+  function normalizeChatMessage(message) {
+    if (!message || typeof message !== 'object') return null;
+    const roleRaw = String(message.role || 'assistant').toLowerCase();
+    const role = ['user', 'assistant', 'system'].includes(roleRaw) ? roleRaw : 'assistant';
+    const content = String(message.content || '');
+    if (!content.trim()) return null;
+    return {
+      id: message.id ? String(message.id) : '',
+      role,
+      content,
+      command_id: message.command_id ? String(message.command_id) : '',
+      timestamp: message.timestamp ? String(message.timestamp) : '',
+    };
+  }
+
+  function isChatTabActive() {
+    return state.activeTab === 'chat' && state.selectedProbeId && state.selectedProbeId === currentChatProbeId;
+  }
+
+  function renderChatMessage(container, message) {
+    const row = document.createElement('div');
+    row.className = `msg-row ${message.role}`;
+
+    const bubble = document.createElement('div');
+    bubble.className = `msg msg-${message.role}`;
+
+    const body = document.createElement('div');
+    body.textContent = message.content;
+    bubble.appendChild(body);
+
+    if (message.timestamp) {
+      const meta = document.createElement('div');
+      meta.className = 'chat-meta';
+      const date = new Date(message.timestamp);
+      meta.textContent = Number.isNaN(date.getTime()) ? message.timestamp : date.toLocaleTimeString();
+      bubble.appendChild(meta);
+    }
+
+    row.appendChild(bubble);
+    container.appendChild(row);
+  }
+
+  function scrollFleetChatToBottom() {
+    const messages = document.getElementById('fleet-chat-messages');
+    if (!messages) return;
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  function renderFleetChatMessages() {
+    const messages = document.getElementById('fleet-chat-messages');
+    if (!messages) return;
+
+    messages.innerHTML = '';
+
+    if (!chatMessages.length) {
+      const empty = document.createElement('div');
+      empty.className = 'chat-empty';
+      empty.textContent = 'Ask this probe anything...';
+      messages.appendChild(empty);
+    } else {
+      chatMessages.forEach((message) => {
+        renderChatMessage(messages, message);
+      });
+    }
+
+    scrollFleetChatToBottom();
+  }
+
+  function setFleetChatThinking(value) {
+    chatThinking = Boolean(value);
+    const typing = document.getElementById('fleet-chat-typing');
+    if (!typing) return;
+    typing.hidden = !chatThinking;
+    if (chatThinking) {
+      scrollFleetChatToBottom();
+    }
+  }
+
+  function autoResizeTextarea(textarea) {
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+  }
+
+  function stopFleetChatPolling() {
+    if (!fleetChatPollTimer) return;
+    window.clearInterval(fleetChatPollTimer);
+    fleetChatPollTimer = null;
+  }
+
+  function stopFleetChatReconnect() {
+    if (!fleetChatReconnectTimer) return;
+    window.clearTimeout(fleetChatReconnectTimer);
+    fleetChatReconnectTimer = null;
+  }
+
+  function teardownFleetChat(options = {}) {
+    const { clear = false } = options;
+
+    stopFleetChatReconnect();
+    stopFleetChatPolling();
+
+    if (fleetChatWS) {
+      fleetChatWS.__manualClose = true;
+      fleetChatWS.close();
+      fleetChatWS = null;
+    }
+
+    if (clear) {
+      chatMessages.length = 0;
+      chatMessageIds.clear();
+      chatHistoryLoaded = false;
+      setFleetChatThinking(false);
+    }
+  }
+
+  function appendFleetChatMessage(message) {
+    const normalized = normalizeChatMessage(message);
+    if (!normalized) return false;
+
+    const key = chatMessageKey(normalized);
+    if (chatMessageIds.has(key)) return false;
+
+    chatMessageIds.add(key);
+    chatMessages.push(normalized);
+
+    if (chatMessages.length > 300) {
+      const dropped = chatMessages.shift();
+      if (dropped) {
+        chatMessageIds.delete(chatMessageKey(dropped));
+      }
+    }
+
+    if (normalized.role === 'assistant' || normalized.role === 'system') {
+      setFleetChatThinking(false);
+    }
+
+    if (isChatTabActive()) {
+      renderFleetChatMessages();
+    }
+
+    return true;
+  }
+
+  async function loadFleetChatHistory(probeId) {
+    if (!probeId) return;
+
+    const response = await fetch(`/api/v1/probes/${encodeURIComponent(probeId)}/chat?limit=50`, { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`chat history request failed: ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const items = Array.isArray(payload) ? payload.slice() : [];
+    items
+      .sort((a, b) => {
+        const ta = new Date(a?.timestamp || 0).getTime();
+        const tb = new Date(b?.timestamp || 0).getTime();
+        return ta - tb;
+      })
+      .forEach((message) => {
+        appendFleetChatMessage(message);
+      });
+
+    chatHistoryLoaded = true;
+
+    if (isChatTabActive()) {
+      renderFleetChatMessages();
+      setFleetChatThinking(chatThinking);
+    }
+  }
+
+  function scheduleFleetChatReconnect(probeId) {
+    if (!probeId || probeId !== currentChatProbeId) return;
+    stopFleetChatReconnect();
+
+    fleetChatReconnectTimer = window.setTimeout(() => {
+      fleetChatReconnectTimer = null;
+      if (probeId !== currentChatProbeId) return;
+      connectFleetChatSocket(probeId);
+    }, 3000);
+  }
+
+  function startFleetChatPolling(probeId) {
+    if (fleetChatPollTimer || !probeId) return;
+
+    fleetChatPollTimer = window.setInterval(() => {
+      if (probeId !== currentChatProbeId) {
+        stopFleetChatPolling();
+        return;
+      }
+
+      loadFleetChatHistory(probeId).catch(() => {
+        // best effort fallback while websocket reconnects
+      });
+    }, 5000);
+  }
+
+  function connectFleetChatSocket(probeId) {
+    if (!probeId || probeId !== currentChatProbeId) return;
+
+    if (fleetChatWS && (fleetChatWS.readyState === WebSocket.OPEN || fleetChatWS.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const socketUrl = `${protocol}//${window.location.host}/ws/chat?probe_id=${encodeURIComponent(probeId)}`;
+
+    let socket;
+    try {
+      socket = new WebSocket(socketUrl);
+    } catch {
+      startFleetChatPolling(probeId);
+      scheduleFleetChatReconnect(probeId);
+      return;
+    }
+
+    fleetChatWS = socket;
+
+    socket.onopen = () => {
+      if (probeId !== currentChatProbeId) {
+        socket.__manualClose = true;
+        socket.close();
+        return;
+      }
+      stopFleetChatPolling();
+      stopFleetChatReconnect();
+    };
+
+    socket.onmessage = (event) => {
+      let payload;
+      try {
+        payload = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+
+      const messages = Array.isArray(payload) ? payload : [payload];
+      messages.forEach((item) => appendFleetChatMessage(item));
+    };
+
+    socket.onerror = () => {
+      // onclose handles reconnect logic
+    };
+
+    socket.onclose = () => {
+      if (fleetChatWS === socket) {
+        fleetChatWS = null;
+      }
+      if (socket.__manualClose || probeId !== currentChatProbeId) return;
+      startFleetChatPolling(probeId);
+      scheduleFleetChatReconnect(probeId);
+    };
+  }
+
+  async function sendFleetChatMessage(probeId, content) {
+    const text = String(content || '').trim();
+    if (!probeId || !text || probeId !== currentChatProbeId) return;
+
+    setFleetChatThinking(true);
+
+    const canUseSocket = fleetChatWS
+      && fleetChatWS.readyState === WebSocket.OPEN
+      && probeId === currentChatProbeId;
+
+    if (canUseSocket) {
+      try {
+        fleetChatWS.send(JSON.stringify({ content: text }));
+        window.setTimeout(() => {
+          if (probeId === currentChatProbeId) {
+            loadFleetChatHistory(probeId).catch(() => {
+              // best effort sync in case websocket only emits assistant replies
+            });
+          }
+        }, 800);
+        return;
+      } catch {
+        // fallback to REST below
+      }
+    }
+
+    const response = await fetch(`/api/v1/probes/${encodeURIComponent(probeId)}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: text }),
+    });
+
+    if (!response.ok) {
+      setFleetChatThinking(false);
+      throw new Error(`chat send failed: ${response.status}`);
+    }
+
+    const payload = await response.json();
+    appendFleetChatMessage(payload);
+    await loadFleetChatHistory(probeId);
+  }
+
+  function bindFleetChatForm(probeId) {
+    const form = document.getElementById('fleet-chat-form');
+    const textarea = document.getElementById('fleet-chat-input');
+    const submit = form?.querySelector('button[type="submit"]');
+    if (!form || !textarea || !submit) return;
+
+    autoResizeTextarea(textarea);
+
+    textarea.addEventListener('input', () => {
+      autoResizeTextarea(textarea);
+    });
+
+    textarea.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        form.requestSubmit();
+      }
+    });
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const content = textarea.value.trim();
+      if (!content || probeId !== currentChatProbeId) return;
+
+      textarea.value = '';
+      autoResizeTextarea(textarea);
+
+      submit.disabled = true;
+      try {
+        await sendFleetChatMessage(probeId, content);
+      } catch {
+        setFleetChatThinking(false);
+      } finally {
+        submit.disabled = false;
+        textarea.focus();
+      }
+    });
+  }
+
+  function initFleetChat(probeId) {
+    if (!probeId || probeId !== currentChatProbeId) return;
+
+    renderFleetChatMessages();
+    setFleetChatThinking(chatThinking);
+    bindFleetChatForm(probeId);
+
+    if (!chatHistoryLoaded) {
+      loadFleetChatHistory(probeId).catch(() => {
+        // best effort
+      });
+    }
+
+    connectFleetChatSocket(probeId);
   }
 
   function matchesFilters(probe) {
@@ -377,6 +746,21 @@
       `;
     }
 
+    if (state.activeTab === 'chat') {
+      return `
+        <div class="detail-chat">
+          <div class="chat-messages" id="fleet-chat-messages">
+            <div class="chat-empty">Ask this probe anything...</div>
+          </div>
+          <div class="chat-typing" id="fleet-chat-typing" hidden>Thinking...</div>
+          <form class="chat-input-form" id="fleet-chat-form">
+            <textarea id="fleet-chat-input" rows="1" placeholder="Ask this probe..." maxlength="4000" autocomplete="off" required></textarea>
+            <button type="submit" class="btn btn-primary">Send</button>
+          </form>
+        </div>
+      `;
+    }
+
     const packages = getPackages(probe);
     if (!packages.length) {
       return '<div class="muted detail-empty-panel">No packages reported.</div>';
@@ -401,6 +785,9 @@
   function renderDetail() {
     const probe = state.probes.find((item) => item.id === state.selectedProbeId);
     if (!probe) {
+      currentChatProbeId = null;
+      teardownFleetChat({ clear: true });
+
       refs.detail.innerHTML = `
         <div class="detail-empty" id="detail-empty">
           <div class="detail-empty-title">Select a probe</div>
@@ -453,9 +840,10 @@
           <button type="button" class="tab${state.activeTab === 'network' ? ' active' : ''}" data-tab="network">Network</button>
           <button type="button" class="tab${state.activeTab === 'services' ? ' active' : ''}" data-tab="services">Services <span class="tree-count-badge">${serviceCount}</span></button>
           <button type="button" class="tab${state.activeTab === 'packages' ? ' active' : ''}" data-tab="packages">Packages <span class="tree-count-badge">${packageCount}</span></button>
+          <button type="button" class="tab${state.activeTab === 'chat' ? ' active' : ''}" data-tab="chat">Chat</button>
         </div>
 
-        <div class="detail-tab-content">${renderTabContent(probe)}</div>
+        <div class="detail-tab-content${state.activeTab === 'chat' ? ' chat-active' : ''}">${renderTabContent(probe)}</div>
       </div>
     `;
 
@@ -465,6 +853,10 @@
         renderDetail();
       });
     });
+
+    if (state.activeTab === 'chat' && currentChatProbeId === probe.id) {
+      initFleetChat(probe.id);
+    }
   }
 
   function renderFeed() {
@@ -520,6 +912,11 @@
         state.filterText = '';
         refs.treeFilter.value = '';
       }
+    }
+
+    if (currentChatProbeId !== probeId) {
+      teardownFleetChat({ clear: true });
+      currentChatProbeId = probeId;
     }
 
     state.selectedProbeId = probeId;
