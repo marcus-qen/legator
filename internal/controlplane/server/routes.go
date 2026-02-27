@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,8 +17,8 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/approval"
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
-	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
 	coreapprovalpolicy "github.com/marcus-qen/legator/internal/controlplane/core/approvalpolicy"
+	corecommanddispatch "github.com/marcus-qen/legator/internal/controlplane/core/commanddispatch"
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/metrics"
@@ -503,24 +504,16 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 		cmd.Stream = true
 	}
 
-	var pending *cmdtracker.PendingCommand
-	if wantWait {
-		pending = s.cmdTracker.Track(cmd.RequestID, id, cmd.Command, ps.PolicyLevel)
-	}
-
-	if err := s.hub.SendTo(id, protocol.MsgCommand, cmd); err != nil {
-		if pending != nil {
-			s.cmdTracker.Cancel(cmd.RequestID)
-		}
-		writeJSONError(w, http.StatusBadGateway, "bad_gateway", err.Error())
-		return
-	}
-
-	s.emitAudit(audit.EventCommandSent, id, "api", fmt.Sprintf("Command dispatched: %s", cmd.Command))
-	s.publishEvent(events.CommandDispatched, id, fmt.Sprintf("Command dispatched: %s", cmd.Command),
-		map[string]string{"request_id": cmd.RequestID, "command": cmd.Command})
-
 	if !wantWait {
+		if err := s.dispatchCore.Dispatch(id, cmd); err != nil {
+			writeJSONError(w, http.StatusBadGateway, "bad_gateway", err.Error())
+			return
+		}
+
+		s.emitAudit(audit.EventCommandSent, id, "api", fmt.Sprintf("Command dispatched: %s", cmd.Command))
+		s.publishEvent(events.CommandDispatched, id, fmt.Sprintf("Command dispatched: %s", cmd.Command),
+			map[string]string{"request_id": cmd.RequestID, "command": cmd.Command})
+
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status":     "dispatched",
@@ -529,23 +522,36 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	pending, err := s.dispatchCore.DispatchTracked(id, cmd)
+	if err != nil {
+		writeJSONError(w, http.StatusBadGateway, "bad_gateway", err.Error())
+		return
+	}
+
+	s.emitAudit(audit.EventCommandSent, id, "api", fmt.Sprintf("Command dispatched: %s", cmd.Command))
+	s.publishEvent(events.CommandDispatched, id, fmt.Sprintf("Command dispatched: %s", cmd.Command),
+		map[string]string{"request_id": cmd.RequestID, "command": cmd.Command})
+
 	timeout := 30 * time.Second
 	if cmd.Timeout > 0 {
 		timeout = cmd.Timeout + 5*time.Second
 	}
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
 
-	select {
-	case result := <-pending.Result:
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(result)
-	case <-timer.C:
-		s.cmdTracker.Cancel(cmd.RequestID)
-		writeJSONError(w, http.StatusGatewayTimeout, "timeout", "timeout waiting for probe response")
-	case <-r.Context().Done():
-		s.cmdTracker.Cancel(cmd.RequestID)
+	result, err := s.dispatchCore.WaitForResult(r.Context(), cmd.RequestID, pending, timeout)
+	if err != nil {
+		switch {
+		case errors.Is(err, corecommanddispatch.ErrTimeout):
+			writeJSONError(w, http.StatusGatewayTimeout, "timeout", "timeout waiting for probe response")
+		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+			// client disconnected; nothing to write
+		default:
+			writeJSONError(w, http.StatusBadGateway, "bad_gateway", err.Error())
+		}
+		return
 	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
 }
 
 func (s *Server) handleRotateKey(w http.ResponseWriter, r *http.Request) {
@@ -885,21 +891,24 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req, err := s.approvalQueue.Decide(id, approval.Decision(body.Decision), body.DecidedBy)
+	decision, err := s.approvalCore.DecideApproval(id, approval.Decision(body.Decision), body.DecidedBy)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	req := decision.Request
 
 	s.emitAudit(audit.EventApprovalDecided, req.ProbeID, body.DecidedBy,
 		fmt.Sprintf("Approval %s for: %s", body.Decision, req.Command.Command))
 	s.publishEvent(events.ApprovalDecided, req.ProbeID, fmt.Sprintf("Approval %s: %s", body.Decision, req.Command.Command), nil)
 
-	if req.Decision == approval.DecisionApproved {
-		if err := s.hub.SendTo(req.ProbeID, protocol.MsgCommand, *req.Command); err != nil {
-			writeJSONError(w, http.StatusBadGateway, "bad_gateway", fmt.Sprintf("approved but dispatch failed: %s", err.Error()))
-			return
-		}
+	if err := s.approvalCore.DispatchApprovedCommand(decision, func(probeID string, cmd protocol.CommandPayload) error {
+		return s.dispatchCore.Dispatch(probeID, cmd)
+	}); err != nil {
+		writeJSONError(w, http.StatusBadGateway, "bad_gateway", fmt.Sprintf("approved but dispatch failed: %s", err.Error()))
+		return
+	}
+	if decision.RequiresDispatch {
 		s.emitAudit(audit.EventCommandSent, req.ProbeID, body.DecidedBy,
 			fmt.Sprintf("Approved command dispatched: %s", req.Command.Command))
 	}
