@@ -8,13 +8,16 @@ import (
 )
 
 type approvalDecideResponseRenderer interface {
-	RenderHTTP(w http.ResponseWriter, contract *coreapprovalpolicy.DecideApprovalTransportContract)
+	RenderHTTP(w http.ResponseWriter, projection *coreapprovalpolicy.DecideApprovalProjection)
 }
 
 type approvalDecideHTTPRenderer struct{}
 
-func (approvalDecideHTTPRenderer) RenderHTTP(w http.ResponseWriter, contract *coreapprovalpolicy.DecideApprovalTransportContract) {
-	projection := coreapprovalpolicy.ProjectDecideApprovalTransport(contract)
+func (approvalDecideHTTPRenderer) RenderHTTP(w http.ResponseWriter, projection *coreapprovalpolicy.DecideApprovalProjection) {
+	if projection == nil {
+		projection = coreapprovalpolicy.ProjectDecideApprovalTransport(nil)
+	}
+
 	if httpErr, ok := projection.HTTPError(); ok {
 		writeJSONError(w, httpErr.Status, httpErr.Code, httpErr.Message)
 		return
@@ -24,6 +27,6 @@ func (approvalDecideHTTPRenderer) RenderHTTP(w http.ResponseWriter, contract *co
 	_ = json.NewEncoder(w).Encode(projection.Success)
 }
 
-func renderDecideApprovalHTTP(w http.ResponseWriter, contract *coreapprovalpolicy.DecideApprovalTransportContract) {
-	approvalDecideHTTPRenderer{}.RenderHTTP(w, contract)
+func renderDecideApprovalHTTP(w http.ResponseWriter, projection *coreapprovalpolicy.DecideApprovalProjection) {
+	approvalDecideHTTPRenderer{}.RenderHTTP(w, projection)
 }
