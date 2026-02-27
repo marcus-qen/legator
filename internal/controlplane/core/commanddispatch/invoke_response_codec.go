@@ -3,7 +3,7 @@ package commanddispatch
 import (
 	"net/http"
 
-	"github.com/marcus-qen/legator/internal/protocol"
+	"github.com/marcus-qen/legator/internal/controlplane/core/transportwriter"
 )
 
 // HTTPJSONErrorPayload is the shared JSON error payload emitted by command
@@ -26,37 +26,29 @@ type CommandInvokeHTTPJSONResponse struct {
 // HTTP JSON response/error payloads while preserving status semantics.
 func EncodeCommandInvokeHTTPJSONResponse(projection *CommandInvokeProjection) CommandInvokeHTTPJSONResponse {
 	response := CommandInvokeHTTPJSONResponse{Status: http.StatusOK}
+	envelope := EncodeCommandInvokeResponseEnvelope(projection, ProjectionDispatchSurfaceHTTP)
 
-	DispatchCommandInvokeProjection(projection, CommandInvokeRenderDispatchWriter{
-		WriteHTTPError: func(httpErr *HTTPErrorContract) {
+	transportwriter.WriteForSurface(transportwriter.SurfaceHTTP, envelope, transportwriter.WriterKernel{
+		WriteHTTPError: func(httpErr *transportwriter.HTTPError) {
 			if httpErr == nil {
 				return
 			}
-			if httpErr.SuppressWrite {
-				response.SuppressWrite = true
-				response.HasBody = false
-				response.Body = nil
-				return
-			}
-
 			response.Status = httpErr.Status
 			response.Body = HTTPJSONErrorPayload{Error: httpErr.Message, Code: httpErr.Code}
 			response.HasBody = true
 		},
-		WriteHTTPDispatched: func(requestID string) {
+		WriteHTTPSuccess: func(payload any) {
 			response.Status = http.StatusOK
-			response.Body = map[string]string{
-				"status":     "dispatched",
-				"request_id": requestID,
-			}
-			response.HasBody = true
-		},
-		WriteHTTPResult: func(result *protocol.CommandResultPayload) {
-			response.Status = http.StatusOK
-			response.Body = result
+			response.Body = payload
 			response.HasBody = true
 		},
 	})
+
+	if envelope != nil && envelope.HTTPError != nil && envelope.HTTPError.SuppressWrite {
+		response.SuppressWrite = true
+		response.HasBody = false
+		response.Body = nil
+	}
 
 	return response
 }
@@ -64,14 +56,16 @@ func EncodeCommandInvokeHTTPJSONResponse(projection *CommandInvokeProjection) Co
 // EncodeCommandInvokeMCPTextResponse shapes command invoke projections into MCP
 // text/error outputs while preserving existing error semantics.
 func EncodeCommandInvokeMCPTextResponse(projection *CommandInvokeProjection) (string, error) {
+	envelope := EncodeCommandInvokeResponseEnvelope(projection, ProjectionDispatchSurfaceMCP)
 	resultText := ""
 	var dispatchErr error
 
-	DispatchCommandInvokeProjection(projection, CommandInvokeRenderDispatchWriter{
+	transportwriter.WriteForSurface(transportwriter.SurfaceMCP, envelope, transportwriter.WriterKernel{
 		WriteMCPError: func(err error) {
 			dispatchErr = err
 		},
-		WriteMCPText: func(text string) {
+		WriteMCPSuccess: func(payload any) {
+			text, _ := payload.(string)
 			resultText = text
 		},
 	})
