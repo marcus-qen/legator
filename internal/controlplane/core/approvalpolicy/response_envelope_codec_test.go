@@ -123,14 +123,18 @@ func approvalMCPDispatchFromEnvelope(envelope *transportwriter.ResponseEnvelope)
 }
 
 func TestEncodeDecideApprovalResponseEnvelope_UnsupportedSurface(t *testing.T) {
+	const wantMessage = "unsupported approval decide dispatch surface \"bogus\""
 	envelope := EncodeDecideApprovalResponseEnvelope(&DecideApprovalProjection{}, DecideApprovalRenderSurface("bogus"))
 	if envelope.HTTPError == nil {
 		t.Fatal("expected unsupported-surface HTTP envelope error")
 	}
-	if envelope.HTTPError.Status != http.StatusInternalServerError || envelope.HTTPError.Code != "internal_error" {
+	if envelope.HTTPError.Status != http.StatusInternalServerError || envelope.HTTPError.Code != "internal_error" || envelope.HTTPError.Message != wantMessage {
 		t.Fatalf("unexpected unsupported-surface HTTP envelope error: %+v", envelope.HTTPError)
 	}
 	if envelope.MCPError == nil {
 		t.Fatal("expected unsupported-surface MCP envelope error")
+	}
+	if envelope.MCPError.Error() != wantMessage {
+		t.Fatalf("unexpected unsupported-surface MCP envelope error: %v", envelope.MCPError)
 	}
 }

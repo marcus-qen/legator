@@ -40,6 +40,9 @@
 - **Kernel split S23 (shared unsupported-surface fallback helper)**
   - Extracted a shared unsupported-surface fallback helper in `internal/controlplane/core/transportwriter` and reused it in approval + command dispatch adapters while preserving existing HTTP-first/MCP-second behavior.
   - Added parity coverage to lock unsupported-surface fallback precedence plus exact status/code/message semantics across approval and command paths.
+- **Kernel split S24 (shared unsupported-surface envelope factory)**
+  - Extracted a shared unsupported-surface envelope factory in `internal/controlplane/core/transportwriter` and reused it across approval + command codecs/adapters to remove duplicate fallback envelope construction.
+  - Added strict parity tests locking exact unsupported-surface HTTP status/code/message and MCP error text semantics across approval + command fallback paths.
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
 - **Kernel split S13 (approval decide render-target registry boundary)**

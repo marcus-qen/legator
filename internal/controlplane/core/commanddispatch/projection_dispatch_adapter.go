@@ -1,9 +1,7 @@
 package commanddispatch
 
 import (
-	"errors"
 	"fmt"
-	"net/http"
 
 	"github.com/marcus-qen/legator/internal/controlplane/core/projectiondispatch"
 	"github.com/marcus-qen/legator/internal/controlplane/core/transportwriter"
@@ -142,12 +140,5 @@ func dispatchUnsupportedCommandSurface(surface ProjectionDispatchSurface, writer
 
 func unsupportedCommandDispatchResponseEnvelope(surface ProjectionDispatchSurface) *transportwriter.ResponseEnvelope {
 	message := fmt.Sprintf("unsupported command dispatch surface %q", string(surface))
-	return &transportwriter.ResponseEnvelope{
-		HTTPError: &transportwriter.HTTPError{
-			Status:  http.StatusInternalServerError,
-			Code:    "internal_error",
-			Message: message,
-		},
-		MCPError: errors.New(message),
-	}
+	return transportwriter.UnsupportedSurfaceEnvelope(message)
 }
