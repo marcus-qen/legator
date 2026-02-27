@@ -1,3 +1,21 @@
+## [v1.0.0-alpha.12] — 2026-02-27
+
+### Added
+- **MCP tool surface** via official Go MCP SDK (`github.com/modelcontextprotocol/go-sdk v1.3.1`)
+  - SSE transport endpoint at `GET /mcp`
+  - 7 tools: `legator_list_probes`, `legator_probe_info`, `legator_run_command`, `legator_get_inventory`, `legator_fleet_query`, `legator_search_audit`, `legator_probe_health`
+  - 2 resources: `legator://fleet/summary`, `legator://fleet/inventory`
+- **MCP E2E coverage** — endpoint reachability check and version regression check
+
+### Changed
+- **Registration tokens** now support `no_expiry=true` for persistent multi-use tokens (DaemonSet-safe)
+
+### Fixed
+- **Discovery E2E safety** — replaced `192.168.1.0/24` scan with loopback-only `127.0.0.0/24` + timeout to prevent outbound net-scan alerts
+
+### Stats
+- **~160 Go files** | **30+ test suites** | **49/49 E2E passing**
+
 ## [v1.0.0-alpha.11] — 2026-02-27
 
 ### Added
