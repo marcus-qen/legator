@@ -47,12 +47,14 @@ func DispatchDecideApprovalResponseForSurface(projection *DecideApprovalProjecti
 }
 
 func dispatchDecideApprovalUnsupportedEnvelope(envelope *transportwriter.ResponseEnvelope, writer DecideApprovalResponseDispatchWriter) {
-	if writer.WriteHTTPError != nil && envelope != nil && envelope.HTTPError != nil {
-		err := envelope.HTTPError
-		writer.WriteHTTPError(&HTTPErrorContract{Status: err.Status, Code: err.Code, Message: err.Message})
-		return
+	fallbackWriter := transportwriter.UnsupportedSurfaceFallbackWriter{WriteMCPError: writer.WriteMCPError}
+	if writer.WriteHTTPError != nil {
+		fallbackWriter.WriteHTTPError = func(err *transportwriter.HTTPError) {
+			if err == nil {
+				return
+			}
+			writer.WriteHTTPError(&HTTPErrorContract{Status: err.Status, Code: err.Code, Message: err.Message})
+		}
 	}
-	if writer.WriteMCPError != nil && envelope != nil && envelope.MCPError != nil {
-		writer.WriteMCPError(envelope.MCPError)
-	}
+	transportwriter.WriteUnsupportedSurfaceFallback(envelope, fallbackWriter)
 }

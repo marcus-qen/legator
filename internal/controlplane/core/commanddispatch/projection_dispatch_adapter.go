@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/marcus-qen/legator/internal/controlplane/core/projectiondispatch"
+	"github.com/marcus-qen/legator/internal/controlplane/core/transportwriter"
 	"github.com/marcus-qen/legator/internal/protocol"
 )
 
@@ -126,16 +127,27 @@ func dispatchUnsupportedCommandSurfaceAdapter(surface ProjectionDispatchSurface,
 }
 
 func dispatchUnsupportedCommandSurface(surface ProjectionDispatchSurface, writer CommandProjectionDispatchWriter) {
-	httpErr := &HTTPErrorContract{
-		Status:  http.StatusInternalServerError,
-		Code:    "internal_error",
-		Message: fmt.Sprintf("unsupported command dispatch surface %q", string(surface)),
-	}
+	envelope := unsupportedCommandDispatchResponseEnvelope(surface)
+	fallbackWriter := transportwriter.UnsupportedSurfaceFallbackWriter{WriteMCPError: writer.WriteMCPError}
 	if writer.WriteHTTPError != nil {
-		writer.WriteHTTPError(httpErr)
-		return
+		fallbackWriter.WriteHTTPError = func(err *transportwriter.HTTPError) {
+			if err == nil {
+				return
+			}
+			writer.WriteHTTPError(&HTTPErrorContract{Status: err.Status, Code: err.Code, Message: err.Message})
+		}
 	}
-	if writer.WriteMCPError != nil {
-		writer.WriteMCPError(errors.New(httpErr.Message))
+	transportwriter.WriteUnsupportedSurfaceFallback(envelope, fallbackWriter)
+}
+
+func unsupportedCommandDispatchResponseEnvelope(surface ProjectionDispatchSurface) *transportwriter.ResponseEnvelope {
+	message := fmt.Sprintf("unsupported command dispatch surface %q", string(surface))
+	return &transportwriter.ResponseEnvelope{
+		HTTPError: &transportwriter.HTTPError{
+			Status:  http.StatusInternalServerError,
+			Code:    "internal_error",
+			Message: message,
+		},
+		MCPError: errors.New(message),
 	}
 }
