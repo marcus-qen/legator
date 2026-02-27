@@ -41,6 +41,9 @@
 - **Kernel split S16 (command dispatch/read projection adapters)**
   - Applied the shared `core/projectiondispatch` registry utility to command dispatch-error and command-read projection paths, introducing centralized HTTP/MCP adapter selection without external response changes.
   - Added strict HTTP/MCP command parity tests that compare legacy vs adapter outputs/errors for dispatch and read flows.
+- **Kernel split S17 (shared command invoke seam for HTTP+MCP)**
+  - Added shared command invoke adapter in `internal/controlplane/core/commanddispatch` to centralize request-id generation, wait/stream/timeout policy selection, and renderer handoff projection.
+  - Refactored HTTP command dispatch route + MCP `legator_run_command` tool to consume the shared invoke seam with strict parity tests preserving existing response/error semantics.
 
 ### Added
 - Parity tests for the extracted core service and server policy-apply paths (not found + offline apply-local behavior).

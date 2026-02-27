@@ -68,7 +68,12 @@ func TestRenderDispatchCommandHTTP_ParityWithLegacy(t *testing.T) {
 			legacyRenderDispatchCommandHTTP(legacyRR, tc.requestID, tc.envelope, tc.wantWait)
 
 			adapterRR := httptest.NewRecorder()
-			renderDispatchCommandHTTP(adapterRR, tc.requestID, tc.envelope, tc.wantWait)
+			renderDispatchCommandHTTP(adapterRR, &corecommanddispatch.CommandInvokeProjection{
+				Surface:       corecommanddispatch.ProjectionDispatchSurfaceHTTP,
+				RequestID:     tc.requestID,
+				WaitForResult: tc.wantWait,
+				Envelope:      tc.envelope,
+			})
 
 			if legacyRR.Code != adapterRR.Code {
 				t.Fatalf("status mismatch: legacy=%d adapter=%d", legacyRR.Code, adapterRR.Code)

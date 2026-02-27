@@ -12,7 +12,6 @@ import (
 	coreapprovalpolicy "github.com/marcus-qen/legator/internal/controlplane/core/approvalpolicy"
 	corecommanddispatch "github.com/marcus-qen/legator/internal/controlplane/core/commanddispatch"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
-	"github.com/marcus-qen/legator/internal/protocol"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -178,14 +177,9 @@ func (s *MCPServer) handleRunCommand(ctx context.Context, _ *mcp.CallToolRequest
 		return nil, nil, fmt.Errorf("probe not found: %s", probeID)
 	}
 
-	cmd := protocol.CommandPayload{
-		RequestID: fmt.Sprintf("cmd-%d", time.Now().UnixNano()%100000),
-		Command:   command,
-		Level:     ps.PolicyLevel,
-	}
-
-	envelope := s.dispatcher.DispatchWithPolicy(ctx, probeID, cmd, corecommanddispatch.WaitPolicy(30*time.Second))
-	return renderRunCommandMCP(envelope)
+	invokeInput := corecommanddispatch.AssembleCommandInvokeMCP(probeID, command, ps.PolicyLevel)
+	projection := corecommanddispatch.InvokeCommandForSurface(ctx, invokeInput, s.dispatcher)
+	return renderRunCommandMCP(projection)
 }
 
 func (s *MCPServer) handleDecideApproval(_ context.Context, _ *mcp.CallToolRequest, input decideApprovalInput) (*mcp.CallToolResult, any, error) {

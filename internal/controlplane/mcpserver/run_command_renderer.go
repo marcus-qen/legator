@@ -7,13 +7,13 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func renderRunCommandMCP(envelope *corecommanddispatch.CommandResultEnvelope) (*mcp.CallToolResult, any, error) {
-	if envelope == nil {
+func renderRunCommandMCP(projection *corecommanddispatch.CommandInvokeProjection) (*mcp.CallToolResult, any, error) {
+	if projection == nil || projection.Envelope == nil {
 		return nil, nil, fmt.Errorf("command failed: empty result")
 	}
 
 	var dispatchErr error
-	handled := corecommanddispatch.DispatchCommandErrorsForSurface(envelope, corecommanddispatch.ProjectionDispatchSurfaceMCP, corecommanddispatch.CommandProjectionDispatchWriter{
+	handled := corecommanddispatch.DispatchCommandErrorsForSurface(projection.Envelope, projection.Surface, corecommanddispatch.CommandProjectionDispatchWriter{
 		WriteMCPError: func(err error) {
 			dispatchErr = err
 		},
@@ -22,12 +22,12 @@ func renderRunCommandMCP(envelope *corecommanddispatch.CommandResultEnvelope) (*
 		return nil, nil, dispatchErr
 	}
 
-	if envelope.Result == nil {
+	if projection.Envelope.Result == nil {
 		return nil, nil, fmt.Errorf("command failed: empty result")
 	}
 
 	resultText := ""
-	corecommanddispatch.DispatchCommandReadForSurface(envelope.Result, corecommanddispatch.ProjectionDispatchSurfaceMCP, corecommanddispatch.CommandProjectionDispatchWriter{
+	corecommanddispatch.DispatchCommandReadForSurface(projection.Envelope.Result, projection.Surface, corecommanddispatch.CommandProjectionDispatchWriter{
 		WriteMCPText: func(text string) {
 			resultText = text
 		},
