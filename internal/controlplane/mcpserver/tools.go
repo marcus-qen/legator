@@ -185,17 +185,7 @@ func (s *MCPServer) handleRunCommand(ctx context.Context, _ *mcp.CallToolRequest
 	}
 
 	envelope := s.dispatcher.DispatchWithPolicy(ctx, probeID, cmd, corecommanddispatch.WaitPolicy(30*time.Second))
-	if envelope == nil {
-		return nil, nil, fmt.Errorf("command failed: empty result")
-	}
-	if err := envelope.MCPError(); err != nil {
-		return nil, nil, err
-	}
-	if envelope.Result == nil {
-		return nil, nil, fmt.Errorf("command failed: empty result")
-	}
-
-	return textToolResult(corecommanddispatch.ResultText(envelope.Result)), nil, nil
+	return renderRunCommandMCP(envelope)
 }
 
 func (s *MCPServer) handleDecideApproval(_ context.Context, _ *mcp.CallToolRequest, input decideApprovalInput) (*mcp.CallToolResult, any, error) {
