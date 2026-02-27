@@ -208,7 +208,7 @@ func (s *MCPServer) handleDecideApproval(_ context.Context, _ *mcp.CallToolReque
 		return nil, nil, err
 	}
 
-	projection := coreapprovalpolicy.InvokeDecideApproval(invokeInput, s.decideApproval, coreapprovalpolicy.DecideApprovalRenderTargetMCP)
+	projection := coreapprovalpolicy.InvokeDecideApproval(invokeInput, s.decideApproval, coreapprovalpolicy.DecideApprovalRenderSurfaceMCP)
 	return renderDecideApprovalMCP(projection)
 }
 

@@ -61,7 +61,7 @@ func TestInvokeDecideApproval_ParityAcrossHTTPAndMCPInputs(t *testing.T) {
 		httpCalledID = id
 		httpCalledRequest = request
 		return &ApprovalDecisionResult{Request: &approval.Request{ID: id, Decision: request.Decision}}, nil
-	}, DecideApprovalRenderTargetHTTP)
+	}, DecideApprovalRenderSurfaceHTTP)
 
 	var mcpCalledID string
 	var mcpCalledRequest *DecideApprovalRequest
@@ -69,7 +69,7 @@ func TestInvokeDecideApproval_ParityAcrossHTTPAndMCPInputs(t *testing.T) {
 		mcpCalledID = id
 		mcpCalledRequest = request
 		return &ApprovalDecisionResult{Request: &approval.Request{ID: id, Decision: request.Decision}}, nil
-	}, DecideApprovalRenderTargetMCP)
+	}, DecideApprovalRenderSurfaceMCP)
 
 	if httpCalledID != "req-invoke-parity" || mcpCalledID != "req-invoke-parity" {
 		t.Fatalf("expected identical normalized invoke ids, http=%q mcp=%q", httpCalledID, mcpCalledID)
@@ -111,13 +111,13 @@ func TestInvokeDecideApproval_BodyDecodeParityAcrossHTTPAndMCPInputs(t *testing.
 	httpProjection := InvokeDecideApproval(httpInput, func(string, *DecideApprovalRequest) (*ApprovalDecisionResult, error) {
 		httpCalls++
 		return nil, nil
-	}, DecideApprovalRenderTargetHTTP)
+	}, DecideApprovalRenderSurfaceHTTP)
 
 	mcpCalls := 0
 	mcpProjection := InvokeDecideApproval(mcpInput, func(string, *DecideApprovalRequest) (*ApprovalDecisionResult, error) {
 		mcpCalls++
 		return nil, nil
-	}, DecideApprovalRenderTargetMCP)
+	}, DecideApprovalRenderSurfaceMCP)
 
 	if httpCalls != 0 || mcpCalls != 0 {
 		t.Fatalf("expected decode failure to short-circuit invoke call, http=%d mcp=%d", httpCalls, mcpCalls)
