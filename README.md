@@ -2,7 +2,7 @@
 
 **A self-hosted fleet management control plane that deploys AI probes across heterogeneous infrastructure.**
 
-Conversational management. Policy-driven guardrails. Audited change tracking. No vendor lock-in.
+Conversational ops. Policy guardrails. Full audit trail. No vendor lock-in.
 
 > "Zabbix meets ChatGPT with the policy engine of a bank."
 
@@ -10,37 +10,39 @@ Conversational management. Policy-driven guardrails. Audited change tracking. No
 
 Legator is a single control-plane application that:
 
-- **Deploys probe agents** onto your servers, VMs, containers, or cloud accounts
-- **Shows you everything** — health, inventory, activity, risk level per host
-- **Lets you talk to each probe** in persistent two-way chat ("restart nginx on web-03")
-- **Enforces strict guardrails** — read-only by default, graduated autonomy, human approval for changes
-- **Audits every action** with before/after state, who approved what, full timeline
+- **Deploys probes** onto servers, VMs, containers, Kubernetes nodes, and cloud accounts
+- **Shows you everything** — health, inventory, activity, risk per host
+- **Lets you talk to probes** in persistent two-way chat ("restart nginx on web-03")
+- **Enforces guardrails** — read-only by default, graduated autonomy, human approval for risky changes
+- **Audits every action** with before/after state and who approved what
 
-The LLM never touches your servers directly. The probe never reasons independently. **Brain and hands are separate.**
+The LLM never touches your servers directly. The probe never reasons independently. **Brain and hands stay separate.**
 
 ## Architecture
 
 ```text
-┌─────────────────────────────────────────────────────┐
-│                  Control Plane                       │
-│  Web UI · REST API · WebSocket Server · LLM Brain   │
-│  Policy Engine · Approval Queue · Audit Log          │
-└────────────────────┬────────────────────────────────┘
-                     │ WSS (TLS)
-          ┌──────────┼──────────┐
-          ▼          ▼          ▼
-      ┌───────┐  ┌───────┐  ┌───────┐
-      │ Probe │  │ Probe │  │ Probe │
-      │ web-01│  │ db-01 │  │ k8s-03│
-      └───────┘  └───────┘  └───────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                               Control Plane                                │
+│  Web UI · REST API · WebSocket Hub · Policy Engine · Audit Log             │
+│  Model Dock (BYOK profiles + routing + usage) · Alerts Engine              │
+└──────────────────────┬───────────────────────────────┬──────────────────────┘
+                       │                               │
+                  WSS/TLS                          Cloud APIs
+                       │                         (agentless ingest)
+            ┌──────────┼──────────┐             ┌──────┬──────┬──────┐
+            ▼          ▼          ▼             ▼      ▼      ▼      
+        ┌───────┐  ┌───────┐  ┌───────┐      AWS    GCP    Azure
+        │ Probe │  │ Probe │  │ Probe │
+        │ web-01│  │ db-01 │  │ k8s-03│
+        └───────┘  └───────┘  └───────┘
 ```
 
 - **Control plane**: standalone Go binary (14MB), runs anywhere
-- **Probe**: static Go binary (7MB), zero dependencies, runs as systemd or Windows service
-- **legatorctl**: CLI for fleet management from the terminal
-- **Connection**: persistent WebSocket, heartbeat every 30s, auto-reconnect with jitter
+- **Probe**: static Go binary (7MB), zero deps, runs as systemd, DaemonSet, or Windows service
+- **legatorctl**: CLI for fleet operations
+- **Connection**: persistent WebSocket, heartbeat every 30s, reconnect with jitter
 
-See [docs/architecture.md](docs/architecture.md) for the full component breakdown.
+See [docs/architecture.md](docs/architecture.md) for full internals.
 
 ## Quick Start
 
@@ -65,22 +67,40 @@ LEGATOR_AUTH=true \
 ./bin/control-plane
 ```
 
-### 3. Connect a probe
+### 3. Connect probes
 
 ```bash
 # Generate a registration token
 TOKEN=$(curl -sf -X POST http://localhost:8080/api/v1/tokens | jq -r .token)
 
-# One-liner install (production)
+# Linux one-liner install
 curl -sSL http://localhost:8080/install.sh | sudo bash -s -- \
   --server http://localhost:8080 --token "$TOKEN"
 
-# Or manual (development)
+# Manual (development)
 ./bin/probe init --server http://localhost:8080 --token "$TOKEN"
 ./bin/probe run
+```
 
-# Windows (PowerShell as Administrator)
-.\probe.exe init --server http://localhost:8080 --token "$TOKEN"
+**Kubernetes DaemonSet (auto-init):**
+
+```bash
+kubectl create ns legator
+kubectl -n legator create secret generic legator-probe \
+  --from-literal=LEGATOR_SERVER_URL=https://legator.example.com \
+  --from-literal=LEGATOR_TOKEN=<multi-use-token> \
+  --from-literal=LEGATOR_TAGS=k8s,prod
+
+kubectl -n legator apply -f deploy/k8s/probe-daemonset.yaml
+```
+
+**Windows (PowerShell, Admin):**
+
+```powershell
+$env:LEGATOR_SERVER_URL = "https://legator.example.com"
+$env:LEGATOR_TOKEN = "<token>"
+$env:LEGATOR_TAGS = "windows,prod"
+.\probe.exe init
 .\probe.exe service install
 ```
 
@@ -99,14 +119,22 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 | Feature | Status |
 |---|---|
 | Fleet view (web UI) | ✅ |
+| Fleet page redesign (3-panel master-detail + 5 detail tabs + embedded chat) | ✅ |
 | Per-probe chat (LLM-powered) | ✅ |
+| Fleet-level chat (multi-probe context + targeted dispatch) | ✅ |
 | Policy engine (observe/diagnose/remediate) | ✅ |
 | Defence-in-depth policy enforcement | ✅ |
 | Approval queue with risk classification | ✅ |
 | Immutable audit log | ✅ |
+| Alert rules engine + alerts dashboard | ✅ |
 | HMAC-SHA256 command signing | ✅ |
 | Output streaming (SSE) | ✅ |
 | Probe self-update | ✅ |
+| K8s DaemonSet probe deployment (auto-init + multi-use tokens + K8s inventory enrichment) | ✅ |
+| Windows probe support (MVP) | ✅ |
+| Cloud connectors (AWS/GCP/Azure, agentless inventory ingestion) | ✅ |
+| Auto-discovery + registration assist (network/SSH scan + guided registration) | ✅ |
+| BYOK model dock (multi-vendor key profiles + runtime model switching + usage tracking) | ✅ |
 | Tags + group commands | ✅ |
 | Multi-user RBAC | ✅ |
 | OIDC/SSO authentication | ✅ |
@@ -135,6 +163,10 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 | `LEGATOR_LLM_BASE_URL` | — | LLM API base URL |
 | `LEGATOR_LLM_API_KEY` | — | LLM API key |
 | `LEGATOR_LLM_MODEL` | — | LLM model name |
+| `LEGATOR_SERVER_URL` | — | Probe auto-init: control plane URL |
+| `LEGATOR_TOKEN` | — | Probe auto-init: registration token |
+| `LEGATOR_TAGS` | — | Probe auto-init: comma-separated tags |
+| `LEGATOR_HOSTNAME` | host OS name | Probe hostname override |
 
 ## Building
 
@@ -148,23 +180,26 @@ make release-build    # Cross-compile release binaries (incl. windows/amd64 prob
 
 ## API
 
-35+ REST endpoints. Key surface areas:
+50+ REST endpoints. Key groups:
 
 - **Fleet**: `GET /api/v1/probes`, `GET /api/v1/fleet/summary`, `POST /api/v1/probes/{id}/command`
 - **Chat**: `GET/POST /api/v1/probes/{id}/chat`, `GET /ws/chat`
+- **Fleet Chat**: `GET/POST /api/v1/fleet/chat`
 - **Policy**: `GET/POST /api/v1/policies`, `POST /api/v1/probes/{id}/apply-policy/{policyId}`
 - **Approvals**: `GET /api/v1/approvals`, `POST /api/v1/approvals/{id}/decide`
 - **Audit**: `GET /api/v1/audit`
+- **Alerts**: `GET/POST /api/v1/alerts`, `GET/PUT/DELETE /api/v1/alerts/{id}`, `GET /api/v1/alerts/{id}/history`, `GET /api/v1/alerts/active`
 - **Webhooks**: `GET/POST /api/v1/webhooks`
 - **Auth**: `GET/POST/DELETE /api/v1/auth/keys`, `GET/POST/DELETE /api/v1/users`
+- **Model Dock**: `GET/POST /api/v1/model-profiles`, `PUT/DELETE /api/v1/model-profiles/{id}`, `POST /api/v1/model-profiles/{id}/activate`, `GET /api/v1/model-profiles/active`, `GET /api/v1/model-usage`
+- **Cloud Connectors**: `GET/POST /api/v1/cloud/connectors`, `PUT/DELETE /api/v1/cloud/connectors/{id}`, `POST /api/v1/cloud/connectors/{id}/scan`, `GET /api/v1/cloud/assets`
+- **Discovery**: `POST /api/v1/discovery/scan`, `GET /api/v1/discovery/runs`, `GET /api/v1/discovery/runs/{id}`, `POST /api/v1/discovery/install-token`
 - **Metrics**: `GET /api/v1/metrics`
 - **Events**: `GET /api/v1/events` (SSE stream)
 
 ## Status
 
-**v1.0.0-alpha.6** — production-grade control plane with SSO, error resilience, and polished dark UI.
-
-~110 Go files · 35 test suites · 29/29 e2e · lint clean
+**v1.0.0-alpha.10** — 155 Go files, 30 test suites, 29/29 e2e.
 
 ## License
 
