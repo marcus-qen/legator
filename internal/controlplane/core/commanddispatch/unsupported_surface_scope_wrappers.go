@@ -24,8 +24,10 @@ func unsupportedCommandDispatchSurfaceEnvelope(surface ProjectionDispatchSurface
 }
 
 func dispatchUnsupportedCommandDispatchSurfaceFallback(surface ProjectionDispatchSurface, writer CommandProjectionDispatchWriter) {
-	transportwriter.WriteUnsupportedSurfaceFallback(
-		unsupportedCommandDispatchSurfaceEnvelope(surface),
-		newCommandUnsupportedSurfaceFallbackWriter(writer),
+	transportwriter.DispatchUnsupportedSurfaceFallback(
+		surface,
+		unsupportedCommandDispatchSurfaceEnvelope,
+		writer,
+		newCommandUnsupportedSurfaceFallbackWriter,
 	)
 }

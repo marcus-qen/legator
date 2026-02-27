@@ -76,6 +76,9 @@
 - **Kernel split S35 (shared unsupported-surface fallback constructor adapter)**
   - Added `transportwriter.AdaptUnsupportedSurfaceFallbackWriter(...)` to centralize unsupported-surface fallback writer assembly from domain HTTP-adapter + MCP passthrough callbacks.
   - Kept approval + command fallback constructors as thin wrappers over the shared helper and added strict helper-vs-legacy parity tests to lock HTTP-first/MCP-fallback precedence plus exact HTTP status/code/message and MCP text semantics.
+- **Kernel split S36 (shared unsupported-surface fallback dispatch invocation helper)**
+  - Added `transportwriter.DispatchUnsupportedSurfaceFallback(...)` to centralize unsupported-surface fallback invocation (`envelope + writer construction + dispatch`) while keeping approval + command domain policy seams explicit.
+  - Replaced duplicated approval/command fallback call-shapes with the shared helper and added strict parity tests against the legacy repeated invocation path to preserve HTTP-first/MCP-fallback precedence and exact HTTP + MCP error text semantics.
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
 - **Kernel split S13 (approval decide render-target registry boundary)**

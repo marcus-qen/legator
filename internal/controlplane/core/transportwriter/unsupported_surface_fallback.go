@@ -17,6 +17,17 @@ func AdaptUnsupportedSurfaceFallbackWriter[T any](writeHTTPError func(*T), const
 	}
 }
 
+// DispatchUnsupportedSurfaceFallback builds the unsupported-surface envelope
+// and fallback writer through domain seams, then emits with shared precedence.
+func DispatchUnsupportedSurfaceFallback[Surface, Writer any](
+	surface Surface,
+	buildEnvelope func(surface Surface) *ResponseEnvelope,
+	writer Writer,
+	buildWriter func(writer Writer) UnsupportedSurfaceFallbackWriter,
+) bool {
+	return WriteUnsupportedSurfaceFallback(buildEnvelope(surface), buildWriter(writer))
+}
+
 // WriteUnsupportedSurfaceFallback emits unsupported-surface errors with the
 // shared precedence policy: HTTP callback first, then MCP callback.
 func WriteUnsupportedSurfaceFallback(envelope *ResponseEnvelope, writer UnsupportedSurfaceFallbackWriter) bool {
