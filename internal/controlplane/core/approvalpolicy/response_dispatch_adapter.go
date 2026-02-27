@@ -23,12 +23,8 @@ func DispatchDecideApprovalResponseForSurface(projection *DecideApprovalProjecti
 	}
 
 	transportwriter.WriteFromBuilder(transportSurface, builder, transportwriter.WriterKernel{
-		WriteHTTPError: func(err *transportwriter.HTTPError) {
-			if writer.WriteHTTPError != nil {
-				writer.WriteHTTPError(&HTTPErrorContract{Status: err.Status, Code: err.Code, Message: err.Message})
-			}
-		},
-		WriteMCPError: writer.WriteMCPError,
+		WriteHTTPError: adaptApprovalHTTPErrorWriter(writer.WriteHTTPError),
+		WriteMCPError:  writer.WriteMCPError,
 		WriteHTTPSuccess: func(payload any) {
 			if writer.WriteSuccess == nil {
 				return

@@ -13,14 +13,9 @@ func unsupportedDecideApprovalSurfaceEnvelope(surface string) *transportwriter.R
 }
 
 func dispatchUnsupportedDecideApprovalSurfaceFallback(surface string, writer DecideApprovalResponseDispatchWriter) {
-	fallbackWriter := transportwriter.UnsupportedSurfaceFallbackWriter{WriteMCPError: writer.WriteMCPError}
-	if writer.WriteHTTPError != nil {
-		fallbackWriter.WriteHTTPError = func(err *transportwriter.HTTPError) {
-			if err == nil {
-				return
-			}
-			writer.WriteHTTPError(&HTTPErrorContract{Status: err.Status, Code: err.Code, Message: err.Message})
-		}
+	fallbackWriter := transportwriter.UnsupportedSurfaceFallbackWriter{
+		WriteHTTPError: adaptApprovalHTTPErrorWriter(writer.WriteHTTPError),
+		WriteMCPError:  writer.WriteMCPError,
 	}
 	transportwriter.WriteUnsupportedSurfaceFallback(unsupportedDecideApprovalSurfaceEnvelope(surface), fallbackWriter)
 }
