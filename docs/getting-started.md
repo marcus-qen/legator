@@ -1,14 +1,14 @@
 # Getting Started with Legator
 
-This guide takes you from zero to a working control plane with a connected probe in under 15 minutes.
+This gets you from zero to a working control plane with connected probes in ~15 minutes.
 
 ## Prerequisites
 
-- Go 1.24+ (for building from source)
-- Linux or Windows host for the probe (amd64)
-- An LLM API key (optional — needed for chat/task features)
+- Go 1.24+ (build from source)
+- Linux, Kubernetes, or Windows target hosts (amd64)
+- LLM API key (optional, needed for chat/task features)
 
-## Step 1: Build
+## 1) Build
 
 ```bash
 git clone https://github.com/marcus-qen/legator.git
@@ -16,20 +16,18 @@ cd legator
 make all
 ```
 
-This produces three binaries in `bin/`:
-- `control-plane` (14MB) — the central server
-- `probe` (7MB) — the agent that runs on target machines
-- `legatorctl` (6MB) — CLI for fleet management
+Binaries in `bin/`:
+- `control-plane` (14MB)
+- `probe` (7MB)
+- `legatorctl` (6MB)
 
-## Step 2: Start the Control Plane
+## 2) Start the control plane
 
-### Minimal (development)
+### Minimal (dev)
 
 ```bash
 ./bin/control-plane
 ```
-
-This starts on `:8080` with in-memory state, auto-generated signing key, and no authentication.
 
 ### Production
 
@@ -39,7 +37,7 @@ export LEGATOR_DATA_DIR="/var/lib/legator"
 export LEGATOR_SIGNING_KEY="$(openssl rand -hex 32)"
 export LEGATOR_AUTH=true
 
-# Optional: LLM for chat and task features
+# Optional LLM setup
 export LEGATOR_LLM_PROVIDER=openai
 export LEGATOR_LLM_BASE_URL=https://api.openai.com/v1
 export LEGATOR_LLM_API_KEY=sk-...
@@ -48,109 +46,164 @@ export LEGATOR_LLM_MODEL=gpt-4o-mini
 ./bin/control-plane
 ```
 
-**Configuration options:**
+When `LEGATOR_AUTH=true`, first startup prints an admin password to stderr. Save it.
 
-| Variable | Default | Description |
-|---|---|---|
-| `LEGATOR_LISTEN_ADDR` | `:8080` | HTTP listen address |
-| `LEGATOR_DATA_DIR` | `/var/lib/legator` | SQLite databases location |
-| `LEGATOR_SIGNING_KEY` | auto-generated | HMAC key for command signing (hex, 64+ chars) |
-| `LEGATOR_AUTH` | `false` | Enable authentication (API keys + sessions) |
-| `LEGATOR_LLM_PROVIDER` | — | LLM provider name |
-| `LEGATOR_LLM_BASE_URL` | — | LLM API base URL |
-| `LEGATOR_LLM_API_KEY` | — | LLM API key |
-| `LEGATOR_LLM_MODEL` | — | LLM model name |
-| `LEGATOR_TASK_APPROVAL_WAIT` | `2m` | How long to wait for approval before timeout |
-
-When `LEGATOR_AUTH=true`, the first startup prints an admin password to stderr. Save it.
-
-## Step 3: Generate a Registration Token
+## 3) Create registration token(s)
 
 ```bash
 curl -sf -X POST http://localhost:8080/api/v1/tokens | jq
 ```
 
-Response:
-```json
-{
-  "token": "prb_a8f3d1e9c2b4_1740000000_hmac_7f2a",
-  "created": "2026-02-26T12:00:00Z",
-  "expires": "2026-02-26T12:30:00Z"
-}
-```
+Default tokens are short-lived and single-use. For automation (DaemonSet, bootstrap jobs), use install-token/discovery flows to mint multi-use install tokens.
 
-Tokens are single-use and expire after 30 minutes.
+## 4) Connect probes
 
-## Step 4: Connect a Probe
-
-### Option A: One-liner install (recommended for production)
+### Linux one-liner (production)
 
 ```bash
 curl -sSL https://your-server/install.sh | sudo bash -s -- \
   --server https://your-server:8080 \
-  --token prb_a8f3d1e9c2b4_1740000000_hmac_7f2a
+  --token <token>
 ```
 
-This downloads the probe binary, registers with the control plane, and installs a systemd service.
-
-### Option B: Manual Linux install (development/testing)
+### Linux manual (dev/testing)
 
 ```bash
 ./bin/probe init --server http://localhost:8080 --token <token>
 ./bin/probe service install
-# or foreground mode:
+# or foreground mode
 ./bin/probe run
 ```
 
-### Option C: Manual Windows install (PowerShell, Admin)
+### Kubernetes DaemonSet deployment
+
+Use this when you want every node covered automatically.
+
+```bash
+kubectl create ns legator
+kubectl -n legator create secret generic legator-probe \
+  --from-literal=LEGATOR_SERVER_URL=https://legator.example.com \
+  --from-literal=LEGATOR_TOKEN=<multi-use-token> \
+  --from-literal=LEGATOR_TAGS=k8s,prod
+
+kubectl -n legator apply -f deploy/k8s/probe-daemonset.yaml
+```
+
+Probe auto-init env vars used by the DaemonSet:
+
+| Variable | Purpose |
+|---|---|
+| `LEGATOR_SERVER_URL` | Control plane URL |
+| `LEGATOR_TOKEN` | Registration token (single or multi-use) |
+| `LEGATOR_TAGS` | Comma-separated tags |
+| `LEGATOR_HOSTNAME` | Optional hostname override |
+
+### Windows probe setup (PowerShell, Administrator)
 
 ```powershell
-# Download probe.exe from release assets
-.\probe.exe init --server http://<control-plane>:8080 --token <token>
+$env:LEGATOR_SERVER_URL = "https://legator.example.com"
+$env:LEGATOR_TOKEN = "<token>"
+$env:LEGATOR_TAGS = "windows,prod"
+# optional
+$env:LEGATOR_HOSTNAME = "win-sql-01"
+
+.\probe.exe init
 .\probe.exe service install
-# lifecycle commands:
-.\probe.exe service status
-.\probe.exe service stop
-.\probe.exe service start
-.\probe.exe service remove
 ```
 
 Windows defaults:
 - config: `%ProgramData%\Legator\probe-config\config.yaml`
-- data/log: `%ProgramData%\Legator\`
+- data/logs: `%ProgramData%\Legator\`
 
-## Step 5: Verify
+## 5) Verify fleet connectivity
 
-Open the web UI at `http://localhost:8080/` — your probe should appear in the fleet view.
+Open `http://localhost:8080/` and check Fleet.
 
 Or via API:
 
 ```bash
-# List probes
 curl -sf http://localhost:8080/api/v1/probes | jq
-
-# Fleet summary
 curl -sf http://localhost:8080/api/v1/fleet/summary | jq
-
-# Send a command
-curl -sf -X POST http://localhost:8080/api/v1/probes/<probe-id>/command \
-  -H 'Content-Type: application/json' \
-  -d '{"command":"hostname","level":"observe"}' \
-  | jq
 ```
 
-## What Happens Next
+## 6) Cloud connector configuration (agentless ingest)
 
-Once a probe is connected:
+Cloud connectors pull inventory directly from provider APIs (AWS/GCP/Azure), no probe needed for basic asset visibility.
 
-1. **Inventory scan** runs automatically — OS, packages, services, users, network interfaces
-2. **Heartbeat** every 30 seconds — CPU, memory, disk metrics
-3. **Health scoring** updates based on heartbeat data
-4. **Commands** can be dispatched via API, UI, or chat
+```bash
+# Create connector
+curl -sf -X POST http://localhost:8080/api/v1/cloud/connectors \
+  -H Content-Type: application/json \
+  -d provider:aws | jq
 
-## Policy Levels
+# Trigger scan
+curl -sf -X POST http://localhost:8080/api/v1/cloud/connectors/<id>/scan | jq
 
-Each probe operates at a **capability level** that limits what commands it can execute:
+# List discovered assets
+curl -sf http://localhost:8080/api/v1/cloud/assets | jq
+```
+
+Start small. One account/project/subscription first. Expand once scan latency and permissions look sane.
+
+## 7) Model dock setup (BYOK)
+
+Model Dock lets you keep your own vendor keys, switch active models at runtime, and track usage.
+
+```bash
+# Add model profile
+curl -sf -X POST http://localhost:8080/api/v1/model-profiles \
+  -H Content-Type: application/json \
+  -d name:aws-prod | jq
+
+# Trigger scan
+curl -sf -X POST http://localhost:8080/api/v1/cloud/connectors/<id>/scan | jq
+
+# List discovered assets
+curl -sf http://localhost:8080/api/v1/cloud/assets | jq
+```
+
+Start small. One account/project/subscription first. Expand once scan latency and permissions look sane.
+
+## 7) Model dock setup (BYOK)
+
+Model Dock lets you keep your own vendor keys, switch active models at runtime, and track usage.
+
+```bash
+# Add model profile
+curl -sf -X POST http://localhost:8080/api/v1/model-profiles \
+  -H Content-Type: application/json \
+  -d config:{region:eu-west-2} | jq
+
+# Trigger scan
+curl -sf -X POST http://localhost:8080/api/v1/cloud/connectors/<id>/scan | jq
+
+# List discovered assets
+curl -sf http://localhost:8080/api/v1/cloud/assets | jq
+```
+
+Start small. One account/project/subscription first. Expand once scan latency and permissions look sane.
+
+## 7) Model dock setup (BYOK)
+
+Model Dock lets you keep your own vendor keys, switch active models at runtime, and track usage.
+
+```bash
+# Add model profile
+curl -sf -X POST http://localhost:8080/api/v1/model-profiles \
+  -H Content-Type: application/json \
+  -d name:openai-prod | jq
+
+# Activate profile
+curl -sf -X POST http://localhost:8080/api/v1/model-profiles/<id>/activate | jq
+
+# Check active profile + usage
+curl -sf http://localhost:8080/api/v1/model-profiles/active | jq
+curl -sf http://localhost:8080/api/v1/model-usage | jq
+```
+
+Rule of thumb: separate profiles by environment (dev/staging/prod) and vendor. Do not share one key across everything.
+
+## Policy levels (guardrails)
 
 | Level | Can do | Examples |
 |---|---|---|
@@ -158,99 +211,114 @@ Each probe operates at a **capability level** that limits what commands it can e
 | **diagnose** | observe + analysis/debug | `strace`, `tcpdump`, `dig`, `ping` |
 | **remediate** | diagnose + writes/changes | `rm`, `apt install`, `systemctl restart` |
 
-Default: **observe** (read-only). Change via policy templates:
+Default is **observe**. Keep it there unless you have a reason.
 
-```bash
-# List available policies
-curl -sf http://localhost:8080/api/v1/policies | jq
+## Next steps
 
-# Apply 'diagnose' policy to a probe
-curl -sf -X POST http://localhost:8080/api/v1/probes/<id>/apply-policy/diagnose | jq
-```
-
-Policy is enforced at **both** the control plane and the probe (defence in depth).
-
-## Approval Queue
-
-Commands that exceed the probe's policy level or are classified as high-risk require human approval:
-
-```bash
-# View pending approvals
-curl -sf http://localhost:8080/api/v1/approvals?status=pending | jq
-
-# Approve
-curl -sf -X POST http://localhost:8080/api/v1/approvals/<id>/decide \
-  -H 'Content-Type: application/json' \
-  -d '{"decision":"approved","decided_by":"admin"}'
-```
-
-Or use the web UI at `/approvals`.
-
-## Configure SSO (Optional)
-
-If you use Keycloak, Auth0, or any OIDC provider, add this to your `legator.json`:
-
-```json
-{
-  "oidc": {
-    "enabled": true,
-    "provider_url": "https://keycloak.example.com/realms/my-realm",
-    "client_id": "legator",
-    "client_secret": "your-client-secret",
-    "redirect_url": "https://legator.example.com/auth/oidc/callback",
-    "role_mapping": {
-      "admins": "admin",
-      "developers": "operator"
-    }
-  }
-}
-```
-
-Or via environment variables:
-
-```bash
-export LEGATOR_OIDC_ENABLED=true
-export LEGATOR_OIDC_PROVIDER_URL="https://keycloak.example.com/realms/my-realm"
-export LEGATOR_OIDC_CLIENT_ID="legator"
-export LEGATOR_OIDC_CLIENT_SECRET="your-client-secret"
-export LEGATOR_OIDC_REDIRECT_URL="https://legator.example.com/auth/oidc/callback"
-```
-
-The login page will show a "Sign in with SSO" button alongside the local login form.
-
-## Chat (requires LLM configuration)
-
-Talk to your probes in natural language:
-
-```bash
-curl -sf -X POST http://localhost:8080/api/v1/probes/<id>/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"What services are running on this server?"}'
-```
-
-Or use the web UI at `/probe/<id>/chat`.
-
-## CLI: legatorctl
-
-```bash
-# List all probes
-./bin/legatorctl list
-
-# Show probe details
-./bin/legatorctl info <probe-id>
-
-# JSON output
-./bin/legatorctl list --format json
-```
-
-## Next Steps
-
-- **Tags**: Organise probes with `PUT /api/v1/probes/<id>/tags`
-- **Group commands**: Dispatch to all probes matching a tag with `POST /api/v1/fleet/by-tag/<tag>/command`
-- **Webhooks**: Get notified on fleet events via `POST /api/v1/webhooks`
-- **Metrics**: Prometheus-compatible metrics at `GET /api/v1/metrics`
-- **Audit log**: Full action history at `GET /api/v1/audit` or `/audit` in the web UI
+- Set up alerts via `GET/POST /api/v1/alerts`
+- Use fleet chat via `GET/POST /api/v1/fleet/chat`
+- Configure SSO (`LEGATOR_OIDC_*`) for multi-user access
+- Wire metrics (`GET /api/v1/metrics`) into Prometheus/Grafana
 
 ---
 
-*Built with Go. Runs anywhere. No dependencies.*
+*Built with Go. Runs anywhere. No nonsense.*
+EOF application/json \
+  -d provider:openai | jq
+
+# Activate profile
+curl -sf -X POST http://localhost:8080/api/v1/model-profiles/<id>/activate | jq
+
+# Check active profile + usage
+curl -sf http://localhost:8080/api/v1/model-profiles/active | jq
+curl -sf http://localhost:8080/api/v1/model-usage | jq
+```
+
+Rule of thumb: separate profiles by environment (dev/staging/prod) and vendor. Do not share one key across everything.
+
+## Policy levels (guardrails)
+
+| Level | Can do | Examples |
+|---|---|---|
+| **observe** | Read-only operations | `ls`, `cat`, `ps`, `df`, `uptime` |
+| **diagnose** | observe + analysis/debug | `strace`, `tcpdump`, `dig`, `ping` |
+| **remediate** | diagnose + writes/changes | `rm`, `apt install`, `systemctl restart` |
+
+Default is **observe**. Keep it there unless you have a reason.
+
+## Next steps
+
+- Set up alerts via `GET/POST /api/v1/alerts`
+- Use fleet chat via `GET/POST /api/v1/fleet/chat`
+- Configure SSO (`LEGATOR_OIDC_*`) for multi-user access
+- Wire metrics (`GET /api/v1/metrics`) into Prometheus/Grafana
+
+---
+
+*Built with Go. Runs anywhere. No nonsense.*
+EOF application/json \
+  -d model:gpt-4.1 | jq
+
+# Activate profile
+curl -sf -X POST http://localhost:8080/api/v1/model-profiles/<id>/activate | jq
+
+# Check active profile + usage
+curl -sf http://localhost:8080/api/v1/model-profiles/active | jq
+curl -sf http://localhost:8080/api/v1/model-usage | jq
+```
+
+Rule of thumb: separate profiles by environment (dev/staging/prod) and vendor. Do not share one key across everything.
+
+## Policy levels (guardrails)
+
+| Level | Can do | Examples |
+|---|---|---|
+| **observe** | Read-only operations | `ls`, `cat`, `ps`, `df`, `uptime` |
+| **diagnose** | observe + analysis/debug | `strace`, `tcpdump`, `dig`, `ping` |
+| **remediate** | diagnose + writes/changes | `rm`, `apt install`, `systemctl restart` |
+
+Default is **observe**. Keep it there unless you have a reason.
+
+## Next steps
+
+- Set up alerts via `GET/POST /api/v1/alerts`
+- Use fleet chat via `GET/POST /api/v1/fleet/chat`
+- Configure SSO (`LEGATOR_OIDC_*`) for multi-user access
+- Wire metrics (`GET /api/v1/metrics`) into Prometheus/Grafana
+
+---
+
+*Built with Go. Runs anywhere. No nonsense.*
+EOF application/json \
+  -d api_key:sk-... | jq
+
+# Activate profile
+curl -sf -X POST http://localhost:8080/api/v1/model-profiles/<id>/activate | jq
+
+# Check active profile + usage
+curl -sf http://localhost:8080/api/v1/model-profiles/active | jq
+curl -sf http://localhost:8080/api/v1/model-usage | jq
+```
+
+Rule of thumb: separate profiles by environment (dev/staging/prod) and vendor. Do not share one key across everything.
+
+## Policy levels (guardrails)
+
+| Level | Can do | Examples |
+|---|---|---|
+| **observe** | Read-only operations | `ls`, `cat`, `ps`, `df`, `uptime` |
+| **diagnose** | observe + analysis/debug | `strace`, `tcpdump`, `dig`, `ping` |
+| **remediate** | diagnose + writes/changes | `rm`, `apt install`, `systemctl restart` |
+
+Default is **observe**. Keep it there unless you have a reason.
+
+## Next steps
+
+- Set up alerts via `GET/POST /api/v1/alerts`
+- Use fleet chat via `GET/POST /api/v1/fleet/chat`
+- Configure SSO (`LEGATOR_OIDC_*`) for multi-user access
+- Wire metrics (`GET /api/v1/metrics`) into Prometheus/Grafana
+
+---
+
+*Built with Go. Runs anywhere. No nonsense.*
