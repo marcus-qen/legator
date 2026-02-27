@@ -420,6 +420,155 @@ else
   fail "Fleet cleanup response invalid"
 fi
 
+# 30b. Fleet summary endpoint (legacy summary placeholder backfill)
+echo ""
+echo "30b. Fleet summary endpoint..."
+SUMMARY_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$CP_URL/api/v1/fleet/summary")
+if [[ "$SUMMARY_CODE" == "200" ]]; then
+  pass "Fleet summary endpoint returns 200"
+else
+  fail "Fleet summary endpoint returned $SUMMARY_CODE"
+fi
+
+# 31. Model Dock: Create profile
+echo ""
+echo "31. Model Dock: Create profile..."
+MODEL_CREATE=$(curl -sf -X POST "$CP_URL/api/v1/model-profiles" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"test-profile","provider":"openai","base_url":"https://api.openai.com/v1","api_key":"sk-test","model":"gpt-4o-mini"}')
+MODEL_PROFILE_ID=$(echo "$MODEL_CREATE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('profile',{}).get('id',''))" 2>/dev/null || echo "")
+if [[ -n "$MODEL_PROFILE_ID" ]]; then
+  pass "Model profile created (id=$MODEL_PROFILE_ID)"
+else
+  fail "Model profile create failed: $MODEL_CREATE"
+fi
+
+# 32. Model Dock: List profiles
+echo ""
+echo "32. Model Dock: List profiles..."
+MODEL_LIST=$(curl -sf "$CP_URL/api/v1/model-profiles")
+if echo "$MODEL_LIST" | python3 -c "import sys,json; profiles=json.load(sys.stdin).get('profiles',[]); assert any(p.get('id')=='$MODEL_PROFILE_ID' and p.get('name')=='test-profile' for p in profiles)" 2>/dev/null; then
+  pass "Model profile visible in list"
+else
+  fail "Model profile missing from list: $MODEL_LIST"
+fi
+
+# 33. Model Dock: Activate profile
+echo ""
+echo "33. Model Dock: Activate profile..."
+MODEL_ACTIVATE=$(curl -sf -X POST "$CP_URL/api/v1/model-profiles/$MODEL_PROFILE_ID/activate")
+MODEL_ACTIVATE_STATUS=$(echo "$MODEL_ACTIVATE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
+if [[ "$MODEL_ACTIVATE_STATUS" == "activated" ]]; then
+  pass "Model profile activated"
+else
+  fail "Model profile activate failed: $MODEL_ACTIVATE"
+fi
+
+# 34. Model Dock: Get active profile
+echo ""
+echo "34. Model Dock: Get active profile..."
+MODEL_ACTIVE=$(curl -sf "$CP_URL/api/v1/model-profiles/active")
+MODEL_ACTIVE_ID=$(echo "$MODEL_ACTIVE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('profile',{}).get('id',''))" 2>/dev/null || echo "")
+if [[ "$MODEL_ACTIVE_ID" == "$MODEL_PROFILE_ID" ]]; then
+  pass "Active profile matches activated profile"
+else
+  fail "Active profile mismatch: $MODEL_ACTIVE"
+fi
+
+# 35. Model Dock: Usage endpoint
+echo ""
+echo "35. Model Dock: Usage endpoint..."
+MODEL_USAGE=$(curl -sf "$CP_URL/api/v1/model-usage")
+if echo "$MODEL_USAGE" | python3 -c "import sys,json; d=json.load(sys.stdin); assert isinstance(d.get('usage', []), list)" 2>/dev/null; then
+  pass "Model usage endpoint returns usage array"
+else
+  fail "Model usage response invalid: $MODEL_USAGE"
+fi
+
+# 36. Model Dock: Delete profile
+echo ""
+echo "36. Model Dock: Delete profile..."
+# Active profiles require another active profile (or env fallback) before delete.
+MODEL_FALLBACK_CREATE=$(curl -sf -X POST "$CP_URL/api/v1/model-profiles" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"test-profile-fallback","provider":"openai","base_url":"https://api.openai.com/v1","api_key":"sk-test-2","model":"gpt-4o-mini"}')
+MODEL_FALLBACK_ID=$(echo "$MODEL_FALLBACK_CREATE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('profile',{}).get('id',''))" 2>/dev/null || echo "")
+if [[ -n "$MODEL_FALLBACK_ID" ]]; then
+  curl -sf -X POST "$CP_URL/api/v1/model-profiles/$MODEL_FALLBACK_ID/activate" > /dev/null
+fi
+MODEL_DELETE_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$CP_URL/api/v1/model-profiles/$MODEL_PROFILE_ID")
+if [[ "$MODEL_DELETE_CODE" == "200" || "$MODEL_DELETE_CODE" == "204" ]]; then
+  pass "Model profile deleted"
+else
+  fail "Model profile delete returned $MODEL_DELETE_CODE"
+fi
+
+# 37. Cloud Connectors: Create connector
+echo ""
+echo "37. Cloud Connectors: Create connector..."
+CLOUD_CREATE=$(curl -sf -X POST "$CP_URL/api/v1/cloud/connectors" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"test-aws","provider":"aws","config":{"region":"us-east-1","access_key_id":"AKIATEST","secret_access_key":"testkey"}}')
+CLOUD_CONNECTOR_ID=$(echo "$CLOUD_CREATE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('connector',{}).get('id',''))" 2>/dev/null || echo "")
+if [[ -n "$CLOUD_CONNECTOR_ID" ]]; then
+  pass "Cloud connector created (id=$CLOUD_CONNECTOR_ID)"
+else
+  fail "Cloud connector create failed: $CLOUD_CREATE"
+fi
+
+# 38. Cloud Connectors: List connectors
+echo ""
+echo "38. Cloud Connectors: List connectors..."
+CLOUD_LIST=$(curl -sf "$CP_URL/api/v1/cloud/connectors")
+if echo "$CLOUD_LIST" | python3 -c "import sys,json; connectors=json.load(sys.stdin).get('connectors',[]); assert any(c.get('id')=='$CLOUD_CONNECTOR_ID' and c.get('name')=='test-aws' for c in connectors)" 2>/dev/null; then
+  pass "Cloud connector visible in list"
+else
+  fail "Cloud connector missing from list: $CLOUD_LIST"
+fi
+
+# 39. Cloud Connectors: List assets (empty)
+echo ""
+echo "39. Cloud Connectors: List assets (empty)..."
+CLOUD_ASSETS=$(curl -sf "$CP_URL/api/v1/cloud/assets")
+if echo "$CLOUD_ASSETS" | python3 -c "import sys,json; d=json.load(sys.stdin); assert isinstance(d.get('assets', []), list)" 2>/dev/null; then
+  pass "Cloud assets endpoint returns array"
+else
+  fail "Cloud assets response invalid: $CLOUD_ASSETS"
+fi
+
+# 40. Cloud Connectors: Delete connector
+echo ""
+echo "40. Cloud Connectors: Delete connector..."
+CLOUD_DELETE_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$CP_URL/api/v1/cloud/connectors/$CLOUD_CONNECTOR_ID")
+if [[ "$CLOUD_DELETE_CODE" == "200" || "$CLOUD_DELETE_CODE" == "204" ]]; then
+  pass "Cloud connector deleted"
+else
+  fail "Cloud connector delete returned $CLOUD_DELETE_CODE"
+fi
+
+# 41. Discovery: List runs (empty)
+echo ""
+echo "41. Discovery: List runs (empty)..."
+DISCOVERY_RUNS=$(curl -sf "$CP_URL/api/v1/discovery/runs")
+RUN_COUNT=$(echo "$DISCOVERY_RUNS" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('runs', [])))" 2>/dev/null || echo "-1")
+if [[ "$RUN_COUNT" == "0" ]]; then
+  pass "Discovery runs list is empty before scan"
+else
+  fail "Expected 0 discovery runs before scan, got $RUN_COUNT"
+fi
+
+# 42. Discovery: Scan endpoint exists
+echo ""
+echo "42. Discovery: Scan endpoint exists..."
+DISCOVERY_SCAN_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$CP_URL/api/v1/discovery/scan" \
+  -H "Content-Type: application/json" \
+  -d '{"cidr":"192.168.1.0/24","scan_type":"ping"}')
+if [[ "$DISCOVERY_SCAN_CODE" == "200" || "$DISCOVERY_SCAN_CODE" == "202" ]]; then
+  pass "Discovery scan endpoint accepted request (status=$DISCOVERY_SCAN_CODE)"
+else
+  fail "Discovery scan endpoint returned $DISCOVERY_SCAN_CODE"
+fi
+
 echo ""
 echo "=========================="
 echo "Results: $PASSED passed, $FAILED failed"
