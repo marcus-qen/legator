@@ -8,15 +8,20 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/core/transportwriter"
 )
 
-// EncodeDecideApprovalResponseEnvelope normalizes approval-decide projections
-// for HTTP/MCP writer-kernel transport rendering.
-func EncodeDecideApprovalResponseEnvelope(projection *DecideApprovalProjection, surface DecideApprovalRenderSurface) *transportwriter.ResponseEnvelope {
-	if projection == nil {
-		projection = ProjectDecideApprovalTransport(nil)
-	}
+// DecideApprovalResponseEnvelopeBuilder normalizes approval-decide projections
+// into shared writer-kernel response envelopes.
+type DecideApprovalResponseEnvelopeBuilder struct {
+	Projection *DecideApprovalProjection
+}
+
+var _ transportwriter.EnvelopeBuilder = DecideApprovalResponseEnvelopeBuilder{}
+
+// BuildResponseEnvelope implements transportwriter.EnvelopeBuilder.
+func (b DecideApprovalResponseEnvelopeBuilder) BuildResponseEnvelope(surface transportwriter.Surface) *transportwriter.ResponseEnvelope {
+	projection := normalizeDecideApprovalProjection(b.Projection)
 
 	switch surface {
-	case DecideApprovalRenderSurfaceHTTP:
+	case transportwriter.SurfaceHTTP:
 		if httpErr, ok := projection.HTTPError(); ok {
 			return &transportwriter.ResponseEnvelope{HTTPError: &transportwriter.HTTPError{
 				Status:  httpErr.Status,
@@ -25,22 +30,43 @@ func EncodeDecideApprovalResponseEnvelope(projection *DecideApprovalProjection, 
 			}}
 		}
 		return &transportwriter.ResponseEnvelope{HTTPSuccess: normalizeDecideApprovalSuccess(projection.Success)}
-	case DecideApprovalRenderSurfaceMCP:
+	case transportwriter.SurfaceMCP:
 		if err := projection.MCPError(); err != nil {
 			return &transportwriter.ResponseEnvelope{MCPError: err}
 		}
 		return &transportwriter.ResponseEnvelope{MCPSuccess: normalizeDecideApprovalSuccess(projection.Success)}
 	default:
-		message := fmt.Sprintf("unsupported approval decide dispatch surface %q", string(surface))
-		return &transportwriter.ResponseEnvelope{
-			HTTPError: &transportwriter.HTTPError{
-				Status:  http.StatusInternalServerError,
-				Code:    "internal_error",
-				Message: message,
-			},
-			MCPError: errors.New(message),
-		}
+		return unsupportedDecideApprovalResponseEnvelope(string(surface))
 	}
+}
+
+// EncodeDecideApprovalResponseEnvelope normalizes approval-decide projections
+// for HTTP/MCP writer-kernel transport rendering.
+func EncodeDecideApprovalResponseEnvelope(projection *DecideApprovalProjection, surface DecideApprovalRenderSurface) *transportwriter.ResponseEnvelope {
+	transportSurface, ok := transportWriterSurfaceForDecideApproval(surface)
+	if !ok {
+		return unsupportedDecideApprovalResponseEnvelope(string(surface))
+	}
+	return DecideApprovalResponseEnvelopeBuilder{Projection: projection}.BuildResponseEnvelope(transportSurface)
+}
+
+func unsupportedDecideApprovalResponseEnvelope(surface string) *transportwriter.ResponseEnvelope {
+	message := fmt.Sprintf("unsupported approval decide dispatch surface %q", surface)
+	return &transportwriter.ResponseEnvelope{
+		HTTPError: &transportwriter.HTTPError{
+			Status:  http.StatusInternalServerError,
+			Code:    "internal_error",
+			Message: message,
+		},
+		MCPError: errors.New(message),
+	}
+}
+
+func normalizeDecideApprovalProjection(projection *DecideApprovalProjection) *DecideApprovalProjection {
+	if projection == nil {
+		return ProjectDecideApprovalTransport(nil)
+	}
+	return projection
 }
 
 func normalizeDecideApprovalSuccess(success *DecideApprovalSuccess) *DecideApprovalSuccess {

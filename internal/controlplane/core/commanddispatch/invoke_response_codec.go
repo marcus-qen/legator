@@ -26,7 +26,8 @@ type CommandInvokeHTTPJSONResponse struct {
 // HTTP JSON response/error payloads while preserving status semantics.
 func EncodeCommandInvokeHTTPJSONResponse(projection *CommandInvokeProjection) CommandInvokeHTTPJSONResponse {
 	response := CommandInvokeHTTPJSONResponse{Status: http.StatusOK}
-	envelope := EncodeCommandInvokeResponseEnvelope(projection, ProjectionDispatchSurfaceHTTP)
+	builder := CommandInvokeResponseEnvelopeBuilder{Projection: projection}
+	envelope := builder.BuildResponseEnvelope(transportwriter.SurfaceHTTP)
 
 	transportwriter.WriteForSurface(transportwriter.SurfaceHTTP, envelope, transportwriter.WriterKernel{
 		WriteHTTPError: func(httpErr *transportwriter.HTTPError) {
@@ -56,11 +57,11 @@ func EncodeCommandInvokeHTTPJSONResponse(projection *CommandInvokeProjection) Co
 // EncodeCommandInvokeMCPTextResponse shapes command invoke projections into MCP
 // text/error outputs while preserving existing error semantics.
 func EncodeCommandInvokeMCPTextResponse(projection *CommandInvokeProjection) (string, error) {
-	envelope := EncodeCommandInvokeResponseEnvelope(projection, ProjectionDispatchSurfaceMCP)
+	builder := CommandInvokeResponseEnvelopeBuilder{Projection: projection}
 	resultText := ""
 	var dispatchErr error
 
-	transportwriter.WriteForSurface(transportwriter.SurfaceMCP, envelope, transportwriter.WriterKernel{
+	transportwriter.WriteFromBuilder(transportwriter.SurfaceMCP, builder, transportwriter.WriterKernel{
 		WriteMCPError: func(err error) {
 			dispatchErr = err
 		},

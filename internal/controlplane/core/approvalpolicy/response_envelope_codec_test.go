@@ -10,7 +10,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/core/transportwriter"
 )
 
-func TestEncodeDecideApprovalResponseEnvelope_ParityWithLegacyHTTP(t *testing.T) {
+func TestDecideApprovalResponseEnvelopeBuilder_ParityWithLegacyHTTP(t *testing.T) {
 	tests := []struct {
 		name       string
 		projection *DecideApprovalProjection
@@ -23,7 +23,8 @@ func TestEncodeDecideApprovalResponseEnvelope_ParityWithLegacyHTTP(t *testing.T)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			legacyErr, legacySuccess := legacyDecideApprovalHTTPDispatch(tt.projection)
-			envelope := EncodeDecideApprovalResponseEnvelope(tt.projection, DecideApprovalRenderSurfaceHTTP)
+			builder := DecideApprovalResponseEnvelopeBuilder{Projection: tt.projection}
+			envelope := builder.BuildResponseEnvelope(transportwriter.SurfaceHTTP)
 			codecErr, codecSuccess := approvalHTTPDispatchFromEnvelope(envelope)
 
 			if !reflect.DeepEqual(legacyErr, codecErr) {
@@ -36,7 +37,7 @@ func TestEncodeDecideApprovalResponseEnvelope_ParityWithLegacyHTTP(t *testing.T)
 	}
 }
 
-func TestEncodeDecideApprovalResponseEnvelope_ParityWithLegacyMCP(t *testing.T) {
+func TestDecideApprovalResponseEnvelopeBuilder_ParityWithLegacyMCP(t *testing.T) {
 	tests := []struct {
 		name       string
 		projection *DecideApprovalProjection
@@ -49,7 +50,8 @@ func TestEncodeDecideApprovalResponseEnvelope_ParityWithLegacyMCP(t *testing.T) 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			legacyErr, legacySuccess := legacyDecideApprovalMCPDispatch(tt.projection)
-			envelope := EncodeDecideApprovalResponseEnvelope(tt.projection, DecideApprovalRenderSurfaceMCP)
+			builder := DecideApprovalResponseEnvelopeBuilder{Projection: tt.projection}
+			envelope := builder.BuildResponseEnvelope(transportwriter.SurfaceMCP)
 			codecErr, codecSuccess := approvalMCPDispatchFromEnvelope(envelope)
 
 			if (legacyErr == nil) != (codecErr == nil) {

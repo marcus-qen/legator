@@ -8,17 +8,34 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/core/transportwriter"
 )
 
+// CommandInvokeResponseEnvelopeBuilder normalizes command invoke projections
+// into shared writer-kernel response envelopes.
+type CommandInvokeResponseEnvelopeBuilder struct {
+	Projection *CommandInvokeProjection
+}
+
+var _ transportwriter.EnvelopeBuilder = CommandInvokeResponseEnvelopeBuilder{}
+
+// BuildResponseEnvelope implements transportwriter.EnvelopeBuilder.
+func (b CommandInvokeResponseEnvelopeBuilder) BuildResponseEnvelope(surface transportwriter.Surface) *transportwriter.ResponseEnvelope {
+	switch surface {
+	case transportwriter.SurfaceHTTP:
+		return encodeCommandInvokeHTTPEnvelope(b.Projection)
+	case transportwriter.SurfaceMCP:
+		return encodeCommandInvokeMCPEnvelope(b.Projection)
+	default:
+		return unsupportedCommandInvokeResponseEnvelope(string(surface))
+	}
+}
+
 // EncodeCommandInvokeResponseEnvelope normalizes command invoke projections
 // into a writer-kernel response envelope for a concrete transport surface.
 func EncodeCommandInvokeResponseEnvelope(projection *CommandInvokeProjection, surface ProjectionDispatchSurface) *transportwriter.ResponseEnvelope {
-	switch surface {
-	case ProjectionDispatchSurfaceHTTP:
-		return encodeCommandInvokeHTTPEnvelope(projection)
-	case ProjectionDispatchSurfaceMCP:
-		return encodeCommandInvokeMCPEnvelope(projection)
-	default:
-		return encodeUnsupportedCommandInvokeSurfaceEnvelope(surface)
+	transportSurface, ok := transportWriterSurfaceForCommandInvoke(surface)
+	if !ok {
+		return unsupportedCommandInvokeResponseEnvelope(string(surface))
 	}
+	return CommandInvokeResponseEnvelopeBuilder{Projection: projection}.BuildResponseEnvelope(transportSurface)
 }
 
 func encodeCommandInvokeHTTPEnvelope(projection *CommandInvokeProjection) *transportwriter.ResponseEnvelope {
@@ -62,8 +79,8 @@ func encodeCommandInvokeMCPEnvelope(projection *CommandInvokeProjection) *transp
 	return &transportwriter.ResponseEnvelope{MCPSuccess: ResultText(projection.Envelope.Result)}
 }
 
-func encodeUnsupportedCommandInvokeSurfaceEnvelope(surface ProjectionDispatchSurface) *transportwriter.ResponseEnvelope {
-	message := fmt.Sprintf("unsupported command invoke surface %q", string(surface))
+func unsupportedCommandInvokeResponseEnvelope(surface string) *transportwriter.ResponseEnvelope {
+	message := fmt.Sprintf("unsupported command invoke surface %q", surface)
 	return &transportwriter.ResponseEnvelope{
 		HTTPError: &transportwriter.HTTPError{
 			Status:  http.StatusInternalServerError,
@@ -72,4 +89,12 @@ func encodeUnsupportedCommandInvokeSurfaceEnvelope(surface ProjectionDispatchSur
 		},
 		MCPError: errors.New(message),
 	}
+}
+
+func transportWriterSurfaceForCommandInvoke(surface ProjectionDispatchSurface) (transportwriter.Surface, bool) {
+	resolvedSurface, ok := ResolveCommandInvokeProjectionDispatchSurface(surface)
+	if !ok {
+		return "", false
+	}
+	return transportwriter.Surface(resolvedSurface), true
 }

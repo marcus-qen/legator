@@ -11,7 +11,7 @@ import (
 	"github.com/marcus-qen/legator/internal/protocol"
 )
 
-func TestEncodeCommandInvokeResponseEnvelope_ParityWithLegacyHTTP(t *testing.T) {
+func TestCommandInvokeResponseEnvelopeBuilder_ParityWithLegacyHTTP(t *testing.T) {
 	tests := []struct {
 		name       string
 		projection *CommandInvokeProjection
@@ -28,7 +28,8 @@ func TestEncodeCommandInvokeResponseEnvelope_ParityWithLegacyHTTP(t *testing.T) 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			legacy := legacyEncodeCommandInvokeHTTPJSONResponse(tc.projection)
-			envelope := EncodeCommandInvokeResponseEnvelope(tc.projection, ProjectionDispatchSurfaceHTTP)
+			builder := CommandInvokeResponseEnvelopeBuilder{Projection: tc.projection}
+			envelope := builder.BuildResponseEnvelope(transportwriter.SurfaceHTTP)
 			codec := commandInvokeHTTPResponseFromEnvelope(envelope)
 
 			if legacy.Status != codec.Status || legacy.HasBody != codec.HasBody || legacy.SuppressWrite != codec.SuppressWrite {
@@ -41,7 +42,7 @@ func TestEncodeCommandInvokeResponseEnvelope_ParityWithLegacyHTTP(t *testing.T) 
 	}
 }
 
-func TestEncodeCommandInvokeResponseEnvelope_ParityWithLegacyMCP(t *testing.T) {
+func TestCommandInvokeResponseEnvelopeBuilder_ParityWithLegacyMCP(t *testing.T) {
 	tests := []struct {
 		name       string
 		projection *CommandInvokeProjection
@@ -58,7 +59,8 @@ func TestEncodeCommandInvokeResponseEnvelope_ParityWithLegacyMCP(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			legacyText, legacyErr := legacyEncodeCommandInvokeMCPTextResponse(tc.projection)
-			envelope := EncodeCommandInvokeResponseEnvelope(tc.projection, ProjectionDispatchSurfaceMCP)
+			builder := CommandInvokeResponseEnvelopeBuilder{Projection: tc.projection}
+			envelope := builder.BuildResponseEnvelope(transportwriter.SurfaceMCP)
 			codecText, codecErr := commandInvokeMCPResponseFromEnvelope(envelope)
 
 			if (legacyErr == nil) != (codecErr == nil) {
