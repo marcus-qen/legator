@@ -6,22 +6,9 @@ import (
 )
 
 func renderRunCommandMCP(projection *corecommanddispatch.CommandInvokeProjection) (*mcp.CallToolResult, any, error) {
-	var (
-		result      *mcp.CallToolResult
-		dispatchErr error
-	)
-
-	corecommanddispatch.DispatchCommandInvokeProjection(projection, corecommanddispatch.CommandInvokeRenderDispatchWriter{
-		WriteMCPError: func(err error) {
-			dispatchErr = err
-		},
-		WriteMCPText: func(text string) {
-			result = textToolResult(text)
-		},
-	})
-
-	if dispatchErr != nil {
-		return nil, nil, dispatchErr
+	text, err := corecommanddispatch.EncodeCommandInvokeMCPTextResponse(projection)
+	if err != nil {
+		return nil, nil, err
 	}
-	return result, nil, nil
+	return textToolResult(text), nil, nil
 }
