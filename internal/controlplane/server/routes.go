@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -500,20 +499,38 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 
 	wantWait := r.URL.Query().Get("wait") == "true" || r.URL.Query().Get("wait") == "1"
 	wantStream := r.URL.Query().Get("stream") == "true" || r.URL.Query().Get("stream") == "1"
-	if wantStream {
-		cmd.Stream = true
+
+	timeout := 30 * time.Second
+	if cmd.Timeout > 0 {
+		timeout = cmd.Timeout + 5*time.Second
 	}
 
-	if !wantWait {
-		if err := s.dispatchCore.Dispatch(id, cmd); err != nil {
-			writeJSONError(w, http.StatusBadGateway, "bad_gateway", err.Error())
-			return
-		}
+	policy := corecommanddispatch.DispatchOnlyPolicy(wantStream)
+	if wantWait {
+		policy = corecommanddispatch.WaitPolicy(timeout)
+		policy.StreamOutput = wantStream
+	}
 
+	envelope := s.dispatchCore.DispatchWithPolicy(r.Context(), id, cmd, policy)
+	if envelope != nil && envelope.Dispatched {
 		s.emitAudit(audit.EventCommandSent, id, "api", fmt.Sprintf("Command dispatched: %s", cmd.Command))
 		s.publishEvent(events.CommandDispatched, id, fmt.Sprintf("Command dispatched: %s", cmd.Command),
 			map[string]string{"request_id": cmd.RequestID, "command": cmd.Command})
+	}
 
+	if envelope == nil {
+		writeJSONError(w, http.StatusBadGateway, "bad_gateway", "command dispatch failed")
+		return
+	}
+
+	if httpErr, ok := envelope.HTTPError(); ok {
+		if !httpErr.SuppressWrite {
+			writeJSONError(w, httpErr.Status, httpErr.Code, httpErr.Message)
+		}
+		return
+	}
+
+	if !wantWait {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status":     "dispatched",
@@ -522,36 +539,8 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pending, err := s.dispatchCore.DispatchTracked(id, cmd)
-	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, "bad_gateway", err.Error())
-		return
-	}
-
-	s.emitAudit(audit.EventCommandSent, id, "api", fmt.Sprintf("Command dispatched: %s", cmd.Command))
-	s.publishEvent(events.CommandDispatched, id, fmt.Sprintf("Command dispatched: %s", cmd.Command),
-		map[string]string{"request_id": cmd.RequestID, "command": cmd.Command})
-
-	timeout := 30 * time.Second
-	if cmd.Timeout > 0 {
-		timeout = cmd.Timeout + 5*time.Second
-	}
-
-	result, err := s.dispatchCore.WaitForResult(r.Context(), cmd.RequestID, pending, timeout)
-	if err != nil {
-		switch {
-		case errors.Is(err, corecommanddispatch.ErrTimeout):
-			writeJSONError(w, http.StatusGatewayTimeout, "timeout", "timeout waiting for probe response")
-		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-			// client disconnected; nothing to write
-		default:
-			writeJSONError(w, http.StatusBadGateway, "bad_gateway", err.Error())
-		}
-		return
-	}
-
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(result)
+	_ = json.NewEncoder(w).Encode(envelope.Result)
 }
 
 func (s *Server) handleRotateKey(w http.ResponseWriter, r *http.Request) {

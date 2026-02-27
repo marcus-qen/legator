@@ -408,6 +408,69 @@ func TestHandleDispatchCommand_WaitAndStreamMode(t *testing.T) {
 	}
 }
 
+func TestHandleDispatchCommand_WaitTimeout(t *testing.T) {
+	srv := newTestServer(t)
+	srv.fleetMgr.Register("probe-timeout", "host", "linux", "amd64")
+
+	conn, cleanup := connectProbeWS(t, srv, "probe-timeout")
+	defer cleanup()
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			errCh <- fmt.Errorf("read command envelope: %w", err)
+			return
+		}
+
+		var env protocol.Envelope
+		if err := json.Unmarshal(msg, &env); err != nil {
+			errCh <- fmt.Errorf("decode command envelope: %w", err)
+			return
+		}
+		if env.Type != protocol.MsgCommand {
+			errCh <- fmt.Errorf("expected message type command, got %s", env.Type)
+			return
+		}
+
+		errCh <- nil
+	}()
+
+	body := protocol.CommandPayload{
+		RequestID: "req-wait-timeout",
+		Command:   "ls",
+		Level:     protocol.CapObserve,
+		Timeout:   1 * time.Millisecond,
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/probes/probe-timeout/command?wait=true", bytes.NewReader(data))
+	req.SetPathValue("id", "probe-timeout")
+	rr := httptest.NewRecorder()
+
+	srv.handleDispatchCommand(rr, req)
+
+	if rr.Code != http.StatusGatewayTimeout {
+		t.Fatalf("expected 504, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var apiErr APIError
+	if err := json.NewDecoder(rr.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode timeout error body: %v", err)
+	}
+	if apiErr.Code != "timeout" || apiErr.Error != "timeout waiting for probe response" {
+		t.Fatalf("unexpected timeout payload: %+v", apiErr)
+	}
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for probe websocket command dispatch")
+	}
+}
+
 func TestHandleSetTags(t *testing.T) {
 	srv := newTestServer(t)
 	srv.fleetMgr.Register("probe-tags", "host", "linux", "amd64")

@@ -936,7 +936,12 @@ func (s *Server) dispatchAndWait(probeID string, cmd *protocol.CommandPayload) (
 	if timeout < 10*time.Second {
 		timeout = 35 * time.Second
 	}
-	return s.dispatchCore.DispatchAndWait(context.Background(), probeID, *cmd, timeout)
+
+	envelope := s.dispatchCore.DispatchWithPolicy(context.Background(), probeID, *cmd, corecommanddispatch.WaitPolicy(timeout))
+	if envelope == nil {
+		return nil, corecommanddispatch.ErrEmptyResult
+	}
+	return envelope.Result, envelope.Err
 }
 
 // offlineChecker runs the periodic offline detection and publishes events.
