@@ -74,6 +74,7 @@ Single Go binary (~14MB). No external dependencies beyond optional LLM API.
 | `websocket/` | Hub: per-probe WebSocket connections, command signing, stream registry |
 | `llm/` | OpenAI-compatible provider, agentic task runner, chat responder |
 | `approval/` | Risk-gated approval queue, risk classifier, submit/decide/reaper |
+| `core/approvalpolicy/` | Reusable approval + policy orchestration facade used by server handlers/task flows |
 | `audit/` | Immutable audit log, SQLite-backed with WAL + indexes |
 | `chat/` | Per-probe persistent chat sessions, REST + WebSocket handlers |
 | `policy/` | Policy template CRUD, 3 built-in templates + custom |

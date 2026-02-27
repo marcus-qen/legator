@@ -82,6 +82,9 @@ func TestNew_InitializesCoreComponents(t *testing.T) {
 	if srv.approvalQueue == nil {
 		t.Fatal("approval queue not initialized")
 	}
+	if srv.approvalCore == nil {
+		t.Fatal("approval core not initialized")
+	}
 	if srv.hub == nil {
 		t.Fatal("websocket hub not initialized")
 	}
@@ -896,5 +899,64 @@ func TestHandleFleetChatPage_RendersTemplate(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "Fleet Chat") {
 		t.Fatalf("expected fleet chat page content, got: %s", rr.Body.String())
+	}
+}
+
+func TestHandleApplyPolicy_NotFound(t *testing.T) {
+	srv := newTestServer(t)
+
+	missingProbeReq := httptest.NewRequest(http.MethodPost, "/api/v1/probes/missing/apply-policy/observe-only", nil)
+	missingProbeReq.SetPathValue("id", "missing")
+	missingProbeReq.SetPathValue("policyId", "observe-only")
+	missingProbeRR := httptest.NewRecorder()
+
+	srv.handleApplyPolicy(missingProbeRR, missingProbeReq)
+
+	if missingProbeRR.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for missing probe, got %d body=%s", missingProbeRR.Code, missingProbeRR.Body.String())
+	}
+
+	srv.fleetMgr.Register("probe-a", "host", "linux", "amd64")
+	missingPolicyReq := httptest.NewRequest(http.MethodPost, "/api/v1/probes/probe-a/apply-policy/missing", nil)
+	missingPolicyReq.SetPathValue("id", "probe-a")
+	missingPolicyReq.SetPathValue("policyId", "missing")
+	missingPolicyRR := httptest.NewRecorder()
+
+	srv.handleApplyPolicy(missingPolicyRR, missingPolicyReq)
+
+	if missingPolicyRR.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for missing policy, got %d body=%s", missingPolicyRR.Code, missingPolicyRR.Body.String())
+	}
+}
+
+func TestHandleApplyPolicy_AppliedLocallyWhenProbeOffline(t *testing.T) {
+	srv := newTestServer(t)
+	srv.fleetMgr.Register("probe-policy", "host", "linux", "amd64")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/probes/probe-policy/apply-policy/observe-only", nil)
+	req.SetPathValue("id", "probe-policy")
+	req.SetPathValue("policyId", "observe-only")
+	rr := httptest.NewRecorder()
+
+	srv.handleApplyPolicy(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got["status"] != "applied_locally" {
+		t.Fatalf("expected applied_locally status, got %#v", got)
+	}
+
+	ps, ok := srv.fleetMgr.Get("probe-policy")
+	if !ok {
+		t.Fatal("probe missing after apply")
+	}
+	if ps.PolicyLevel != protocol.CapObserve {
+		t.Fatalf("expected policy level observe, got %s", ps.PolicyLevel)
 	}
 }
