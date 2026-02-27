@@ -1419,3 +1419,16 @@ body[data-page='discovery'] .discovery-run-cidr {
     padding: 10px;
   }
 }
+
+.code-box {
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--fg-0);
+  overflow: auto;
+  max-height: 420px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

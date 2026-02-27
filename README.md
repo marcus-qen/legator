@@ -193,6 +193,7 @@ make release-build    # Cross-compile release binaries (incl. windows/amd64 prob
 - **Auth**: `GET/POST/DELETE /api/v1/auth/keys`, `GET/POST/DELETE /api/v1/users`
 - **Model Dock**: `GET/POST /api/v1/model-profiles`, `PUT/DELETE /api/v1/model-profiles/{id}`, `POST /api/v1/model-profiles/{id}/activate`, `GET /api/v1/model-profiles/active`, `GET /api/v1/model-usage`
 - **Cloud Connectors**: `GET/POST /api/v1/cloud/connectors`, `PUT/DELETE /api/v1/cloud/connectors/{id}`, `POST /api/v1/cloud/connectors/{id}/scan`, `GET /api/v1/cloud/assets`
+- **Network Devices**: `GET/POST /api/v1/network/devices`, `GET/PUT/DELETE /api/v1/network/devices/{id}`, `POST /api/v1/network/devices/{id}/test`, `POST /api/v1/network/devices/{id}/inventory`
 - **Discovery**: `POST /api/v1/discovery/scan`, `GET /api/v1/discovery/runs`, `GET /api/v1/discovery/runs/{id}`, `POST /api/v1/discovery/install-token`
 - **Metrics**: `GET /api/v1/metrics`
 - **Events**: `GET /api/v1/events` (SSE stream)

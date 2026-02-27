@@ -1,0 +1,416 @@
+{{define "title"}}Network Devices — Legator{{end}}
+
+{{define "header"}}
+<div>
+  <h1 class="page-title">Network Devices</h1>
+  <span class="page-meta">SSH-based routers/switches/firewalls inventory (MVP)</span>
+</div>
+<div class="right">
+  <button class="btn" type="button" id="refresh-network-devices">Refresh</button>
+</div>
+{{end}}
+
+{{define "content"}}
+<section class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Targets</h2>
+    <span class="panel-sub" id="network-devices-count">0 devices</span>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Host</th>
+          <th>Vendor</th>
+          <th>Username</th>
+          <th>Auth</th>
+          <th>Tags</th>
+          <th>Updated</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="network-devices-body">
+        <tr><td colspan="8" class="empty-state">Loading devices…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel" id="network-device-form-panel">
+  <div class="panel-header">
+    <h2 class="panel-title" id="network-device-form-title">Add Device</h2>
+    <button type="button" class="btn" id="network-device-form-reset">Reset</button>
+  </div>
+
+  <form id="network-device-form" class="feed" autocomplete="off">
+    <input type="hidden" id="network-device-id" />
+
+    <label>
+      <span class="muted">Name</span>
+      <input class="input" id="network-device-name" required />
+    </label>
+
+    <div class="grid-two cloud-form-grid">
+      <label>
+        <span class="muted">Host</span>
+        <input class="input" id="network-device-host" required />
+      </label>
+
+      <label>
+        <span class="muted">Port</span>
+        <input class="input" id="network-device-port" type="number" min="1" max="65535" value="22" />
+      </label>
+    </div>
+
+    <div class="grid-two cloud-form-grid">
+      <label>
+        <span class="muted">Vendor</span>
+        <select class="input" id="network-device-vendor" required>
+          <option value="cisco">Cisco IOS</option>
+          <option value="junos">Juniper JunOS</option>
+          <option value="fortinet">Fortinet</option>
+          <option value="generic">Generic SSH</option>
+        </select>
+      </label>
+
+      <label>
+        <span class="muted">Auth mode</span>
+        <select class="input" id="network-device-auth-mode" required>
+          <option value="password">password</option>
+          <option value="agent">agent</option>
+          <option value="key">key</option>
+        </select>
+      </label>
+    </div>
+
+    <label>
+      <span class="muted">Username</span>
+      <input class="input" id="network-device-username" required />
+    </label>
+
+    <label>
+      <span class="muted">Tags (comma-separated)</span>
+      <input class="input" id="network-device-tags" placeholder="core, edge, datacenter-a" />
+    </label>
+
+    <div class="actions-row">
+      <button class="btn btn-primary" type="submit" id="network-device-submit">Create</button>
+      <button class="btn" type="button" id="network-device-cancel">Cancel</button>
+    </div>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Inventory Result</h2>
+    <span class="panel-sub">Best-effort output from selected target</span>
+  </div>
+  <pre id="network-device-inventory" class="code-box">No inventory run yet.</pre>
+</section>
+{{end}}
+
+{{define "scripts"}}
+<script>
+(() => {
+  const state = {
+    devices: [],
+    canWrite: false,
+  };
+
+  const body = document.getElementById('network-devices-body');
+  const count = document.getElementById('network-devices-count');
+  const inventoryBox = document.getElementById('network-device-inventory');
+
+  const formPanel = document.getElementById('network-device-form-panel');
+  const form = document.getElementById('network-device-form');
+  const formTitle = document.getElementById('network-device-form-title');
+  const submitBtn = document.getElementById('network-device-submit');
+
+  const idInput = document.getElementById('network-device-id');
+  const nameInput = document.getElementById('network-device-name');
+  const hostInput = document.getElementById('network-device-host');
+  const portInput = document.getElementById('network-device-port');
+  const vendorInput = document.getElementById('network-device-vendor');
+  const usernameInput = document.getElementById('network-device-username');
+  const authModeInput = document.getElementById('network-device-auth-mode');
+  const tagsInput = document.getElementById('network-device-tags');
+
+  function toast(message, kind) {
+    if (window.LegatorUI?.showToast) {
+      window.LegatorUI.showToast(message, kind || 'info');
+    }
+  }
+
+  function esc(value) {
+    return String(value || '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  function formatTime(value) {
+    if (!value) return '—';
+    const dt = new Date(value);
+    if (Number.isNaN(dt.getTime())) return value;
+    return dt.toLocaleString();
+  }
+
+  function parseTags(raw) {
+    return raw
+      .split(',')
+      .map((value) => value.trim().toLowerCase())
+      .filter((value, idx, all) => value && all.indexOf(value) === idx);
+  }
+
+  function formatJSON(value) {
+    return JSON.stringify(value, null, 2);
+  }
+
+  async function requestJSON(url, options) {
+    const response = await fetch(url, {
+      cache: 'no-store',
+      credentials: 'include',
+      ...options,
+    });
+
+    let payload = null;
+    if (response.status !== 204) {
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+    }
+
+    if (!response.ok) {
+      const message = payload?.error || payload?.message || response.statusText || 'Request failed';
+      throw new Error(message);
+    }
+    return payload;
+  }
+
+  async function loadPermissions() {
+    try {
+      const me = await requestJSON('/api/v1/me');
+      const permissions = Array.isArray(me?.permissions) ? me.permissions : [];
+      state.canWrite = permissions.includes('admin') || permissions.includes('fleet:write');
+    } catch {
+      state.canWrite = false;
+    }
+
+    formPanel.style.display = state.canWrite ? '' : 'none';
+  }
+
+  function renderDevices() {
+    count.textContent = `${state.devices.length} devices`;
+
+    if (!state.devices.length) {
+      body.innerHTML = '<tr><td colspan="8" class="empty-state">No network devices configured.</td></tr>';
+      return;
+    }
+
+    body.innerHTML = state.devices.map((device) => {
+      const actions = state.canWrite
+        ? `
+          <div class="actions-row">
+            <button class="btn" type="button" data-action="edit" data-id="${esc(device.id)}">Edit</button>
+            <button class="btn" type="button" data-action="test" data-id="${esc(device.id)}">Test</button>
+            <button class="btn" type="button" data-action="inventory" data-id="${esc(device.id)}">Inventory</button>
+            <button class="btn btn-danger" type="button" data-action="delete" data-id="${esc(device.id)}">Delete</button>
+          </div>
+        `
+        : '<span class="muted">Read-only</span>';
+
+      return `
+        <tr>
+          <td>${esc(device.name)}</td>
+          <td class="id-text">${esc(device.host)}:${esc(device.port || 22)}</td>
+          <td>${esc(device.vendor)}</td>
+          <td>${esc(device.username)}</td>
+          <td>${esc(device.auth_mode)}</td>
+          <td>${esc((device.tags || []).join(', ') || '—')}</td>
+          <td>${esc(formatTime(device.updated_at))}</td>
+          <td>${actions}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function setEditMode(device) {
+    formTitle.textContent = `Edit Device: ${device.name}`;
+    submitBtn.textContent = 'Save';
+
+    idInput.value = device.id;
+    nameInput.value = device.name || '';
+    hostInput.value = device.host || '';
+    portInput.value = String(device.port || 22);
+    vendorInput.value = device.vendor || 'generic';
+    usernameInput.value = device.username || '';
+    authModeInput.value = device.auth_mode || 'password';
+    tagsInput.value = Array.isArray(device.tags) ? device.tags.join(', ') : '';
+    nameInput.focus();
+  }
+
+  function resetForm() {
+    formTitle.textContent = 'Add Device';
+    submitBtn.textContent = 'Create';
+    idInput.value = '';
+    form.reset();
+    portInput.value = '22';
+    vendorInput.value = 'cisco';
+    authModeInput.value = 'password';
+  }
+
+  async function loadDevices() {
+    const payload = await requestJSON('/api/v1/network/devices');
+    state.devices = Array.isArray(payload?.devices) ? payload.devices : [];
+    renderDevices();
+  }
+
+  function getCredentialPayload() {
+    const password = window.prompt('Password/private key is never stored. Enter SSH password (leave blank to skip):', '');
+    if (password === null) {
+      return null;
+    }
+    const trimmed = password.trim();
+    if (!trimmed) {
+      return {};
+    }
+    return { password: trimmed };
+  }
+
+  body.addEventListener('click', async (event) => {
+    const button = event.target.closest('button[data-action]');
+    if (!button) return;
+
+    if (!state.canWrite) {
+      toast('You need fleet:write permission for this action.', 'error');
+      return;
+    }
+
+    const action = button.dataset.action;
+    const id = button.dataset.id;
+    const device = state.devices.find((item) => item.id === id);
+    if (!device) return;
+
+    if (action === 'edit') {
+      setEditMode(device);
+      return;
+    }
+
+    if (action === 'delete') {
+      if (!window.confirm(`Delete network device “${device.name}”?`)) return;
+      try {
+        await requestJSON(`/api/v1/network/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (idInput.value === id) {
+          resetForm();
+        }
+        toast('Device deleted', 'success');
+        await loadDevices();
+      } catch (error) {
+        toast(`Delete failed: ${error.message}`, 'error');
+      }
+      return;
+    }
+
+    const credentialPayload = getCredentialPayload();
+    if (credentialPayload === null) {
+      return;
+    }
+
+    if (action === 'test') {
+      try {
+        const payload = await requestJSON(`/api/v1/network/devices/${encodeURIComponent(id)}/test`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(credentialPayload),
+        });
+        inventoryBox.textContent = formatJSON(payload?.result || payload);
+        toast('Connectivity check completed', 'success');
+      } catch (error) {
+        toast(`Connectivity check failed: ${error.message}`, 'error');
+      }
+      return;
+    }
+
+    if (action === 'inventory') {
+      try {
+        const payload = await requestJSON(`/api/v1/network/devices/${encodeURIComponent(id)}/inventory`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(credentialPayload),
+        });
+        inventoryBox.textContent = formatJSON(payload?.inventory || payload);
+        toast('Inventory collection finished', 'success');
+      } catch (error) {
+        toast(`Inventory collection failed: ${error.message}`, 'error');
+      }
+      return;
+    }
+  });
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!state.canWrite) {
+      toast('You need fleet:write permission to save targets.', 'error');
+      return;
+    }
+
+    const id = idInput.value.trim();
+    const payload = {
+      name: nameInput.value.trim(),
+      host: hostInput.value.trim(),
+      port: Number(portInput.value || 22),
+      vendor: vendorInput.value,
+      username: usernameInput.value.trim(),
+      auth_mode: authModeInput.value,
+      tags: parseTags(tagsInput.value || ''),
+    };
+
+    try {
+      if (id) {
+        await requestJSON(`/api/v1/network/devices/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        toast('Device updated', 'success');
+      } else {
+        await requestJSON('/api/v1/network/devices', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        toast('Device created', 'success');
+      }
+
+      resetForm();
+      await loadDevices();
+    } catch (error) {
+      toast(`Save failed: ${error.message}`, 'error');
+    }
+  });
+
+  document.getElementById('refresh-network-devices').addEventListener('click', async () => {
+    try {
+      await loadDevices();
+      toast('Network devices refreshed', 'success');
+    } catch (error) {
+      toast(`Refresh failed: ${error.message}`, 'error');
+    }
+  });
+  document.getElementById('network-device-form-reset').addEventListener('click', resetForm);
+  document.getElementById('network-device-cancel').addEventListener('click', resetForm);
+
+  Promise.resolve()
+    .then(loadPermissions)
+    .then(loadDevices)
+    .catch((error) => {
+      toast(`Failed to load network devices: ${error.message}`, 'error');
+    });
+})();
+</script>
+{{end}}

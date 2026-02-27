@@ -209,6 +209,25 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/v1/cloud/assets", s.withPermission(auth.PermFleetRead, s.handleCloudConnectorsUnavailable))
 	}
 
+	// Network Devices API
+	if s.networkDeviceHandlers != nil {
+		mux.HandleFunc("GET /api/v1/network/devices", s.withPermission(auth.PermFleetRead, s.networkDeviceHandlers.HandleListDevices))
+		mux.HandleFunc("POST /api/v1/network/devices", s.withPermission(auth.PermFleetWrite, s.networkDeviceHandlers.HandleCreateDevice))
+		mux.HandleFunc("GET /api/v1/network/devices/{id}", s.withPermission(auth.PermFleetRead, s.networkDeviceHandlers.HandleGetDevice))
+		mux.HandleFunc("PUT /api/v1/network/devices/{id}", s.withPermission(auth.PermFleetWrite, s.networkDeviceHandlers.HandleUpdateDevice))
+		mux.HandleFunc("DELETE /api/v1/network/devices/{id}", s.withPermission(auth.PermFleetWrite, s.networkDeviceHandlers.HandleDeleteDevice))
+		mux.HandleFunc("POST /api/v1/network/devices/{id}/test", s.withPermission(auth.PermFleetWrite, s.networkDeviceHandlers.HandleTestDevice))
+		mux.HandleFunc("POST /api/v1/network/devices/{id}/inventory", s.withPermission(auth.PermFleetWrite, s.networkDeviceHandlers.HandleInventoryDevice))
+	} else {
+		mux.HandleFunc("GET /api/v1/network/devices", s.withPermission(auth.PermFleetRead, s.handleNetworkDevicesUnavailable))
+		mux.HandleFunc("POST /api/v1/network/devices", s.withPermission(auth.PermFleetWrite, s.handleNetworkDevicesUnavailable))
+		mux.HandleFunc("GET /api/v1/network/devices/{id}", s.withPermission(auth.PermFleetRead, s.handleNetworkDevicesUnavailable))
+		mux.HandleFunc("PUT /api/v1/network/devices/{id}", s.withPermission(auth.PermFleetWrite, s.handleNetworkDevicesUnavailable))
+		mux.HandleFunc("DELETE /api/v1/network/devices/{id}", s.withPermission(auth.PermFleetWrite, s.handleNetworkDevicesUnavailable))
+		mux.HandleFunc("POST /api/v1/network/devices/{id}/test", s.withPermission(auth.PermFleetWrite, s.handleNetworkDevicesUnavailable))
+		mux.HandleFunc("POST /api/v1/network/devices/{id}/inventory", s.withPermission(auth.PermFleetWrite, s.handleNetworkDevicesUnavailable))
+	}
+
 	// Binary download + install script
 	mux.HandleFunc("GET /download/{filename}", s.handleDownload)
 	mux.HandleFunc("GET /install.sh", s.handleInstallScript)
@@ -229,6 +248,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /alerts", s.handleAlertsPage)
 	mux.HandleFunc("GET /model-dock", s.handleModelDockPage)
 	mux.HandleFunc("GET /cloud-connectors", s.handleCloudConnectorsPage)
+	mux.HandleFunc("GET /network-devices", s.handleNetworkDevicesPage)
 	mux.HandleFunc("GET /discovery", s.handleDiscoveryPage)
 
 	// WebSocket for probes

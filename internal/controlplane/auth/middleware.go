@@ -137,7 +137,7 @@ func (m *AuthMiddleware) shouldSkip(path string) bool {
 
 func isWebLoginRedirectPath(path string) bool {
 	switch path {
-	case "/", "/approvals", "/audit":
+	case "/", "/approvals", "/audit", "/alerts", "/model-dock", "/cloud-connectors", "/network-devices", "/discovery", "/fleet/chat":
 		return true
 	}
 	if strings.HasPrefix(path, "/probe/") {
