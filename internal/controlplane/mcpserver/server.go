@@ -5,6 +5,7 @@ import (
 
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
+	coreapprovalpolicy "github.com/marcus-qen/legator/internal/controlplane/core/approvalpolicy"
 	corecommanddispatch "github.com/marcus-qen/legator/internal/controlplane/core/commanddispatch"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
@@ -17,12 +18,13 @@ var Version = "dev"
 
 // MCPServer exposes Legator control-plane capabilities as MCP tools/resources.
 type MCPServer struct {
-	server     *mcp.Server
-	handler    http.Handler
-	fleetStore *fleet.Store
-	auditStore *audit.Store
-	dispatcher *corecommanddispatch.Service
-	logger     *zap.Logger
+	server         *mcp.Server
+	handler        http.Handler
+	fleetStore     *fleet.Store
+	auditStore     *audit.Store
+	dispatcher     *corecommanddispatch.Service
+	decideApproval func(id string, request *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error)
+	logger         *zap.Logger
 }
 
 // New creates and wires the MCP server surface for Legator.
@@ -32,6 +34,7 @@ func New(
 	hub *cpws.Hub,
 	cmdTracker *cmdtracker.Tracker,
 	logger *zap.Logger,
+	decideApproval func(id string, request *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error),
 ) *MCPServer {
 	if logger == nil {
 		logger = zap.NewNop()
@@ -48,11 +51,12 @@ func New(
 	}, nil)
 
 	m := &MCPServer{
-		server:     srv,
-		fleetStore: fleetStore,
-		auditStore: auditStore,
-		dispatcher: corecommanddispatch.NewService(hub, cmdTracker),
-		logger:     logger.Named("mcp"),
+		server:         srv,
+		fleetStore:     fleetStore,
+		auditStore:     auditStore,
+		dispatcher:     corecommanddispatch.NewService(hub, cmdTracker),
+		decideApproval: decideApproval,
+		logger:         logger.Named("mcp"),
 	}
 
 	m.registerTools()

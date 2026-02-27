@@ -33,6 +33,7 @@ func TestToolsRegistered(t *testing.T) {
 	sort.Strings(names)
 
 	expected := []string{
+		"legator_decide_approval",
 		"legator_fleet_query",
 		"legator_get_inventory",
 		"legator_list_probes",
@@ -157,7 +158,7 @@ func newTestMCPServer(t *testing.T) (*MCPServer, *fleet.Store, *audit.Store) {
 
 	hub := cpws.NewHub(zap.NewNop(), nil)
 	tracker := cmdtracker.New(time.Minute)
-	srv := New(fleetStore, auditStore, hub, tracker, zap.NewNop())
+	srv := New(fleetStore, auditStore, hub, tracker, zap.NewNop(), nil)
 
 	t.Cleanup(func() {
 		_ = fleetStore.Close()
