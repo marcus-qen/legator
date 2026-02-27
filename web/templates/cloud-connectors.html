@@ -123,6 +123,7 @@
     connectors: [],
     assets: [],
   };
+  const canWrite = {{if hasPermission .CurrentUser "fleet:write"}}true{{else}}false{{end}};
 
   const connectorsBody = document.getElementById('connectors-body');
   const connectorsCount = document.getElementById('connectors-count');
@@ -131,6 +132,8 @@
   const form = document.getElementById('connector-form');
   const formTitle = document.getElementById('connector-form-title');
   const submitBtn = document.getElementById('connector-submit');
+  const formResetBtn = document.getElementById('connector-form-reset');
+  const cancelBtn = document.getElementById('connector-cancel');
 
   const connectorId = document.getElementById('connector-id');
   const connectorName = document.getElementById('connector-name');
@@ -231,9 +234,11 @@
         <td>${statusTag(connector)}</td>
         <td>
           <div class="actions-row">
-            <button class="btn" type="button" data-action="edit" data-id="${esc(connector.id)}">Edit</button>
-            <button class="btn" type="button" data-action="scan" data-id="${esc(connector.id)}">Scan</button>
-            <button class="btn btn-danger" type="button" data-action="delete" data-id="${esc(connector.id)}">Delete</button>
+            ${canWrite
+              ? `<button class="btn" type="button" data-action="edit" data-id="${esc(connector.id)}">Edit</button>
+                 <button class="btn" type="button" data-action="scan" data-id="${esc(connector.id)}">Scan</button>
+                 <button class="btn btn-danger" type="button" data-action="delete" data-id="${esc(connector.id)}">Delete</button>`
+              : '<span class="muted">Read-only</span>'}
           </div>
         </td>
       </tr>
@@ -309,6 +314,11 @@
     const button = event.target.closest('button[data-action]');
     if (!button) return;
 
+    if (!canWrite) {
+      toast('fleet:write permission is required to manage connectors', 'warning');
+      return;
+    }
+
     const action = button.dataset.action;
     const id = button.dataset.id;
     const connector = state.connectors.find((item) => item.id === id);
@@ -351,6 +361,11 @@
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
 
+    if (!canWrite) {
+      toast('fleet:write permission is required to save connectors', 'warning');
+      return;
+    }
+
     const id = connectorId.value.trim();
     const payload = {
       name: connectorName.value.trim(),
@@ -391,8 +406,19 @@
       toast(`Refresh failed: ${error.message}`, 'error');
     }
   });
-  document.getElementById('connector-form-reset').addEventListener('click', resetForm);
-  document.getElementById('connector-cancel').addEventListener('click', resetForm);
+  formResetBtn.addEventListener('click', resetForm);
+  cancelBtn.addEventListener('click', resetForm);
+
+  if (!canWrite) {
+    formTitle.textContent = 'Connectors (read-only)';
+    submitBtn.setAttribute('disabled', 'disabled');
+    submitBtn.textContent = 'Read-only';
+    formResetBtn.setAttribute('disabled', 'disabled');
+    cancelBtn.setAttribute('disabled', 'disabled');
+    [connectorName, connectorProvider, connectorAuthMode, connectorEnabled].forEach((el) => {
+      el.setAttribute('disabled', 'disabled');
+    });
+  }
   providerFilter.addEventListener('change', loadAssets);
   connectorFilter.addEventListener('change', loadAssets);
 
