@@ -49,6 +49,28 @@ else
   fail "Token generation failed: $TOKEN_JSON"
 fi
 
+# 2b. Generate a non-expiring multi-use token and register with it
+echo ""
+echo "2b. Generating non-expiring multi-use token..."
+TOKEN_JSON_NO_EXPIRY=$(curl -sf -X POST "$CP_URL/api/v1/tokens?multi_use=true&no_expiry=true")
+TOKEN_NO_EXPIRY=$(echo "$TOKEN_JSON_NO_EXPIRY" | python3 -c "import sys,json; print(json.load(sys.stdin).get(\"token\", \"\"))")
+if [[ "$TOKEN_NO_EXPIRY" == prb_* ]]; then
+  pass "Non-expiring token generated: ${TOKEN_NO_EXPIRY:0:20}..."
+
+  REG_NO_EXPIRY_JSON=$(curl -sf -X POST "$CP_URL/api/v1/register" \
+    -H "Content-Type: application/json" \
+    -d "{\"token\":\"$TOKEN_NO_EXPIRY\",\"hostname\":\"e2e-test-no-expiry\",\"os\":\"linux\",\"arch\":\"amd64\"}")
+  NO_EXPIRY_PROBE_ID=$(echo "$REG_NO_EXPIRY_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get(\"probe_id\", \"\"))")
+
+  if [[ -n "$NO_EXPIRY_PROBE_ID" && "$NO_EXPIRY_PROBE_ID" == prb-* ]]; then
+    pass "Non-expiring token used for registration: $NO_EXPIRY_PROBE_ID"
+  else
+    fail "Non-expiring token registration failed: $REG_NO_EXPIRY_JSON"
+  fi
+else
+  fail "Non-expiring token generation failed: $TOKEN_JSON_NO_EXPIRY"
+fi
+
 # 3. Register probe
 echo ""
 echo "3. Registering probe..."
@@ -602,6 +624,30 @@ if echo "$AUDIT_PURGE" | python3 -c 'import sys,json; d=json.load(sys.stdin); as
   pass "Audit purge endpoint returns deleted count"
 else
   fail "Audit purge response invalid: $AUDIT_PURGE"
+fi
+
+# 46. MCP endpoint exists
+echo ""
+echo "46. MCP endpoint exists..."
+MCP_HEADERS=$(mktemp)
+MCP_BODY=$(mktemp)
+MCP_CURL_EXIT=0
+curl -s -D "$MCP_HEADERS" -o "$MCP_BODY" --max-time 2 "$CP_URL/mcp" || MCP_CURL_EXIT=$?
+MCP_STATUS=$(awk 'toupper($1) ~ /^HTTP/ {code=$2} END {print code}' "$MCP_HEADERS")
+if [[ "$MCP_STATUS" == "200" || "$MCP_STATUS" == "401" || "$MCP_STATUS" == "403" ]]; then
+  pass "MCP endpoint reachable (status=$MCP_STATUS, curl_exit=$MCP_CURL_EXIT)"
+else
+  fail "MCP endpoint check failed (status=$MCP_STATUS, curl_exit=$MCP_CURL_EXIT, headers=$(tr '\n' ' ' < "$MCP_HEADERS"))"
+fi
+
+# 47. /version sanity after MCP wiring
+echo ""
+echo "47. Version endpoint still works..."
+VERSION_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$CP_URL/version")
+if [[ "$VERSION_STATUS" == "200" ]]; then
+  pass "/version returns 200 after MCP wiring"
+else
+  fail "/version returned $VERSION_STATUS after MCP wiring"
 fi
 
 echo ""

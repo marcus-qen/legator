@@ -29,6 +29,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/llm"
+	"github.com/marcus-qen/legator/internal/controlplane/mcpserver"
 	"github.com/marcus-qen/legator/internal/controlplane/metrics"
 	"github.com/marcus-qen/legator/internal/controlplane/modeldock"
 	"github.com/marcus-qen/legator/internal/controlplane/oidc"
@@ -107,6 +108,9 @@ type Server struct {
 	discoveryStore    *discovery.Store
 	discoveryHandlers *discovery.Handler
 
+	// MCP
+	mcpServer *mcpserver.MCPServer
+
 	// Templates
 	pages *pageTemplates
 
@@ -166,6 +170,11 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initDiscovery()
 	s.initLLM()
 	s.initHub()
+	if s.cfg.MCPEnabled {
+		mcpserver.Version = Version
+		s.mcpServer = mcpserver.New(s.fleetStore, s.auditStore, s.hub, s.cmdTracker, s.logger)
+		s.logger.Info("mcp server enabled", zap.String("path", "/mcp"), zap.String("version", mcpserver.Version))
+	}
 	s.wireChatLLM()
 	s.initAuth()
 	s.loadTemplates()

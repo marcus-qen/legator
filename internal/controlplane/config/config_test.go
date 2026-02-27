@@ -20,6 +20,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.OIDC.DefaultRole != "viewer" {
 		t.Errorf("expected OIDC default role viewer, got %s", cfg.OIDC.DefaultRole)
 	}
+	if !cfg.MCPEnabled {
+		t.Error("expected MCP enabled by default")
+	}
 }
 
 func TestLoadFromFile(t *testing.T) {
@@ -30,6 +33,7 @@ func TestLoadFromFile(t *testing.T) {
 		"data_dir": "/tmp/test",
 		"auth_enabled": true,
 		"audit_retention": "90d",
+		"mcp_enabled": false,
 		"oidc": {
 			"enabled": true,
 			"provider_url": "https://id.example.com/realms/dev",
@@ -63,6 +67,9 @@ func TestLoadFromFile(t *testing.T) {
 	if cfg.LLM.Provider != "openai" {
 		t.Errorf("expected openai, got %s", cfg.LLM.Provider)
 	}
+	if cfg.MCPEnabled {
+		t.Error("expected mcp_enabled=false from file")
+	}
 	if !cfg.OIDC.Enabled {
 		t.Fatal("expected oidc enabled")
 	}
@@ -83,6 +90,7 @@ func TestEnvOverridesFile(t *testing.T) {
 
 	t.Setenv("LEGATOR_LISTEN_ADDR", ":7070")
 	t.Setenv("LEGATOR_AUTH", "true")
+	t.Setenv("LEGATOR_MCP_ENABLED", "0")
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -95,12 +103,16 @@ func TestEnvOverridesFile(t *testing.T) {
 	if !cfg.AuthEnabled {
 		t.Error("env LEGATOR_AUTH=true should enable auth")
 	}
+	if cfg.MCPEnabled {
+		t.Error("env LEGATOR_MCP_ENABLED=0 should disable MCP")
+	}
 }
 
 func TestLoadFromEnvOnly(t *testing.T) {
 	t.Setenv("LEGATOR_DATA_DIR", "/tmp/env-test")
 	t.Setenv("LEGATOR_LOG_LEVEL", "debug")
 	t.Setenv("LEGATOR_AUDIT_RETENTION", "30d")
+	t.Setenv("LEGATOR_MCP_ENABLED", "false")
 
 	cfg := LoadFromEnv()
 	if cfg.DataDir != "/tmp/env-test" {
@@ -111,6 +123,9 @@ func TestLoadFromEnvOnly(t *testing.T) {
 	}
 	if cfg.AuditRetention != "30d" {
 		t.Errorf("expected audit retention 30d, got %s", cfg.AuditRetention)
+	}
+	if cfg.MCPEnabled {
+		t.Error("expected MCP disabled from env")
 	}
 }
 
