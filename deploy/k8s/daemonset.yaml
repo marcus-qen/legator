@@ -18,15 +18,10 @@ spec:
         app.kubernetes.io/component: probe
     spec:
       serviceAccountName: legator-probe
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchExpressions:
-              - key: node-role.kubernetes.io/control-plane
-                operator: DoesNotExist
       tolerations:
       - effect: NoSchedule
+        operator: Exists
+      - effect: NoExecute
         operator: Exists
       imagePullSecrets:
       - name: harbor-pull-secret
@@ -45,7 +40,7 @@ spec:
               name: legator-probe-config
               key: token
         - name: LEGATOR_PROBE_TAGS
-          value: kubernetes,daemonset,worker
+          value: kubernetes,daemonset
         - name: LEGATOR_CONFIG_DIR
           value: /etc/legator
         - name: NODE_NAME
