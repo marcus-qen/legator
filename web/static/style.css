@@ -1048,6 +1048,18 @@ body[data-page='fleet'] .detail-chat {
   overflow: hidden;
 }
 
+body[data-page='fleet'] .chat-header {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.btn-sm {
+  font-size: 12px;
+  padding: 2px 8px;
+}
+
 body[data-page='fleet'] .chat-messages {
   flex: 1;
   overflow-y: auto;

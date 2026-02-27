@@ -544,12 +544,39 @@
     });
   }
 
+  function bindFleetChatControls(probeId) {
+    const clear = document.getElementById('fleet-chat-clear');
+    if (!clear) return;
+
+    clear.addEventListener('click', async () => {
+      if (!probeId || probeId !== currentChatProbeId) return;
+      try {
+        const response = await fetch(`/api/v1/probes/${encodeURIComponent(probeId)}/chat`, {
+          method: 'DELETE',
+        });
+        if (response.ok) {
+          const msgList = document.getElementById('fleet-chat-messages');
+          if (msgList) {
+            msgList.innerHTML = '<div class="chat-empty">Ask this probe anything...</div>';
+          }
+          chatMessageIds.clear();
+          chatMessages.length = 0;
+          chatHistoryLoaded = false;
+          setFleetChatThinking(false);
+        }
+      } catch (e) {
+        console.error('Failed to clear chat:', e);
+      }
+    });
+  }
+
   function initFleetChat(probeId) {
     if (!probeId || probeId !== currentChatProbeId) return;
 
     renderFleetChatMessages();
     setFleetChatThinking(chatThinking);
     bindFleetChatForm(probeId);
+    bindFleetChatControls(probeId);
 
     if (!chatHistoryLoaded) {
       loadFleetChatHistory(probeId).catch(() => {
@@ -749,6 +776,9 @@
     if (state.activeTab === 'chat') {
       return `
         <div class="detail-chat">
+          <div class="chat-header">
+            <button class="btn btn-sm" id="fleet-chat-clear">Clear</button>
+          </div>
           <div class="chat-messages" id="fleet-chat-messages">
             <div class="chat-empty">Ask this probe anything...</div>
           </div>

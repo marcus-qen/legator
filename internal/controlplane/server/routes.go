@@ -138,10 +138,12 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	if s.chatStore != nil {
 		mux.HandleFunc("GET /api/v1/probes/{id}/chat", s.withPermission(auth.PermFleetRead, s.chatStore.HandleGetMessages))
 		mux.HandleFunc("POST /api/v1/probes/{id}/chat", s.withPermission(auth.PermFleetRead, s.chatStore.HandleSendMessage))
+		mux.HandleFunc("DELETE /api/v1/probes/{id}/chat", s.withPermission(auth.PermFleetRead, s.chatStore.HandleClearChat))
 		mux.HandleFunc("GET /ws/chat", s.withPermission(auth.PermFleetRead, s.chatStore.HandleChatWS))
 	} else {
 		mux.HandleFunc("GET /api/v1/probes/{id}/chat", s.withPermission(auth.PermFleetRead, s.chatMgr.HandleGetMessages))
 		mux.HandleFunc("POST /api/v1/probes/{id}/chat", s.withPermission(auth.PermFleetRead, s.chatMgr.HandleSendMessage))
+		mux.HandleFunc("DELETE /api/v1/probes/{id}/chat", s.withPermission(auth.PermFleetRead, s.chatMgr.HandleClearChat))
 		mux.HandleFunc("GET /ws/chat", s.withPermission(auth.PermFleetRead, s.chatMgr.HandleChatWS))
 	}
 	mux.HandleFunc("GET /api/v1/fleet/chat", s.withPermission(auth.PermFleetRead, s.handleFleetGetMessages))

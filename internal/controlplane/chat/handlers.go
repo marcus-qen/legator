@@ -173,6 +173,21 @@ func (m *Manager) HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// HandleClearChat clears all in-memory messages for a probe session.
+func (m *Manager) HandleClearChat(w http.ResponseWriter, r *http.Request) {
+	probeID := r.PathValue("id")
+	if probeID == "" {
+		http.Error(w, `{"error":"missing probe id"}`, http.StatusBadRequest)
+		return
+	}
+
+	m.ClearMessages(probeID)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
 func parseProbeID(path string) string {
 	path = strings.Trim(path, "/")
 	parts := strings.Split(path, "/")
