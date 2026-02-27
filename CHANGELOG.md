@@ -1,3 +1,22 @@
+## [v1.0.0-alpha.11] — 2026-02-27
+
+### Added
+- **Audit log JSONL export** — `GET /api/v1/audit/export` streams full audit log as newline-delimited JSON with filter support (`probe_id`, `type`, `since`, `until`)
+- **Audit log CSV export** — `GET /api/v1/audit/export/csv` streams audit events as CSV with 6 key columns
+- **Cursor pagination** on `GET /api/v1/audit` — `limit`, `cursor` parameters, response includes `next_cursor` and `has_more`
+- **Audit retention auto-purge** — configurable via `audit_retention` in config or `LEGATOR_AUDIT_RETENTION` env var (e.g. `30d`, `90d`)
+- **Manual audit purge** — `DELETE /api/v1/audit/purge?older_than=30d` (admin-only)
+- **Landing page** — sparse prose-first design at `/site/`, public (no auth), dark theme, ASCII architecture diagram, system font stack
+- **E2E test expansion** — model dock, cloud connectors, discovery APIs, audit export/CSV/purge (42 → 45 tests)
+
+### Fixed
+- **Probe WebSocket reconnection** — exponential backoff now resets after successful connection; `Connected()` flag properly cleared on disconnect
+- **DaemonSet control-plane coverage** — added NoSchedule/NoExecute tolerations, removed node selector that excluded control plane nodes
+- **Landing page auth skip** — `/site/*` added to auth middleware skip paths
+
+### Changed
+- **Documentation refresh** — README and getting-started guide updated for alpha.10 features, config table, API sections, architecture diagram
+
 ## [v1.0.0-alpha.10] — 2026-02-27
 
 ### Added
