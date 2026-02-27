@@ -81,9 +81,12 @@ func (c *Client) Run(ctx context.Context) error {
 		default:
 		}
 
-		err := c.connectAndServe(ctx)
+		wasConnected, err := c.connectAndServe(ctx)
 		if err == nil || ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if wasConnected {
+			delay = time.Second
 		}
 
 		c.logger.Warn("connection lost, reconnecting",
@@ -98,7 +101,6 @@ func (c *Client) Run(ctx context.Context) error {
 		}
 
 		// Exponential backoff with cap
-		// Reset backoff on successful reconnect attempt would go here
 		delay = delay * 2
 		if delay > maxReconnectDelay {
 			delay = maxReconnectDelay
@@ -119,7 +121,7 @@ func jitter(d time.Duration) time.Duration {
 	return d + time.Duration(n.Int64())
 }
 
-func (c *Client) connectAndServe(ctx context.Context) error {
+func (c *Client) connectAndServe(ctx context.Context) (bool, error) {
 	url := fmt.Sprintf("%s/ws/probe?id=%s", c.serverURL, c.probeID)
 	header := map[string][]string{
 		"Authorization": {fmt.Sprintf("Bearer %s", c.apiKey)},
@@ -127,7 +129,7 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, url, header)
 	if err != nil {
-		return fmt.Errorf("dial: %w", err)
+		return false, fmt.Errorf("dial: %w", err)
 	}
 
 	c.mu.Lock()
@@ -138,6 +140,7 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 		conn.Close()
 		c.mu.Lock()
 		c.conn = nil
+		c.connected = false
 		c.mu.Unlock()
 	}()
 
@@ -160,7 +163,7 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
-			return fmt.Errorf("read: %w", err)
+			return true, fmt.Errorf("read: %w", err)
 		}
 
 		var env protocol.Envelope
