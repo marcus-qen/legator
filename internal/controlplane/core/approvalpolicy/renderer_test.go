@@ -31,6 +31,9 @@ func TestProjectDecideApprovalTransportParity(t *testing.T) {
 		if projection.Success != nil {
 			t.Fatalf("expected nil success when error is present, got %+v", projection.Success)
 		}
+		if err := projection.MCPError(); err == nil || err.Error() != contract.Err.Message {
+			t.Fatalf("unexpected MCP error projection: %v", err)
+		}
 	})
 
 	t.Run("success projection", func(t *testing.T) {
@@ -52,6 +55,9 @@ func TestProjectDecideApprovalTransportParity(t *testing.T) {
 		}
 		if projection.Success.Request != req {
 			t.Fatalf("expected request passthrough, got %+v", projection.Success.Request)
+		}
+		if err := projection.MCPError(); err != nil {
+			t.Fatalf("expected nil MCP error for success projection, got %v", err)
 		}
 	})
 }
