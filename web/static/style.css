@@ -1321,6 +1321,26 @@ body[data-page='model-dock'] .actions-row {
   margin: 0;
 }
 
+body[data-page='cloud-connectors'] .content {
+  max-width: 1300px;
+}
+
+body[data-page='cloud-connectors'] .data-table {
+  min-width: 1040px;
+}
+
+body[data-page='cloud-connectors'] .actions-row {
+  margin: 0;
+}
+
+body[data-page='cloud-connectors'] .cloud-form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+body[data-page='cloud-connectors'] .panel .right .input {
+  min-width: 160px;
+}
+
 @media (max-width: 980px) {
   .grid-two {
     grid-template-columns: 1fr;

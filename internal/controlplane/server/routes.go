@@ -171,6 +171,23 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/v1/model-usage", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
 	}
 
+	// Cloud Connectors API
+	if s.cloudConnectorHandlers != nil {
+		mux.HandleFunc("GET /api/v1/cloud/connectors", s.withPermission(auth.PermFleetRead, s.cloudConnectorHandlers.HandleListConnectors))
+		mux.HandleFunc("POST /api/v1/cloud/connectors", s.withPermission(auth.PermFleetRead, s.cloudConnectorHandlers.HandleCreateConnector))
+		mux.HandleFunc("PUT /api/v1/cloud/connectors/{id}", s.withPermission(auth.PermFleetRead, s.cloudConnectorHandlers.HandleUpdateConnector))
+		mux.HandleFunc("DELETE /api/v1/cloud/connectors/{id}", s.withPermission(auth.PermFleetRead, s.cloudConnectorHandlers.HandleDeleteConnector))
+		mux.HandleFunc("POST /api/v1/cloud/connectors/{id}/scan", s.withPermission(auth.PermFleetRead, s.cloudConnectorHandlers.HandleScanConnector))
+		mux.HandleFunc("GET /api/v1/cloud/assets", s.withPermission(auth.PermFleetRead, s.cloudConnectorHandlers.HandleListAssets))
+	} else {
+		mux.HandleFunc("GET /api/v1/cloud/connectors", s.withPermission(auth.PermFleetRead, s.handleCloudConnectorsUnavailable))
+		mux.HandleFunc("POST /api/v1/cloud/connectors", s.withPermission(auth.PermFleetRead, s.handleCloudConnectorsUnavailable))
+		mux.HandleFunc("PUT /api/v1/cloud/connectors/{id}", s.withPermission(auth.PermFleetRead, s.handleCloudConnectorsUnavailable))
+		mux.HandleFunc("DELETE /api/v1/cloud/connectors/{id}", s.withPermission(auth.PermFleetRead, s.handleCloudConnectorsUnavailable))
+		mux.HandleFunc("POST /api/v1/cloud/connectors/{id}/scan", s.withPermission(auth.PermFleetRead, s.handleCloudConnectorsUnavailable))
+		mux.HandleFunc("GET /api/v1/cloud/assets", s.withPermission(auth.PermFleetRead, s.handleCloudConnectorsUnavailable))
+	}
+
 	// Binary download + install script
 	mux.HandleFunc("GET /download/{filename}", s.handleDownload)
 	mux.HandleFunc("GET /install.sh", s.handleInstallScript)
@@ -190,6 +207,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /audit", s.handleAuditPage)
 	mux.HandleFunc("GET /alerts", s.handleAlertsPage)
 	mux.HandleFunc("GET /model-dock", s.handleModelDockPage)
+	mux.HandleFunc("GET /cloud-connectors", s.handleCloudConnectorsPage)
 
 	// WebSocket for probes
 	mux.HandleFunc("GET /ws/probe", s.hub.HandleProbeWS)
@@ -1277,6 +1295,26 @@ func (s *Server) handleModelDockPage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleCloudConnectorsPage(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
+	if s.pages == nil {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, "<h1>Cloud Connectors</h1><p>Template not loaded</p>")
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data := BasePage{
+		CurrentUser: s.currentTemplateUser(r),
+		Version:     Version,
+		ActiveNav:   "cloud-connectors",
+	}
+	if err := s.pages.Render(w, "cloud-connectors", data); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
+	}
+}
+
 func (s *Server) handleDeleteProbe(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(w, r, auth.PermFleetWrite) {
 		return
@@ -1340,4 +1378,8 @@ func (s *Server) handleAlertsUnavailable(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) handleModelDockUnavailable(w http.ResponseWriter, r *http.Request) {
 	writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "model dock unavailable")
+}
+
+func (s *Server) handleCloudConnectorsUnavailable(w http.ResponseWriter, r *http.Request) {
+	writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "cloud connectors unavailable")
 }
