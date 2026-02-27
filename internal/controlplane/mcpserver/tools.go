@@ -1,7 +1,6 @@
 package mcpserver
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -204,25 +203,12 @@ func (s *MCPServer) handleDecideApproval(_ context.Context, _ *mcp.CallToolReque
 		return nil, nil, fmt.Errorf("approval service unavailable")
 	}
 
-	approvalID := strings.TrimSpace(input.ApprovalID)
-	if approvalID == "" {
-		return nil, nil, fmt.Errorf("approval_id is required")
-	}
-
-	body, err := json.Marshal(struct {
-		Decision  string `json:"decision"`
-		DecidedBy string `json:"decided_by"`
-	}{
-		Decision:  input.Decision,
-		DecidedBy: input.DecidedBy,
-	})
+	invokeInput, err := coreapprovalpolicy.AssembleDecideApprovalInvokeMCP(input.ApprovalID, input.Decision, input.DecidedBy)
 	if err != nil {
-		return nil, nil, fmt.Errorf("encode decide approval input: %w", err)
+		return nil, nil, err
 	}
 
-	projection := orchestrateDecideApprovalMCP(bytes.NewReader(body), func(request *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error) {
-		return s.decideApproval(approvalID, request)
-	})
+	projection := coreapprovalpolicy.InvokeDecideApproval(invokeInput, s.decideApproval, coreapprovalpolicy.DecideApprovalRenderTargetMCP)
 	return renderDecideApprovalMCP(projection)
 }
 
