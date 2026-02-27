@@ -1,3 +1,31 @@
+## [v1.0.0-alpha.10] — 2026-02-27
+
+### Added
+- **K8s DaemonSet probe deployment** — container image, DaemonSet manifests, multi-use registration tokens, auto-init from environment variables, K8s inventory enrichment (cluster, node, namespace, pod metadata)
+- **Windows probe MVP** — cross-compilation, Windows service management, platform-specific inventory, command execution
+- **BYOK model dock** — user-provided API key profiles per vendor, runtime model switching, usage tracking UI
+- **Cloud connectors MVP** — inventory APIs and adapters for external cloud accounts, dedicated UI page
+- **Auto-discovery + registration assist MVP** — network/SSH probe scanning, registration assist with generated install commands, discovery UI page
+- **UI overhaul** — shared `_base.html` layout architecture, warm dark palette, design tokens, zero CDN dependencies, inline SVG icons, system font stack, consolidated JS (`app.js` with `LegatorUI` namespace)
+- **Fleet page redesign** — three-panel master-detail layout (tree navigator + probe detail + activity feed), resizable split panes, status grouping (Online/Degraded/Offline/Pending), tag filtering, hostname search, 5 detail tabs (System/Network/Services/Packages/Chat)
+- **Embedded probe chat** — Chat tab in fleet detail panel with WebSocket connection, message history, typing indicator, auto-scroll
+- **Clear chat endpoint** — `DELETE /api/v1/probes/{id}/chat` with UI button
+- Sidebar navigation consistency across all template pages
+- Per-page template loading (`map[string]*template.Template`)
+- `BasePage` struct with `CurrentUser`, `Version`, `ActiveNav`
+
+### Fixed
+- Alerts engine race condition (nil channel deref on Stop/loop race)
+- DaemonSet security context for Kyverno + PodSecurity compliance
+- Registration tags sent in initial request (eliminated separate API call)
+- Container image Dockerfile podman compatibility
+- SSH template placeholder quote escaping in discovery UI
+
+### Stats
+- **155 Go files** | **30 test suites** | **5 probes online** (2 bare metal + 3 K8s DaemonSet)
+- Control plane: **14MB** | Probe: **7.1MB** | legatorctl: **5.7MB**
+
+
 # Changelog
 
 All notable changes to Legator are documented here.
