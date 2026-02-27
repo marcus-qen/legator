@@ -43,6 +43,46 @@ func TestAdaptApprovalHTTPErrorWriter_ParityWithLegacyInlineConversion(t *testin
 	}
 }
 
+func TestAdaptApprovalSuccessPayloadWriter_ParityWithLegacyInlineConversion(t *testing.T) {
+	typedSuccess := &DecideApprovalSuccess{Status: "approved"}
+	var typedNilSuccess *DecideApprovalSuccess
+
+	tests := []struct {
+		name    string
+		payload any
+	}{
+		{name: "typed success payload", payload: typedSuccess},
+		{name: "typed nil success payload", payload: typedNilSuccess},
+		{name: "untyped nil success payload", payload: nil},
+		{name: "wrong payload type", payload: "wrong"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotNew *DecideApprovalSuccess
+			adaptedNew := transportwriter.AdaptSuccessPayloadWriter(func(success *DecideApprovalSuccess) {
+				gotNew = success
+			}, normalizeDecideApprovalSuccess)
+
+			var gotLegacy *DecideApprovalSuccess
+			adaptedLegacy := legacyApprovalSuccessPayloadWriter(func(success *DecideApprovalSuccess) {
+				gotLegacy = success
+			})
+
+			adaptedNew(tt.payload)
+			adaptedLegacy(tt.payload)
+
+			if !reflect.DeepEqual(gotNew, gotLegacy) {
+				t.Fatalf("success conversion parity mismatch: new=%+v legacy=%+v", gotNew, gotLegacy)
+			}
+		})
+	}
+
+	if got := transportwriter.AdaptSuccessPayloadWriter[*DecideApprovalSuccess](nil, normalizeDecideApprovalSuccess); got != nil {
+		t.Fatalf("expected nil success adapter for nil callback, got type %T", got)
+	}
+}
+
 func TestDispatchDecideApprovalResponseForSurface_EndToEndParityWithLegacyInlineConversion(t *testing.T) {
 	errorProjection := ProjectDecideApprovalTransport(EncodeDecideApprovalTransport(nil, &ApprovedDispatchError{Err: errors.New("probe p-adapter not connected")}))
 
@@ -114,6 +154,16 @@ func legacyApprovalHTTPErrorWriter(write func(*HTTPErrorContract)) func(*transpo
 	}
 }
 
+func legacyApprovalSuccessPayloadWriter(write func(*DecideApprovalSuccess)) func(any) {
+	if write == nil {
+		return nil
+	}
+	return func(payload any) {
+		success, _ := payload.(*DecideApprovalSuccess)
+		write(normalizeDecideApprovalSuccess(success))
+	}
+}
+
 func legacyDispatchUnsupportedDecideApprovalSurfaceFallback(surface string, writer DecideApprovalResponseDispatchWriter) {
 	fallbackWriter := transportwriter.UnsupportedSurfaceFallbackWriter{WriteMCPError: writer.WriteMCPError}
 	if writer.WriteHTTPError != nil {
@@ -135,26 +185,16 @@ func legacyDispatchDecideApprovalResponseForSurface(projection *DecideApprovalPr
 		return
 	}
 
+	legacySuccessWriter := legacyApprovalSuccessPayloadWriter(writer.WriteSuccess)
+
 	transportwriter.WriteFromBuilder(transportSurface, builder, transportwriter.WriterKernel{
 		WriteHTTPError: func(err *transportwriter.HTTPError) {
 			if writer.WriteHTTPError != nil {
 				writer.WriteHTTPError(&HTTPErrorContract{Status: err.Status, Code: err.Code, Message: err.Message})
 			}
 		},
-		WriteMCPError: writer.WriteMCPError,
-		WriteHTTPSuccess: func(payload any) {
-			if writer.WriteSuccess == nil {
-				return
-			}
-			success, _ := payload.(*DecideApprovalSuccess)
-			writer.WriteSuccess(normalizeDecideApprovalSuccess(success))
-		},
-		WriteMCPSuccess: func(payload any) {
-			if writer.WriteSuccess == nil {
-				return
-			}
-			success, _ := payload.(*DecideApprovalSuccess)
-			writer.WriteSuccess(normalizeDecideApprovalSuccess(success))
-		},
+		WriteMCPError:    writer.WriteMCPError,
+		WriteHTTPSuccess: legacySuccessWriter,
+		WriteMCPSuccess:  legacySuccessWriter,
 	})
 }

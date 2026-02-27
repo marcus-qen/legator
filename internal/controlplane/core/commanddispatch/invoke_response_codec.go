@@ -65,10 +65,9 @@ func EncodeCommandInvokeMCPTextResponse(projection *CommandInvokeProjection) (st
 		WriteMCPError: func(err error) {
 			dispatchErr = err
 		},
-		WriteMCPSuccess: func(payload any) {
-			text, _ := payload.(string)
+		WriteMCPSuccess: transportwriter.AdaptSuccessPayloadWriter(func(text string) {
 			resultText = text
-		},
+		}, nil),
 	})
 
 	if dispatchErr != nil {
