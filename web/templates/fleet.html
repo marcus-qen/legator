@@ -1,240 +1,648 @@
 {{define "title"}}Fleet — Legator{{end}}
 
 {{define "header"}}
-<div>
-  <h1 class="page-title">Fleet</h1>
-  <span class="page-meta">{{.Summary.Total}} probes · v{{.Version}}</span>
+<div class="fleet-header">
+  <div>
+    <h1 class="page-title">Fleet</h1>
+    <span class="page-meta"><span id="header-total">{{.Summary.Total}}</span> probes · v{{.Version}}</span>
+  </div>
+  <div class="fleet-header-actions">
+    <button type="button" class="btn fleet-header-toggle fleet-tree-toggle" id="toggle-tree">Probes</button>
+    <button type="button" class="btn fleet-header-toggle fleet-feed-toggle" id="toggle-feed">Activity</button>
+  </div>
 </div>
 {{end}}
 
 {{define "content"}}
-<section class="panel">
-  <div class="stat-row">
-    <span>Online: <strong id="cnt-online">{{.Summary.Online}}</strong></span>
-    <span>Offline: <strong id="cnt-offline">{{.Summary.Offline}}</strong></span>
-    <span>Degraded: <strong id="cnt-degraded">{{.Summary.Degraded}}</strong></span>
-    <span>Total: <strong id="cnt-total">{{.Summary.Total}}</strong></span>
-    <span class="right"><span class="dot dot-pending" id="sse-dot"></span><span id="sse-status">connecting…</span></span>
-  </div>
-</section>
-
-<section class="grid-two">
-  <section class="panel">
-    <div class="panel-header">
-      <h2 class="panel-title">Probes</h2>
+<div class="fleet-layout" id="fleet-layout">
+  <aside class="fleet-tree" id="fleet-tree">
+    <div class="tree-search">
+      <input type="text" placeholder="Filter probes..." class="input tree-filter" id="tree-filter" autocomplete="off">
     </div>
-    <div class="table-wrap">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Status</th>
-            <th>Hostname</th>
-            <th>Probe ID</th>
-            <th>OS/Arch</th>
-            <th>Policy</th>
-            <th>Health</th>
-            <th>Tags</th>
-            <th>Last Seen</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="fleet-body">
-          {{if .Probes}}{{range .Probes}}
-          <tr class="probe-row" data-probe-id="{{.ID}}" onclick="location.href='/probe/'+encodeURIComponent('{{.ID}}')">
-            <td><span class="dot dot-{{statusClass .Status}}"></span>{{humanizeStatus .Status}}</td>
-            <td>{{if .Hostname}}{{.Hostname}}{{else}}-{{end}}</td>
-            <td class="id-text">{{.ID}}</td>
-            <td>{{if .OS}}{{.OS}}/{{.Arch}}{{else}}-{{end}}</td>
-            <td>{{.PolicyLevel}}</td>
-            <td>
-              {{if .Health}}
-              <div class="health-meter">
-                <span class="health-track"><span class="health-fill {{if ge .Health.Score 80}}ok{{else if ge .Health.Score 50}}warn{{else}}bad{{end}}" style="width:{{.Health.Score}}%"></span></span>
-                <span class="health-score">{{.Health.Score}}%</span>
-              </div>
-              {{else}}
-              <span class="muted">—</span>
-              {{end}}
-            </td>
-            <td>{{if .Tags}}{{range .Tags}}<span class="tag">{{.}}</span>{{end}}{{else}}<span class="muted">—</span>{{end}}</td>
-            <td>{{formatLastSeen .LastSeen}}</td>
-            <td><a href="/probe/{{.ID}}/chat" onclick="event.stopPropagation()" class="btn">chat</a></td>
-          </tr>
-          {{end}}{{else}}
-          <tr><td colspan="9" class="empty-state">No probes registered yet.</td></tr>
-          {{end}}
-        </tbody>
-      </table>
+    <div class="tree-groups" id="tree-groups"></div>
+    <div class="tree-tags" id="tree-tags"></div>
+    <div class="tree-footer">
+      <span class="tree-count" id="tree-count">{{.Summary.Total}} probes</span>
+      <span class="dot dot-pending" id="sse-dot"></span>
+      <span id="sse-status">connecting…</span>
+    </div>
+  </aside>
+
+  <div class="drag-handle" data-resize="tree-detail"></div>
+
+  <section class="fleet-detail" id="fleet-detail">
+    <div class="detail-empty" id="detail-empty">
+      <div class="detail-empty-title">Select a probe</div>
+      <div class="detail-empty-stats">
+        <span><span class="dot dot-online"></span> <strong id="cnt-online">{{.Summary.Online}}</strong> online</span>
+        <span><span class="dot dot-offline"></span> <strong id="cnt-offline">{{.Summary.Offline}}</strong> offline</span>
+        <span><strong id="cnt-total">{{.Summary.Total}}</strong> total</span>
+      </div>
     </div>
   </section>
 
-  <aside class="panel">
-    <div class="panel-header">
-      <h2 class="panel-title">Activity Feed</h2>
-      <span class="panel-sub" id="feed-count">0 events</span>
+  <div class="drag-handle" data-resize="detail-feed"></div>
+
+  <aside class="fleet-feed" id="fleet-feed">
+    <div class="feed-header">
+      <h3 class="panel-title">Activity</h3>
+      <span class="feed-count" id="feed-count">0</span>
     </div>
-    <div class="feed" id="feed">
-      <div class="feed-item muted">Waiting for fleet events…</div>
+    <div class="feed-list" id="feed">
+      <div class="feed-empty muted">Waiting for fleet events…</div>
+    </div>
+    <div class="feed-footer">
+      <a href="/fleet/chat" class="btn btn-primary" style="width:100%;justify-content:center;">Fleet Chat</a>
     </div>
   </aside>
-</section>
+</div>
+
+<div class="fleet-overlay-backdrop" id="fleet-overlay-backdrop"></div>
 {{end}}
 
 {{define "scripts"}}
 <script>
 (() => {
-  const MAX_FEED = 100;
-  let feedCount = 0;
+  const MAX_FEED = 200;
+  const STATUS_ORDER = ['online', 'degraded', 'offline', 'pending'];
+  const state = {
+    probes: [],
+    selectedProbeId: null,
+    filterText: '',
+    activeTag: null,
+    activeTab: 'system',
+    feed: [],
+    collapsed: {
+      online: false,
+      degraded: false,
+      offline: false,
+      pending: false,
+    },
+  };
 
-  function dotClass(status) {
-    const s = (status || '').toLowerCase();
-    if (s === 'online') return 'dot-online';
-    if (s === 'offline') return 'dot-offline';
-    if (s === 'degraded') return 'dot-degraded';
-    return 'dot-pending';
+  const refs = {
+    treeGroups: document.getElementById('tree-groups'),
+    treeTags: document.getElementById('tree-tags'),
+    treeFilter: document.getElementById('tree-filter'),
+    treeCount: document.getElementById('tree-count'),
+    detail: document.getElementById('fleet-detail'),
+    feed: document.getElementById('feed'),
+    feedCount: document.getElementById('feed-count'),
+    sseDot: document.getElementById('sse-dot'),
+    sseStatus: document.getElementById('sse-status'),
+    cntOnline: document.getElementById('cnt-online'),
+    cntOffline: document.getElementById('cnt-offline'),
+    cntTotal: document.getElementById('cnt-total'),
+    headerTotal: document.getElementById('header-total'),
+    toggleTree: document.getElementById('toggle-tree'),
+    toggleFeed: document.getElementById('toggle-feed'),
+    overlayBackdrop: document.getElementById('fleet-overlay-backdrop'),
+  };
+
+  function esc(value) {
+    return String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
   }
 
-  function healthClass(score) {
-    if (score >= 80) return 'ok';
-    if (score >= 50) return 'warn';
-    return 'bad';
+  function statusClass(status) {
+    const normalized = String(status || '').toLowerCase();
+    if (normalized === 'online') return 'online';
+    if (normalized === 'offline') return 'offline';
+    if (normalized === 'degraded') return 'degraded';
+    return 'pending';
+  }
+
+  function statusLabel(status) {
+    return statusClass(status).toUpperCase();
+  }
+
+  function summarize(probes) {
+    const summary = { online: 0, offline: 0, degraded: 0, total: probes.length };
+    probes.forEach((probe) => {
+      const normalized = statusClass(probe.status);
+      if (normalized === 'online') summary.online += 1;
+      else if (normalized === 'offline') summary.offline += 1;
+      else if (normalized === 'degraded') summary.degraded += 1;
+    });
+    return summary;
   }
 
   function ago(value) {
     if (!value) return '—';
-    const d = Math.max(0, Math.floor((Date.now() - new Date(value)) / 1000));
-    if (d < 60) return d + 's ago';
-    if (d < 3600) return Math.floor(d / 60) + 'm ago';
-    if (d < 86400) return Math.floor(d / 3600) + 'h ago';
-    return Math.floor(d / 86400) + 'd ago';
+    const ts = new Date(value).getTime();
+    if (Number.isNaN(ts)) return '—';
+    const seconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+    if (seconds < 60) return seconds + 's ago';
+    if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+    if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+    return Math.floor(seconds / 86400) + 'd ago';
   }
 
-  function hms(ts) {
-    const d = new Date(ts || Date.now());
-    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') + ':' + String(d.getSeconds()).padStart(2, '0');
+  function elapsed(value) {
+    if (!value) return '—';
+    const ts = new Date(value).getTime();
+    if (Number.isNaN(ts)) return '—';
+    let seconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+    const days = Math.floor(seconds / 86400);
+    seconds -= days * 86400;
+    const hours = Math.floor(seconds / 3600);
+    seconds -= hours * 3600;
+    const mins = Math.floor(seconds / 60);
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${mins}m`;
+    if (mins > 0) return `${mins}m`;
+    return `${seconds}s`;
   }
 
-  function typeTag(type) {
-    const t = String(type || 'event');
-    if (t.startsWith('command.')) return '<span class="tag">cmd</span>';
-    if (t.startsWith('probe.')) return '<span class="tag">probe</span>';
-    if (t.startsWith('approval.')) return '<span class="tag">approval</span>';
-    return '<span class="tag">' + t.split('.')[0] + '</span>';
-  }
-
-  function updateCounter(id, value) {
-    const node = document.getElementById(id);
-    if (node) node.textContent = String(value);
-  }
-
-  function refreshFleet() {
-    fetch('/api/v1/probes', { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((probes) => {
-        const rows = Array.isArray(probes) ? probes : [];
-        const body = document.getElementById('fleet-body');
-        body.innerHTML = '';
-
-        if (!rows.length) {
-          body.innerHTML = '<tr><td colspan="9" class="empty-state">No probes registered yet.</td></tr>';
-          updateCounter('cnt-online', 0);
-          updateCounter('cnt-offline', 0);
-          updateCounter('cnt-degraded', 0);
-          updateCounter('cnt-total', 0);
-          return;
-        }
-
-        let online = 0;
-        let offline = 0;
-        let degraded = 0;
-
-        rows.forEach((p) => {
-          const status = String(p.status || 'pending').toLowerCase();
-          if (status === 'online') online += 1;
-          else if (status === 'offline') offline += 1;
-          else if (status === 'degraded') degraded += 1;
-
-          const tr = document.createElement('tr');
-          tr.className = 'probe-row';
-          tr.dataset.probeId = p.id;
-          tr.onclick = () => { location.href = '/probe/' + encodeURIComponent(p.id); };
-
-          const tags = Array.isArray(p.tags) && p.tags.length
-            ? p.tags.map((tag) => '<span class="tag">' + tag + '</span>').join(' ')
-            : '<span class="muted">—</span>';
-
-          const health = p.health && typeof p.health.score === 'number'
-            ? '<div class="health-meter"><span class="health-track"><span class="health-fill ' + healthClass(p.health.score) + '" style="width:' + p.health.score + '%"></span></span><span class="health-score">' + p.health.score + '%</span></div>'
-            : '<span class="muted">—</span>';
-
-          tr.innerHTML = ''
-            + '<td><span class="dot ' + dotClass(status) + '"></span>' + status + '</td>'
-            + '<td>' + (p.hostname || '-') + '</td>'
-            + '<td class="id-text">' + p.id + '</td>'
-            + '<td>' + (p.os ? (p.os + '/' + (p.arch || '-')) : '-') + '</td>'
-            + '<td>' + (p.policy_level || 'observe') + '</td>'
-            + '<td>' + health + '</td>'
-            + '<td>' + tags + '</td>'
-            + '<td>' + ago(p.last_seen) + '</td>'
-            + '<td><a href="/probe/' + encodeURIComponent(p.id) + '/chat" onclick="event.stopPropagation()" class="btn">chat</a></td>';
-
-          body.appendChild(tr);
-        });
-
-        updateCounter('cnt-online', online);
-        updateCounter('cnt-offline', offline);
-        updateCounter('cnt-degraded', degraded);
-        updateCounter('cnt-total', rows.length);
-      })
-      .catch(() => {});
-  }
-
-  function addFeedItem(evt) {
-    const feed = document.getElementById('feed');
-    const item = document.createElement('div');
-    const pid = evt.probe_id ? ' <span class="id-text">' + evt.probe_id.slice(0, 12) + '</span>' : '';
-    item.className = 'feed-item';
-    item.innerHTML = '<span class="muted">' + hms(evt.timestamp) + '</span> ' + typeTag(evt.type) + pid + ' ' + (evt.summary || 'event');
-    feed.prepend(item);
-
-    feedCount += 1;
-    while (feed.children.length > MAX_FEED) {
-      feed.removeChild(feed.lastChild);
+  function humanBytes(bytes) {
+    const value = Number(bytes || 0);
+    if (!Number.isFinite(value) || value <= 0) return '0 B';
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+    let unit = 0;
+    let size = value;
+    while (size >= 1024 && unit < units.length - 1) {
+      size /= 1024;
+      unit += 1;
     }
-    document.getElementById('feed-count').textContent = feedCount + ' events';
+    return `${size.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
   }
 
-  const dot = document.getElementById('sse-dot');
-  const status = document.getElementById('sse-status');
-  const handlers = {
-    onopen: () => {
-      dot.className = 'dot dot-online';
-      status.textContent = 'live';
-    },
-    onerror: () => {
-      dot.className = 'dot dot-offline';
-      status.textContent = 'reconnecting…';
-    },
-  };
+  function eventTypeLabel(type) {
+    const normalized = String(type || 'event');
+    if (normalized.startsWith('probe.')) return 'probe';
+    if (normalized.startsWith('command.')) return 'command';
+    if (normalized.startsWith('approval.')) return 'approval';
+    return normalized.split('.')[0] || 'event';
+  }
 
-  [
-    'probe.connected', 'probe.disconnected', 'probe.offline', 'probe.registered',
-    'command.dispatched', 'command.completed', 'command.failed',
-    'approval.needed', 'approval.decided', 'policy.changed', 'chat.message',
-  ].forEach((eventName) => {
-    handlers[eventName] = (evt) => {
-      addFeedItem(evt);
-      if (eventName.startsWith('probe.') || eventName === 'command.completed' || eventName === 'command.failed') {
-        refreshFleet();
-      }
+  function getServices(probe) {
+    return Array.isArray(probe?.inventory?.services) ? probe.inventory.services : [];
+  }
+
+  function getPackages(probe) {
+    return Array.isArray(probe?.inventory?.packages) ? probe.inventory.packages : [];
+  }
+
+  function getInterfaces(probe) {
+    return Array.isArray(probe?.inventory?.interfaces) ? probe.inventory.interfaces : [];
+  }
+
+  function matchesFilters(probe) {
+    const name = String(probe.hostname || '').toLowerCase();
+    const hasName = !state.filterText || name.includes(state.filterText);
+    const tags = Array.isArray(probe.tags) ? probe.tags : [];
+    const hasTag = !state.activeTag || tags.includes(state.activeTag);
+    return hasName && hasTag;
+  }
+
+  function sortedProbes(input) {
+    return input.slice().sort((a, b) => {
+      const aName = String(a.hostname || a.id || '').toLowerCase();
+      const bName = String(b.hostname || b.id || '').toLowerCase();
+      return aName.localeCompare(bName);
+    });
+  }
+
+  function renderTree() {
+    const filtered = sortedProbes(state.probes.filter(matchesFilters));
+    const grouped = {
+      online: [],
+      degraded: [],
+      offline: [],
+      pending: [],
     };
+
+    filtered.forEach((probe) => {
+      grouped[statusClass(probe.status)].push(probe);
+    });
+
+    refs.treeGroups.innerHTML = '';
+
+    STATUS_ORDER.forEach((groupName) => {
+      const items = grouped[groupName] || [];
+      const group = document.createElement('div');
+      group.className = 'tree-group';
+
+      const header = document.createElement('button');
+      header.type = 'button';
+      header.className = 'tree-group-header';
+      header.dataset.group = groupName;
+      header.dataset.collapsed = state.collapsed[groupName] ? 'true' : 'false';
+      header.innerHTML = `
+        <span class="tree-chevron">${state.collapsed[groupName] ? '▶' : '▼'}</span>
+        <span class="dot dot-${groupName}"></span>
+        <span>${groupName[0].toUpperCase() + groupName.slice(1)}</span>
+        <span class="tree-count-badge">${items.length}</span>
+      `;
+      header.addEventListener('click', () => {
+        state.collapsed[groupName] = !state.collapsed[groupName];
+        renderTree();
+      });
+
+      const list = document.createElement('div');
+      list.className = 'tree-group-items';
+      if (state.collapsed[groupName]) {
+        list.style.display = 'none';
+      }
+
+      items.forEach((probe) => {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'tree-item' + (probe.id === state.selectedProbeId ? ' selected' : '');
+        item.dataset.probeId = probe.id;
+        item.title = probe.id;
+        item.innerHTML = `<span class="tree-hostname">${esc(probe.hostname || probe.id)}</span>`;
+        item.addEventListener('click', () => selectProbe(probe.id));
+        list.appendChild(item);
+      });
+
+      group.append(header, list);
+      refs.treeGroups.appendChild(group);
+    });
+
+    renderTagFilters();
+
+    const summary = summarize(state.probes);
+    refs.treeCount.textContent = `${filtered.length} probes`;
+    refs.headerTotal.textContent = String(summary.total);
+    refs.cntOnline.textContent = String(summary.online);
+    refs.cntOffline.textContent = String(summary.offline);
+    refs.cntTotal.textContent = String(summary.total);
+  }
+
+  function renderTagFilters() {
+    const counts = new Map();
+    state.probes.forEach((probe) => {
+      (Array.isArray(probe.tags) ? probe.tags : []).forEach((tag) => {
+        counts.set(tag, (counts.get(tag) || 0) + 1);
+      });
+    });
+
+    refs.treeTags.innerHTML = '';
+
+    const title = document.createElement('div');
+    title.className = 'tree-tags-title';
+    title.textContent = 'Tags';
+    refs.treeTags.appendChild(title);
+
+    if (!counts.size) {
+      const empty = document.createElement('div');
+      empty.className = 'muted tree-tags-empty';
+      empty.textContent = 'No tags';
+      refs.treeTags.appendChild(empty);
+      return;
+    }
+
+    const wrap = document.createElement('div');
+    wrap.className = 'tree-tag-list';
+
+    Array.from(counts.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .forEach(([tag, count]) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'tree-tag' + (state.activeTag === tag ? ' active' : '');
+        button.innerHTML = `<span>${esc(tag)}</span><span class="tree-count-badge">${count}</span>`;
+        button.addEventListener('click', () => {
+          state.activeTag = state.activeTag === tag ? null : tag;
+          renderTree();
+        });
+        wrap.appendChild(button);
+      });
+
+    refs.treeTags.appendChild(wrap);
+  }
+
+  function renderTabContent(probe) {
+    const inventory = probe.inventory || {};
+
+    if (state.activeTab === 'system') {
+      return `
+        <dl class="kv-grid detail-kv-grid">
+          <dt>Hostname</dt><dd>${esc(probe.hostname || inventory.hostname || '-')}</dd>
+          <dt>OS</dt><dd>${esc(probe.os || inventory.os || '-')}</dd>
+          <dt>Arch</dt><dd>${esc(probe.arch || inventory.arch || '-')}</dd>
+          <dt>Kernel</dt><dd>${esc(inventory.kernel || '-')}</dd>
+          <dt>CPUs</dt><dd>${esc(inventory.cpus ?? '-')}</dd>
+          <dt>Memory</dt><dd>${humanBytes(inventory.mem_total_bytes)}</dd>
+          <dt>Disk</dt><dd>${humanBytes(inventory.disk_total_bytes)}</dd>
+        </dl>
+      `;
+    }
+
+    if (state.activeTab === 'network') {
+      const interfaces = getInterfaces(probe);
+      if (!interfaces.length) {
+        return '<div class="muted detail-empty-panel">No network interfaces reported.</div>';
+      }
+
+      return `
+        <div class="detail-list detail-list-network">
+          ${interfaces.map((net) => `
+            <div class="detail-list-row">
+              <span>${esc(net.name || '-')}</span>
+              <span class="detail-list-mono">${esc(net.mac || '-')}</span>
+              <span class="tag tag-${statusClass(net.state || 'pending')}">${esc(String(net.state || 'unknown').toUpperCase())}</span>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    if (state.activeTab === 'services') {
+      const services = getServices(probe);
+      if (!services.length) {
+        return '<div class="muted detail-empty-panel">No services reported.</div>';
+      }
+
+      return `
+        <div class="detail-list detail-list-scroll">
+          ${services.map((svc) => {
+            const name = svc?.name || svc?.service || svc?.unit || String(svc || '-');
+            const rawState = String(svc?.state || svc?.status || '').toLowerCase();
+            const stateClass = rawState.includes('run') || rawState === 'up' ? 'online' : rawState.includes('fail') || rawState === 'down' ? 'offline' : rawState ? 'degraded' : 'pending';
+            const stateText = rawState ? rawState.toUpperCase() : 'UNKNOWN';
+            return `
+              <div class="detail-list-row">
+                <span>${esc(name)}</span>
+                <span class="tag tag-${stateClass}">${esc(stateText)}</span>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    const packages = getPackages(probe);
+    if (!packages.length) {
+      return '<div class="muted detail-empty-panel">No packages reported.</div>';
+    }
+
+    return `
+      <div class="detail-list detail-list-scroll">
+        ${packages.map((pkg) => {
+          const name = pkg?.name || pkg?.package || String(pkg || '-');
+          const version = pkg?.version || pkg?.ver || pkg?.release || '-';
+          return `
+            <div class="detail-list-row">
+              <span>${esc(name)}</span>
+              <span class="detail-list-mono">${esc(version)}</span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  function renderDetail() {
+    const probe = state.probes.find((item) => item.id === state.selectedProbeId);
+    if (!probe) {
+      refs.detail.innerHTML = `
+        <div class="detail-empty" id="detail-empty">
+          <div class="detail-empty-title">Select a probe</div>
+          <div class="detail-empty-stats">
+            <span><span class="dot dot-online"></span> <strong id="cnt-online">${refs.cntOnline.textContent}</strong> online</span>
+            <span><span class="dot dot-offline"></span> <strong id="cnt-offline">${refs.cntOffline.textContent}</strong> offline</span>
+            <span><strong id="cnt-total">${refs.cntTotal.textContent}</strong> total</span>
+          </div>
+        </div>
+      `;
+      refs.cntOnline = document.getElementById('cnt-online');
+      refs.cntOffline = document.getElementById('cnt-offline');
+      refs.cntTotal = document.getElementById('cnt-total');
+      return;
+    }
+
+    const serviceCount = getServices(probe).length;
+    const packageCount = getPackages(probe).length;
+    const tags = Array.isArray(probe.tags) ? probe.tags : [];
+    const healthScore = typeof probe?.health?.score === 'number' ? probe.health.score : null;
+
+    refs.detail.innerHTML = `
+      <div class="detail-probe">
+        <div class="detail-header">
+          <div>
+            <h2 class="detail-hostname">${esc(probe.hostname || probe.id)}</h2>
+            <span class="detail-id">${esc(probe.id)}</span>
+          </div>
+          <div class="detail-actions">
+            <a href="/probe/${encodeURIComponent(probe.id)}/chat" class="btn btn-primary">Chat</a>
+            <a href="/probe/${encodeURIComponent(probe.id)}" class="btn">Full Page</a>
+          </div>
+        </div>
+
+        <div class="detail-meta">
+          <span class="tag tag-${statusClass(probe.status)}">${statusLabel(probe.status)}</span>
+          <span class="tag">HEALTH ${healthScore === null ? '—' : esc(healthScore + '/100')}</span>
+          <span>Policy: ${esc(probe.policy_level || 'observe')}</span>
+          <span>Last seen: ${esc(ago(probe.last_seen))}</span>
+          <span>Uptime: ${esc(elapsed(probe.registered))}</span>
+          <span>OS: ${esc((probe.os || '-') + '/' + (probe.arch || '-'))}</span>
+        </div>
+
+        <div class="detail-tags">
+          ${tags.length ? tags.map((tag) => `<span class="tag">${esc(tag)}</span>`).join('') : '<span class="muted">No tags</span>'}
+        </div>
+
+        <div class="detail-tabs">
+          <button type="button" class="tab${state.activeTab === 'system' ? ' active' : ''}" data-tab="system">System</button>
+          <button type="button" class="tab${state.activeTab === 'network' ? ' active' : ''}" data-tab="network">Network</button>
+          <button type="button" class="tab${state.activeTab === 'services' ? ' active' : ''}" data-tab="services">Services <span class="tree-count-badge">${serviceCount}</span></button>
+          <button type="button" class="tab${state.activeTab === 'packages' ? ' active' : ''}" data-tab="packages">Packages <span class="tree-count-badge">${packageCount}</span></button>
+        </div>
+
+        <div class="detail-tab-content">${renderTabContent(probe)}</div>
+      </div>
+    `;
+
+    refs.detail.querySelectorAll('.tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        state.activeTab = tab.dataset.tab || 'system';
+        renderDetail();
+      });
+    });
+  }
+
+  function renderFeed() {
+    refs.feed.innerHTML = '';
+
+    if (!state.feed.length) {
+      refs.feed.innerHTML = '<div class="feed-empty muted">Waiting for fleet events…</div>';
+      refs.feedCount.textContent = '0';
+      return;
+    }
+
+    state.feed.forEach((entry) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'feed-item' + (entry.probe_id ? ' clickable' : '');
+      if (entry.probe_id) item.dataset.probeId = entry.probe_id;
+      item.innerHTML = `
+        <span class="feed-time">${esc(ago(entry.timestamp))}</span>
+        <span class="feed-type tag">${esc(eventTypeLabel(entry.type))}</span>
+        <span class="feed-summary">${esc(entry.summary || entry.type || 'event')}</span>
+      `;
+      refs.feed.appendChild(item);
+    });
+
+    refs.feedCount.textContent = String(state.feed.length);
+  }
+
+  function addFeedItem(entry) {
+    const payload = {
+      type: entry?.type || 'event',
+      probe_id: entry?.probe_id || '',
+      summary: entry?.summary || entry?.type || 'event',
+      timestamp: entry?.timestamp || new Date().toISOString(),
+    };
+
+    state.feed.unshift(payload);
+    if (state.feed.length > MAX_FEED) {
+      state.feed.length = MAX_FEED;
+    }
+    renderFeed();
+  }
+
+  function selectProbe(probeId, options = {}) {
+    const probe = state.probes.find((item) => item.id === probeId);
+    if (!probe) return;
+
+    if (options.reveal) {
+      if (state.activeTag && !(Array.isArray(probe.tags) && probe.tags.includes(state.activeTag))) {
+        state.activeTag = null;
+      }
+      const name = String(probe.hostname || '').toLowerCase();
+      if (state.filterText && !name.includes(state.filterText)) {
+        state.filterText = '';
+        refs.treeFilter.value = '';
+      }
+    }
+
+    state.selectedProbeId = probeId;
+    renderTree();
+    renderDetail();
+    closeFleetOverlays();
+  }
+
+  async function refreshProbes() {
+    try {
+      const response = await fetch('/api/v1/probes', { cache: 'no-store' });
+      if (!response.ok) return;
+      const payload = await response.json();
+      state.probes = Array.isArray(payload) ? payload : [];
+
+      if (state.selectedProbeId && !state.probes.some((probe) => probe.id === state.selectedProbeId)) {
+        state.selectedProbeId = null;
+      }
+
+      renderTree();
+      renderDetail();
+
+      if (window.LegatorUI && typeof window.LegatorUI.updateBadges === 'function') {
+        window.LegatorUI.updateBadges();
+      }
+    } catch {
+      // best effort
+    }
+  }
+
+  function closeFleetOverlays() {
+    document.body.classList.remove('fleet-tree-open', 'fleet-feed-open');
+  }
+
+  function initLayoutToggles() {
+    refs.toggleTree?.addEventListener('click', () => {
+      document.body.classList.toggle('fleet-tree-open');
+      document.body.classList.remove('fleet-feed-open');
+    });
+
+    refs.toggleFeed?.addEventListener('click', () => {
+      document.body.classList.toggle('fleet-feed-open');
+      document.body.classList.remove('fleet-tree-open');
+    });
+
+    refs.overlayBackdrop?.addEventListener('click', closeFleetOverlays);
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        closeFleetOverlays();
+      }
+    });
+  }
+
+  function shouldRefresh(eventType) {
+    return eventType.startsWith('probe.') || eventType === 'command.completed' || eventType === 'command.failed';
+  }
+
+  function initSSE() {
+    const handlers = {
+      onopen: () => {
+        refs.sseDot.className = 'dot dot-online';
+        refs.sseStatus.textContent = 'live';
+      },
+      onerror: () => {
+        refs.sseDot.className = 'dot dot-offline';
+        refs.sseStatus.textContent = 'reconnecting…';
+      },
+    };
+
+    const events = [
+      'probe.connected',
+      'probe.disconnected',
+      'probe.offline',
+      'probe.registered',
+      'probe.updated',
+      'command.dispatched',
+      'command.completed',
+      'command.failed',
+      'approval.needed',
+      'approval.decided',
+      'policy.changed',
+      'chat.message',
+    ];
+
+    events.forEach((eventType) => {
+      handlers[eventType] = (payload) => {
+        const entry = Object.assign({}, payload || {}, { type: payload?.type || eventType });
+        addFeedItem(entry);
+        if (shouldRefresh(eventType)) {
+          refreshProbes();
+        }
+      };
+    });
+
+    if (window.LegatorUI && typeof window.LegatorUI.connectSSE === 'function') {
+      window.LegatorUI.connectSSE(handlers);
+    }
+  }
+
+  refs.treeFilter.addEventListener('input', (event) => {
+    state.filterText = String(event.target.value || '').trim().toLowerCase();
+    renderTree();
   });
 
-  refreshFleet();
-  if (window.LegatorUI && window.LegatorUI.connectSSE) {
-    window.LegatorUI.connectSSE(handlers);
+  refs.feed.addEventListener('click', (event) => {
+    const row = event.target.closest('.feed-item[data-probe-id]');
+    if (!row) return;
+    selectProbe(row.dataset.probeId, { reveal: true });
+  });
+
+  initLayoutToggles();
+  renderTree();
+  renderDetail();
+  renderFeed();
+  refreshProbes();
+  initSSE();
+
+  if (window.LegatorUI && typeof window.LegatorUI.initResizable === 'function') {
+    window.LegatorUI.initResizable();
   }
-  setInterval(refreshFleet, 30000);
+
+  window.setInterval(refreshProbes, 30000);
 })();
 </script>
 {{end}}
