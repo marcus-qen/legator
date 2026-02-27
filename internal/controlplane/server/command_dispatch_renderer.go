@@ -9,33 +9,21 @@ import (
 )
 
 func renderDispatchCommandHTTP(w http.ResponseWriter, projection *corecommanddispatch.CommandInvokeProjection) {
-	if projection == nil || projection.Envelope == nil {
-		writeJSONError(w, http.StatusBadGateway, "bad_gateway", "command dispatch failed")
-		return
-	}
-
-	handled := corecommanddispatch.DispatchCommandErrorsForSurface(projection.Envelope, projection.Surface, corecommanddispatch.CommandProjectionDispatchWriter{
+	corecommanddispatch.DispatchCommandInvokeProjection(projection, corecommanddispatch.CommandInvokeRenderDispatchWriter{
 		WriteHTTPError: func(httpErr *corecommanddispatch.HTTPErrorContract) {
 			if !httpErr.SuppressWrite {
 				writeJSONError(w, httpErr.Status, httpErr.Code, httpErr.Message)
 			}
 		},
-	})
-	if handled {
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if !projection.WaitForResult {
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"status":     "dispatched",
-			"request_id": projection.RequestID,
-		})
-		return
-	}
-
-	corecommanddispatch.DispatchCommandReadForSurface(projection.Envelope.Result, projection.Surface, corecommanddispatch.CommandProjectionDispatchWriter{
+		WriteHTTPDispatched: func(requestID string) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"status":     "dispatched",
+				"request_id": requestID,
+			})
+		},
 		WriteHTTPResult: func(result *protocol.CommandResultPayload) {
+			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(result)
 		},
 	})
