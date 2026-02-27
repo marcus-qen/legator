@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	_ "modernc.org/sqlite"
 	"go.uber.org/zap"
+	_ "modernc.org/sqlite"
 )
 
 // Store provides persistent chat backed by SQLite.
@@ -71,6 +71,13 @@ func (s *Store) GetMessages(probeID string, limit int) []Message {
 
 func (s *Store) Subscribe(probeID string) (<-chan Message, func()) {
 	return s.mgr.Subscribe(probeID)
+}
+
+// ClearMessages removes all messages for a probe from memory and disk.
+func (s *Store) ClearMessages(probeID string) error {
+	s.mgr.ClearMessages(probeID)
+	_, err := s.db.Exec("DELETE FROM chat_messages WHERE probe_id = ?", probeID)
+	return err
 }
 
 // ── Mutations (memory + disk) ───────────────────────────────
@@ -197,6 +204,23 @@ func (s *Store) HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(assistant)
+}
+
+func (s *Store) HandleClearChat(w http.ResponseWriter, r *http.Request) {
+	probeID := r.PathValue("id")
+	if probeID == "" {
+		http.Error(w, `{"error":"missing probe id"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := s.ClearMessages(probeID); err != nil {
+		http.Error(w, `{"error":"failed to clear chat"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
 // HandleChatWS handles WebSocket chat with persistent storage.

@@ -79,6 +79,22 @@ func (m *Manager) GetOrCreate(probeID string) *Session {
 	return s
 }
 
+// ClearMessages removes all messages for a probe session.
+func (m *Manager) ClearMessages(probeID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sess, ok := m.sessions[probeID]
+	if !ok {
+		return
+	}
+
+	sess.mu.Lock()
+	sess.Messages = nil
+	sess.UpdatedAt = time.Now().UTC()
+	sess.mu.Unlock()
+}
+
 // AddMessage appends a message to a probe session and fan-outs to subscribers.
 func (m *Manager) AddMessage(probeID, role, content string) *Message {
 	sess := m.GetOrCreate(probeID)
