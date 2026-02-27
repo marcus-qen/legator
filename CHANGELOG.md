@@ -14,6 +14,9 @@
 - **Kernel split S6 (approval decide success contract extraction)**
   - Extracted decide success decode/encode contracts into `internal/controlplane/core/approvalpolicy` and reduced `handleDecideApproval` to contract decode → core call → contract encode.
   - Added success parity assertions for denied/approved `{status,request}` responses to lock response schema/fields.
+- **Kernel split S7 (approval decide transport adapter contract)**
+  - Added a unified decide transport adapter contract in internal/controlplane/core/approvalpolicy (single success/error envelope, HTTP/MCP-ready) and refactored handleDecideApproval to consume adapter output with near-zero branching.
+  - Added transport-contract parity coverage across decode, success, invalid-decision, dispatch-failure, and hook-failure decide scenarios.
 
 ### Added
 - Parity tests for the extracted core service and server policy-apply paths (not found + offline apply-local behavior).
