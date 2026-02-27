@@ -880,27 +880,24 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	decision, err := s.approvalCore.DecideApproval(id, approval.Decision(body.Decision), body.DecidedBy)
+	decision, err := s.approvalCore.DecideAndDispatch(id, approval.Decision(body.Decision), body.DecidedBy, func(probeID string, cmd protocol.CommandPayload) error {
+		return s.dispatchCore.Dispatch(probeID, cmd)
+	})
 	if err != nil {
+		var dispatchErr *coreapprovalpolicy.ApprovedDispatchError
+		if errors.As(err, &dispatchErr) {
+			writeJSONError(w, http.StatusBadGateway, "bad_gateway", fmt.Sprintf("approved but dispatch failed: %s", dispatchErr.Error()))
+			return
+		}
+		var hookErr *coreapprovalpolicy.DecisionHookError
+		if errors.As(err, &hookErr) {
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", hookErr.Error())
+			return
+		}
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	req := decision.Request
-
-	s.emitAudit(audit.EventApprovalDecided, req.ProbeID, body.DecidedBy,
-		fmt.Sprintf("Approval %s for: %s", body.Decision, req.Command.Command))
-	s.publishEvent(events.ApprovalDecided, req.ProbeID, fmt.Sprintf("Approval %s: %s", body.Decision, req.Command.Command), nil)
-
-	if err := s.approvalCore.DispatchApprovedCommand(decision, func(probeID string, cmd protocol.CommandPayload) error {
-		return s.dispatchCore.Dispatch(probeID, cmd)
-	}); err != nil {
-		writeJSONError(w, http.StatusBadGateway, "bad_gateway", fmt.Sprintf("approved but dispatch failed: %s", err.Error()))
-		return
-	}
-	if decision.RequiresDispatch {
-		s.emitAudit(audit.EventCommandSent, req.ProbeID, body.DecidedBy,
-			fmt.Sprintf("Approved command dispatched: %s", req.Command.Command))
-	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{

@@ -17,6 +17,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/chat"
 	"github.com/marcus-qen/legator/internal/controlplane/config"
+	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/policy"
 	"github.com/marcus-qen/legator/internal/protocol"
@@ -668,6 +669,10 @@ func TestHandleDecideApproval(t *testing.T) {
 		t.Fatalf("submit approval: %v", err)
 	}
 
+	subID := "test-decide-" + req.ID
+	eventsCh := srv.eventBus.Subscribe(subID)
+	defer srv.eventBus.Unsubscribe(subID)
+
 	badReq := httptest.NewRequest(http.MethodPost, "/api/v1/approvals/"+req.ID+"/decide", strings.NewReader(`{"decision":"denied"}`))
 	badReq.SetPathValue("id", req.ID)
 	badRR := httptest.NewRecorder()
@@ -700,6 +705,36 @@ func TestHandleDecideApproval(t *testing.T) {
 	if updated.Decision != approval.DecisionDenied {
 		t.Fatalf("expected denied decision in queue, got %s", updated.Decision)
 	}
+
+	select {
+	case evt := <-eventsCh:
+		if evt.Type != events.ApprovalDecided {
+			t.Fatalf("expected approval.decided event, got %s", evt.Type)
+		}
+		if evt.ProbeID != "probe-decide" {
+			t.Fatalf("expected probe-decide event probe id, got %s", evt.ProbeID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected approval.decided event")
+	}
+
+	auditEvents := srv.queryAudit(audit.Filter{ProbeID: "probe-decide", Limit: 20})
+	hasApprovalAudit := false
+	hasCommandAudit := false
+	for _, evt := range auditEvents {
+		if evt.Type == audit.EventApprovalDecided {
+			hasApprovalAudit = true
+		}
+		if evt.Type == audit.EventCommandSent {
+			hasCommandAudit = true
+		}
+	}
+	if !hasApprovalAudit {
+		t.Fatal("expected approval decision audit event")
+	}
+	if hasCommandAudit {
+		t.Fatal("did not expect command sent audit event for denied decision")
+	}
 }
 
 func TestHandleDecideApproval_ApprovedDispatchFailure(t *testing.T) {
@@ -715,6 +750,10 @@ func TestHandleDecideApproval_ApprovedDispatchFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("submit approval: %v", err)
 	}
+
+	subID := "test-decide-fail-" + req.ID
+	eventsCh := srv.eventBus.Subscribe(subID)
+	defer srv.eventBus.Unsubscribe(subID)
 
 	httpReq := httptest.NewRequest(http.MethodPost, "/api/v1/approvals/"+req.ID+"/decide", strings.NewReader(`{"decision":"approved","decided_by":"operator"}`))
 	httpReq.SetPathValue("id", req.ID)
@@ -735,8 +774,37 @@ func TestHandleDecideApproval_ApprovedDispatchFailure(t *testing.T) {
 	if updated.Decision != approval.DecisionApproved {
 		t.Fatalf("expected approved decision in queue, got %s", updated.Decision)
 	}
-}
 
+	select {
+	case evt := <-eventsCh:
+		if evt.Type != events.ApprovalDecided {
+			t.Fatalf("expected approval.decided event, got %s", evt.Type)
+		}
+		if evt.ProbeID != "probe-decide-fail" {
+			t.Fatalf("expected probe-decide-fail event probe id, got %s", evt.ProbeID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected approval.decided event")
+	}
+
+	auditEvents := srv.queryAudit(audit.Filter{ProbeID: "probe-decide-fail", Limit: 20})
+	hasApprovalAudit := false
+	hasCommandAudit := false
+	for _, evt := range auditEvents {
+		if evt.Type == audit.EventApprovalDecided {
+			hasApprovalAudit = true
+		}
+		if evt.Type == audit.EventCommandSent {
+			hasCommandAudit = true
+		}
+	}
+	if !hasApprovalAudit {
+		t.Fatal("expected approval decision audit event")
+	}
+	if hasCommandAudit {
+		t.Fatal("did not expect command sent audit event when approved dispatch fails")
+	}
+}
 func TestHandleAuditLog(t *testing.T) {
 	srv := newTestServer(t)
 	srv.emitAudit(audit.EventCommandSent, "probe-a", "api", "command a")

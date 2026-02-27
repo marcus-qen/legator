@@ -446,7 +446,28 @@ func (s *Server) initPolicy() {
 }
 
 func (s *Server) initApprovalCore() {
-	s.approvalCore = coreapprovalpolicy.NewService(s.approvalQueue, s.fleetMgr, s.policyStore)
+	hooks := coreapprovalpolicy.DecisionHookFuncs{
+		OnDecisionRecordedFn: func(result *coreapprovalpolicy.ApprovalDecisionResult) error {
+			if result == nil || result.Request == nil {
+				return nil
+			}
+			req := result.Request
+			s.emitAudit(audit.EventApprovalDecided, req.ProbeID, req.DecidedBy,
+				fmt.Sprintf("Approval %s for: %s", req.Decision, req.Command.Command))
+			s.publishEvent(events.ApprovalDecided, req.ProbeID, fmt.Sprintf("Approval %s: %s", req.Decision, req.Command.Command), nil)
+			return nil
+		},
+		OnApprovedDispatchFn: func(result *coreapprovalpolicy.ApprovalDecisionResult) error {
+			if result == nil || result.Request == nil {
+				return nil
+			}
+			req := result.Request
+			s.emitAudit(audit.EventCommandSent, req.ProbeID, req.DecidedBy,
+				fmt.Sprintf("Approved command dispatched: %s", req.Command.Command))
+			return nil
+		},
+	}
+	s.approvalCore = coreapprovalpolicy.NewService(s.approvalQueue, s.fleetMgr, s.policyStore, coreapprovalpolicy.WithDecisionHooks(hooks))
 }
 
 func (s *Server) initDispatchCore() {
