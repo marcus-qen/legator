@@ -187,6 +187,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 			"/auth/oidc/login",
 			"/auth/oidc/callback",
 			"/static/*",
+			"/site/*",
 		})
 		authMiddleware.SetSessionAuth(s.sessionValidator, s.permissionResolver)
 		handler = authMiddleware.Wrap(handler)
