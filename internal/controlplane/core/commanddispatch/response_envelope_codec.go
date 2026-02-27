@@ -78,5 +78,5 @@ func encodeCommandInvokeMCPEnvelope(projection *CommandInvokeProjection) *transp
 }
 
 func unsupportedCommandInvokeResponseEnvelope(surface string) *transportwriter.ResponseEnvelope {
-	return transportwriter.UnsupportedSurfaceEnvelope(unsupportedCommandInvokeSurfaceMessage(surface))
+	return unsupportedCommandInvokeSurfaceEnvelope(surface)
 }

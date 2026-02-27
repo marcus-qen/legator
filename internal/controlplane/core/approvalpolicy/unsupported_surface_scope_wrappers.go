@@ -7,3 +7,7 @@ const unsupportedDecideApprovalScope = transportwriter.UnsupportedSurfaceScopeAp
 func unsupportedDecideApprovalSurfaceMessage(surface string) string {
 	return transportwriter.UnsupportedSurfaceMessage(unsupportedDecideApprovalScope, surface)
 }
+
+func unsupportedDecideApprovalSurfaceEnvelope(surface string) *transportwriter.ResponseEnvelope {
+	return transportwriter.UnsupportedSurfaceEnvelope(unsupportedDecideApprovalSurfaceMessage(surface))
+}
