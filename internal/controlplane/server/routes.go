@@ -517,29 +517,7 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 			map[string]string{"request_id": cmd.RequestID, "command": cmd.Command})
 	}
 
-	if envelope == nil {
-		writeJSONError(w, http.StatusBadGateway, "bad_gateway", "command dispatch failed")
-		return
-	}
-
-	if httpErr, ok := envelope.HTTPError(); ok {
-		if !httpErr.SuppressWrite {
-			writeJSONError(w, httpErr.Status, httpErr.Code, httpErr.Message)
-		}
-		return
-	}
-
-	if !wantWait {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"status":     "dispatched",
-			"request_id": cmd.RequestID,
-		})
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(envelope.Result)
+	renderDispatchCommandHTTP(w, cmd.RequestID, envelope, wantWait)
 }
 
 func (s *Server) handleRotateKey(w http.ResponseWriter, r *http.Request) {

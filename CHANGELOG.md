@@ -38,6 +38,9 @@
 - **Kernel split S15 (projection dispatch policy registry generalization)**
   - Generalized projection dispatch policy registry/adapter selection into reusable `internal/controlplane/core/projectiondispatch` utilities and applied them to approval-decide render-target + dispatch policy selection with parity tests.
   - Added non-invasive command-dispatch/read surface registry hooks for upcoming extractions without changing current command behavior.
+- **Kernel split S16 (command dispatch/read projection adapters)**
+  - Applied the shared `core/projectiondispatch` registry utility to command dispatch-error and command-read projection paths, introducing centralized HTTP/MCP adapter selection without external response changes.
+  - Added strict HTTP/MCP command parity tests that compare legacy vs adapter outputs/errors for dispatch and read flows.
 
 ### Added
 - Parity tests for the extracted core service and server policy-apply paths (not found + offline apply-local behavior).
