@@ -2,42 +2,57 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Legator — Self-hosted Fleet Management</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Legator</title>
     <style>
       :root {
         --bg: #0f1117;
-        --panel: #161a22;
-        --text: #e5e7eb;
-        --muted: #9ca3af;
-        --amber: #f59e0b;
-        --amber-2: #f8b73e;
-        --border: #293041;
-        --card: #141824;
+        --text: #e6e8ef;
+        --muted: #b8bcc6;
+        --line: #2a2f3a;
+        --accent: #d4a053;
       }
 
       * {
         box-sizing: border-box;
       }
 
-      html {
-        scroll-behavior: smooth;
-      }
-
       body {
         margin: 0;
-        font-family: Inter, "Segoe UI", Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif;
         background: var(--bg);
         color: var(--text);
-        line-height: 1.6;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        line-height: 1.65;
       }
 
-      img {
-        max-width: 100%;
+      main {
+        padding: 3.5rem 1.5rem 4rem;
+      }
+
+      h1,
+      h2 {
+        line-height: 1.15;
+        margin: 0;
+      }
+
+      h1 {
+        font-size: clamp(2.2rem, 7vw, 4rem);
+        letter-spacing: -0.02em;
+      }
+
+      h2 {
+        font-size: clamp(1.15rem, 2.2vw, 1.5rem);
+        margin-bottom: 0.7rem;
+        color: var(--text);
+      }
+
+      p {
+        margin: 0;
+        color: var(--muted);
       }
 
       a {
-        color: var(--amber);
+        color: var(--accent);
         text-decoration: none;
       }
 
@@ -45,503 +60,206 @@
         text-decoration: underline;
       }
 
-      .container {
-        width: min(1100px, calc(100% - 2rem));
-        margin: 0 auto;
-      }
-
-      .topbar {
-        position: sticky;
-        top: 0;
-        z-index: 20;
-        backdrop-filter: blur(12px);
-        background: color-mix(in srgb, var(--bg) 82%, transparent);
-        border-bottom: 1px solid var(--border);
-      }
-
-      .topbar-inner {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 0.85rem 0;
-      }
-
-      .brand {
-        font-weight: 800;
-        letter-spacing: 0.02em;
-        color: var(--text);
-        font-size: 1.1rem;
-      }
-
-      .brand span {
-        color: var(--amber);
-      }
-
-      .nav {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.9rem;
-        justify-content: flex-end;
-      }
-
-      .nav a {
-        color: var(--text);
-        font-size: 0.95rem;
-      }
-
       .hero {
-        position: relative;
-        padding: 6rem 0 4.8rem;
-        overflow: hidden;
+        max-width: 50rem;
       }
 
-      .hero::before,
-      .hero::after {
-        content: "";
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
-        z-index: -1;
-      }
-
-      .hero::before {
-        background:
-          radial-gradient(circle at 20% 20%, rgba(245, 158, 11, 0.16), transparent 42%),
-          radial-gradient(circle at 80% 10%, rgba(56, 189, 248, 0.11), transparent 38%),
-          linear-gradient(120deg, rgba(245, 158, 11, 0.08), rgba(15, 17, 23, 0) 55%, rgba(56, 189, 248, 0.06));
-      }
-
-      .hero::after {
-        background-image: linear-gradient(to right, rgba(255,255,255,.05) 1px, transparent 1px),
-          linear-gradient(to bottom, rgba(255,255,255,.04) 1px, transparent 1px);
-        background-size: 34px 34px;
-        opacity: 0.22;
-      }
-
-      .hero-content {
-        position: relative;
-        z-index: 1;
-        max-width: 760px;
-      }
-
-      .kicker {
+      .mark {
         display: inline-block;
-        border: 1px solid rgba(245, 158, 11, 0.45);
-        color: var(--amber-2);
-        border-radius: 999px;
-        padding: 0.35rem 0.8rem;
-        font-size: 0.82rem;
-        letter-spacing: 0.06em;
+        margin-bottom: 1rem;
+        color: var(--accent);
+        font-size: 0.8rem;
+        letter-spacing: 0.08em;
         text-transform: uppercase;
       }
 
-      h1 {
-        margin: 0.7rem 0;
-        font-size: clamp(2rem, 4vw, 3.4rem);
-        letter-spacing: 0.01em;
+      .hero p {
+        margin-top: 1.1rem;
+        max-width: 44rem;
       }
 
-      .subtitle {
-        color: #cfd4dc;
-        max-width: 68ch;
-      }
-
-      .cta-row {
-        margin-top: 1.7rem;
-        display: flex;
-        gap: 0.85rem;
-        flex-wrap: wrap;
-      }
-
-      .btn {
-        border: 1px solid transparent;
-        border-radius: 0.7rem;
-        padding: 0.7rem 1.1rem;
-        display: inline-flex;
-        align-items: center;
-        font-weight: 600;
-        transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
-      }
-
-      .btn:hover {
-        transform: translateY(-1px);
-      }
-
-      .btn-primary {
-        background: linear-gradient(135deg, var(--amber), #d97706);
-        color: #111827;
-      }
-
-      .btn-secondary {
-        border-color: var(--border);
+      .hero .split {
+        margin-top: 1rem;
         color: var(--text);
-        background: rgba(255, 255, 255, 0.02);
       }
 
-      .section {
-        padding: 3.5rem 0;
+      section {
+        margin-top: 3.2rem;
       }
 
-      .section-title {
-        margin: 0;
-        font-size: clamp(1.4rem, 2.4vw, 2rem);
+      .what {
+        max-width: 40rem;
       }
 
-      .section-copy {
-        margin-top: 0.55rem;
-        color: var(--muted);
-        max-width: 74ch;
+      .what p + p {
+        margin-top: 0.95rem;
       }
 
-      .panel-grid {
-        margin-top: 1.5rem;
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-        gap: 1rem;
+      .architecture {
+        max-width: 58rem;
       }
 
-      .card {
-        border: 1px solid var(--border);
-        border-radius: 0.85rem;
-        padding: 1.1rem;
-        background: linear-gradient(150deg, rgba(255, 255, 255, 0.02), rgba(245, 158, 11, 0.03));
-        color: var(--text);
-        opacity: 1;
-        transform: translateY(18px);
-      }
-
-      .card.visible {
-        animation: fadeInUp 0.6s cubic-bezier(0.21, 1, 0.37, 1) forwards;
-      }
-
-      .card h3 {
-        margin: 0.2rem 0;
-      }
-
-      .card p {
-        margin: 0;
-        color: #c8ced7;
-      }
-
-      .icon {
-        font-size: 1.3rem;
-        margin-bottom: 0.4rem;
-        display: inline-block;
-      }
-
-      .timeline {
-        display: grid;
-        gap: 0.9rem;
-      }
-
-      .step {
-        display: grid;
-        grid-template-columns: auto 1fr;
-        gap: 0.9rem;
-        align-items: center;
-      }
-
-      .step-number {
-        width: 2.2rem;
-        height: 2.2rem;
-        border-radius: 999px;
-        display: grid;
-        place-items: center;
-        background: #2c2f3b;
-        border: 1px solid var(--amber);
-        color: var(--amber);
-        font-weight: 700;
-      }
-
-      .step .card {
-        margin: 0;
-        width: 100%;
-        opacity: 1;
-        transform: none;
-      }
-
-      .install-block {
-        background: var(--panel);
-        border: 1px dashed var(--border);
-        border-radius: 0.95rem;
-        padding: 1rem;
+      pre,
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       }
 
       pre {
-        margin: 0.7rem 0;
-        background: #0b0f19;
-        border-radius: 0.65rem;
-        padding: 0.9rem;
-        border: 1px solid #1c2232;
+        margin: 0;
+        white-space: pre;
         overflow-x: auto;
-        font-size: 0.95rem;
-        color: #d4d9e2;
+        border: 1px solid var(--line);
+        padding: 1rem;
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.01);
       }
 
-      .muted-note {
+      .quickstart {
+        max-width: 64rem;
+      }
+
+      .quickstart pre {
+        font-size: 0.93rem;
+      }
+
+      .stats {
+        max-width: 42rem;
+      }
+
+      .stats ul {
+        margin: 0;
+        padding-left: 1.2rem;
+      }
+
+      .stats li {
+        margin-bottom: 0.55rem;
         color: var(--muted);
       }
 
-      .arch {
-        border: 1px solid var(--border);
-        border-radius: 0.95rem;
-        background: var(--card);
-        padding: 1rem;
-        overflow: auto;
-      }
-
-      .arch pre {
-        margin: 0;
-        border-radius: 0.45rem;
-      }
-
-      .small {
-        font-size: 0.9rem;
+      .stats li:last-child {
+        margin-bottom: 0;
       }
 
       footer {
-        margin-top: 4rem;
-        border-top: 1px solid var(--border);
-        padding: 1.5rem 0 2rem;
+        margin-top: 3.4rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--line);
+        max-width: 30rem;
         color: var(--muted);
       }
 
-      .footer-grid {
-        display: flex;
-        justify-content: space-between;
-        gap: 1rem;
-        flex-wrap: wrap;
-        align-items: center;
-      }
+      @media (min-width: 980px) {
+        main {
+          padding: 4rem 4rem 5rem;
+        }
 
-      .links {
-        display: flex;
-        gap: 1rem;
-        flex-wrap: wrap;
-      }
+        .what {
+          margin-left: 2rem;
+        }
 
-      .badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.45rem;
-        color: #111827;
-        padding: 0.4rem 0.75rem;
-        border-radius: 999px;
-        background: linear-gradient(120deg, var(--amber), #eab308);
-        font-weight: 700;
-        font-size: 0.82rem;
+        .architecture {
+          margin-left: 2rem;
+        }
+
+        .quickstart {
+          margin-left: 2rem;
+        }
+
+        .stats {
+          margin-left: 2rem;
+        }
+
+        footer {
+          margin-left: 2rem;
+        }
       }
 
       @media (max-width: 640px) {
-        .topbar-inner {
-          flex-direction: column;
-          align-items: flex-start;
-          gap: 0.5rem;
+        main {
+          padding-top: 2.4rem;
         }
 
-        .nav {
-          justify-content: flex-start;
+        section {
+          margin-top: 2.4rem;
         }
 
-        .hero {
-          padding-top: 4.9rem;
-        }
-      }
-
-      @keyframes fadeInUp {
-        to {
-          opacity: 1;
-          transform: translateY(0);
+        pre {
+          font-size: 0.86rem;
         }
       }
     </style>
   </head>
   <body>
-    <header class="topbar">
-      <div class="container topbar-inner">
-        <a class="brand" href="#">Lega<span>tor</span></a>
-        <nav class="nav" aria-label="Primary">
-          <a href="#features">Features</a>
-          <a href="#how-it-works">How it works</a>
-          <a href="#install">Install</a>
-          <a href="#architecture">Architecture</a>
-          <a href="#docs">Docs</a>
-        </nav>
-      </div>
-    </header>
-
     <main>
-      <section class="hero">
-        <div class="container">
-          <div class="hero-content">
-            <span class="kicker">Open-source Fleet Control Plane</span>
-            <h1>Legator</h1>
-            <p class="subtitle">Self-hosted fleet management with AI-powered probes</p>
-            <p class="subtitle">
-              Deploy AI agents across your infrastructure. Observe, diagnose, and remediate — with policy-driven
-              guardrails and full audit trails.
-            </p>
-            <div class="cta-row">
-              <a class="btn btn-primary" href="#install">Get Started</a>
-              <a class="btn btn-secondary" href="https://github.com/marcus-qen/legator" target="_blank" rel="noreferrer">View on GitHub</a>
-            </div>
-          </div>
-        </div>
+      <header class="hero">
+        <span class="mark">Legator</span>
+        <h1>Your servers. Your models. Your rules.</h1>
+        <p>
+          Legator is a self-hosted fleet management control plane. It deploys AI probes that talk to your
+          infrastructure — but the AI never touches your servers directly. Brain and hands are separate.
+        </p>
+        <p class="split">Brain decides. Probe executes. Policy gates everything.</p>
+        <p style="margin-top:1.1rem"><a href="https://github.com/marcus-qen/legator">→ GitHub</a></p>
+      </header>
+
+      <section class="what" aria-labelledby="what-it-does">
+        <h2 id="what-it-does">What it does</h2>
+        <p>
+          You install a 7MB binary on a server. It connects home over WebSocket. You can ask it questions,
+          give it work, and get real answers back: inventory, health, drift, suspicious changes, failed
+          services. If a change is risky, it stops and asks for approval.
+        </p>
+        <p>
+          Every action is logged with before/after state. The LLM never has root. The probe never reasons
+          on its own. You decide autonomy level per host.
+        </p>
       </section>
 
-      <section id="features" class="section">
-        <div class="container">
-          <h2 class="section-title">Features</h2>
-          <p class="section-copy">Legator is built to be practical: lightweight, transparent, and a little less drama than enterprise dashboards.</p>
-
-          <div class="panel-grid" id="featureCards">
-            <article class="card">
-              <div class="icon" aria-hidden="true">🔍</div>
-              <h3>Fleet Visibility</h3>
-              <p>Real-time status, health scoring, and inventory across all your machines.</p>
-            </article>
-
-            <article class="card">
-              <div class="icon" aria-hidden="true">🤖</div>
-              <h3>AI-Powered Chat</h3>
-              <p>Ask questions about your fleet in natural language. Legator dispatches commands and summarises results.</p>
-            </article>
-
-            <article class="card">
-              <div class="icon" aria-hidden="true">🛡️</div>
-              <h3>Policy Guardrails</h3>
-              <p>Observe, Diagnose, or Remediate levels. Defence-in-depth enforcement at both control plane and probe.</p>
-            </article>
-
-            <article class="card">
-              <div class="icon" aria-hidden="true">🔔</div>
-              <h3>Alert Rules</h3>
-              <p>
-                Get notified when probes go offline, disks fill up, or CPU spikes. Webhook delivery with HMAC signing.
-              </p>
-            </article>
-
-            <article class="card">
-              <div class="icon" aria-hidden="true">🔑</div>
-              <h3>Built-in Auth</h3>
-              <p>Local accounts + OIDC SSO (Keycloak, Google, etc). API keys with scoped permissions.</p>
-            </article>
-
-            <article class="card">
-              <div class="icon" aria-hidden="true">📋</div>
-              <h3>Full Audit Trail</h3>
-              <p>Every command, policy change, and login is recorded. Searchable, filterable, exportable.</p>
-            </article>
-          </div>
-        </div>
+      <section class="architecture" aria-labelledby="architecture">
+        <h2 id="architecture">Architecture</h2>
+        <pre>┌────────────────────────────────────────────┐
+│            Control Plane (15MB)            │
+│  Web UI · REST API · WebSocket · LLM       │
+│  Policy Engine · Approval Queue · Audit    │
+└──────────────────┬─────────────────────────┘
+                   │ WSS (TLS)
+        ┌──────────┼──────────┐
+        ▼          ▼          ▼
+    ┌───────┐  ┌───────┐  ┌───────┐
+    │ Probe │  │ Probe │  │ Probe │
+    │  7MB  │  │  7MB  │  │  7MB  │
+    └───────┘  └───────┘  └───────┘</pre>
       </section>
 
-      <section id="how-it-works" class="section">
-        <div class="container">
-          <h2 class="section-title">How it works</h2>
-          <p class="section-copy">No hand-holding, no wizard cult. Three steps and you are in.</p>
+      <section class="quickstart" aria-labelledby="quick-start">
+        <h2 id="quick-start">Quick start</h2>
+        <pre><code># Build
+git clone https://github.com/marcus-qen/legator && cd legator && make
 
-          <div class="timeline">
-            <div class="step">
-              <div class="step-number">1</div>
-              <article class="card">
-                <h3>Install the control plane</h3>
-                <p>Run the control plane on one server. Single binary, around 14MB.</p>
-              </article>
-            </div>
+# Run
+./bin/control-plane
 
-            <div class="step">
-              <div class="step-number">2</div>
-              <article class="card">
-                <h3>Deploy probes</h3>
-                <p>Install probe daemons on your machines with a short command. Each probe is a ~7MB binary.</p>
-              </article>
-            </div>
-
-            <div class="step">
-              <div class="step-number">3</div>
-              <article class="card">
-                <h3>Manage the fleet</h3>
-                <p>Operate from the web dashboard or API: observe, diagnose, and remediate.</p>
-              </article>
-            </div>
-          </div>
-        </div>
+# Connect a probe
+TOKEN=$(curl -sf -X POST http://localhost:8080/api/v1/tokens | jq -r .token)
+curl -sSL http://localhost:8080/install.sh | sudo bash -s -- --server http://localhost:8080 --token "$TOKEN"</code></pre>
       </section>
 
-      <section id="install" class="section">
-        <div class="container">
-          <h2 class="section-title">Install</h2>
-          <p class="section-copy">Use this one-liner to register a probe (replace placeholders first):</p>
-          <div class="install-block">
-            <pre><code>curl -sSL https://your-server/install.sh | sudo bash -s -- --server https://your-server --token YOUR_TOKEN</code></pre>
-            <p class="muted-note">
-              Replace <code>your-server</code> with your control plane URL and <code>YOUR_TOKEN</code> with a registration token.
-            </p>
-            <p>
-              Need the full story? <a href="#docs">Read the docs</a>.
-            </p>
-          </div>
-        </div>
+      <section class="stats" aria-labelledby="stats">
+        <h2 id="stats">Stats</h2>
+        <ul>
+          <li>155 Go files</li>
+          <li>30 test suites, 29 E2E checks</li>
+          <li>Control plane: 15MB. Probe: 7MB. Zero dependencies.</li>
+          <li>Runs on Linux, Windows, K8s DaemonSet</li>
+          <li>BYOK: bring your own API keys (OpenAI, Anthropic, local Ollama, whatever)</li>
+          <li>Apache 2.0</li>
+        </ul>
       </section>
 
-      <section id="architecture" class="section">
-        <div class="container">
-          <h2 class="section-title">Architecture</h2>
-          <p class="section-copy">A simple split-brain-resistant design: small binaries, clear trust boundaries, observable state.</p>
-
-          <div class="arch">
-            <pre>Control Plane: Go binary, SQLite databases, REST API + WebSocket, web dashboard
-Probes: lightweight Go binary, auto-reconnect, heartbeat, inventory scanner, command executor
-Connection: persistent WebSocket (WSS), heartbeat every 30s, auto-reconnect with jitter</pre>
-          </div>
-        </div>
-      </section>
-
-      <section id="docs" class="section">
-        <div class="container">
-          <h2 class="section-title">Documentation</h2>
-          <p class="section-copy">
-            Documentation is on GitHub. Start with the README for quickstart, architecture overview, and API reference.
-            <a href="https://github.com/marcus-qen/legator">Read the docs →</a>
-          </p>
-        </div>
-      </section>
+      <footer>
+        <a href="https://github.com/marcus-qen/legator">github.com/marcus-qen/legator</a><br />
+        Made by marcus-qen
+      </footer>
     </main>
-
-    <footer>
-      <div class="container footer-grid">
-        <div>
-          <p>Built by <strong>Marcus Qen</strong></p>
-          <p class="small">Legator is open-source and aimed at people who run their own gear.</p>
-        </div>
-        <div class="links">
-          <a href="https://github.com/marcus-qen/legator" target="_blank" rel="noreferrer">GitHub</a>
-          <a href="#docs">Documentation</a>
-          <a href="LICENSE">License (MIT)</a>
-        </div>
-        <span class="badge">Legator v1.0.0-alpha</span>
-      </div>
-    </footer>
-
-    <script>
-      (() => {
-        const cards = document.querySelectorAll(#featureCards .card);
-        const observer = new IntersectionObserver(
-          (entries) => {
-            entries.forEach((entry, idx) => {
-              if (entry.isIntersecting) {
-                entry.target.style.animationDelay = `${idx * 0.09}s`;
-                entry.target.classList.add(visible);
-                observer.unobserve(entry.target);
-              }
-            });
-          },
-          { threshold: 0.2 }
-        );
-
-        cards.forEach((card) => observer.observe(card));
-      })();
-    </script>
   </body>
 </html>
