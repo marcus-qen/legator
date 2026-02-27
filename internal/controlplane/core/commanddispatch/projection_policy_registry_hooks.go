@@ -20,6 +20,10 @@ var (
 		ProjectionDispatchSurfaceHTTP: ProjectionDispatchSurfaceHTTP,
 		ProjectionDispatchSurfaceMCP:  ProjectionDispatchSurfaceMCP,
 	})
+	defaultCommandInvokeProjectionDispatchSurfaceRegistry = projectiondispatch.NewPolicyRegistry(map[ProjectionDispatchSurface]ProjectionDispatchSurface{
+		ProjectionDispatchSurfaceHTTP: ProjectionDispatchSurfaceHTTP,
+		ProjectionDispatchSurfaceMCP:  ProjectionDispatchSurfaceMCP,
+	})
 )
 
 // ResolveCommandDispatchProjectionSurface is an extension hook for future
@@ -32,4 +36,10 @@ func ResolveCommandDispatchProjectionSurface(surface ProjectionDispatchSurface) 
 // command-read projection adapter extraction.
 func ResolveCommandReadProjectionSurface(surface ProjectionDispatchSurface) (ProjectionDispatchSurface, bool) {
 	return defaultCommandReadProjectionSurfaceRegistry.Resolve(surface)
+}
+
+// ResolveCommandInvokeProjectionDispatchSurface is an extension hook for
+// command invoke render-dispatch adapter surface selection.
+func ResolveCommandInvokeProjectionDispatchSurface(surface ProjectionDispatchSurface) (ProjectionDispatchSurface, bool) {
+	return defaultCommandInvokeProjectionDispatchSurfaceRegistry.Resolve(surface)
 }

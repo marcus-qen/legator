@@ -44,6 +44,9 @@
 - **Kernel split S17 (shared command invoke seam for HTTP+MCP)**
   - Added shared command invoke adapter in `internal/controlplane/core/commanddispatch` to centralize request-id generation, wait/stream/timeout policy selection, and renderer handoff projection.
   - Refactored HTTP command dispatch route + MCP `legator_run_command` tool to consume the shared invoke seam with strict parity tests preserving existing response/error semantics.
+- **Kernel split S18 (command invoke render-dispatch adapter)**
+  - Added a shared command invoke render-dispatch adapter in `internal/controlplane/core/commanddispatch` so HTTP/MCP shells now provide transport writers only while core owns sequencing + fallback policy.
+  - Refactored HTTP command dispatch and MCP run-command renderers to consume the adapter with strict parity tests preserving existing JSON/tool error semantics.
 
 ### Added
 - Parity tests for the extracted core service and server policy-apply paths (not found + offline apply-local behavior).
