@@ -6,9 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/marcus-qen/legator/internal/probe/agent"
@@ -50,7 +48,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, cancel := newSignalContext(context.Background())
 	defer cancel()
 
 	var err error
@@ -88,12 +86,12 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println(`Usage: probe <command>
+	fmt.Printf(`Usage: probe <command>
 
 Commands:
   init       Register with control plane (requires --server and --token)
-  run        Start the agent loop (runs as systemd service)
-  service    Manage the systemd service (install|remove|status)
+  run        Start the agent loop (foreground; service manager optional)
+  service    Manage the probe service (install|start|stop|remove|status)
   status     Show local probe status
   list       List all probes in the fleet (--url, --format json)
   info       Show detailed probe info (probe info <id>)
@@ -103,7 +101,8 @@ Commands:
   help       Show this help
 
 Global flags:
-  --config-dir <path>   Config directory (default /etc/legator)`)
+  --config-dir <path>   Config directory (default %s)
+`, agent.DefaultConfigDir)
 }
 
 // parseConfigDir extracts --config-dir from args, returning the dir and remaining args.
@@ -247,18 +246,22 @@ func cmdRun(ctx context.Context, args []string) error {
 		return fmt.Errorf("load config: %w (run 'probe init' first)", err)
 	}
 
-	a := agent.New(cfg, logger)
-	return a.Run(ctx)
+	return runAgent(ctx, cfg, logger)
 }
 
 func cmdService(args []string) error {
+	configDir, args := parseConfigDir(args)
 	if len(args) == 0 {
-		return fmt.Errorf("usage: probe service <install|remove|status>")
+		return fmt.Errorf("usage: probe service <install|start|stop|remove|status>")
 	}
 	switch args[0] {
 	case "install":
-		return agent.ServiceInstall("")
-	case "remove":
+		return agent.ServiceInstall(configDir)
+	case "start":
+		return agent.ServiceStart()
+	case "stop":
+		return agent.ServiceStop()
+	case "remove", "uninstall":
 		return agent.ServiceRemove()
 	case "status":
 		return agent.ServiceStatus()

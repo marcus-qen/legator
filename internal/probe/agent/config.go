@@ -10,10 +10,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const (
-	DefaultConfigDir = "/etc/legator"
-	DefaultDataDir   = "/var/lib/legator"
-	DefaultLogDir    = "/var/log/legator"
+var (
+	DefaultConfigDir = defaultConfigDir()
+	DefaultDataDir   = defaultDataDir()
+	DefaultLogDir    = defaultLogDir()
 )
 
 // Config holds the probe's persistent configuration.

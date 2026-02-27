@@ -58,6 +58,7 @@ jobs:
             bin/legator-probe-linux-amd64
             bin/legator-probe-linux-arm64
             bin/legator-probe-darwin-arm64
+            bin/legator-probe-windows-amd64.exe
             bin/legator-ctl-linux-amd64
             bin/legator-ctl-linux-arm64
             bin/legator-ctl-darwin-arm64

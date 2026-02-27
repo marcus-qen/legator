@@ -5,7 +5,7 @@ This guide takes you from zero to a working control plane with a connected probe
 ## Prerequisites
 
 - Go 1.24+ (for building from source)
-- Linux (amd64 or arm64) for the probe
+- Linux or Windows host for the probe (amd64)
 - An LLM API key (optional — needed for chat/task features)
 
 ## Step 1: Build
@@ -93,18 +93,31 @@ curl -sSL https://your-server/install.sh | sudo bash -s -- \
 
 This downloads the probe binary, registers with the control plane, and installs a systemd service.
 
-### Option B: Manual (development/testing)
+### Option B: Manual Linux install (development/testing)
 
 ```bash
 ./bin/probe init --server http://localhost:8080 --token <token>
+./bin/probe service install
+# or foreground mode:
 ./bin/probe run
 ```
 
-Or combine in one step:
+### Option C: Manual Windows install (PowerShell, Admin)
 
-```bash
-./bin/probe run --server http://localhost:8080 --token <token>
+```powershell
+# Download probe.exe from release assets
+.\probe.exe init --server http://<control-plane>:8080 --token <token>
+.\probe.exe service install
+# lifecycle commands:
+.\probe.exe service status
+.\probe.exe service stop
+.\probe.exe service start
+.\probe.exe service remove
 ```
+
+Windows defaults:
+- config: `%ProgramData%\Legator\probe-config\config.yaml`
+- data/log: `%ProgramData%\Legator\`
 
 ## Step 5: Verify
 

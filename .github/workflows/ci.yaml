@@ -41,6 +41,11 @@ jobs:
             COMMIT="${GITHUB_SHA::7}" \
             DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+      - name: Build Windows probe (compile check)
+        run: |
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build \
+            -o bin/probe-windows-amd64.exe ./cmd/probe
+
       - name: Upload binaries
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -48,6 +53,7 @@ jobs:
           path: |
             bin/control-plane
             bin/probe
+            bin/probe-windows-amd64.exe
             bin/legatorctl
 
   lint:

@@ -1,3 +1,5 @@
+//go:build !windows
+
 package agent
 
 import (
@@ -80,8 +82,8 @@ func ServiceInstall(configDir string) error {
 		return fmt.Errorf("enable: %w", err)
 	}
 
-	if err := systemctl("start", serviceName); err != nil {
-		return fmt.Errorf("start: %w", err)
+	if err := ServiceStart(); err != nil {
+		return err
 	}
 
 	fmt.Printf("✅ Service %s installed and started\n", serviceName)
@@ -91,9 +93,23 @@ func ServiceInstall(configDir string) error {
 	return nil
 }
 
+func ServiceStart() error {
+	if err := systemctl("start", serviceName); err != nil {
+		return fmt.Errorf("start: %w", err)
+	}
+	return nil
+}
+
+func ServiceStop() error {
+	if err := systemctl("stop", serviceName); err != nil {
+		return fmt.Errorf("stop: %w", err)
+	}
+	return nil
+}
+
 // ServiceRemove stops and removes the systemd service.
 func ServiceRemove() error {
-	_ = systemctl("stop", serviceName)
+	_ = ServiceStop()
 	_ = systemctl("disable", serviceName)
 
 	if err := os.Remove(unitPath); err != nil && !os.IsNotExist(err) {

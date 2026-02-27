@@ -70,7 +70,19 @@ func (e *Executor) ExecuteStream(ctx context.Context, cmd *protocol.CommandPaylo
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	c := exec.CommandContext(execCtx, cmd.Command, cmd.Args...)
+	spec, err := buildExecSpec(cmd)
+	if err != nil {
+		cb(protocol.OutputChunkPayload{
+			RequestID: cmd.RequestID,
+			Stream:    "stderr",
+			Data:      err.Error(),
+			Final:     true,
+			ExitCode:  -1,
+		})
+		return
+	}
+
+	c := exec.CommandContext(execCtx, spec.name, spec.args...)
 
 	stdout, err := c.StdoutPipe()
 	if err != nil {

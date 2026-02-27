@@ -38,6 +38,7 @@ build-probe-all:
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/legator-probe-linux-amd64 ./cmd/probe
 	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/legator-probe-linux-arm64 ./cmd/probe
 	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/legator-probe-darwin-arm64 ./cmd/probe
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/legator-probe-windows-amd64.exe ./cmd/probe
 
 build-ctl-all:
 	mkdir -p $(BIN_DIR)
