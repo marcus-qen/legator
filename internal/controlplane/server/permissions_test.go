@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -192,6 +193,81 @@ func TestPermissionsFleetReadCannotMutateModelDockCloudOrDiscovery(t *testing.T)
 				t.Fatalf("expected 403, got %d body=%s", rr.Code, rr.Body.String())
 			}
 		})
+	}
+}
+
+func TestPermissionsNetworkDeviceRoutes(t *testing.T) {
+	srv := newAuthTestServer(t)
+	readToken := createAPIKey(t, srv, "fleet-read", auth.PermFleetRead)
+	writeToken := createAPIKey(t, srv, "fleet-write", auth.PermFleetWrite)
+
+	createBody := `{"name":"core-rtr","host":"10.0.0.10","port":22,"vendor":"cisco","username":"admin","auth_mode":"password","tags":["core"]}`
+	created := makeRequest(t, srv, http.MethodPost, "/api/v1/network/devices", writeToken, createBody)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("expected 201 create with fleet:write, got %d body=%s", created.Code, created.Body.String())
+	}
+
+	listRead := makeRequest(t, srv, http.MethodGet, "/api/v1/network/devices", readToken, "")
+	if listRead.Code == http.StatusUnauthorized || listRead.Code == http.StatusForbidden {
+		t.Fatalf("expected fleet:read to list network devices, got %d body=%s", listRead.Code, listRead.Body.String())
+	}
+
+	var listPayload struct {
+		Devices []struct {
+			ID string `json:"id"`
+		} `json:"devices"`
+	}
+	if err := json.Unmarshal(listRead.Body.Bytes(), &listPayload); err != nil {
+		t.Fatalf("decode list payload: %v", err)
+	}
+	if len(listPayload.Devices) == 0 || listPayload.Devices[0].ID == "" {
+		t.Fatalf("expected at least one network device in list, body=%s", listRead.Body.String())
+	}
+	deviceID := listPayload.Devices[0].ID
+
+	getRead := makeRequest(t, srv, http.MethodGet, "/api/v1/network/devices/"+deviceID, readToken, "")
+	if getRead.Code == http.StatusUnauthorized || getRead.Code == http.StatusForbidden {
+		t.Fatalf("expected fleet:read to get network device, got %d body=%s", getRead.Code, getRead.Body.String())
+	}
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{name: "create denied", method: http.MethodPost, path: "/api/v1/network/devices", body: createBody},
+		{name: "update denied", method: http.MethodPut, path: "/api/v1/network/devices/" + deviceID, body: `{"name":"new"}`},
+		{name: "delete denied", method: http.MethodDelete, path: "/api/v1/network/devices/" + deviceID},
+		{name: "test denied", method: http.MethodPost, path: "/api/v1/network/devices/" + deviceID + "/test", body: `{}`},
+		{name: "inventory denied", method: http.MethodPost, path: "/api/v1/network/devices/" + deviceID + "/inventory", body: `{}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := makeRequest(t, srv, tc.method, tc.path, readToken, tc.body)
+			if rr.Code != http.StatusForbidden {
+				t.Fatalf("expected 403 for fleet:read on %s %s, got %d body=%s", tc.method, tc.path, rr.Code, rr.Body.String())
+			}
+		})
+	}
+
+	updateWrite := makeRequest(t, srv, http.MethodPut, "/api/v1/network/devices/"+deviceID, writeToken, `{"name":"core-rtr-2","tags":["core","edge"]}`)
+	if updateWrite.Code == http.StatusUnauthorized || updateWrite.Code == http.StatusForbidden {
+		t.Fatalf("expected fleet:write update access, got %d body=%s", updateWrite.Code, updateWrite.Body.String())
+	}
+
+	testWrite := makeRequest(t, srv, http.MethodPost, "/api/v1/network/devices/"+deviceID+"/test", writeToken, `{}`)
+	if testWrite.Code == http.StatusUnauthorized || testWrite.Code == http.StatusForbidden {
+		t.Fatalf("expected fleet:write test access, got %d body=%s", testWrite.Code, testWrite.Body.String())
+	}
+
+	inventoryWrite := makeRequest(t, srv, http.MethodPost, "/api/v1/network/devices/"+deviceID+"/inventory", writeToken, `{}`)
+	if inventoryWrite.Code == http.StatusUnauthorized || inventoryWrite.Code == http.StatusForbidden {
+		t.Fatalf("expected fleet:write inventory access, got %d body=%s", inventoryWrite.Code, inventoryWrite.Body.String())
+	}
+
+	deleteWrite := makeRequest(t, srv, http.MethodDelete, "/api/v1/network/devices/"+deviceID, writeToken, "")
+	if deleteWrite.Code == http.StatusUnauthorized || deleteWrite.Code == http.StatusForbidden {
+		t.Fatalf("expected fleet:write delete access, got %d body=%s", deleteWrite.Code, deleteWrite.Body.String())
 	}
 }
 

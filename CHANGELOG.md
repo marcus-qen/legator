@@ -1,3 +1,21 @@
+## [v1.0.0-alpha.14] — 2026-02-27
+
+### Added
+- **Network Device Probes MVP (phase 1)**
+  - SQLite-backed `network_devices` target store (id, name, host, port, vendor, username, auth mode, tags, timestamps)
+  - Auth-protected API endpoints:
+    - `GET /api/v1/network/devices`
+    - `POST /api/v1/network/devices`
+    - `GET /api/v1/network/devices/{id}`
+    - `PUT /api/v1/network/devices/{id}`
+    - `DELETE /api/v1/network/devices/{id}`
+    - `POST /api/v1/network/devices/{id}/test` (safe connectivity check)
+    - `POST /api/v1/network/devices/{id}/inventory` (best-effort hostname/version/interfaces)
+  - Permission model wired to RBAC: read routes require `fleet:read`; mutating/test/inventory routes require `fleet:write`
+  - New **Network Devices** page under the existing template system (no CDN dependencies), including list/add/edit/delete plus test/inventory actions with write-permission gating
+  - Unit tests for network device store + handlers, plus server permission coverage for all network-device routes
+  - E2E checks expanded for network-device CRUD and probe/inventory endpoint behavior
+
 ## [v1.0.0-alpha.13] — 2026-02-27
 
 ### Changed

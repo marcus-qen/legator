@@ -650,6 +650,74 @@ else
   fail "/version returned $VERSION_STATUS after MCP wiring"
 fi
 
+# 48. Network devices CRUD + probe endpoints (no real device required)
+echo ""
+echo "48. Network devices CRUD + probe endpoints..."
+NETWORK_CREATE=$(curl -sf -X POST "$CP_URL/api/v1/network/devices" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"e2e-router","host":"127.0.0.1","port":22,"vendor":"generic","username":"tester","auth_mode":"password","tags":["lab","e2e"]}')
+NETWORK_ID=$(echo "$NETWORK_CREATE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('device',{}).get('id',''))" 2>/dev/null || echo "")
+if [[ -n "$NETWORK_ID" ]]; then
+  pass "Network device created (id=$NETWORK_ID)"
+else
+  fail "Network device create failed: $NETWORK_CREATE"
+fi
+
+NETWORK_LIST=$(curl -sf "$CP_URL/api/v1/network/devices")
+if echo "$NETWORK_LIST" | python3 -c "import sys,json; devices=json.load(sys.stdin).get('devices',[]); assert any(d.get('id')=='$NETWORK_ID' for d in devices)" 2>/dev/null; then
+  pass "Network device visible in list"
+else
+  fail "Network device missing from list: $NETWORK_LIST"
+fi
+
+NETWORK_GET=$(curl -sf "$CP_URL/api/v1/network/devices/$NETWORK_ID")
+if echo "$NETWORK_GET" | python3 -c "import sys,json; d=json.load(sys.stdin).get('device',{}); assert d.get('id')=='$NETWORK_ID' and d.get('name')=='e2e-router'" 2>/dev/null; then
+  pass "Network device get endpoint returns created device"
+else
+  fail "Network device get failed: $NETWORK_GET"
+fi
+
+NETWORK_UPDATE=$(curl -sf -X PUT "$CP_URL/api/v1/network/devices/$NETWORK_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"e2e-router-updated","tags":["lab","updated"]}')
+if echo "$NETWORK_UPDATE" | python3 -c "import sys,json; d=json.load(sys.stdin).get('device',{}); assert d.get('name')=='e2e-router-updated'" 2>/dev/null; then
+  pass "Network device update endpoint works"
+else
+  fail "Network device update failed: $NETWORK_UPDATE"
+fi
+
+NETWORK_TEST=$(curl -sf -X POST "$CP_URL/api/v1/network/devices/$NETWORK_ID/test" -H "Content-Type: application/json" -d '{}')
+if echo "$NETWORK_TEST" | python3 -c "import sys,json; r=json.load(sys.stdin).get('result',{}); assert 'reachable' in r and 'ssh_ready' in r" 2>/dev/null; then
+  pass "Network device test endpoint returns structured result"
+else
+  fail "Network device test endpoint failed: $NETWORK_TEST"
+fi
+
+NETWORK_INV_CODE=$(curl -s -o /tmp/network-inv.json -w "%{http_code}" -X POST "$CP_URL/api/v1/network/devices/$NETWORK_ID/inventory" \
+  -H "Content-Type: application/json" \
+  -d '{}')
+if [[ "$NETWORK_INV_CODE" == "200" || "$NETWORK_INV_CODE" == "502" ]]; then
+  pass "Network device inventory endpoint reachable (status=$NETWORK_INV_CODE)"
+else
+  fail "Network device inventory endpoint returned unexpected status: $NETWORK_INV_CODE"
+fi
+
+NETWORK_DELETE_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$CP_URL/api/v1/network/devices/$NETWORK_ID")
+if [[ "$NETWORK_DELETE_CODE" == "200" || "$NETWORK_DELETE_CODE" == "204" ]]; then
+  pass "Network device deleted"
+else
+  fail "Network device delete returned $NETWORK_DELETE_CODE"
+fi
+
+# 49. Network-device auth/permission behavior (via focused permission unit test)
+echo ""
+echo "49. Network-device auth/permission behavior..."
+if go test ./internal/controlplane/server -run TestPermissionsNetworkDeviceRoutes -count=1 > /tmp/network-perms-test.log 2>&1; then
+  pass "Permission test passed for network-device routes"
+else
+  fail "Permission test failed: $(tail -n 20 /tmp/network-perms-test.log)"
+fi
+
 echo ""
 echo "=========================="
 echo "Results: $PASSED passed, $FAILED failed"

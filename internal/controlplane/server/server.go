@@ -32,6 +32,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/mcpserver"
 	"github.com/marcus-qen/legator/internal/controlplane/metrics"
 	"github.com/marcus-qen/legator/internal/controlplane/modeldock"
+	"github.com/marcus-qen/legator/internal/controlplane/networkdevices"
 	"github.com/marcus-qen/legator/internal/controlplane/oidc"
 	"github.com/marcus-qen/legator/internal/controlplane/policy"
 	"github.com/marcus-qen/legator/internal/controlplane/session"
@@ -105,6 +106,9 @@ type Server struct {
 	cloudConnectorStore    *cloudconnectors.Store
 	cloudConnectorHandlers *cloudconnectors.Handler
 
+	networkDeviceStore    *networkdevices.Store
+	networkDeviceHandlers *networkdevices.Handler
+
 	discoveryStore    *discovery.Store
 	discoveryHandlers *discovery.Handler
 
@@ -167,6 +171,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initPolicy()
 	s.initModelDock()
 	s.initCloudConnectors()
+	s.initNetworkDevices()
 	s.initDiscovery()
 	s.initLLM()
 	s.initHub()
@@ -303,6 +308,9 @@ func (s *Server) Close() {
 	}
 	if s.cloudConnectorStore != nil {
 		s.cloudConnectorStore.Close()
+	}
+	if s.networkDeviceStore != nil {
+		s.networkDeviceStore.Close()
 	}
 	if s.discoveryStore != nil {
 		s.discoveryStore.Close()
@@ -480,6 +488,26 @@ func (s *Server) initCloudConnectors() {
 	s.cloudConnectorStore = store
 	s.cloudConnectorHandlers = cloudconnectors.NewHandler(store, cloudconnectors.NewCLIAdapter())
 	s.logger.Info("cloud connector store opened", zap.String("path", cloudDBPath))
+}
+
+func (s *Server) initNetworkDevices() {
+	networkDBPath := filepath.Join(s.cfg.DataDir, "network.db")
+	if err := os.MkdirAll(s.cfg.DataDir, 0750); err != nil {
+		s.logger.Warn("cannot create data dir, network devices disabled",
+			zap.String("dir", s.cfg.DataDir), zap.Error(err))
+		return
+	}
+
+	store, err := networkdevices.NewStore(networkDBPath)
+	if err != nil {
+		s.logger.Warn("cannot open network devices database, network devices disabled",
+			zap.String("path", networkDBPath), zap.Error(err))
+		return
+	}
+
+	s.networkDeviceStore = store
+	s.networkDeviceHandlers = networkdevices.NewHandler(store, networkdevices.NewSSHProber())
+	s.logger.Info("network device store opened", zap.String("path", networkDBPath))
 }
 
 func (s *Server) initDiscovery() {
@@ -785,7 +813,7 @@ func (s *Server) loadTemplates() {
 	tmplDir := filepath.Join("web", "templates")
 	pt := &pageTemplates{templates: make(map[string]pageTemplate)}
 
-	pages := []string{"fleet", "probe-detail", "chat", "fleet-chat", "approvals", "audit", "alerts", "model-dock", "cloud-connectors", "discovery"}
+	pages := []string{"fleet", "probe-detail", "chat", "fleet-chat", "approvals", "audit", "alerts", "model-dock", "cloud-connectors", "network-devices", "discovery"}
 	for _, page := range pages {
 		t, err := template.New("").Funcs(templateFuncs()).ParseFiles(
 			filepath.Join(tmplDir, "_base.html"),
