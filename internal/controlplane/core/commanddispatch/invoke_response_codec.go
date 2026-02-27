@@ -29,8 +29,8 @@ func EncodeCommandInvokeHTTPJSONResponse(projection *CommandInvokeProjection) Co
 	builder := CommandInvokeResponseEnvelopeBuilder{Projection: projection}
 	envelope := builder.BuildResponseEnvelope(transportwriter.SurfaceHTTP)
 
-	transportwriter.WriteForSurface(transportwriter.SurfaceHTTP, envelope, transportwriter.WriterKernel{
-		WriteHTTPError: func(httpErr *transportwriter.HTTPError) {
+	transportwriter.WriteForSurface(transportwriter.SurfaceHTTP, envelope, newCommandInvokeWriterKernel(CommandInvokeWriterKernelCallbacks{
+		WriteHTTPError: func(httpErr *HTTPErrorContract) {
 			if httpErr == nil {
 				return
 			}
@@ -43,7 +43,7 @@ func EncodeCommandInvokeHTTPJSONResponse(projection *CommandInvokeProjection) Co
 			response.Body = payload
 			response.HasBody = true
 		},
-	})
+	}))
 
 	if envelope != nil && envelope.HTTPError != nil && envelope.HTTPError.SuppressWrite {
 		response.SuppressWrite = true
@@ -61,14 +61,14 @@ func EncodeCommandInvokeMCPTextResponse(projection *CommandInvokeProjection) (st
 	resultText := ""
 	var dispatchErr error
 
-	transportwriter.WriteFromBuilder(transportwriter.SurfaceMCP, builder, transportwriter.WriterKernel{
+	transportwriter.WriteFromBuilder(transportwriter.SurfaceMCP, builder, newCommandInvokeWriterKernel(CommandInvokeWriterKernelCallbacks{
 		WriteMCPError: func(err error) {
 			dispatchErr = err
 		},
-		WriteMCPSuccess: adaptCommandMCPSuccessPayloadWriter(func(text string) {
+		WriteMCPSuccess: func(text string) {
 			resultText = text
-		}),
-	})
+		},
+	}))
 
 	if dispatchErr != nil {
 		return "", dispatchErr

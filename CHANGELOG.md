@@ -67,6 +67,9 @@
 - **Kernel split S32 (domain success-writer wrappers)**
   - Added tiny approval/command success-writer constructor wrappers around the shared `transportwriter` success adapter and routed remaining domain call sites through those wrappers.
   - Added strict wrapper-vs-legacy parity tests to lock type assertion semantics, nil normalization behavior, success payload shape, and HTTP-first/MCP fallback semantics.
+- **Kernel split S33 (domain writer-kernel constructors)**
+  - Added tiny approval + command domain constructors that assemble full `transportwriter.WriterKernel` callbacks (HTTP error/success + MCP error/success) and replaced inline per-field wiring call sites.
+  - Added strict constructor-vs-legacy parity tests to lock error/success payload mapping, nil handling, and HTTP-first/MCP fallback behavior.
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
 - **Kernel split S13 (approval decide render-target registry boundary)**
