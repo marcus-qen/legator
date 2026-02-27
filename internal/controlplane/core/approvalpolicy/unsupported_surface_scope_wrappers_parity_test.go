@@ -58,6 +58,37 @@ func TestUnsupportedDecideApprovalResponseEnvelope_FallbackParity(t *testing.T) 
 	}
 }
 
+func TestDispatchUnsupportedDecideApprovalSurfaceFallback_ParityAndPrecedence(t *testing.T) {
+	const surface = "bogus"
+	const wantMessage = "unsupported approval decide dispatch surface \"bogus\""
+
+	httpCalled, mcpCalled := false, false
+	dispatchUnsupportedDecideApprovalSurfaceFallback(surface, DecideApprovalResponseDispatchWriter{
+		WriteHTTPError: func(err *HTTPErrorContract) {
+			httpCalled = true
+			if err == nil || err.Status != http.StatusInternalServerError || err.Code != "internal_error" || err.Message != wantMessage {
+				t.Fatalf("unexpected unsupported-surface HTTP fallback: %+v", err)
+			}
+		},
+		WriteMCPError: func(err error) {
+			mcpCalled = err != nil
+		},
+	})
+	if !httpCalled || mcpCalled {
+		t.Fatalf("fallback precedence mismatch: http=%v mcp=%v", httpCalled, mcpCalled)
+	}
+
+	var got error
+	dispatchUnsupportedDecideApprovalSurfaceFallback(surface, DecideApprovalResponseDispatchWriter{
+		WriteMCPError: func(err error) {
+			got = err
+		},
+	})
+	if got == nil || got.Error() != wantMessage {
+		t.Fatalf("unexpected unsupported-surface MCP fallback: %v", got)
+	}
+}
+
 func assertUnsupportedSurfaceEnvelopeParity(t *testing.T, got, want *transportwriter.ResponseEnvelope, wantMessage string) {
 	t.Helper()
 	if got == nil || want == nil {

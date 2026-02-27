@@ -127,7 +127,7 @@ func inferCommandInvokeProjectionSurface(writer CommandInvokeRenderDispatchWrite
 }
 
 func dispatchUnsupportedCommandInvokeProjectionSurface(surface ProjectionDispatchSurface, writer CommandInvokeRenderDispatchWriter) {
-	dispatchUnsupportedCommandSurface(surface, writer.projectionWriter())
+	dispatchUnsupportedCommandDispatchSurfaceFallback(surface, writer.projectionWriter())
 }
 
 func (w CommandInvokeRenderDispatchWriter) projectionWriter() CommandProjectionDispatchWriter {

@@ -135,3 +135,23 @@ func TestDispatchDecideApprovalResponseForSurface_UnsupportedSurfaceFallback(t *
 		t.Fatalf("unexpected unsupported-surface MCP message: %q", mcpErr.Error())
 	}
 }
+
+func TestDispatchDecideApprovalResponseForSurface_UnsupportedSurfaceFallbackPrecedence(t *testing.T) {
+	const wantMessage = "unsupported approval decide dispatch surface \"bogus\""
+	httpCalled, mcpCalled := false, false
+
+	DispatchDecideApprovalResponseForSurface(ProjectDecideApprovalTransport(EncodeDecideApprovalTransport(&ApprovalDecisionResult{}, nil)), DecideApprovalRenderSurface("bogus"), DecideApprovalResponseDispatchWriter{
+		WriteHTTPError: func(err *HTTPErrorContract) {
+			httpCalled = true
+			if err == nil || err.Status != http.StatusInternalServerError || err.Code != "internal_error" || err.Message != wantMessage {
+				t.Fatalf("unexpected unsupported-surface HTTP error: %+v", err)
+			}
+		},
+		WriteMCPError: func(err error) {
+			mcpCalled = err != nil
+		},
+	})
+	if !httpCalled || mcpCalled {
+		t.Fatalf("fallback precedence mismatch: http=%v mcp=%v", httpCalled, mcpCalled)
+	}
+}

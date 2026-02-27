@@ -18,7 +18,7 @@ func DispatchDecideApprovalResponseForSurface(projection *DecideApprovalProjecti
 	builder := DecideApprovalResponseEnvelopeBuilder{Projection: projection}
 	transportSurface, ok := ResolveDecideApprovalTransportSurface(surface)
 	if !ok {
-		dispatchDecideApprovalUnsupportedEnvelope(unsupportedDecideApprovalResponseEnvelope(string(surface)), writer)
+		dispatchUnsupportedDecideApprovalSurfaceFallback(string(surface), writer)
 		return
 	}
 
@@ -44,17 +44,4 @@ func DispatchDecideApprovalResponseForSurface(projection *DecideApprovalProjecti
 			writer.WriteSuccess(normalizeDecideApprovalSuccess(success))
 		},
 	})
-}
-
-func dispatchDecideApprovalUnsupportedEnvelope(envelope *transportwriter.ResponseEnvelope, writer DecideApprovalResponseDispatchWriter) {
-	fallbackWriter := transportwriter.UnsupportedSurfaceFallbackWriter{WriteMCPError: writer.WriteMCPError}
-	if writer.WriteHTTPError != nil {
-		fallbackWriter.WriteHTTPError = func(err *transportwriter.HTTPError) {
-			if err == nil {
-				return
-			}
-			writer.WriteHTTPError(&HTTPErrorContract{Status: err.Status, Code: err.Code, Message: err.Message})
-		}
-	}
-	transportwriter.WriteUnsupportedSurfaceFallback(envelope, fallbackWriter)
 }
