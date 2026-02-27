@@ -1,18 +1,22 @@
 package mcpserver
 
 import (
+	"io"
+
 	coreapprovalpolicy "github.com/marcus-qen/legator/internal/controlplane/core/approvalpolicy"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type approvalDecideResponseRenderer interface {
-	RenderMCP(contract *coreapprovalpolicy.DecideApprovalTransportContract) (*mcp.CallToolResult, any, error)
+	RenderMCP(projection *coreapprovalpolicy.DecideApprovalProjection) (*mcp.CallToolResult, any, error)
 }
 
 type approvalDecideMCPRenderer struct{}
 
-func (approvalDecideMCPRenderer) RenderMCP(contract *coreapprovalpolicy.DecideApprovalTransportContract) (*mcp.CallToolResult, any, error) {
-	projection := coreapprovalpolicy.ProjectDecideApprovalTransport(contract)
+func (approvalDecideMCPRenderer) RenderMCP(projection *coreapprovalpolicy.DecideApprovalProjection) (*mcp.CallToolResult, any, error) {
+	if projection == nil {
+		projection = coreapprovalpolicy.ProjectDecideApprovalTransport(nil)
+	}
 	if err := projection.MCPError(); err != nil {
 		return nil, nil, err
 	}
@@ -20,6 +24,12 @@ func (approvalDecideMCPRenderer) RenderMCP(contract *coreapprovalpolicy.DecideAp
 	return jsonToolResult(projection.Success)
 }
 
-func renderDecideApprovalMCP(contract *coreapprovalpolicy.DecideApprovalTransportContract) (*mcp.CallToolResult, any, error) {
-	return approvalDecideMCPRenderer{}.RenderMCP(contract)
+// orchestrateDecideApprovalMCP is the MCP-side seam for shared decide flow
+// orchestration until a public MCP approval-decide tool is exposed.
+func orchestrateDecideApprovalMCP(body io.Reader, decide func(*coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error)) *coreapprovalpolicy.DecideApprovalProjection {
+	return coreapprovalpolicy.OrchestrateDecideApproval(body, decide, coreapprovalpolicy.DecideApprovalRenderTargetMCP)
+}
+
+func renderDecideApprovalMCP(projection *coreapprovalpolicy.DecideApprovalProjection) (*mcp.CallToolResult, any, error) {
+	return approvalDecideMCPRenderer{}.RenderMCP(projection)
 }

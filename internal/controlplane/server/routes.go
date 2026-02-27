@@ -866,12 +866,12 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 
-	contract := coreapprovalpolicy.AdaptDecideApprovalTransport(r.Body, func(body *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error) {
+	projection := coreapprovalpolicy.OrchestrateDecideApproval(r.Body, func(body *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error) {
 		return s.approvalCore.DecideAndDispatch(id, body.Decision, body.DecidedBy, func(probeID string, cmd protocol.CommandPayload) error {
 			return s.dispatchCore.Dispatch(probeID, cmd)
 		})
-	})
-	renderDecideApprovalHTTP(w, contract)
+	}, coreapprovalpolicy.DecideApprovalRenderTargetHTTP)
+	renderDecideApprovalHTTP(w, projection)
 }
 
 // ── Audit ────────────────────────────────────────────────────

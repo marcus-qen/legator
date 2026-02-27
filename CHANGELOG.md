@@ -23,6 +23,9 @@
 - **Kernel split S9 (approval decide MCP renderer parity)**
   - Added MCP approval-decide renderer wired to the shared `approvalpolicy` decide transport projection so HTTP and MCP consume one core projection contract path.
   - Added MCP parity tests for `{status,request}` success payloads and approved-dispatch failure wording without changing existing HTTP/MCP behavior.
+- **Kernel split S10 (approval decide orchestration seam)**
+  - Extracted shared decide orchestration helper (`decode -> decide -> project -> render-target selection`) in `internal/controlplane/core/approvalpolicy` and refactored HTTP decide route to consume the new helper directly.
+  - Added MCP orchestration seam wiring (stub path for future decide tool exposure) plus cross-transport parity tests to lock unchanged decide status/error payload behavior.
 
 ### Added
 - Parity tests for the extracted core service and server policy-apply paths (not found + offline apply-local behavior).

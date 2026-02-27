@@ -13,10 +13,10 @@ import (
 
 func TestRenderDecideApprovalHTTP_ParitySuccess(t *testing.T) {
 	req := &approval.Request{ID: "req-render-success", Decision: approval.DecisionDenied}
-	contract := coreapprovalpolicy.EncodeDecideApprovalTransport(&coreapprovalpolicy.ApprovalDecisionResult{Request: req}, nil)
+	projection := coreapprovalpolicy.ProjectDecideApprovalTransport(coreapprovalpolicy.EncodeDecideApprovalTransport(&coreapprovalpolicy.ApprovalDecisionResult{Request: req}, nil))
 
 	rr := httptest.NewRecorder()
-	renderDecideApprovalHTTP(rr, contract)
+	renderDecideApprovalHTTP(rr, projection)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
@@ -48,10 +48,10 @@ func TestRenderDecideApprovalHTTP_ParitySuccess(t *testing.T) {
 }
 
 func TestRenderDecideApprovalHTTP_ParityError(t *testing.T) {
-	contract := coreapprovalpolicy.EncodeDecideApprovalTransport(nil, &coreapprovalpolicy.ApprovedDispatchError{Err: errors.New("probe probe-render-error not connected")})
+	projection := coreapprovalpolicy.ProjectDecideApprovalTransport(coreapprovalpolicy.EncodeDecideApprovalTransport(nil, &coreapprovalpolicy.ApprovedDispatchError{Err: errors.New("probe probe-render-error not connected")}))
 
 	rr := httptest.NewRecorder()
-	renderDecideApprovalHTTP(rr, contract)
+	renderDecideApprovalHTTP(rr, projection)
 
 	if rr.Code != http.StatusBadGateway {
 		t.Fatalf("expected 502, got %d: %s", rr.Code, rr.Body.String())
