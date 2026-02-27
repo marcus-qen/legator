@@ -80,6 +80,67 @@ func TestWaitForDecision(t *testing.T) {
 	}
 }
 
+func TestDecideApproval(t *testing.T) {
+	svc, queue, _, _ := newServiceForTest()
+
+	req, err := queue.Submit("probe-a", &protocol.CommandPayload{RequestID: "req-4", Command: "systemctl restart nginx"}, "manual", "high", "api")
+	if err != nil {
+		t.Fatalf("submit approval: %v", err)
+	}
+
+	decision, err := svc.DecideApproval(req.ID, approval.DecisionDenied, "operator")
+	if err != nil {
+		t.Fatalf("DecideApproval returned error: %v", err)
+	}
+	if decision == nil || decision.Request == nil {
+		t.Fatal("expected decision result with request")
+	}
+	if decision.Request.Decision != approval.DecisionDenied {
+		t.Fatalf("expected denied decision, got %s", decision.Request.Decision)
+	}
+	if decision.RequiresDispatch {
+		t.Fatal("expected RequiresDispatch=false for denied decision")
+	}
+}
+
+func TestDispatchApprovedCommand(t *testing.T) {
+	svc, queue, _, _ := newServiceForTest()
+
+	req, err := queue.Submit("probe-a", &protocol.CommandPayload{RequestID: "req-5", Command: "systemctl restart nginx"}, "manual", "high", "api")
+	if err != nil {
+		t.Fatalf("submit approval: %v", err)
+	}
+	decision, err := svc.DecideApproval(req.ID, approval.DecisionApproved, "operator")
+	if err != nil {
+		t.Fatalf("DecideApproval returned error: %v", err)
+	}
+
+	called := false
+	err = svc.DispatchApprovedCommand(decision, func(probeID string, cmd protocol.CommandPayload) error {
+		called = true
+		if probeID != "probe-a" {
+			t.Fatalf("unexpected probeID: %s", probeID)
+		}
+		if cmd.RequestID != "req-5" {
+			t.Fatalf("unexpected command payload: %+v", cmd)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("DispatchApprovedCommand returned error: %v", err)
+	}
+	if !called {
+		t.Fatal("expected dispatch callback to be called")
+	}
+
+	err = svc.DispatchApprovedCommand(decision, func(string, protocol.CommandPayload) error {
+		return errors.New("not connected")
+	})
+	if err == nil {
+		t.Fatal("expected dispatch error")
+	}
+}
+
 func TestApplyPolicyTemplate(t *testing.T) {
 	svc, _, fleetMgr, _ := newServiceForTest()
 

@@ -639,6 +639,41 @@ func TestHandleDecideApproval(t *testing.T) {
 	}
 }
 
+func TestHandleDecideApproval_ApprovedDispatchFailure(t *testing.T) {
+	srv := newTestServer(t)
+
+	req, err := srv.approvalQueue.Submit(
+		"probe-decide-fail",
+		&protocol.CommandPayload{RequestID: "req-decide-fail", Command: "systemctl restart nginx"},
+		"manual",
+		"high",
+		"api",
+	)
+	if err != nil {
+		t.Fatalf("submit approval: %v", err)
+	}
+
+	httpReq := httptest.NewRequest(http.MethodPost, "/api/v1/approvals/"+req.ID+"/decide", strings.NewReader(`{"decision":"approved","decided_by":"operator"}`))
+	httpReq.SetPathValue("id", req.ID)
+	rr := httptest.NewRecorder()
+	srv.handleDecideApproval(rr, httpReq)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "approved but dispatch failed") {
+		t.Fatalf("expected dispatch failure message, got %s", rr.Body.String())
+	}
+
+	updated, ok := srv.approvalQueue.Get(req.ID)
+	if !ok {
+		t.Fatalf("approval %s missing after decision", req.ID)
+	}
+	if updated.Decision != approval.DecisionApproved {
+		t.Fatalf("expected approved decision in queue, got %s", updated.Decision)
+	}
+}
+
 func TestHandleAuditLog(t *testing.T) {
 	srv := newTestServer(t)
 	srv.emitAudit(audit.EventCommandSent, "probe-a", "api", "command a")

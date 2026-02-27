@@ -26,6 +26,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
 	"github.com/marcus-qen/legator/internal/controlplane/config"
 	coreapprovalpolicy "github.com/marcus-qen/legator/internal/controlplane/core/approvalpolicy"
+	corecommanddispatch "github.com/marcus-qen/legator/internal/controlplane/core/commanddispatch"
 	"github.com/marcus-qen/legator/internal/controlplane/discovery"
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
@@ -64,6 +65,7 @@ type Server struct {
 	cmdTracker    *cmdtracker.Tracker
 	approvalQueue *approval.Queue
 	approvalCore  *coreapprovalpolicy.Service
+	dispatchCore  *corecommanddispatch.Service
 	hub           *cpws.Hub
 
 	// Persistence (nil = in-memory fallback)
@@ -178,6 +180,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initDiscovery()
 	s.initLLM()
 	s.initHub()
+	s.initDispatchCore()
 	if s.cfg.MCPEnabled {
 		mcpserver.Version = Version
 		s.mcpServer = mcpserver.New(s.fleetStore, s.auditStore, s.hub, s.cmdTracker, s.logger)
@@ -445,6 +448,11 @@ func (s *Server) initPolicy() {
 func (s *Server) initApprovalCore() {
 	s.approvalCore = coreapprovalpolicy.NewService(s.approvalQueue, s.fleetMgr, s.policyStore)
 }
+
+func (s *Server) initDispatchCore() {
+	s.dispatchCore = corecommanddispatch.NewService(s.hub, s.cmdTracker)
+}
+
 func (s *Server) initModelDock() {
 	envCfg := llm.ProviderConfig{
 		Name:    os.Getenv("LEGATOR_LLM_PROVIDER"),
@@ -924,22 +932,11 @@ func (s *Server) publishEvent(typ events.EventType, probeID, summary string, det
 
 // dispatchAndWait sends a command to a probe and waits for the result.
 func (s *Server) dispatchAndWait(probeID string, cmd *protocol.CommandPayload) (*protocol.CommandResultPayload, error) {
-	pending := s.cmdTracker.Track(cmd.RequestID, probeID, cmd.Command, cmd.Level)
-	if err := s.hub.SendTo(probeID, protocol.MsgCommand, *cmd); err != nil {
-		s.cmdTracker.Cancel(cmd.RequestID)
-		return nil, err
-	}
 	timeout := cmd.Timeout + 5*time.Second
 	if timeout < 10*time.Second {
 		timeout = 35 * time.Second
 	}
-	select {
-	case result := <-pending.Result:
-		return result, nil
-	case <-time.After(timeout):
-		s.cmdTracker.Cancel(cmd.RequestID)
-		return nil, fmt.Errorf("timeout waiting for probe response")
-	}
+	return s.dispatchCore.DispatchAndWait(context.Background(), probeID, *cmd, timeout)
 }
 
 // offlineChecker runs the periodic offline detection and publishes events.

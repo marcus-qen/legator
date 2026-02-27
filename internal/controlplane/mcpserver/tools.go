@@ -3,12 +3,14 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
+	corecommanddispatch "github.com/marcus-qen/legator/internal/controlplane/core/commanddispatch"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/protocol"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -147,7 +149,7 @@ func (s *MCPServer) handleRunCommand(ctx context.Context, _ *mcp.CallToolRequest
 	if s.fleetStore == nil {
 		return nil, nil, fmt.Errorf("fleet store unavailable")
 	}
-	if s.hub == nil || s.cmdTracker == nil {
+	if s.dispatcher == nil {
 		return nil, nil, fmt.Errorf("command transport unavailable")
 	}
 
@@ -171,38 +173,18 @@ func (s *MCPServer) handleRunCommand(ctx context.Context, _ *mcp.CallToolRequest
 		Level:     ps.PolicyLevel,
 	}
 
-	pending := s.cmdTracker.Track(cmd.RequestID, probeID, cmd.Command, ps.PolicyLevel)
-	if err := s.hub.SendTo(probeID, protocol.MsgCommand, cmd); err != nil {
-		s.cmdTracker.Cancel(cmd.RequestID)
+	result, err := s.dispatcher.DispatchAndWait(ctx, probeID, cmd, 30*time.Second)
+	if err != nil {
+		if errors.Is(err, corecommanddispatch.ErrTimeout) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, nil, err
+		}
 		return nil, nil, fmt.Errorf("dispatch command: %w", err)
 	}
-
-	timer := time.NewTimer(30 * time.Second)
-	defer timer.Stop()
-
-	select {
-	case result, ok := <-pending.Result:
-		if !ok || result == nil {
-			return nil, nil, fmt.Errorf("command failed: empty result")
-		}
-		output := strings.TrimSpace(result.Stdout)
-		if output == "" {
-			output = strings.TrimSpace(result.Stderr)
-		}
-		if output == "" {
-			output = fmt.Sprintf("command completed with exit_code=%d", result.ExitCode)
-		}
-		if result.ExitCode != 0 {
-			output = fmt.Sprintf("exit_code=%d\n%s", result.ExitCode, output)
-		}
-		return textToolResult(output), nil, nil
-	case <-timer.C:
-		s.cmdTracker.Cancel(cmd.RequestID)
-		return nil, nil, fmt.Errorf("timeout waiting for probe response")
-	case <-ctx.Done():
-		s.cmdTracker.Cancel(cmd.RequestID)
-		return nil, nil, ctx.Err()
+	if result == nil {
+		return nil, nil, fmt.Errorf("command failed: empty result")
 	}
+
+	return textToolResult(corecommanddispatch.ResultText(result)), nil, nil
 }
 
 func (s *MCPServer) handleGetInventory(_ context.Context, _ *mcp.CallToolRequest, input probeInfoInput) (*mcp.CallToolResult, any, error) {

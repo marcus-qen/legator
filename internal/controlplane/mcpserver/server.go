@@ -5,6 +5,7 @@ import (
 
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
+	corecommanddispatch "github.com/marcus-qen/legator/internal/controlplane/core/commanddispatch"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -20,8 +21,7 @@ type MCPServer struct {
 	handler    http.Handler
 	fleetStore *fleet.Store
 	auditStore *audit.Store
-	hub        *cpws.Hub
-	cmdTracker *cmdtracker.Tracker
+	dispatcher *corecommanddispatch.Service
 	logger     *zap.Logger
 }
 
@@ -51,8 +51,7 @@ func New(
 		server:     srv,
 		fleetStore: fleetStore,
 		auditStore: auditStore,
-		hub:        hub,
-		cmdTracker: cmdTracker,
+		dispatcher: corecommanddispatch.NewService(hub, cmdTracker),
 		logger:     logger.Named("mcp"),
 	}
 

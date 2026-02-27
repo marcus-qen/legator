@@ -17,6 +17,7 @@ var (
 
 type approvalQueue interface {
 	Submit(probeID string, cmd *protocol.CommandPayload, reason, riskLevel, requester string) (*approval.Request, error)
+	Decide(id string, decision approval.Decision, decidedBy string) (*approval.Request, error)
 	WaitForDecision(id string, timeout time.Duration) (*approval.Request, error)
 }
 
@@ -56,6 +57,30 @@ func (s *Service) SubmitCommandApproval(probeID string, cmd *protocol.CommandPay
 	}
 
 	return req, true, nil
+}
+
+type ApprovalDecisionResult struct {
+	Request          *approval.Request
+	RequiresDispatch bool
+}
+
+func (s *Service) DecideApproval(id string, decision approval.Decision, decidedBy string) (*ApprovalDecisionResult, error) {
+	req, err := s.approvals.Decide(id, decision, decidedBy)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ApprovalDecisionResult{
+		Request:          req,
+		RequiresDispatch: req.Decision == approval.DecisionApproved && req.Command != nil,
+	}, nil
+}
+
+func (s *Service) DispatchApprovedCommand(decision *ApprovalDecisionResult, dispatch func(probeID string, cmd protocol.CommandPayload) error) error {
+	if decision == nil || !decision.RequiresDispatch || decision.Request == nil || dispatch == nil {
+		return nil
+	}
+	return dispatch(decision.Request.ProbeID, *decision.Request.Command)
 }
 
 func (s *Service) WaitForDecision(id string, timeout time.Duration) (*approval.Request, error) {
