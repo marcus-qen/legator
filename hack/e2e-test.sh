@@ -584,7 +584,7 @@ echo ""
 echo "42. Discovery: Scan endpoint exists..."
 DISCOVERY_SCAN_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$CP_URL/api/v1/discovery/scan" \
   -H "Content-Type: application/json" \
-  -d '{"cidr":"192.168.1.0/24","scan_type":"ping"}')
+  -d '{"cidr":"127.0.0.0/24","scan_type":"ping","timeout_ms":50}')
 if [[ "$DISCOVERY_SCAN_CODE" == "200" || "$DISCOVERY_SCAN_CODE" == "202" ]]; then
   pass "Discovery scan endpoint accepted request (status=$DISCOVERY_SCAN_CODE)"
 else
