@@ -60,3 +60,26 @@ func TestWriteForSurface_MCPError(t *testing.T) {
 		t.Fatalf("unexpected MCP error callback value: got %v want %v", got, want)
 	}
 }
+
+func TestWriteFromBuilder_UsesBuiltEnvelope(t *testing.T) {
+	var got any
+	builder := EnvelopeBuilderFunc(func(surface Surface) *ResponseEnvelope {
+		if surface != SurfaceHTTP {
+			t.Fatalf("unexpected surface: %q", surface)
+		}
+		return &ResponseEnvelope{HTTPSuccess: "ok"}
+	})
+
+	handled := WriteFromBuilder(SurfaceHTTP, builder, WriterKernel{
+		WriteHTTPSuccess: func(payload any) {
+			got = payload
+		},
+	})
+
+	if handled {
+		t.Fatal("expected handled=false for HTTP success")
+	}
+	if got != "ok" {
+		t.Fatalf("unexpected HTTP success payload: got %#v want %#v", got, "ok")
+	}
+}

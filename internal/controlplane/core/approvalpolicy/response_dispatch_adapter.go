@@ -15,21 +15,14 @@ type DecideApprovalResponseDispatchWriter struct {
 // DispatchDecideApprovalResponseForSurface dispatches the shared decide
 // projection to transport writers using centralized surface normalization.
 func DispatchDecideApprovalResponseForSurface(projection *DecideApprovalProjection, surface DecideApprovalRenderSurface, writer DecideApprovalResponseDispatchWriter) {
-	envelope := EncodeDecideApprovalResponseEnvelope(projection, surface)
+	builder := DecideApprovalResponseEnvelopeBuilder{Projection: projection}
 	transportSurface, ok := transportWriterSurfaceForDecideApproval(surface)
 	if !ok {
-		if writer.WriteHTTPError != nil && envelope != nil && envelope.HTTPError != nil {
-			err := envelope.HTTPError
-			writer.WriteHTTPError(&HTTPErrorContract{Status: err.Status, Code: err.Code, Message: err.Message})
-			return
-		}
-		if writer.WriteMCPError != nil && envelope != nil && envelope.MCPError != nil {
-			writer.WriteMCPError(envelope.MCPError)
-		}
+		dispatchDecideApprovalUnsupportedEnvelope(unsupportedDecideApprovalResponseEnvelope(string(surface)), writer)
 		return
 	}
 
-	transportwriter.WriteForSurface(transportSurface, envelope, transportwriter.WriterKernel{
+	transportwriter.WriteFromBuilder(transportSurface, builder, transportwriter.WriterKernel{
 		WriteHTTPError: func(err *transportwriter.HTTPError) {
 			if writer.WriteHTTPError != nil {
 				writer.WriteHTTPError(&HTTPErrorContract{Status: err.Status, Code: err.Code, Message: err.Message})
@@ -51,6 +44,17 @@ func DispatchDecideApprovalResponseForSurface(projection *DecideApprovalProjecti
 			writer.WriteSuccess(normalizeDecideApprovalSuccess(success))
 		},
 	})
+}
+
+func dispatchDecideApprovalUnsupportedEnvelope(envelope *transportwriter.ResponseEnvelope, writer DecideApprovalResponseDispatchWriter) {
+	if writer.WriteHTTPError != nil && envelope != nil && envelope.HTTPError != nil {
+		err := envelope.HTTPError
+		writer.WriteHTTPError(&HTTPErrorContract{Status: err.Status, Code: err.Code, Message: err.Message})
+		return
+	}
+	if writer.WriteMCPError != nil && envelope != nil && envelope.MCPError != nil {
+		writer.WriteMCPError(envelope.MCPError)
+	}
 }
 
 func transportWriterSurfaceForDecideApproval(surface DecideApprovalRenderSurface) (transportwriter.Surface, bool) {

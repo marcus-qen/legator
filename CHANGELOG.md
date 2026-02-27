@@ -31,6 +31,9 @@
 - **Kernel split S20 (shared transport writer kernel)**
   - Extracted a shared HTTP/MCP writer kernel and routed approval + command response codecs through normalized response envelopes into this kernel while preserving existing response bodies/status/messages.
   - Added strict legacy-vs-kernel parity coverage for command and approval flows across both HTTP and MCP render paths.
+- **Kernel split S21 (unified response-envelope builders)**
+  - Added a shared response-envelope builder interface in `internal/controlplane/core/transportwriter` and implemented builder adapters for approval + command flows before writer-kernel dispatch.
+  - Preserved existing HTTP/MCP status codes, payload shapes, and error messages; added builder-level parity tests for approval + command transports.
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
 - **Kernel split S13 (approval decide render-target registry boundary)**

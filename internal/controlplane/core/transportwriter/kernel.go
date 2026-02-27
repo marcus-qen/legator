@@ -25,6 +25,23 @@ type ResponseEnvelope struct {
 	MCPSuccess  any
 }
 
+// EnvelopeBuilder builds transportwriter response envelopes for a specific
+// response surface.
+type EnvelopeBuilder interface {
+	BuildResponseEnvelope(surface Surface) *ResponseEnvelope
+}
+
+// EnvelopeBuilderFunc is a function adapter for EnvelopeBuilder.
+type EnvelopeBuilderFunc func(surface Surface) *ResponseEnvelope
+
+// BuildResponseEnvelope implements EnvelopeBuilder.
+func (f EnvelopeBuilderFunc) BuildResponseEnvelope(surface Surface) *ResponseEnvelope {
+	if f == nil {
+		return nil
+	}
+	return f(surface)
+}
+
 // WriterKernel is the shared HTTP/MCP transport writer kernel.
 //
 // Core codecs emit ResponseEnvelope values; concrete HTTP/MCP renderers provide
@@ -70,4 +87,13 @@ func WriteForSurface(surface Surface, envelope *ResponseEnvelope, kernel WriterK
 	default:
 		return false
 	}
+}
+
+// WriteFromBuilder builds an envelope for the target surface and routes it
+// through the shared writer kernel.
+func WriteFromBuilder(surface Surface, builder EnvelopeBuilder, kernel WriterKernel) bool {
+	if builder == nil {
+		return false
+	}
+	return WriteForSurface(surface, builder.BuildResponseEnvelope(surface), kernel)
 }
