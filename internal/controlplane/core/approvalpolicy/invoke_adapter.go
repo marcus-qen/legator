@@ -46,7 +46,7 @@ func AssembleDecideApprovalInvokeMCP(approvalID, decision, decidedBy string) (*D
 
 // InvokeDecideApproval runs the shared decide orchestration using normalized
 // shell input while wiring id + request invocation through one closure seam.
-func InvokeDecideApproval(input *DecideApprovalInvokeInput, invoke func(id string, request *DecideApprovalRequest) (*ApprovalDecisionResult, error), target DecideApprovalRenderTarget) *DecideApprovalProjection {
+func InvokeDecideApproval(input *DecideApprovalInvokeInput, invoke func(id string, request *DecideApprovalRequest) (*ApprovalDecisionResult, error), surface DecideApprovalRenderSurface) *DecideApprovalProjection {
 	if input == nil {
 		return &DecideApprovalProjection{
 			Err: &HTTPErrorContract{
@@ -75,7 +75,7 @@ func InvokeDecideApproval(input *DecideApprovalInvokeInput, invoke func(id strin
 		}
 	}
 
-	return OrchestrateDecideApproval(input.Body, func(request *DecideApprovalRequest) (*ApprovalDecisionResult, error) {
+	return OrchestrateDecideApprovalForSurface(input.Body, func(request *DecideApprovalRequest) (*ApprovalDecisionResult, error) {
 		return invoke(input.ApprovalID, request)
-	}, target)
+	}, surface)
 }

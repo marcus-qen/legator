@@ -104,3 +104,75 @@ func TestSelectDecideApprovalProjection_UnsupportedTarget(t *testing.T) {
 		t.Fatalf("unexpected unsupported-target message: %q", httpErr.Message)
 	}
 }
+
+func TestResolveDecideApprovalRenderTarget_RegistryParity(t *testing.T) {
+	tests := []struct {
+		surface DecideApprovalRenderSurface
+		want    DecideApprovalRenderTarget
+		ok      bool
+	}{
+		{surface: DecideApprovalRenderSurfaceHTTP, want: DecideApprovalRenderTargetHTTP, ok: true},
+		{surface: DecideApprovalRenderSurfaceMCP, want: DecideApprovalRenderTargetMCP, ok: true},
+		{surface: DecideApprovalRenderSurface("bogus"), ok: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.surface), func(t *testing.T) {
+			got, ok := ResolveDecideApprovalRenderTarget(tt.surface)
+			if ok != tt.ok {
+				t.Fatalf("unexpected resolve presence: got %v want %v", ok, tt.ok)
+			}
+			if tt.ok && got != tt.want {
+				t.Fatalf("unexpected target resolution: got %q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOrchestrateDecideApprovalForSurface_ParityWithDirectTarget(t *testing.T) {
+	body := `{"decision":"denied","decided_by":"operator"}`
+	decide := func(*DecideApprovalRequest) (*ApprovalDecisionResult, error) {
+		return &ApprovalDecisionResult{Request: &approval.Request{ID: "req-registry-parity", Decision: approval.DecisionDenied}}, nil
+	}
+
+	tests := []struct {
+		name    string
+		surface DecideApprovalRenderSurface
+		target  DecideApprovalRenderTarget
+	}{
+		{name: "http", surface: DecideApprovalRenderSurfaceHTTP, target: DecideApprovalRenderTargetHTTP},
+		{name: "mcp", surface: DecideApprovalRenderSurfaceMCP, target: DecideApprovalRenderTargetMCP},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			viaRegistry := OrchestrateDecideApprovalForSurface(strings.NewReader(body), decide, tt.surface)
+			direct := OrchestrateDecideApproval(strings.NewReader(body), decide, tt.target)
+
+			registryErr, registryHasErr := viaRegistry.HTTPError()
+			directErr, directHasErr := direct.HTTPError()
+			if registryHasErr != directHasErr {
+				t.Fatalf("expected error parity, registry=%v direct=%v", registryHasErr, directHasErr)
+			}
+			if registryHasErr {
+				if *registryErr != *directErr {
+					t.Fatalf("expected identical error projection, registry=%+v direct=%+v", registryErr, directErr)
+				}
+				return
+			}
+
+			if viaRegistry.Success == nil || direct.Success == nil {
+				t.Fatalf("expected success projections, registry=%+v direct=%+v", viaRegistry, direct)
+			}
+			if viaRegistry.Success.Status != direct.Success.Status {
+				t.Fatalf("expected status parity, registry=%q direct=%q", viaRegistry.Success.Status, direct.Success.Status)
+			}
+			if viaRegistry.Success.Request == nil || direct.Success.Request == nil {
+				t.Fatalf("expected request parity, registry=%+v direct=%+v", viaRegistry.Success, direct.Success)
+			}
+			if viaRegistry.Success.Request.ID != direct.Success.Request.ID || viaRegistry.Success.Request.Decision != direct.Success.Request.Decision {
+				t.Fatalf("expected request id/decision parity, registry=%+v direct=%+v", viaRegistry.Success.Request, direct.Success.Request)
+			}
+		})
+	}
+}

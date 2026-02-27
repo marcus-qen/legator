@@ -869,7 +869,7 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 		return s.approvalCore.DecideAndDispatch(id, body.Decision, body.DecidedBy, func(probeID string, cmd protocol.CommandPayload) error {
 			return s.dispatchCore.Dispatch(probeID, cmd)
 		})
-	}, coreapprovalpolicy.DecideApprovalRenderTargetHTTP)
+	}, coreapprovalpolicy.DecideApprovalRenderSurfaceHTTP)
 	renderDecideApprovalHTTP(w, projection)
 }
 

@@ -30,6 +30,8 @@
   - Exposed `legator_decide_approval` MCP tool using the shared decide orchestration seam and renderer contracts, with parity tests to lock HTTP+MCP equivalent success/error behavior.
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
+- **Kernel split S13 (approval decide render-target registry boundary)**
+  - Added a shared render-target registry boundary so HTTP and MCP decide surfaces resolve their renderer target via registry selection while preserving existing success/error contracts.
 
 ### Added
 - Parity tests for the extracted core service and server policy-apply paths (not found + offline apply-local behavior).

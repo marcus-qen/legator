@@ -92,3 +92,38 @@ func TestOrchestrateDecideApprovalMCP_ParityWithHTTPProjection(t *testing.T) {
 		}
 	}
 }
+
+func TestOrchestrateDecideApprovalMCP_RegistryParityWithDirectTarget(t *testing.T) {
+	body := `{"decision":"denied","decided_by":"operator"}`
+	decide := func(*coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error) {
+		return &coreapprovalpolicy.ApprovalDecisionResult{Request: &approval.Request{ID: "req-mcp-registry", Decision: approval.DecisionDenied}}, nil
+	}
+
+	viaRegistry := orchestrateDecideApprovalMCP(strings.NewReader(body), decide)
+	direct := coreapprovalpolicy.OrchestrateDecideApproval(strings.NewReader(body), decide, coreapprovalpolicy.DecideApprovalRenderTargetMCP)
+
+	viaErr, viaHasErr := viaRegistry.HTTPError()
+	directErr, directHasErr := direct.HTTPError()
+	if viaHasErr != directHasErr {
+		t.Fatalf("expected error parity, registry=%v direct=%v", viaHasErr, directHasErr)
+	}
+	if viaHasErr {
+		if *viaErr != *directErr {
+			t.Fatalf("expected identical error projection, registry=%+v direct=%+v", viaErr, directErr)
+		}
+		return
+	}
+
+	if viaRegistry.Success == nil || direct.Success == nil {
+		t.Fatalf("expected success projections, registry=%+v direct=%+v", viaRegistry, direct)
+	}
+	if viaRegistry.Success.Status != direct.Success.Status {
+		t.Fatalf("expected status parity, registry=%q direct=%q", viaRegistry.Success.Status, direct.Success.Status)
+	}
+	if viaRegistry.Success.Request == nil || direct.Success.Request == nil {
+		t.Fatalf("expected request parity, registry=%+v direct=%+v", viaRegistry.Success, direct.Success)
+	}
+	if viaRegistry.Success.Request.ID != direct.Success.Request.ID || viaRegistry.Success.Request.Decision != direct.Success.Request.Decision {
+		t.Fatalf("expected request id/decision parity, registry=%+v direct=%+v", viaRegistry.Success.Request, direct.Success.Request)
+	}
+}
