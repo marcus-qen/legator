@@ -17,6 +17,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
+	coreapprovalpolicy "github.com/marcus-qen/legator/internal/controlplane/core/approvalpolicy"
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/metrics"
@@ -476,14 +477,14 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if this command needs approval
-	if approval.NeedsApproval(&cmd, ps.PolicyLevel) {
-		req, err := s.approvalQueue.Submit(id, &cmd, "Manual command dispatch", approval.ClassifyRisk(&cmd), "api")
-		if err != nil {
-			writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", fmt.Sprintf("approval queue: %s", err.Error()))
-			return
-		}
+	req, needsApproval, err := s.approvalCore.SubmitCommandApproval(id, &cmd, ps.PolicyLevel, "Manual command dispatch", "api")
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", fmt.Sprintf("approval queue: %s", err.Error()))
+		return
+	}
+	if needsApproval {
 		s.emitAudit(audit.EventApprovalRequest, id, "api",
-			fmt.Sprintf("Approval required for: %s (risk: %s)", cmd.Command, approval.ClassifyRisk(&cmd)))
+			fmt.Sprintf("Approval required for: %s (risk: %s)", cmd.Command, req.RiskLevel))
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -654,21 +655,21 @@ func (s *Server) handleApplyPolicy(w http.ResponseWriter, r *http.Request) {
 	probeID := r.PathValue("id")
 	policyID := r.PathValue("policyId")
 
-	_, ok := s.fleetMgr.Get(probeID)
-	if !ok {
-		writeJSONError(w, http.StatusNotFound, "not_found", "probe not found")
+	result, err := s.approvalCore.ApplyPolicyTemplate(probeID, policyID, func(targetProbeID string, pol *protocol.PolicyUpdatePayload) error {
+		return s.hub.SendTo(targetProbeID, protocol.MsgPolicyUpdate, pol)
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, coreapprovalpolicy.ErrProbeNotFound):
+			writeJSONError(w, http.StatusNotFound, "not_found", "probe not found")
+		case errors.Is(err, coreapprovalpolicy.ErrPolicyTemplateNotFound):
+			writeJSONError(w, http.StatusNotFound, "not_found", "policy template not found")
+		default:
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		}
 		return
 	}
-	tpl, ok := s.policyStore.Get(policyID)
-	if !ok {
-		writeJSONError(w, http.StatusNotFound, "not_found", "policy template not found")
-		return
-	}
-
-	_ = s.fleetMgr.SetPolicy(probeID, tpl.Level)
-
-	pol := tpl.ToPolicy()
-	if err := s.hub.SendTo(probeID, protocol.MsgPolicyUpdate, pol); err != nil {
+	if !result.Pushed {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status": "applied_locally",
@@ -678,14 +679,14 @@ func (s *Server) handleApplyPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.emitAudit(audit.EventPolicyChanged, probeID, "api",
-		fmt.Sprintf("Policy %s (%s) applied", tpl.Name, tpl.ID))
+		fmt.Sprintf("Policy %s (%s) applied", result.Template.Name, result.Template.ID))
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status":    "applied",
 		"probe_id":  probeID,
 		"policy_id": policyID,
-		"level":     string(tpl.Level),
+		"level":     string(result.Template.Level),
 	})
 }
 

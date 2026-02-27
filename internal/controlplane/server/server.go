@@ -25,6 +25,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/cloudconnectors"
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
 	"github.com/marcus-qen/legator/internal/controlplane/config"
+	coreapprovalpolicy "github.com/marcus-qen/legator/internal/controlplane/core/approvalpolicy"
 	"github.com/marcus-qen/legator/internal/controlplane/discovery"
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
@@ -62,6 +63,7 @@ type Server struct {
 	tokenStore    *api.TokenStore
 	cmdTracker    *cmdtracker.Tracker
 	approvalQueue *approval.Queue
+	approvalCore  *coreapprovalpolicy.Service
 	hub           *cpws.Hub
 
 	// Persistence (nil = in-memory fallback)
@@ -169,6 +171,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initAlerts()
 	s.initChat()
 	s.initPolicy()
+	s.initApprovalCore()
 	s.initModelDock()
 	s.initCloudConnectors()
 	s.initNetworkDevices()
@@ -439,6 +442,9 @@ func (s *Server) initPolicy() {
 	}
 }
 
+func (s *Server) initApprovalCore() {
+	s.approvalCore = coreapprovalpolicy.NewService(s.approvalQueue, s.fleetMgr, s.policyStore)
+}
 func (s *Server) initModelDock() {
 	envCfg := llm.ProviderConfig{
 		Name:    os.Getenv("LEGATOR_LLM_PROVIDER"),
@@ -566,23 +572,25 @@ func (s *Server) initLLM() {
 
 	// dispatch is a closure that will be set after hub init
 	s.taskRunner = llm.NewTaskRunner(taskProvider, func(probeID string, cmd *protocol.CommandPayload) (*protocol.CommandResultPayload, error) {
-		if ps, ok := s.fleetMgr.Get(probeID); ok && approval.NeedsApproval(cmd, ps.PolicyLevel) {
-			risk := approval.ClassifyRisk(cmd)
-			req, err := s.approvalQueue.Submit(probeID, cmd, "LLM task command", risk, "llm-task")
+		if ps, ok := s.fleetMgr.Get(probeID); ok {
+			req, needsApproval, err := s.approvalCore.SubmitCommandApproval(probeID, cmd, ps.PolicyLevel, "LLM task command", "llm-task")
 			if err != nil {
 				return nil, fmt.Errorf("approval queue unavailable: %w", err)
 			}
-			s.emitAudit(audit.EventApprovalRequest, probeID, "llm-task",
-				fmt.Sprintf("LLM command pending approval: %s (risk: %s)", cmd.Command, risk))
 
-			decided, err := s.approvalQueue.WaitForDecision(req.ID, approvalWait)
-			if err != nil {
-				return nil, fmt.Errorf("approval required (id=%s): %w", req.ID, err)
-			}
-			s.emitAudit(audit.EventApprovalDecided, probeID, decided.DecidedBy,
-				fmt.Sprintf("LLM approval %s for: %s", decided.Decision, cmd.Command))
-			if decided.Decision != approval.DecisionApproved {
-				return nil, fmt.Errorf("command not approved (id=%s, decision=%s)", decided.ID, decided.Decision)
+			if needsApproval {
+				s.emitAudit(audit.EventApprovalRequest, probeID, "llm-task",
+					fmt.Sprintf("LLM command pending approval: %s (risk: %s)", cmd.Command, req.RiskLevel))
+
+				decided, err := s.approvalCore.WaitForDecision(req.ID, approvalWait)
+				if err != nil {
+					return nil, fmt.Errorf("approval required (id=%s): %w", req.ID, err)
+				}
+				s.emitAudit(audit.EventApprovalDecided, probeID, decided.DecidedBy,
+					fmt.Sprintf("LLM approval %s for: %s", decided.Decision, cmd.Command))
+				if decided.Decision != approval.DecisionApproved {
+					return nil, fmt.Errorf("command not approved (id=%s, decision=%s)", decided.ID, decided.Decision)
+				}
 			}
 		}
 

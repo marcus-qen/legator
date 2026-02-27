@@ -1,3 +1,14 @@
+## [v1.0.0-alpha.15] — 2026-02-27
+
+### Changed
+- **Kernel split S1 (approval/policy first extraction)**
+  - Added `internal/controlplane/core/approvalpolicy` service as the first reusable core boundary for approval + policy orchestration.
+  - Moved approval submission/wait orchestration out of server route/task closures into the new core service (behavior preserved).
+  - Moved policy-apply orchestration (template lookup, fleet policy update, push fallback) behind the same core service.
+
+### Added
+- Parity tests for the extracted core service and server policy-apply paths (not found + offline apply-local behavior).
+
 ## [v1.0.0-alpha.14] — 2026-02-27
 
 ### Added
