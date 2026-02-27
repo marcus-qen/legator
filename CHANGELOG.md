@@ -1,3 +1,23 @@
+## [v1.0.0-alpha.13] — 2026-02-27
+
+### Changed
+- **RBAC parity hardening across API routes**
+  - Discovery scan + install-token endpoints now require `fleet:write`
+  - Model Dock create/update/delete/activate endpoints now require `fleet:write`
+  - Cloud Connector create/update/delete/scan endpoints now require `fleet:write`
+- **Page-level permission alignment**
+  - `/approvals` now requires `approval:read`
+  - `/audit` now requires `audit:read`
+- **UI permission gating**
+  - Sidebar navigation now hides links the current role cannot access
+  - Write actions on Approvals/Alerts/Model Dock/Cloud Connectors/Discovery are read-only or disabled when `fleet:write` / `approval:write` is missing
+
+### Added
+- **Authorization denial audit events**
+  - New `auth.authorization_denied` audit event recorded for permission denials
+  - Captures method/path/required permission/reason without request payload leakage
+- **RBAC regression tests** for denied mutation paths, page-scope checks, template permission helpers, and denial audit emission
+
 ## [v1.0.0-alpha.12] — 2026-02-27
 
 ### Added

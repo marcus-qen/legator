@@ -150,6 +150,7 @@ func (l *Log) MarshalJSON() ([]byte, error) {
 
 // Login audit event types.
 const (
-	EventLoginSuccess EventType = "auth.login"
-	EventLoginFailed  EventType = "auth.login_failed"
+	EventLoginSuccess        EventType = "auth.login"
+	EventLoginFailed         EventType = "auth.login_failed"
+	EventAuthorizationDenied EventType = "auth.authorization_denied"
 )

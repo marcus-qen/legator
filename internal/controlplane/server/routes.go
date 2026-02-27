@@ -73,15 +73,15 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Discovery
 	if s.discoveryHandlers != nil {
-		mux.HandleFunc("POST /api/v1/discovery/scan", s.withPermission(auth.PermFleetRead, s.discoveryHandlers.HandleScan))
+		mux.HandleFunc("POST /api/v1/discovery/scan", s.withPermission(auth.PermFleetWrite, s.discoveryHandlers.HandleScan))
 		mux.HandleFunc("GET /api/v1/discovery/runs", s.withPermission(auth.PermFleetRead, s.discoveryHandlers.HandleListRuns))
 		mux.HandleFunc("GET /api/v1/discovery/runs/{id}", s.withPermission(auth.PermFleetRead, s.discoveryHandlers.HandleGetRun))
-		mux.HandleFunc("POST /api/v1/discovery/install-token", s.withPermission(auth.PermFleetRead, s.discoveryHandlers.HandleInstallToken))
+		mux.HandleFunc("POST /api/v1/discovery/install-token", s.withPermission(auth.PermFleetWrite, s.discoveryHandlers.HandleInstallToken))
 	} else {
-		mux.HandleFunc("POST /api/v1/discovery/scan", s.withPermission(auth.PermFleetRead, s.handleDiscoveryUnavailable))
+		mux.HandleFunc("POST /api/v1/discovery/scan", s.withPermission(auth.PermFleetWrite, s.handleDiscoveryUnavailable))
 		mux.HandleFunc("GET /api/v1/discovery/runs", s.withPermission(auth.PermFleetRead, s.handleDiscoveryUnavailable))
 		mux.HandleFunc("GET /api/v1/discovery/runs/{id}", s.withPermission(auth.PermFleetRead, s.handleDiscoveryUnavailable))
-		mux.HandleFunc("POST /api/v1/discovery/install-token", s.withPermission(auth.PermFleetRead, s.handleDiscoveryUnavailable))
+		mux.HandleFunc("POST /api/v1/discovery/install-token", s.withPermission(auth.PermFleetWrite, s.handleDiscoveryUnavailable))
 	}
 
 	// Metrics
@@ -176,18 +176,18 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Model Dock API
 	if s.modelDockHandlers != nil {
 		mux.HandleFunc("GET /api/v1/model-profiles", s.withPermission(auth.PermFleetRead, s.modelDockHandlers.HandleListProfiles))
-		mux.HandleFunc("POST /api/v1/model-profiles", s.withPermission(auth.PermFleetRead, s.modelDockHandlers.HandleCreateProfile))
-		mux.HandleFunc("PUT /api/v1/model-profiles/{id}", s.withPermission(auth.PermFleetRead, s.modelDockHandlers.HandleUpdateProfile))
-		mux.HandleFunc("DELETE /api/v1/model-profiles/{id}", s.withPermission(auth.PermFleetRead, s.modelDockHandlers.HandleDeleteProfile))
-		mux.HandleFunc("POST /api/v1/model-profiles/{id}/activate", s.withPermission(auth.PermFleetRead, s.modelDockHandlers.HandleActivateProfile))
+		mux.HandleFunc("POST /api/v1/model-profiles", s.withPermission(auth.PermFleetWrite, s.modelDockHandlers.HandleCreateProfile))
+		mux.HandleFunc("PUT /api/v1/model-profiles/{id}", s.withPermission(auth.PermFleetWrite, s.modelDockHandlers.HandleUpdateProfile))
+		mux.HandleFunc("DELETE /api/v1/model-profiles/{id}", s.withPermission(auth.PermFleetWrite, s.modelDockHandlers.HandleDeleteProfile))
+		mux.HandleFunc("POST /api/v1/model-profiles/{id}/activate", s.withPermission(auth.PermFleetWrite, s.modelDockHandlers.HandleActivateProfile))
 		mux.HandleFunc("GET /api/v1/model-profiles/active", s.withPermission(auth.PermFleetRead, s.modelDockHandlers.HandleGetActiveProfile))
 		mux.HandleFunc("GET /api/v1/model-usage", s.withPermission(auth.PermFleetRead, s.modelDockHandlers.HandleGetUsage))
 	} else {
 		mux.HandleFunc("GET /api/v1/model-profiles", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
-		mux.HandleFunc("POST /api/v1/model-profiles", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
-		mux.HandleFunc("PUT /api/v1/model-profiles/{id}", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
-		mux.HandleFunc("DELETE /api/v1/model-profiles/{id}", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
-		mux.HandleFunc("POST /api/v1/model-profiles/{id}/activate", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
+		mux.HandleFunc("POST /api/v1/model-profiles", s.withPermission(auth.PermFleetWrite, s.handleModelDockUnavailable))
+		mux.HandleFunc("PUT /api/v1/model-profiles/{id}", s.withPermission(auth.PermFleetWrite, s.handleModelDockUnavailable))
+		mux.HandleFunc("DELETE /api/v1/model-profiles/{id}", s.withPermission(auth.PermFleetWrite, s.handleModelDockUnavailable))
+		mux.HandleFunc("POST /api/v1/model-profiles/{id}/activate", s.withPermission(auth.PermFleetWrite, s.handleModelDockUnavailable))
 		mux.HandleFunc("GET /api/v1/model-profiles/active", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
 		mux.HandleFunc("GET /api/v1/model-usage", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
 	}
@@ -195,17 +195,17 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Cloud Connectors API
 	if s.cloudConnectorHandlers != nil {
 		mux.HandleFunc("GET /api/v1/cloud/connectors", s.withPermission(auth.PermFleetRead, s.cloudConnectorHandlers.HandleListConnectors))
-		mux.HandleFunc("POST /api/v1/cloud/connectors", s.withPermission(auth.PermFleetRead, s.cloudConnectorHandlers.HandleCreateConnector))
-		mux.HandleFunc("PUT /api/v1/cloud/connectors/{id}", s.withPermission(auth.PermFleetRead, s.cloudConnectorHandlers.HandleUpdateConnector))
-		mux.HandleFunc("DELETE /api/v1/cloud/connectors/{id}", s.withPermission(auth.PermFleetRead, s.cloudConnectorHandlers.HandleDeleteConnector))
-		mux.HandleFunc("POST /api/v1/cloud/connectors/{id}/scan", s.withPermission(auth.PermFleetRead, s.cloudConnectorHandlers.HandleScanConnector))
+		mux.HandleFunc("POST /api/v1/cloud/connectors", s.withPermission(auth.PermFleetWrite, s.cloudConnectorHandlers.HandleCreateConnector))
+		mux.HandleFunc("PUT /api/v1/cloud/connectors/{id}", s.withPermission(auth.PermFleetWrite, s.cloudConnectorHandlers.HandleUpdateConnector))
+		mux.HandleFunc("DELETE /api/v1/cloud/connectors/{id}", s.withPermission(auth.PermFleetWrite, s.cloudConnectorHandlers.HandleDeleteConnector))
+		mux.HandleFunc("POST /api/v1/cloud/connectors/{id}/scan", s.withPermission(auth.PermFleetWrite, s.cloudConnectorHandlers.HandleScanConnector))
 		mux.HandleFunc("GET /api/v1/cloud/assets", s.withPermission(auth.PermFleetRead, s.cloudConnectorHandlers.HandleListAssets))
 	} else {
 		mux.HandleFunc("GET /api/v1/cloud/connectors", s.withPermission(auth.PermFleetRead, s.handleCloudConnectorsUnavailable))
-		mux.HandleFunc("POST /api/v1/cloud/connectors", s.withPermission(auth.PermFleetRead, s.handleCloudConnectorsUnavailable))
-		mux.HandleFunc("PUT /api/v1/cloud/connectors/{id}", s.withPermission(auth.PermFleetRead, s.handleCloudConnectorsUnavailable))
-		mux.HandleFunc("DELETE /api/v1/cloud/connectors/{id}", s.withPermission(auth.PermFleetRead, s.handleCloudConnectorsUnavailable))
-		mux.HandleFunc("POST /api/v1/cloud/connectors/{id}/scan", s.withPermission(auth.PermFleetRead, s.handleCloudConnectorsUnavailable))
+		mux.HandleFunc("POST /api/v1/cloud/connectors", s.withPermission(auth.PermFleetWrite, s.handleCloudConnectorsUnavailable))
+		mux.HandleFunc("PUT /api/v1/cloud/connectors/{id}", s.withPermission(auth.PermFleetWrite, s.handleCloudConnectorsUnavailable))
+		mux.HandleFunc("DELETE /api/v1/cloud/connectors/{id}", s.withPermission(auth.PermFleetWrite, s.handleCloudConnectorsUnavailable))
+		mux.HandleFunc("POST /api/v1/cloud/connectors/{id}/scan", s.withPermission(auth.PermFleetWrite, s.handleCloudConnectorsUnavailable))
 		mux.HandleFunc("GET /api/v1/cloud/assets", s.withPermission(auth.PermFleetRead, s.handleCloudConnectorsUnavailable))
 	}
 
@@ -250,11 +250,13 @@ func (s *Server) requirePermission(w http.ResponseWriter, r *http.Request, perm 
 	}
 
 	if !auth.IsAuthenticated(r.Context()) {
+		s.recordAuthorizationDenied(r, perm, "authentication_required")
 		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return false
 	}
 
 	if !auth.HasPermissionFromContext(r.Context(), perm) {
+		s.recordAuthorizationDenied(r, perm, "insufficient_permissions")
 		writeJSONError(w, http.StatusForbidden, "forbidden", fmt.Sprintf("insufficient permissions (required: %s)", perm))
 		return false
 	}
@@ -267,7 +269,54 @@ func (s *Server) currentTemplateUser(r *http.Request) *TemplateUser {
 	if user == nil {
 		return nil
 	}
-	return &TemplateUser{Username: user.Username, Role: user.Role}
+
+	permissions := make(map[auth.Permission]struct{}, len(user.Permissions))
+	for _, perm := range user.Permissions {
+		permissions[perm] = struct{}{}
+	}
+
+	return &TemplateUser{
+		Username:    user.Username,
+		Role:        user.Role,
+		Permissions: permissions,
+	}
+}
+
+func (s *Server) recordAuthorizationDenied(r *http.Request, perm auth.Permission, reason string) {
+	if s.auditStore == nil {
+		return
+	}
+
+	actor := "anonymous"
+	if user := auth.UserFromContext(r.Context()); user != nil {
+		if user.Username != "" {
+			actor = user.Username
+		} else if user.ID != "" {
+			actor = user.ID
+		}
+	} else if key := auth.FromContext(r.Context()); key != nil {
+		if key.Name != "" {
+			actor = key.Name
+		} else if key.ID != "" {
+			actor = key.ID
+		}
+	}
+
+	detail := map[string]string{
+		"method":              r.Method,
+		"path":                r.URL.Path,
+		"required_permission": string(perm),
+		"reason":              reason,
+	}
+
+	s.recordAudit(audit.Event{
+		Timestamp: time.Now().UTC(),
+		Type:      audit.EventAuthorizationDenied,
+		Actor:     actor,
+		ProbeID:   "",
+		Summary:   fmt.Sprintf("authorization denied for %s %s", r.Method, r.URL.Path),
+		Detail:    detail,
+	})
 }
 
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
@@ -1396,7 +1445,7 @@ func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleApprovalsPage(w http.ResponseWriter, r *http.Request) {
-	if !s.requirePermission(w, r, auth.PermFleetRead) {
+	if !s.requirePermission(w, r, auth.PermApprovalRead) {
 		return
 	}
 	if s.pages == nil {
@@ -1416,7 +1465,7 @@ func (s *Server) handleApprovalsPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuditPage(w http.ResponseWriter, r *http.Request) {
-	if !s.requirePermission(w, r, auth.PermFleetRead) {
+	if !s.requirePermission(w, r, auth.PermAuditRead) {
 		return
 	}
 	if s.pages == nil {

@@ -25,6 +25,7 @@
 <script>
 (() => {
   const decidedBy = {{if .CurrentUser}}"{{.CurrentUser.Username}}"{{else}}"operator"{{end}};
+  const canDecide = {{if hasPermission .CurrentUser "approval:write"}}true{{else}}false{{end}};
 
   function riskClass(risk) {
     const r = (risk || '').toLowerCase();
@@ -51,6 +52,11 @@
   }
 
   function decide(id, decision) {
+    if (!canDecide) {
+      notify('You do not have permission to decide approvals', false);
+      return;
+    }
+
     fetch('/api/v1/approvals/' + encodeURIComponent(id) + '/decide', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -93,8 +99,10 @@
           </div>
           <pre class="chat-code">${JSON.stringify(approval.command || approval.task || approval, null, 2)}</pre>
           <div class="actions-row">
-            <button class="btn btn-primary" onclick="approvalsDecide('${approval.id}','approved')">Approve</button>
-            <button class="btn btn-danger" onclick="approvalsDecide('${approval.id}','denied')">Deny</button>
+            ${canDecide
+              ? `<button class="btn btn-primary" onclick="approvalsDecide('${approval.id}','approved')">Approve</button>
+                 <button class="btn btn-danger" onclick="approvalsDecide('${approval.id}','denied')">Deny</button>`
+              : '<span class="muted">Read-only access</span>'}
           </div>
           <div class="muted">Approval ID: <span class="id-text">${approval.id}</span></div>
         </article>

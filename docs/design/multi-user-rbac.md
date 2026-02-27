@@ -81,3 +81,18 @@ internal/controlplane/auth/
 web/templates/
   login.html      — login page
 ```
+
+## Alpha.13 RBAC Hardening Notes
+
+- Enforced write-scope parity for mutating APIs:
+  - `POST /api/v1/discovery/scan`
+  - `POST /api/v1/discovery/install-token`
+  - `POST|PUT|DELETE /api/v1/model-profiles` and `POST /api/v1/model-profiles/{id}/activate`
+  - `POST|PUT|DELETE /api/v1/cloud/connectors` and `POST /api/v1/cloud/connectors/{id}/scan`
+- Tightened page-level auth checks:
+  - `/approvals` requires `approval:read`
+  - `/audit` requires `audit:read`
+- UI now mirrors backend authorization:
+  - Sidebar hides routes user cannot read
+  - Approvals/Alerts/Model Dock/Cloud Connectors/Discovery write actions are disabled or hidden without write permissions
+- Authorization denials now emit explicit audit events (`auth.authorization_denied`) with safe metadata only (`method`, `path`, `required_permission`, `reason`).

@@ -109,6 +109,7 @@
     rules: [],
     history: {},
   };
+  const canWrite = {{if hasPermission .CurrentUser "fleet:write"}}true{{else}}false{{end}};
 
   const activeAlertsEl = document.getElementById('active-alerts');
   const activeAlertCountEl = document.getElementById('active-alert-count');
@@ -269,14 +270,14 @@
           <td>${tags}</td>
           <td>
             <label>
-              <input type="checkbox" data-toggle-rule="${escapeHTML(rule.id)}" ${rule.enabled ? 'checked' : ''} />
+              <input type="checkbox" data-toggle-rule="${escapeHTML(rule.id)}" ${rule.enabled ? 'checked' : ''} ${canWrite ? '' : 'disabled'} />
               <span>${rule.enabled ? 'On' : 'Off'}</span>
             </label>
           </td>
           <td>
             <div class="actions-row">
               <button type="button" class="btn" data-history-rule="${escapeHTML(rule.id)}">History</button>
-              <button type="button" class="btn btn-danger" data-delete-rule="${escapeHTML(rule.id)}">Delete</button>
+              ${canWrite ? `<button type="button" class="btn btn-danger" data-delete-rule="${escapeHTML(rule.id)}">Delete</button>` : '<span class="muted">Read-only</span>'}
             </div>
           </td>
         </tr>
@@ -306,6 +307,12 @@
   }
 
   async function updateRuleEnabled(ruleID, enabled) {
+    if (!canWrite) {
+      showToast('fleet:write permission is required to edit alert rules', 'warning');
+      renderRules();
+      return;
+    }
+
     const rule = state.rules.find((item) => item.id === ruleID);
     if (!rule) return;
 
@@ -337,6 +344,11 @@
   }
 
   async function deleteRule(ruleID) {
+    if (!canWrite) {
+      showToast('fleet:write permission is required to delete alert rules', 'warning');
+      return;
+    }
+
     if (!window.confirm('Delete this alert rule?')) {
       return;
     }
@@ -398,6 +410,10 @@
     const checkbox = event.target.closest('[data-toggle-rule]');
     if (!checkbox) return;
     const ruleID = checkbox.getAttribute('data-toggle-rule');
+    if (!canWrite) {
+      renderRules();
+      return;
+    }
     void updateRuleEnabled(ruleID, checkbox.checked);
   });
 
@@ -416,7 +432,18 @@
     }
   });
 
-  createBtn.addEventListener('click', () => setCreatePanelOpen(true));
+  if (!canWrite) {
+    createBtn.setAttribute('disabled', 'disabled');
+    createBtn.setAttribute('title', 'fleet:write permission required');
+  }
+
+  createBtn.addEventListener('click', () => {
+    if (!canWrite) {
+      showToast('fleet:write permission is required to create alert rules', 'warning');
+      return;
+    }
+    setCreatePanelOpen(true);
+  });
   createCloseTargets.forEach((target) => {
     target.addEventListener('click', () => setCreatePanelOpen(false));
   });
@@ -431,6 +458,11 @@
 
   createForm.addEventListener('submit', async (event) => {
     event.preventDefault();
+
+    if (!canWrite) {
+      showToast('fleet:write permission is required to create alert rules', 'warning');
+      return;
+    }
 
     const ruleType = typeInput.value;
     const needsThreshold = ruleType === 'disk_threshold' || ruleType === 'cpu_threshold';

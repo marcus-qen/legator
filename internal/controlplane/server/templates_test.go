@@ -6,11 +6,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/marcus-qen/legator/internal/controlplane/auth"
 )
 
 func TestTemplateFuncs_MapContainsExpectedHelpers(t *testing.T) {
 	funcs := templateFuncs()
-	for _, key := range []string{"statusClass", "humanizeStatus", "formatLastSeen", "humanBytes"} {
+	for _, key := range []string{"statusClass", "humanizeStatus", "formatLastSeen", "humanBytes", "hasPermission"} {
 		if _, ok := funcs[key]; !ok {
 			t.Fatalf("missing template func %q", key)
 		}
@@ -106,5 +108,23 @@ func TestProbeDetailTemplateIncludesIncrementalSSEAnchors(t *testing.T) {
 		if !strings.Contains(html, snippet) {
 			t.Fatalf("template missing expected snippet: %s", snippet)
 		}
+	}
+}
+
+func TestTemplateHasPermission(t *testing.T) {
+	admin := &TemplateUser{Permissions: map[auth.Permission]struct{}{auth.PermAdmin: {}}}
+	if !templateHasPermission(admin, string(auth.PermFleetWrite)) {
+		t.Fatal("expected admin to have fleet write")
+	}
+
+	viewer := &TemplateUser{Permissions: map[auth.Permission]struct{}{auth.PermFleetRead: {}, auth.PermAuditRead: {}}}
+	if !templateHasPermission(viewer, string(auth.PermAuditRead)) {
+		t.Fatal("expected explicit permission to pass")
+	}
+	if templateHasPermission(viewer, string(auth.PermFleetWrite)) {
+		t.Fatal("expected missing permission to fail")
+	}
+	if templateHasPermission(nil, string(auth.PermFleetRead)) {
+		t.Fatal("nil user should never have permission")
 	}
 }

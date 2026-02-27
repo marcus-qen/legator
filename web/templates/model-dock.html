@@ -129,6 +129,7 @@
     usage: [],
     totals: null,
   };
+  const canWrite = {{if hasPermission .CurrentUser "fleet:write"}}true{{else}}false{{end}};
 
   const profilesBody = document.getElementById('profiles-body');
   const profilesCount = document.getElementById('profiles-count');
@@ -140,6 +141,8 @@
   const form = document.getElementById('profile-form');
   const formTitle = document.getElementById('profile-form-title');
   const submitBtn = document.getElementById('profile-submit');
+  const formResetBtn = document.getElementById('profile-form-reset');
+  const cancelBtn = document.getElementById('profile-cancel');
 
   const idInput = document.getElementById('profile-id');
   const nameInput = document.getElementById('profile-name');
@@ -251,9 +254,11 @@
           <td>${activeBadge}</td>
           <td>
             <div class="actions-row">
-              <button class="btn" type="button" data-action="edit" data-id="${esc(profile.id)}">Edit</button>
-              <button class="btn" type="button" data-action="activate" data-id="${esc(profile.id)}" ${profile.is_active ? 'disabled' : ''}>Activate</button>
-              <button class="btn btn-danger" type="button" data-action="delete" data-id="${esc(profile.id)}">Delete</button>
+              ${canWrite
+                ? `<button class="btn" type="button" data-action="edit" data-id="${esc(profile.id)}">Edit</button>
+                   <button class="btn" type="button" data-action="activate" data-id="${esc(profile.id)}" ${profile.is_active ? 'disabled' : ''}>Activate</button>
+                   <button class="btn btn-danger" type="button" data-action="delete" data-id="${esc(profile.id)}">Delete</button>`
+                : '<span class="muted">Read-only</span>'}
             </div>
           </td>
         </tr>
@@ -314,6 +319,11 @@
     const btn = event.target.closest('button[data-action]');
     if (!btn) return;
 
+    if (!canWrite) {
+      toast('fleet:write permission is required to manage model profiles', 'warning');
+      return;
+    }
+
     const action = btn.getAttribute('data-action');
     const id = btn.getAttribute('data-id');
     const profile = state.profiles.find((item) => item.id === id);
@@ -353,6 +363,11 @@
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
+
+    if (!canWrite) {
+      toast('fleet:write permission is required to save model profiles', 'warning');
+      return;
+    }
 
     const id = idInput.value.trim();
     const payload = {
@@ -394,8 +409,19 @@
     }
   });
 
-  document.getElementById('profile-cancel').addEventListener('click', resetForm);
-  document.getElementById('profile-form-reset').addEventListener('click', resetForm);
+  cancelBtn.addEventListener('click', resetForm);
+  formResetBtn.addEventListener('click', resetForm);
+
+  if (!canWrite) {
+    formTitle.textContent = 'Profiles (read-only)';
+    submitBtn.setAttribute('disabled', 'disabled');
+    submitBtn.textContent = 'Read-only';
+    formResetBtn.setAttribute('disabled', 'disabled');
+    cancelBtn.setAttribute('disabled', 'disabled');
+    [nameInput, providerInput, modelInput, baseURLInput, apiKeyInput, activeInput].forEach((el) => {
+      el.setAttribute('disabled', 'disabled');
+    });
+  }
   document.getElementById('refresh-model-dock').addEventListener('click', async () => {
     try {
       await refreshAll();

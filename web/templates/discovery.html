@@ -85,6 +85,8 @@
 {{define "scripts"}}
 <script>
 (() => {
+  const canWrite = {{if hasPermission .CurrentUser "fleet:write"}}true{{else}}false{{end}};
+
   const scanForm = document.getElementById('discovery-scan-form');
   const cidrInput = document.getElementById('discovery-cidr');
   const scanBtn = document.getElementById('discovery-scan-btn');
@@ -201,6 +203,12 @@
 
   async function handleScan(event) {
     event.preventDefault();
+
+    if (!canWrite) {
+      toast('fleet:write permission is required to run discovery scans', 'warning');
+      return;
+    }
+
     const cidr = cidrInput.value.trim();
     if (!cidr) return;
 
@@ -227,6 +235,11 @@
   }
 
   async function generateInstallToken() {
+    if (!canWrite) {
+      toast('fleet:write permission is required to generate install commands', 'warning');
+      return;
+    }
+
     generateBtn.disabled = true;
     try {
       const payload = await requestJSON('/api/v1/discovery/install-token', {
@@ -269,6 +282,12 @@
       toast(`Failed to load run: ${error.message}`, 'error');
     }
   });
+
+  if (!canWrite) {
+    scanBtn.setAttribute('disabled', 'disabled');
+    generateBtn.setAttribute('disabled', 'disabled');
+    statusEl.textContent = 'Read-only access';
+  }
 
   scanForm.addEventListener('submit', handleScan);
   generateBtn.addEventListener('click', generateInstallToken);

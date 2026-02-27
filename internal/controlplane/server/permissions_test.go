@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
 	"github.com/marcus-qen/legator/internal/controlplane/config"
 	"go.uber.org/zap"
@@ -165,5 +166,85 @@ func TestPermissionsFleetReadCanAccessFleetInventoryAndChat(t *testing.T) {
 	history := makeRequest(t, srv, http.MethodGet, "/api/v1/fleet/chat", token, "")
 	if history.Code == http.StatusUnauthorized || history.Code == http.StatusForbidden {
 		t.Fatalf("expected fleet chat read access, got %d body=%s", history.Code, history.Body.String())
+	}
+}
+
+func TestPermissionsFleetReadCannotMutateModelDockCloudOrDiscovery(t *testing.T) {
+	srv := newAuthTestServer(t)
+	token := createAPIKey(t, srv, "fleet-read", auth.PermFleetRead)
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{name: "model dock create", method: http.MethodPost, path: "/api/v1/model-profiles", body: `{"name":"blocked","provider":"openai","base_url":"https://api.example.com/v1","model":"gpt-4o-mini","api_key":"secret"}`},
+		{name: "cloud connector create", method: http.MethodPost, path: "/api/v1/cloud/connectors", body: `{"name":"blocked","provider":"aws","auth_mode":"cli","is_enabled":true}`},
+		{name: "discovery scan", method: http.MethodPost, path: "/api/v1/discovery/scan", body: `{"cidr":"127.0.0.0/24"}`},
+		{name: "discovery install token", method: http.MethodPost, path: "/api/v1/discovery/install-token"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := makeRequest(t, srv, tc.method, tc.path, token, tc.body)
+			if rr.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d body=%s", rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestPermissionsApprovalsAndAuditPagesUseScopeSpecificPermissions(t *testing.T) {
+	srv := newAuthTestServer(t)
+
+	fleetRead := createAPIKey(t, srv, "fleet-read", auth.PermFleetRead)
+	approvalRead := createAPIKey(t, srv, "approval-read", auth.PermApprovalRead)
+	auditRead := createAPIKey(t, srv, "audit-read", auth.PermAuditRead)
+
+	approvalsDenied := makeRequest(t, srv, http.MethodGet, "/approvals", fleetRead, "")
+	if approvalsDenied.Code != http.StatusForbidden {
+		t.Fatalf("expected /approvals to require approval:read, got %d body=%s", approvalsDenied.Code, approvalsDenied.Body.String())
+	}
+
+	approvalsAllowed := makeRequest(t, srv, http.MethodGet, "/approvals", approvalRead, "")
+	if approvalsAllowed.Code == http.StatusUnauthorized || approvalsAllowed.Code == http.StatusForbidden {
+		t.Fatalf("expected approval:read to access /approvals, got %d body=%s", approvalsAllowed.Code, approvalsAllowed.Body.String())
+	}
+
+	auditDenied := makeRequest(t, srv, http.MethodGet, "/audit", fleetRead, "")
+	if auditDenied.Code != http.StatusForbidden {
+		t.Fatalf("expected /audit to require audit:read, got %d body=%s", auditDenied.Code, auditDenied.Body.String())
+	}
+
+	auditAllowed := makeRequest(t, srv, http.MethodGet, "/audit", auditRead, "")
+	if auditAllowed.Code == http.StatusUnauthorized || auditAllowed.Code == http.StatusForbidden {
+		t.Fatalf("expected audit:read to access /audit, got %d body=%s", auditAllowed.Code, auditAllowed.Body.String())
+	}
+}
+
+func TestAuthorizationDenialsAreAudited(t *testing.T) {
+	srv := newAuthTestServer(t)
+	token := createAPIKey(t, srv, "fleet-read", auth.PermFleetRead)
+
+	rr := makeRequest(t, srv, http.MethodPost, "/api/v1/model-profiles", token, `{"name":"blocked"}`)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	events := srv.queryAudit(audit.Filter{Type: audit.EventAuthorizationDenied, Limit: 5})
+	if len(events) == 0 {
+		t.Fatal("expected authorization denial audit event")
+	}
+
+	detail, ok := events[0].Detail.(map[string]string)
+	if !ok {
+		t.Fatalf("expected detail map[string]string, got %T", events[0].Detail)
+	}
+	if detail["path"] != "/api/v1/model-profiles" {
+		t.Fatalf("expected denied path to be recorded, got %q", detail["path"])
+	}
+	if detail["required_permission"] != string(auth.PermFleetWrite) {
+		t.Fatalf("expected required permission %q, got %q", auth.PermFleetWrite, detail["required_permission"])
 	}
 }

@@ -12,6 +12,7 @@
     <aside class="nav" id="nav">
       <div class="nav-brand">LEGATOR</div>
       <nav class="nav-links">
+        {{if hasPermission .CurrentUser "fleet:read"}}
         <a href="/" class="nav-link{{if eq .ActiveNav "fleet"}} active{{end}}">
           <svg class="icon" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="2" y="14" width="20" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="6" cy="6" r="1" fill="currentColor"/><circle cx="6" cy="18" r="1" fill="currentColor"/></svg>
           Fleet <span class="badge" data-badge="probes"></span>
@@ -32,18 +33,23 @@
           <svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-4-4" fill="none" stroke="currentColor" stroke-width="2"/></svg>
           Discovery
         </a>
-        <a href="/approvals" class="nav-link{{if eq .ActiveNav "approvals"}} active{{end}}">
-          <svg class="icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
-          Approvals <span class="badge" data-badge="approvals"></span>
-        </a>
-        <a href="/audit" class="nav-link{{if eq .ActiveNav "audit"}} active{{end}}">
-          <svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" fill="none" stroke="currentColor" stroke-width="2"/><polyline points="14 2 14 8 20 8" fill="none" stroke="currentColor" stroke-width="2"/></svg>
-          Audit
-        </a>
         <a href="/alerts" class="nav-link{{if eq .ActiveNav "alerts"}} active{{end}}">
           <svg class="icon" viewBox="0 0 24 24"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0" fill="none" stroke="currentColor" stroke-width="2"/></svg>
           Alerts
         </a>
+        {{end}}
+        {{if hasPermission .CurrentUser "approval:read"}}
+        <a href="/approvals" class="nav-link{{if eq .ActiveNav "approvals"}} active{{end}}">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+          Approvals <span class="badge" data-badge="approvals"></span>
+        </a>
+        {{end}}
+        {{if hasPermission .CurrentUser "audit:read"}}
+        <a href="/audit" class="nav-link{{if eq .ActiveNav "audit"}} active{{end}}">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" fill="none" stroke="currentColor" stroke-width="2"/><polyline points="14 2 14 8 20 8" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+          Audit
+        </a>
+        {{end}}
       </nav>
       {{if .CurrentUser}}
       <div class="nav-footer">

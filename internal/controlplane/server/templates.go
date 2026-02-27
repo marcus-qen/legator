@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marcus-qen/legator/internal/controlplane/auth"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 )
 
@@ -22,8 +23,9 @@ type FleetSummary struct {
 
 // TemplateUser describes the logged-in user shown in page chrome.
 type TemplateUser struct {
-	Username string
-	Role     string
+	Username    string
+	Role        string
+	Permissions map[auth.Permission]struct{}
 }
 
 // BasePage contains common layout metadata shared by all pages.
@@ -65,7 +67,26 @@ func templateFuncs() template.FuncMap {
 		"humanizeStatus": templateHumanizeStatus,
 		"formatLastSeen": formatLastSeen,
 		"humanBytes":     humanBytes,
+		"hasPermission":  templateHasPermission,
 	}
+}
+
+func templateHasPermission(user *TemplateUser, permission string) bool {
+	if user == nil {
+		return false
+	}
+
+	required := auth.Permission(strings.TrimSpace(permission))
+	if required == "" {
+		return false
+	}
+
+	if _, ok := user.Permissions[auth.PermAdmin]; ok {
+		return true
+	}
+
+	_, ok := user.Permissions[required]
+	return ok
 }
 
 func templateStatusClass(status string) string {
