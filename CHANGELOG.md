@@ -8,6 +8,10 @@
 
 ### Added
 - Parity tests for the extracted core service and server policy-apply paths (not found + offline apply-local behavior).
+- **Kernel split S3 (dispatch contract + policy envelope)**
+  - Added a unified core command-dispatch result envelope with shared API/MCP error mapping helpers.
+  - Introduced `DispatchPolicy` options (wait/stream/timeout/cancel semantics) and migrated API, MCP, and server dispatch callers.
+  - Preserved external command responses while reducing duplicated mapping logic across API and MCP surfaces.
 
 ## [v1.0.0-alpha.14] — 2026-02-27
 
