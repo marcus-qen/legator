@@ -1,0 +1,283 @@
+{{define "title"}}Discovery — Legator{{end}}
+
+{{define "header"}}
+<div>
+  <h1 class="page-title">Discovery</h1>
+  <span class="page-meta">Scan a subnet (/24 max), inspect candidates, then generate install commands</span>
+</div>
+{{end}}
+
+{{define "content"}}
+<section class="panel discovery-panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Subnet Scan</h2>
+    <span class="panel-sub">TCP probe only: 22, 443, 80</span>
+  </div>
+  <form id="discovery-scan-form" class="feed discovery-form" autocomplete="off">
+    <label>
+      <span class="muted">CIDR (max /24)</span>
+      <input class="input" id="discovery-cidr" placeholder="192.168.1.0/24" required>
+    </label>
+    <div class="actions-row">
+      <button class="btn btn-primary" id="discovery-scan-btn" type="submit">Scan</button>
+      <span class="muted" id="discovery-status">Idle</span>
+    </div>
+  </form>
+</section>
+
+<section class="panel discovery-panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Candidates</h2>
+    <span class="panel-sub" id="discovery-candidate-count">0 hosts</span>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>IP</th>
+          <th>Hostname</th>
+          <th>Open Ports</th>
+          <th>Confidence</th>
+        </tr>
+      </thead>
+      <tbody id="discovery-candidates-body">
+        <tr><td colspan="4" class="empty-state">Run a scan to populate candidates.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel discovery-panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Registration Assist</h2>
+    <button class="btn" id="discovery-generate-token" type="button">Generate Install Command</button>
+  </div>
+
+  <label>
+    <span class="muted">Install command</span>
+    <textarea class="input discovery-output" id="discovery-install-command" readonly placeholder="Generate a multi-use token to get install command"></textarea>
+  </label>
+  <div class="actions-row">
+    <button class="btn" id="discovery-copy-command" type="button">Copy Command</button>
+    <span class="muted" id="discovery-token-expiry"></span>
+  </div>
+
+  <label>
+    <span class="muted">SSH template</span>
+    <textarea class="input discovery-output" id="discovery-ssh-template" readonly placeholder="ssh <user>@<ip> \"curl -sSL ...\""></textarea>
+  </label>
+  <div class="actions-row">
+    <button class="btn" id="discovery-copy-ssh" type="button">Copy SSH Template</button>
+  </div>
+</section>
+
+<section class="panel discovery-panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Recent Runs</h2>
+    <button class="btn" id="discovery-refresh-history" type="button">Refresh</button>
+  </div>
+  <ul class="discovery-history" id="discovery-history">
+    <li class="muted">No runs yet.</li>
+  </ul>
+</section>
+{{end}}
+
+{{define "scripts"}}
+<script>
+(() => {
+  const scanForm = document.getElementById('discovery-scan-form');
+  const cidrInput = document.getElementById('discovery-cidr');
+  const scanBtn = document.getElementById('discovery-scan-btn');
+  const statusEl = document.getElementById('discovery-status');
+
+  const candidatesBody = document.getElementById('discovery-candidates-body');
+  const candidateCount = document.getElementById('discovery-candidate-count');
+
+  const generateBtn = document.getElementById('discovery-generate-token');
+  const installCommandEl = document.getElementById('discovery-install-command');
+  const sshTemplateEl = document.getElementById('discovery-ssh-template');
+  const tokenExpiryEl = document.getElementById('discovery-token-expiry');
+
+  const copyCommandBtn = document.getElementById('discovery-copy-command');
+  const copySSHBtn = document.getElementById('discovery-copy-ssh');
+
+  const historyEl = document.getElementById('discovery-history');
+  const refreshHistoryBtn = document.getElementById('discovery-refresh-history');
+
+  function toast(message, kind) {
+    if (window.LegatorUI?.showToast) {
+      window.LegatorUI.showToast(message, kind || 'info');
+    }
+  }
+
+  function esc(value) {
+    return String(value || '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  function fmtTime(value) {
+    if (!value) return '—';
+    const dt = new Date(value);
+    if (Number.isNaN(dt.getTime())) return value;
+    return dt.toLocaleString();
+  }
+
+  function confidenceTag(level) {
+    const v = String(level || '').toLowerCase();
+    if (v === 'high') return '<span class="tag tag-online">high</span>';
+    if (v === 'medium') return '<span class="tag tag-pending">medium</span>';
+    return '<span class="tag">low</span>';
+  }
+
+  async function requestJSON(url, options) {
+    const response = await fetch(url, {
+      credentials: 'include',
+      cache: 'no-store',
+      ...options,
+    });
+
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    if (!response.ok) {
+      const message = payload?.error || payload?.message || response.statusText || 'Request failed';
+      throw new Error(message);
+    }
+
+    return payload;
+  }
+
+  function renderCandidates(candidates) {
+    const list = Array.isArray(candidates) ? candidates : [];
+    candidateCount.textContent = `${list.length} host${list.length === 1 ? '' : 's'}`;
+
+    if (!list.length) {
+      candidatesBody.innerHTML = '<tr><td colspan="4" class="empty-state">No candidates in this scan.</td></tr>';
+      return;
+    }
+
+    candidatesBody.innerHTML = list.map((candidate) => {
+      const ports = (candidate.open_ports || []).join(', ') || 'none';
+      return `
+        <tr>
+          <td class="id-text">${esc(candidate.ip)}</td>
+          <td>${esc(candidate.hostname || '—')}</td>
+          <td>${esc(ports)}</td>
+          <td>${confidenceTag(candidate.confidence)}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  async function loadHistory() {
+    try {
+      const payload = await requestJSON('/api/v1/discovery/runs?limit=10');
+      const runs = Array.isArray(payload?.runs) ? payload.runs : [];
+      if (!runs.length) {
+        historyEl.innerHTML = '<li class="muted">No runs yet.</li>';
+        return;
+      }
+
+      historyEl.innerHTML = runs.map((run) => `
+        <li>
+          <button class="btn btn-small" type="button" data-run-id="${esc(run.id)}">Load</button>
+          <span class="discovery-run-cidr">${esc(run.cidr)}</span>
+          <span class="tag">${esc(run.status || 'unknown')}</span>
+          <span class="muted">${esc(fmtTime(run.started_at))}</span>
+        </li>
+      `).join('');
+    } catch (error) {
+      historyEl.innerHTML = `<li class="empty-state">Failed to load history: ${esc(error.message)}</li>`;
+    }
+  }
+
+  async function handleScan(event) {
+    event.preventDefault();
+    const cidr = cidrInput.value.trim();
+    if (!cidr) return;
+
+    scanBtn.disabled = true;
+    statusEl.textContent = 'Scanning…';
+
+    try {
+      const payload = await requestJSON('/api/v1/discovery/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cidr }),
+      });
+
+      renderCandidates(payload?.candidates || []);
+      statusEl.textContent = `Done · run #${payload?.run?.id || '?'}`;
+      toast('Discovery scan completed', 'success');
+      await loadHistory();
+    } catch (error) {
+      statusEl.textContent = 'Scan failed';
+      toast(`Scan failed: ${error.message}`, 'error');
+    } finally {
+      scanBtn.disabled = false;
+    }
+  }
+
+  async function generateInstallToken() {
+    generateBtn.disabled = true;
+    try {
+      const payload = await requestJSON('/api/v1/discovery/install-token', {
+        method: 'POST',
+      });
+
+      installCommandEl.value = payload?.install_command || '';
+      sshTemplateEl.value = payload?.ssh_example_template || '';
+      tokenExpiryEl.textContent = payload?.expires_at ? `expires ${fmtTime(payload.expires_at)}` : '';
+      toast('Install command generated', 'success');
+    } catch (error) {
+      toast(`Token generation failed: ${error.message}`, 'error');
+    } finally {
+      generateBtn.disabled = false;
+    }
+  }
+
+  async function copyText(value) {
+    if (!value) {
+      toast('Nothing to copy yet', 'warning');
+      return;
+    }
+    await navigator.clipboard.writeText(value);
+    toast('Copied to clipboard', 'success');
+  }
+
+  historyEl.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-run-id]');
+    if (!button) return;
+
+    const runId = button.getAttribute('data-run-id');
+    if (!runId) return;
+
+    try {
+      const payload = await requestJSON(`/api/v1/discovery/runs/${encodeURIComponent(runId)}`);
+      renderCandidates(payload?.candidates || []);
+      cidrInput.value = payload?.run?.cidr || cidrInput.value;
+      statusEl.textContent = `Loaded run #${runId}`;
+    } catch (error) {
+      toast(`Failed to load run: ${error.message}`, 'error');
+    }
+  });
+
+  scanForm.addEventListener('submit', handleScan);
+  generateBtn.addEventListener('click', generateInstallToken);
+  refreshHistoryBtn.addEventListener('click', loadHistory);
+  copyCommandBtn.addEventListener('click', () => copyText(installCommandEl.value));
+  copySSHBtn.addEventListener('click', () => copyText(sshTemplateEl.value));
+
+  renderCandidates([]);
+  loadHistory();
+})();
+</script>
+{{end}}

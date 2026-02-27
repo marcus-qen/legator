@@ -71,6 +71,19 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/tokens", s.withPermission(auth.PermFleetWrite, api.HandleGenerateTokenWithAudit(s.tokenStore, s.auditRecorder(), s.logger.Named("tokens"))))
 	mux.HandleFunc("GET /api/v1/tokens", s.withPermission(auth.PermAdmin, api.HandleListTokens(s.tokenStore)))
 
+	// Discovery
+	if s.discoveryHandlers != nil {
+		mux.HandleFunc("POST /api/v1/discovery/scan", s.withPermission(auth.PermFleetRead, s.discoveryHandlers.HandleScan))
+		mux.HandleFunc("GET /api/v1/discovery/runs", s.withPermission(auth.PermFleetRead, s.discoveryHandlers.HandleListRuns))
+		mux.HandleFunc("GET /api/v1/discovery/runs/{id}", s.withPermission(auth.PermFleetRead, s.discoveryHandlers.HandleGetRun))
+		mux.HandleFunc("POST /api/v1/discovery/install-token", s.withPermission(auth.PermFleetRead, s.discoveryHandlers.HandleInstallToken))
+	} else {
+		mux.HandleFunc("POST /api/v1/discovery/scan", s.withPermission(auth.PermFleetRead, s.handleDiscoveryUnavailable))
+		mux.HandleFunc("GET /api/v1/discovery/runs", s.withPermission(auth.PermFleetRead, s.handleDiscoveryUnavailable))
+		mux.HandleFunc("GET /api/v1/discovery/runs/{id}", s.withPermission(auth.PermFleetRead, s.handleDiscoveryUnavailable))
+		mux.HandleFunc("POST /api/v1/discovery/install-token", s.withPermission(auth.PermFleetRead, s.handleDiscoveryUnavailable))
+	}
+
 	// Metrics
 	metricsCollector := metrics.NewCollector(
 		s.fleetMgr,
@@ -208,6 +221,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /alerts", s.handleAlertsPage)
 	mux.HandleFunc("GET /model-dock", s.handleModelDockPage)
 	mux.HandleFunc("GET /cloud-connectors", s.handleCloudConnectorsPage)
+	mux.HandleFunc("GET /discovery", s.handleDiscoveryPage)
 
 	// WebSocket for probes
 	mux.HandleFunc("GET /ws/probe", s.hub.HandleProbeWS)
@@ -1315,6 +1329,26 @@ func (s *Server) handleCloudConnectorsPage(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+func (s *Server) handleDiscoveryPage(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
+	if s.pages == nil {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, "<h1>Discovery</h1><p>Template not loaded</p>")
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data := BasePage{
+		CurrentUser: s.currentTemplateUser(r),
+		Version:     Version,
+		ActiveNav:   "discovery",
+	}
+	if err := s.pages.Render(w, "discovery", data); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
+	}
+}
+
 func (s *Server) handleDeleteProbe(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(w, r, auth.PermFleetWrite) {
 		return
@@ -1382,4 +1416,8 @@ func (s *Server) handleModelDockUnavailable(w http.ResponseWriter, r *http.Reque
 
 func (s *Server) handleCloudConnectorsUnavailable(w http.ResponseWriter, r *http.Request) {
 	writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "cloud connectors unavailable")
+}
+
+func (s *Server) handleDiscoveryUnavailable(w http.ResponseWriter, r *http.Request) {
+	writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "discovery unavailable")
 }

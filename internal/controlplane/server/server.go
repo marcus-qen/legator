@@ -25,6 +25,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/cloudconnectors"
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
 	"github.com/marcus-qen/legator/internal/controlplane/config"
+	"github.com/marcus-qen/legator/internal/controlplane/discovery"
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/llm"
@@ -103,6 +104,9 @@ type Server struct {
 	cloudConnectorStore    *cloudconnectors.Store
 	cloudConnectorHandlers *cloudconnectors.Handler
 
+	discoveryStore    *discovery.Store
+	discoveryHandlers *discovery.Handler
+
 	// Templates
 	pages *pageTemplates
 
@@ -159,6 +163,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initPolicy()
 	s.initModelDock()
 	s.initCloudConnectors()
+	s.initDiscovery()
 	s.initLLM()
 	s.initHub()
 	s.wireChatLLM()
@@ -268,6 +273,9 @@ func (s *Server) Close() {
 	}
 	if s.cloudConnectorStore != nil {
 		s.cloudConnectorStore.Close()
+	}
+	if s.discoveryStore != nil {
+		s.discoveryStore.Close()
 	}
 	if s.userStore != nil {
 		s.userStore.Close()
@@ -442,6 +450,30 @@ func (s *Server) initCloudConnectors() {
 	s.cloudConnectorStore = store
 	s.cloudConnectorHandlers = cloudconnectors.NewHandler(store, cloudconnectors.NewCLIAdapter())
 	s.logger.Info("cloud connector store opened", zap.String("path", cloudDBPath))
+}
+
+func (s *Server) initDiscovery() {
+	discoveryDBPath := filepath.Join(s.cfg.DataDir, "discovery.db")
+	if err := os.MkdirAll(s.cfg.DataDir, 0750); err != nil {
+		s.logger.Warn("cannot create data dir, discovery disabled",
+			zap.String("dir", s.cfg.DataDir), zap.Error(err))
+		return
+	}
+
+	store, err := discovery.NewStore(discoveryDBPath)
+	if err != nil {
+		s.logger.Warn("cannot open discovery database, falling back to in-memory",
+			zap.String("path", discoveryDBPath), zap.Error(err))
+		store, err = discovery.NewStore(":memory:")
+		if err != nil {
+			s.logger.Error("cannot initialize discovery store", zap.Error(err))
+			return
+		}
+	}
+
+	s.discoveryStore = store
+	s.discoveryHandlers = discovery.NewHandler(store, discovery.NewScanner(), s.tokenStore)
+	s.logger.Info("discovery store opened", zap.String("path", discoveryDBPath))
 }
 
 func (s *Server) initLLM() {
@@ -723,7 +755,7 @@ func (s *Server) loadTemplates() {
 	tmplDir := filepath.Join("web", "templates")
 	pt := &pageTemplates{templates: make(map[string]pageTemplate)}
 
-	pages := []string{"fleet", "probe-detail", "chat", "fleet-chat", "approvals", "audit", "alerts", "model-dock", "cloud-connectors"}
+	pages := []string{"fleet", "probe-detail", "chat", "fleet-chat", "approvals", "audit", "alerts", "model-dock", "cloud-connectors", "discovery"}
 	for _, page := range pages {
 		t, err := template.New("").Funcs(templateFuncs()).ParseFiles(
 			filepath.Join(tmplDir, "_base.html"),
