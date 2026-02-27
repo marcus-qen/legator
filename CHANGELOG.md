@@ -64,6 +64,9 @@
 - **Kernel split S31 (shared success-payload adapter helper)**
   - Added shared `transportwriter` success-payload conversion helpers (type assertion + optional normalization) and reused them in approval/command wrappers.
   - Preserved exact success payload semantics (including nil normalization and HTTP-first/MCP-fallback behavior) with focused legacy-parity tests for approval + command conversion callbacks.
+- **Kernel split S32 (domain success-writer wrappers)**
+  - Added tiny approval/command success-writer constructor wrappers around the shared `transportwriter` success adapter and routed remaining domain call sites through those wrappers.
+  - Added strict wrapper-vs-legacy parity tests to lock type assertion semantics, nil normalization behavior, success payload shape, and HTTP-first/MCP fallback semantics.
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
 - **Kernel split S13 (approval decide render-target registry boundary)**

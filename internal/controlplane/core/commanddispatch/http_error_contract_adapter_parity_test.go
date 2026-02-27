@@ -56,9 +56,9 @@ func TestAdaptCommandMCPSuccessPayloadWriter_ParityWithLegacyInlineConversion(t 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var gotNew string
-			adaptedNew := transportwriter.AdaptSuccessPayloadWriter(func(text string) {
+			adaptedNew := adaptCommandMCPSuccessPayloadWriter(func(text string) {
 				gotNew = text
-			}, nil)
+			})
 
 			var gotLegacy string
 			adaptedLegacy := legacyCommandMCPSuccessPayloadWriter(func(text string) {
@@ -74,7 +74,7 @@ func TestAdaptCommandMCPSuccessPayloadWriter_ParityWithLegacyInlineConversion(t 
 		})
 	}
 
-	if got := transportwriter.AdaptSuccessPayloadWriter[string](nil, nil); got != nil {
+	if got := adaptCommandMCPSuccessPayloadWriter(nil); got != nil {
 		t.Fatalf("expected nil success adapter for nil callback, got type %T", got)
 	}
 }

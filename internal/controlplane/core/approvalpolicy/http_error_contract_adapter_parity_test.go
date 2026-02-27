@@ -60,9 +60,9 @@ func TestAdaptApprovalSuccessPayloadWriter_ParityWithLegacyInlineConversion(t *t
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var gotNew *DecideApprovalSuccess
-			adaptedNew := transportwriter.AdaptSuccessPayloadWriter(func(success *DecideApprovalSuccess) {
+			adaptedNew := adaptApprovalSuccessPayloadWriter(func(success *DecideApprovalSuccess) {
 				gotNew = success
-			}, normalizeDecideApprovalSuccess)
+			})
 
 			var gotLegacy *DecideApprovalSuccess
 			adaptedLegacy := legacyApprovalSuccessPayloadWriter(func(success *DecideApprovalSuccess) {
@@ -78,7 +78,7 @@ func TestAdaptApprovalSuccessPayloadWriter_ParityWithLegacyInlineConversion(t *t
 		})
 	}
 
-	if got := transportwriter.AdaptSuccessPayloadWriter[*DecideApprovalSuccess](nil, normalizeDecideApprovalSuccess); got != nil {
+	if got := adaptApprovalSuccessPayloadWriter(nil); got != nil {
 		t.Fatalf("expected nil success adapter for nil callback, got type %T", got)
 	}
 }
