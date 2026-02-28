@@ -150,6 +150,29 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/v1/alerts/{id}/history", s.withPermission(auth.PermFleetRead, s.handleAlertsUnavailable))
 	}
 
+	// Scheduled jobs
+	if s.jobsHandler != nil {
+		mux.HandleFunc("GET /api/v1/jobs", s.withPermission(auth.PermFleetRead, s.jobsHandler.HandleListJobs))
+		mux.HandleFunc("POST /api/v1/jobs", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleCreateJob))
+		mux.HandleFunc("GET /api/v1/jobs/{id}", s.withPermission(auth.PermFleetRead, s.jobsHandler.HandleGetJob))
+		mux.HandleFunc("PUT /api/v1/jobs/{id}", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleUpdateJob))
+		mux.HandleFunc("DELETE /api/v1/jobs/{id}", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleDeleteJob))
+		mux.HandleFunc("POST /api/v1/jobs/{id}/run", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleRunJob))
+		mux.HandleFunc("GET /api/v1/jobs/{id}/runs", s.withPermission(auth.PermFleetRead, s.jobsHandler.HandleListRuns))
+		mux.HandleFunc("POST /api/v1/jobs/{id}/enable", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleEnableJob))
+		mux.HandleFunc("POST /api/v1/jobs/{id}/disable", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleDisableJob))
+	} else {
+		mux.HandleFunc("GET /api/v1/jobs", s.withPermission(auth.PermFleetRead, s.handleJobsUnavailable))
+		mux.HandleFunc("POST /api/v1/jobs", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
+		mux.HandleFunc("GET /api/v1/jobs/{id}", s.withPermission(auth.PermFleetRead, s.handleJobsUnavailable))
+		mux.HandleFunc("PUT /api/v1/jobs/{id}", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
+		mux.HandleFunc("DELETE /api/v1/jobs/{id}", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
+		mux.HandleFunc("POST /api/v1/jobs/{id}/run", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
+		mux.HandleFunc("GET /api/v1/jobs/{id}/runs", s.withPermission(auth.PermFleetRead, s.handleJobsUnavailable))
+		mux.HandleFunc("POST /api/v1/jobs/{id}/enable", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
+		mux.HandleFunc("POST /api/v1/jobs/{id}/disable", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
+	}
+
 	// Auth (optional)
 	if s.authStore != nil {
 		mux.HandleFunc("GET /api/v1/auth/keys", s.withPermission(auth.PermAdmin, auth.HandleListKeys(s.authStore)))
@@ -1579,6 +1602,10 @@ func (s *Server) handleFleetCleanup(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAlertsUnavailable(w http.ResponseWriter, r *http.Request) {
 	writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "alerts engine unavailable")
+}
+
+func (s *Server) handleJobsUnavailable(w http.ResponseWriter, r *http.Request) {
+	writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "jobs scheduler unavailable")
 }
 
 func (s *Server) handleModelDockUnavailable(w http.ResponseWriter, r *http.Request) {

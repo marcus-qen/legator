@@ -271,6 +271,56 @@ func TestPermissionsNetworkDeviceRoutes(t *testing.T) {
 	}
 }
 
+func TestPermissionsJobsRoutes(t *testing.T) {
+	srv := newAuthTestServer(t)
+	readToken := createAPIKey(t, srv, "fleet-read", auth.PermFleetRead)
+	writeToken := createAPIKey(t, srv, "fleet-write", auth.PermFleetWrite)
+
+	createBody := `{"name":"nightly","command":"echo hi","schedule":"5m","target":{"kind":"probe","value":"probe-1"},"enabled":true}`
+	created := makeRequest(t, srv, http.MethodPost, "/api/v1/jobs", writeToken, createBody)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("expected 201 create with fleet:write, got %d body=%s", created.Code, created.Body.String())
+	}
+
+	var createdJob struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &createdJob); err != nil {
+		t.Fatalf("decode created job: %v", err)
+	}
+	if createdJob.ID == "" {
+		t.Fatalf("expected job id in create response: %s", created.Body.String())
+	}
+
+	if rr := makeRequest(t, srv, http.MethodGet, "/api/v1/jobs", readToken, ""); rr.Code == http.StatusUnauthorized || rr.Code == http.StatusForbidden {
+		t.Fatalf("expected fleet:read to list jobs, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if rr := makeRequest(t, srv, http.MethodGet, "/api/v1/jobs/"+createdJob.ID, readToken, ""); rr.Code == http.StatusUnauthorized || rr.Code == http.StatusForbidden {
+		t.Fatalf("expected fleet:read to get job, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if rr := makeRequest(t, srv, http.MethodGet, "/api/v1/jobs/"+createdJob.ID+"/runs", readToken, ""); rr.Code == http.StatusUnauthorized || rr.Code == http.StatusForbidden {
+		t.Fatalf("expected fleet:read to list job runs, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	for _, tc := range []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{method: http.MethodPost, path: "/api/v1/jobs", body: createBody},
+		{method: http.MethodPost, path: "/api/v1/jobs/" + createdJob.ID + "/run"},
+		{method: http.MethodPost, path: "/api/v1/jobs/" + createdJob.ID + "/enable"},
+		{method: http.MethodPost, path: "/api/v1/jobs/" + createdJob.ID + "/disable"},
+		{method: http.MethodPut, path: "/api/v1/jobs/" + createdJob.ID, body: createBody},
+		{method: http.MethodDelete, path: "/api/v1/jobs/" + createdJob.ID},
+	} {
+		rr := makeRequest(t, srv, tc.method, tc.path, readToken, tc.body)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("expected fleet:read to be denied for %s %s, got %d body=%s", tc.method, tc.path, rr.Code, rr.Body.String())
+		}
+	}
+}
+
 func TestPermissionsApprovalsAndAuditPagesUseScopeSpecificPermissions(t *testing.T) {
 	srv := newAuthTestServer(t)
 

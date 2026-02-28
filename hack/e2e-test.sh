@@ -222,6 +222,37 @@ else
   fail "Expected 0 pending, got $IN_FLIGHT"
 fi
 
+# 10b. Scheduled jobs API + manual run
+echo ""
+echo "10b. Scheduled jobs create/run/history..."
+JOB_CREATE=$(curl -sf -X POST "$CP_URL/api/v1/jobs" \
+  -H "Content-Type: application/json" \
+  -d "{\"name\":\"e2e scheduled\",\"command\":\"echo scheduled-ok\",\"schedule\":\"1h\",\"target\":{\"kind\":\"probe\",\"value\":\"$PROBE_ID\"},\"enabled\":true}")
+JOB_ID=$(echo "$JOB_CREATE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+if [[ -n "$JOB_ID" ]]; then
+  pass "Job created (id=$JOB_ID)"
+else
+  fail "Job creation failed: $JOB_CREATE"
+fi
+
+JOB_RUN=$(curl -sf -X POST "$CP_URL/api/v1/jobs/$JOB_ID/run")
+JOB_RUN_STATUS=$(echo "$JOB_RUN" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
+if [[ "$JOB_RUN_STATUS" == "dispatched" ]]; then
+  pass "Job run dispatched"
+else
+  fail "Job run dispatch failed: $JOB_RUN"
+fi
+
+sleep 2
+JOB_RUNS=$(curl -sf "$CP_URL/api/v1/jobs/$JOB_ID/runs")
+JOB_RUN_COUNT=$(echo "$JOB_RUNS" | python3 -c "import sys,json; print(json.load(sys.stdin).get('count',0))" 2>/dev/null || echo "0")
+JOB_LAST_STATUS=$(echo "$JOB_RUNS" | python3 -c "import sys,json; runs=json.load(sys.stdin).get('runs', []); print(runs[0].get('status','') if runs else '')" 2>/dev/null || echo "")
+if [[ "$JOB_RUN_COUNT" -ge 1 ]] && [[ "$JOB_LAST_STATUS" == "success" || "$JOB_LAST_STATUS" == "failed" ]]; then
+  pass "Job run history recorded (count=$JOB_RUN_COUNT status=$JOB_LAST_STATUS)"
+else
+  fail "Job run history missing/invalid: $JOB_RUNS"
+fi
+
 # 11. Task endpoint returns 503 without LLM config
 echo ""
 echo "11. Checking task endpoint (no LLM configured)..."
