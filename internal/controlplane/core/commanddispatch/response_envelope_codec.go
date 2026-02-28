@@ -22,7 +22,7 @@ func (b CommandInvokeResponseEnvelopeBuilder) BuildResponseEnvelope(surface tran
 	case transportwriter.SurfaceMCP:
 		return encodeCommandInvokeMCPEnvelope(b.Projection)
 	default:
-		return unsupportedCommandInvokeResponseEnvelope(string(surface))
+		return unsupportedCommandInvokeResponseEnvelope(surface)
 	}
 }
 
@@ -31,7 +31,7 @@ func (b CommandInvokeResponseEnvelopeBuilder) BuildResponseEnvelope(surface tran
 func EncodeCommandInvokeResponseEnvelope(projection *CommandInvokeProjection, surface ProjectionDispatchSurface) *transportwriter.ResponseEnvelope {
 	transportSurface, ok := ResolveCommandInvokeTransportSurface(surface)
 	if !ok {
-		return unsupportedCommandInvokeResponseEnvelope(string(surface))
+		return unsupportedCommandInvokeResponseEnvelope(surface)
 	}
 	return CommandInvokeResponseEnvelopeBuilder{Projection: projection}.BuildResponseEnvelope(transportSurface)
 }
@@ -77,6 +77,6 @@ func encodeCommandInvokeMCPEnvelope(projection *CommandInvokeProjection) *transp
 	return &transportwriter.ResponseEnvelope{MCPSuccess: ResultText(projection.Envelope.Result)}
 }
 
-func unsupportedCommandInvokeResponseEnvelope(surface string) *transportwriter.ResponseEnvelope {
+func unsupportedCommandInvokeResponseEnvelope[Surface ~string](surface Surface) *transportwriter.ResponseEnvelope {
 	return unsupportedCommandInvokeSurfaceEnvelope(surface)
 }
