@@ -12,7 +12,7 @@ import (
 )
 
 func TestHandleDecideApproval_RequiresApprovalID(t *testing.T) {
-	srv, _, _ := newTestMCPServer(t)
+	srv, _, _, _ := newTestMCPServer(t)
 	called := false
 	srv.decideApproval = func(string, *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error) {
 		called = true
@@ -84,7 +84,7 @@ func TestHandleDecideApproval_ParityWithHTTPContracts(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			srv, _, _ := newTestMCPServer(t)
+			srv, _, _, _ := newTestMCPServer(t)
 			decideCalls := 0
 			srv.decideApproval = func(id string, request *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error) {
 				decideCalls++

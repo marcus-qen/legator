@@ -4,14 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
+	"github.com/marcus-qen/legator/internal/controlplane/jobs"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
 	resourceFleetSummary   = "legator://fleet/summary"
 	resourceFleetInventory = "legator://fleet/inventory"
+	resourceJobsList       = "legator://jobs/list"
+	resourceJobsActiveRuns = "legator://jobs/active-runs"
 )
 
 func (s *MCPServer) registerResources() {
@@ -28,6 +32,20 @@ func (s *MCPServer) registerResources() {
 		Description: "Aggregated fleet inventory across all probes",
 		MIMEType:    "application/json",
 	}, s.handleFleetInventoryResource)
+
+	s.server.AddResource(&mcp.Resource{
+		URI:         resourceJobsList,
+		Name:        "Jobs List",
+		Description: "Configured scheduled jobs",
+		MIMEType:    "application/json",
+	}, s.handleJobsListResource)
+
+	s.server.AddResource(&mcp.Resource{
+		URI:         resourceJobsActiveRuns,
+		Name:        "Jobs Active Runs",
+		Description: "Pending/running job runs across all jobs",
+		MIMEType:    "application/json",
+	}, s.handleJobsActiveRunsResource)
 }
 
 func (s *MCPServer) handleFleetSummaryResource(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
@@ -80,6 +98,77 @@ func (s *MCPServer) handleFleetInventoryResource(_ context.Context, req *mcp.Rea
 	}
 
 	uri := resourceFleetInventory
+	if req != nil && req.Params != nil && req.Params.URI != "" {
+		uri = req.Params.URI
+	}
+
+	return &mcp.ReadResourceResult{
+		Contents: []*mcp.ResourceContents{{
+			URI:      uri,
+			MIMEType: "application/json",
+			Text:     string(data),
+		}},
+	}, nil
+}
+
+func (s *MCPServer) handleJobsListResource(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	if s.jobsStore == nil {
+		return nil, fmt.Errorf("jobs store unavailable")
+	}
+
+	jobsList, err := s.jobsStore.ListJobs()
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := json.Marshal(jobsList)
+	if err != nil {
+		return nil, err
+	}
+
+	uri := resourceJobsList
+	if req != nil && req.Params != nil && req.Params.URI != "" {
+		uri = req.Params.URI
+	}
+
+	return &mcp.ReadResourceResult{
+		Contents: []*mcp.ResourceContents{{
+			URI:      uri,
+			MIMEType: "application/json",
+			Text:     string(data),
+		}},
+	}, nil
+}
+
+func (s *MCPServer) handleJobsActiveRunsResource(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	if s.jobsStore == nil {
+		return nil, fmt.Errorf("jobs store unavailable")
+	}
+
+	jobsList, err := s.jobsStore.ListJobs()
+	if err != nil {
+		return nil, err
+	}
+
+	activeRuns := make([]jobs.JobRun, 0)
+	for _, job := range jobsList {
+		runs, err := s.jobsStore.ListActiveRunsByJob(strings.TrimSpace(job.ID))
+		if err != nil {
+			return nil, err
+		}
+		activeRuns = append(activeRuns, runs...)
+	}
+
+	payload := map[string]any{
+		"runs":  activeRuns,
+		"count": len(activeRuns),
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	uri := resourceJobsActiveRuns
 	if req != nil && req.Params != nil && req.Params.URI != "" {
 		uri = req.Params.URI
 	}

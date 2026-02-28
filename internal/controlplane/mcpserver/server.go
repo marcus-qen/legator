@@ -7,7 +7,9 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
 	coreapprovalpolicy "github.com/marcus-qen/legator/internal/controlplane/core/approvalpolicy"
 	corecommanddispatch "github.com/marcus-qen/legator/internal/controlplane/core/commanddispatch"
+	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
+	"github.com/marcus-qen/legator/internal/controlplane/jobs"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.uber.org/zap"
@@ -22,6 +24,9 @@ type MCPServer struct {
 	handler        http.Handler
 	fleetStore     *fleet.Store
 	auditStore     *audit.Store
+	jobsStore      *jobs.Store
+	eventBus       *events.Bus
+	hub            *cpws.Hub
 	dispatcher     *corecommanddispatch.Service
 	decideApproval func(id string, request *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error)
 	logger         *zap.Logger
@@ -31,6 +36,8 @@ type MCPServer struct {
 func New(
 	fleetStore *fleet.Store,
 	auditStore *audit.Store,
+	jobsStore *jobs.Store,
+	eventBus *events.Bus,
 	hub *cpws.Hub,
 	cmdTracker *cmdtracker.Tracker,
 	logger *zap.Logger,
@@ -54,6 +61,9 @@ func New(
 		server:         srv,
 		fleetStore:     fleetStore,
 		auditStore:     auditStore,
+		jobsStore:      jobsStore,
+		eventBus:       eventBus,
+		hub:            hub,
 		dispatcher:     corecommanddispatch.NewService(hub, cmdTracker),
 		decideApproval: decideApproval,
 		logger:         logger.Named("mcp"),

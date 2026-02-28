@@ -11,7 +11,10 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	coreapprovalpolicy "github.com/marcus-qen/legator/internal/controlplane/core/approvalpolicy"
 	corecommanddispatch "github.com/marcus-qen/legator/internal/controlplane/core/commanddispatch"
+	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
+	"github.com/marcus-qen/legator/internal/controlplane/jobs"
+	"github.com/marcus-qen/legator/internal/protocol"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -44,6 +47,87 @@ type decideApprovalInput struct {
 	ApprovalID string `json:"approval_id" jsonschema:"approval request identifier"`
 	Decision   string `json:"decision" jsonschema:"approval decision: approved or denied"`
 	DecidedBy  string `json:"decided_by" jsonschema:"operator identity recording the decision"`
+}
+
+type listJobRunsInput struct {
+	JobID         string `json:"job_id,omitempty" jsonschema:"optional job identifier filter"`
+	ProbeID       string `json:"probe_id,omitempty" jsonschema:"optional probe identifier filter"`
+	Status        string `json:"status,omitempty" jsonschema:"optional status filter: pending, running, success, failed, canceled"`
+	StartedAfter  string `json:"started_after,omitempty" jsonschema:"optional RFC3339 lower timestamp bound"`
+	StartedBefore string `json:"started_before,omitempty" jsonschema:"optional RFC3339 upper timestamp bound"`
+	Limit         int    `json:"limit,omitempty" jsonschema:"optional max results (default 50, max 500)"`
+}
+
+type getJobRunInput struct {
+	RunID string `json:"run_id" jsonschema:"job run identifier"`
+}
+
+type pollActiveJobStatusInput struct {
+	JobID       string `json:"job_id" jsonschema:"job identifier"`
+	WaitMS      int    `json:"wait_ms,omitempty" jsonschema:"optional poll window in milliseconds (default 10000, max 60000)"`
+	IntervalMS  int    `json:"interval_ms,omitempty" jsonschema:"optional poll interval in milliseconds (default 500, min 100)"`
+	IncludeJob  *bool  `json:"include_job,omitempty" jsonschema:"include job metadata in poll response"`
+	IncludeRuns *bool  `json:"include_runs,omitempty" jsonschema:"include active run payloads in poll response (default true)"`
+}
+
+type streamJobRunOutputInput struct {
+	RunID     string `json:"run_id" jsonschema:"job run identifier"`
+	WaitMS    int    `json:"wait_ms,omitempty" jsonschema:"optional max wait for output chunks in milliseconds (default 5000, max 60000)"`
+	MaxChunks int    `json:"max_chunks,omitempty" jsonschema:"optional max chunks to collect before returning (default 256)"`
+}
+
+type streamJobEventsInput struct {
+	JobID       string `json:"job_id,omitempty" jsonschema:"optional job identifier filter"`
+	RunID       string `json:"run_id,omitempty" jsonschema:"optional run identifier filter"`
+	ExecutionID string `json:"execution_id,omitempty" jsonschema:"optional execution identifier filter"`
+	RequestID   string `json:"request_id,omitempty" jsonschema:"optional command request identifier filter"`
+	ProbeID     string `json:"probe_id,omitempty" jsonschema:"optional probe identifier filter"`
+	WaitMS      int    `json:"wait_ms,omitempty" jsonschema:"optional long-poll timeout for live events in milliseconds"`
+	Limit       int    `json:"limit,omitempty" jsonschema:"optional max events to return (default 50)"`
+	Since       string `json:"since,omitempty" jsonschema:"optional RFC3339 lower timestamp bound"`
+}
+
+type jobRunsSummaryPayload struct {
+	Runs          []jobs.JobRun `json:"runs"`
+	Count         int           `json:"count"`
+	FailedCount   int           `json:"failed_count"`
+	SuccessCount  int           `json:"success_count"`
+	RunningCount  int           `json:"running_count"`
+	PendingCount  int           `json:"pending_count"`
+	CanceledCount int           `json:"canceled_count"`
+}
+
+type mcpRunSummary struct {
+	Pending  int
+	Running  int
+	Success  int
+	Failed   int
+	Canceled int
+}
+
+type pollActiveJobStatusPayload struct {
+	JobID      string        `json:"job_id"`
+	PolledAt   time.Time     `json:"polled_at"`
+	Completed  bool          `json:"completed"`
+	Active     bool          `json:"active"`
+	ActiveRuns int           `json:"active_runs"`
+	Runs       []jobs.JobRun `json:"runs,omitempty"`
+	Job        *jobs.Job     `json:"job,omitempty"`
+}
+
+type streamJobRunOutputPayload struct {
+	RunID          string                        `json:"run_id"`
+	RequestID      string                        `json:"request_id"`
+	Status         string                        `json:"status"`
+	Terminal       bool                          `json:"terminal"`
+	Chunks         []protocol.OutputChunkPayload `json:"chunks"`
+	BufferedOutput string                        `json:"buffered_output,omitempty"`
+}
+
+type streamJobEventsPayload struct {
+	Events   []audit.Event `json:"events"`
+	Count    int           `json:"count"`
+	PolledAt time.Time     `json:"polled_at"`
 }
 
 type probeSummary struct {
@@ -94,6 +178,36 @@ func (s *MCPServer) registerTools() {
 		Name:        "legator_probe_health",
 		Description: "Get health score/status/warnings for a probe",
 	}, s.handleProbeHealth)
+
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "legator_list_jobs",
+		Description: "List configured scheduled jobs",
+	}, s.handleListJobs)
+
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "legator_list_job_runs",
+		Description: "List job runs with optional status/time filters",
+	}, s.handleListJobRuns)
+
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "legator_get_job_run",
+		Description: "Get details for a specific job run",
+	}, s.handleGetJobRun)
+
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "legator_poll_job_active",
+		Description: "Poll active status for a scheduled job until terminal or timeout",
+	}, s.handlePollActiveJobStatus)
+
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "legator_stream_job_run_output",
+		Description: "Stream incremental output chunks for a running job run",
+	}, s.handleStreamJobRunOutput)
+
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "legator_stream_job_events",
+		Description: "Stream or poll job lifecycle events using audit/event bus infrastructure",
+	}, s.handleStreamJobEvents)
 }
 
 func (s *MCPServer) handleListProbes(_ context.Context, _ *mcp.CallToolRequest, input listProbesInput) (*mcp.CallToolResult, any, error) {
@@ -298,6 +412,463 @@ func (s *MCPServer) handleProbeHealth(_ context.Context, _ *mcp.CallToolRequest,
 		health = *ps.Health
 	}
 	return jsonToolResult(health)
+}
+
+func (s *MCPServer) handleListJobs(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+	if s.jobsStore == nil {
+		return nil, nil, fmt.Errorf("jobs store unavailable")
+	}
+
+	jobsList, err := s.jobsStore.ListJobs()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return jsonToolResult(jobsList)
+}
+
+func (s *MCPServer) handleListJobRuns(_ context.Context, _ *mcp.CallToolRequest, input listJobRunsInput) (*mcp.CallToolResult, any, error) {
+	if s.jobsStore == nil {
+		return nil, nil, fmt.Errorf("jobs store unavailable")
+	}
+
+	query, err := parseMCPJobRunQuery(input)
+	if err != nil {
+		return nil, nil, err
+	}
+	if query.JobID != "" {
+		if _, err := s.jobsStore.GetJob(query.JobID); err != nil {
+			return nil, nil, fmt.Errorf("job not found: %s", query.JobID)
+		}
+	}
+
+	runs, err := s.jobsStore.ListRuns(query)
+	if err != nil {
+		return nil, nil, err
+	}
+	summary := summarizeMCPRuns(runs)
+
+	payload := jobRunsSummaryPayload{
+		Runs:          runs,
+		Count:         len(runs),
+		FailedCount:   summary.Failed,
+		SuccessCount:  summary.Success,
+		RunningCount:  summary.Running,
+		PendingCount:  summary.Pending,
+		CanceledCount: summary.Canceled,
+	}
+	return jsonToolResult(payload)
+}
+
+func (s *MCPServer) handleGetJobRun(_ context.Context, _ *mcp.CallToolRequest, input getJobRunInput) (*mcp.CallToolResult, any, error) {
+	if s.jobsStore == nil {
+		return nil, nil, fmt.Errorf("jobs store unavailable")
+	}
+	runID := strings.TrimSpace(input.RunID)
+	if runID == "" {
+		return nil, nil, fmt.Errorf("run_id is required")
+	}
+
+	run, err := s.jobsStore.GetRun(runID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("run not found: %s", runID)
+	}
+
+	active := run.Status == jobs.RunStatusPending || run.Status == jobs.RunStatusRunning
+	payload := map[string]any{
+		"run":      run,
+		"active":   active,
+		"terminal": !active,
+	}
+	return jsonToolResult(payload)
+}
+
+func (s *MCPServer) handlePollActiveJobStatus(ctx context.Context, _ *mcp.CallToolRequest, input pollActiveJobStatusInput) (*mcp.CallToolResult, any, error) {
+	if s.jobsStore == nil {
+		return nil, nil, fmt.Errorf("jobs store unavailable")
+	}
+	jobID := strings.TrimSpace(input.JobID)
+	if jobID == "" {
+		return nil, nil, fmt.Errorf("job_id is required")
+	}
+
+	job, err := s.jobsStore.GetJob(jobID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("job not found: %s", jobID)
+	}
+
+	waitMS := input.WaitMS
+	if waitMS <= 0 {
+		waitMS = 10_000
+	}
+	if waitMS > 60_000 {
+		waitMS = 60_000
+	}
+
+	intervalMS := input.IntervalMS
+	if intervalMS <= 0 {
+		intervalMS = 500
+	}
+	if intervalMS < 100 {
+		intervalMS = 100
+	}
+
+	includeRuns := true
+	if input.IncludeRuns != nil {
+		includeRuns = *input.IncludeRuns
+	}
+
+	deadline := time.Now().UTC().Add(time.Duration(waitMS) * time.Millisecond)
+	for {
+		runs, err := s.jobsStore.ListActiveRunsByJob(jobID)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		now := time.Now().UTC()
+		payload := pollActiveJobStatusPayload{
+			JobID:      jobID,
+			PolledAt:   now,
+			Completed:  len(runs) == 0,
+			Active:     len(runs) > 0,
+			ActiveRuns: len(runs),
+		}
+		if includeRuns {
+			payload.Runs = runs
+		}
+		if input.IncludeJob != nil && *input.IncludeJob {
+			freshJob, err := s.jobsStore.GetJob(jobID)
+			if err == nil {
+				payload.Job = freshJob
+			} else {
+				payload.Job = job
+			}
+		}
+
+		if payload.Completed || !now.Before(deadline) {
+			return jsonToolResult(payload)
+		}
+
+		timer := time.NewTimer(time.Duration(intervalMS) * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (s *MCPServer) handleStreamJobRunOutput(ctx context.Context, _ *mcp.CallToolRequest, input streamJobRunOutputInput) (*mcp.CallToolResult, any, error) {
+	if s.jobsStore == nil {
+		return nil, nil, fmt.Errorf("jobs store unavailable")
+	}
+	runID := strings.TrimSpace(input.RunID)
+	if runID == "" {
+		return nil, nil, fmt.Errorf("run_id is required")
+	}
+
+	run, err := s.jobsStore.GetRun(runID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("run not found: %s", runID)
+	}
+
+	waitMS := input.WaitMS
+	if waitMS <= 0 {
+		waitMS = 5_000
+	}
+	if waitMS > 60_000 {
+		waitMS = 60_000
+	}
+
+	maxChunks := input.MaxChunks
+	if maxChunks <= 0 {
+		maxChunks = 256
+	}
+	if maxChunks > 1024 {
+		maxChunks = 1024
+	}
+
+	chunks := make([]protocol.OutputChunkPayload, 0, maxChunks)
+	terminal := isTerminalRunStatus(run.Status)
+
+	requestID := strings.TrimSpace(run.RequestID)
+	if requestID != "" && s.hub != nil && !terminal {
+		sub, cleanup := s.hub.SubscribeStream(requestID, maxChunks)
+		defer cleanup()
+
+		timer := time.NewTimer(time.Duration(waitMS) * time.Millisecond)
+		defer timer.Stop()
+
+		collecting := true
+		for collecting {
+			select {
+			case <-ctx.Done():
+				return nil, nil, ctx.Err()
+			case <-timer.C:
+				collecting = false
+			case chunk, ok := <-sub.Ch:
+				if !ok {
+					collecting = false
+					continue
+				}
+				chunks = append(chunks, chunk)
+				if chunk.Final || len(chunks) >= maxChunks {
+					collecting = false
+				}
+			}
+		}
+	}
+
+	if refreshedRun, err := s.jobsStore.GetRun(runID); err == nil {
+		run = refreshedRun
+	}
+
+	payload := streamJobRunOutputPayload{
+		RunID:          run.ID,
+		RequestID:      run.RequestID,
+		Status:         run.Status,
+		Terminal:       isTerminalRunStatus(run.Status),
+		Chunks:         chunks,
+		BufferedOutput: run.Output,
+	}
+	return jsonToolResult(payload)
+}
+
+func (s *MCPServer) handleStreamJobEvents(ctx context.Context, _ *mcp.CallToolRequest, input streamJobEventsInput) (*mcp.CallToolResult, any, error) {
+	limit := input.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	var since time.Time
+	if strings.TrimSpace(input.Since) != "" {
+		parsed, err := parseRFC3339MCP(input.Since)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid since timestamp: %w", err)
+		}
+		since = parsed
+	}
+
+	collected := make([]audit.Event, 0, limit)
+	if s.auditStore != nil {
+		eventsFromAudit := s.auditStore.Query(audit.Filter{Since: since, Limit: limit})
+		for _, evt := range eventsFromAudit {
+			if !isJobLifecycleAuditEvent(evt.Type) {
+				continue
+			}
+			if !matchesJobAuditEvent(evt, input) {
+				continue
+			}
+			collected = append(collected, evt)
+			if len(collected) >= limit {
+				break
+			}
+		}
+	}
+
+	waitMS := input.WaitMS
+	if waitMS < 0 {
+		waitMS = 0
+	}
+	if waitMS > 60_000 {
+		waitMS = 60_000
+	}
+
+	if len(collected) == 0 && waitMS > 0 && s.eventBus != nil {
+		subID := fmt.Sprintf("mcp-job-events-%d", time.Now().UnixNano())
+		ch := s.eventBus.Subscribe(subID)
+		defer s.eventBus.Unsubscribe(subID)
+
+		timer := time.NewTimer(time.Duration(waitMS) * time.Millisecond)
+		defer timer.Stop()
+
+		for len(collected) < limit {
+			select {
+			case <-ctx.Done():
+				return nil, nil, ctx.Err()
+			case <-timer.C:
+				payload := streamJobEventsPayload{Events: collected, Count: len(collected), PolledAt: time.Now().UTC()}
+				return jsonToolResult(payload)
+			case evt, ok := <-ch:
+				if !ok {
+					payload := streamJobEventsPayload{Events: collected, Count: len(collected), PolledAt: time.Now().UTC()}
+					return jsonToolResult(payload)
+				}
+				if !isJobLifecycleBusEvent(evt.Type) {
+					continue
+				}
+
+				auditEvt := audit.Event{
+					Timestamp: evt.Timestamp,
+					Type:      audit.EventType(evt.Type),
+					ProbeID:   evt.ProbeID,
+					Summary:   evt.Summary,
+					Detail:    evt.Detail,
+				}
+				if !matchesJobAuditEvent(auditEvt, input) {
+					continue
+				}
+				collected = append(collected, auditEvt)
+			}
+		}
+	}
+
+	payload := streamJobEventsPayload{Events: collected, Count: len(collected), PolledAt: time.Now().UTC()}
+	return jsonToolResult(payload)
+}
+
+func parseMCPJobRunQuery(input listJobRunsInput) (jobs.RunQuery, error) {
+	query := jobs.RunQuery{
+		JobID:   strings.TrimSpace(input.JobID),
+		ProbeID: strings.TrimSpace(input.ProbeID),
+		Limit:   input.Limit,
+	}
+	if input.Limit < 0 {
+		return jobs.RunQuery{}, fmt.Errorf("limit must be a positive integer")
+	}
+
+	status := strings.TrimSpace(input.Status)
+	if status != "" {
+		switch status {
+		case jobs.RunStatusPending, jobs.RunStatusRunning, jobs.RunStatusSuccess, jobs.RunStatusFailed, jobs.RunStatusCanceled:
+			query.Status = status
+		default:
+			return jobs.RunQuery{}, fmt.Errorf("status must be one of: pending, running, success, failed, canceled")
+		}
+	}
+
+	if raw := strings.TrimSpace(input.StartedAfter); raw != "" {
+		ts, err := parseRFC3339MCP(raw)
+		if err != nil {
+			return jobs.RunQuery{}, fmt.Errorf("started_after must be RFC3339")
+		}
+		query.StartedAfter = &ts
+	}
+	if raw := strings.TrimSpace(input.StartedBefore); raw != "" {
+		ts, err := parseRFC3339MCP(raw)
+		if err != nil {
+			return jobs.RunQuery{}, fmt.Errorf("started_before must be RFC3339")
+		}
+		query.StartedBefore = &ts
+	}
+	if query.StartedAfter != nil && query.StartedBefore != nil && query.StartedAfter.After(*query.StartedBefore) {
+		return jobs.RunQuery{}, fmt.Errorf("started_after must be <= started_before")
+	}
+
+	return query, nil
+}
+
+func parseRFC3339MCP(raw string) (time.Time, error) {
+	if ts, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return ts.UTC(), nil
+	}
+	ts, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return ts.UTC(), nil
+}
+
+func summarizeMCPRuns(runs []jobs.JobRun) mcpRunSummary {
+	summary := mcpRunSummary{}
+	for _, run := range runs {
+		switch run.Status {
+		case jobs.RunStatusPending:
+			summary.Pending++
+		case jobs.RunStatusRunning:
+			summary.Running++
+		case jobs.RunStatusSuccess:
+			summary.Success++
+		case jobs.RunStatusFailed:
+			summary.Failed++
+		case jobs.RunStatusCanceled:
+			summary.Canceled++
+		}
+	}
+	return summary
+}
+
+func isTerminalRunStatus(status string) bool {
+	switch status {
+	case jobs.RunStatusSuccess, jobs.RunStatusFailed, jobs.RunStatusCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
+func isJobLifecycleAuditEvent(typ audit.EventType) bool {
+	switch typ {
+	case audit.EventJobCreated,
+		audit.EventJobUpdated,
+		audit.EventJobDeleted,
+		audit.EventJobRunQueued,
+		audit.EventJobRunStarted,
+		audit.EventJobRunRetryScheduled,
+		audit.EventJobRunSucceeded,
+		audit.EventJobRunFailed,
+		audit.EventJobRunCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
+func isJobLifecycleBusEvent(typ events.EventType) bool {
+	switch typ {
+	case events.JobCreated,
+		events.JobUpdated,
+		events.JobDeleted,
+		events.JobRunQueued,
+		events.JobRunStarted,
+		events.JobRunRetryScheduled,
+		events.JobRunSucceeded,
+		events.JobRunFailed,
+		events.JobRunCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
+func matchesJobAuditEvent(evt audit.Event, filter streamJobEventsInput) bool {
+	if strings.TrimSpace(filter.ProbeID) != "" && strings.TrimSpace(evt.ProbeID) != strings.TrimSpace(filter.ProbeID) {
+		return false
+	}
+	if strings.TrimSpace(filter.JobID) != "" && detailField(evt.Detail, "job_id") != strings.TrimSpace(filter.JobID) {
+		return false
+	}
+	if strings.TrimSpace(filter.RunID) != "" && detailField(evt.Detail, "run_id") != strings.TrimSpace(filter.RunID) {
+		return false
+	}
+	if strings.TrimSpace(filter.ExecutionID) != "" && detailField(evt.Detail, "execution_id") != strings.TrimSpace(filter.ExecutionID) {
+		return false
+	}
+	if strings.TrimSpace(filter.RequestID) != "" && detailField(evt.Detail, "request_id") != strings.TrimSpace(filter.RequestID) {
+		return false
+	}
+	return true
+}
+
+func detailField(detail any, key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+
+	switch typed := detail.(type) {
+	case map[string]any:
+		if value, ok := typed[key]; ok {
+			return fmt.Sprintf("%v", value)
+		}
+	case map[string]string:
+		return typed[key]
+	}
+	return ""
 }
 
 func jsonToolResult(v any) (*mcp.CallToolResult, any, error) {
