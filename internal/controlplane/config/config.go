@@ -42,6 +42,9 @@ type Config struct {
 	// Kubeflow adapter settings (optional)
 	Kubeflow KubeflowConfig `json:"kubeflow,omitempty"`
 
+	// Grafana adapter settings (optional)
+	Grafana GrafanaConfig `json:"grafana,omitempty"`
+
 	// Scheduled jobs defaults
 	Jobs JobsConfig `json:"jobs,omitempty"`
 
@@ -82,6 +85,17 @@ type KubeflowConfig struct {
 	ActionsEnabled bool   `json:"actions_enabled,omitempty"`
 }
 
+// GrafanaConfig controls the Grafana read-only capacity adapter.
+type GrafanaConfig struct {
+	Enabled        bool   `json:"enabled"`
+	BaseURL        string `json:"base_url,omitempty"`
+	APIToken       string `json:"api_token,omitempty"`
+	Timeout        string `json:"timeout,omitempty"`
+	DashboardLimit int    `json:"dashboard_limit,omitempty"`
+	TLSSkipVerify  bool   `json:"tls_skip_verify,omitempty"`
+	OrgID          int    `json:"org_id,omitempty"`
+}
+
 // JobsConfig controls scheduler defaults for retry behavior.
 type JobsConfig struct {
 	RetryMaxAttempts    int     `json:"retry_max_attempts,omitempty"`
@@ -109,6 +123,28 @@ func (k KubeflowConfig) TimeoutDuration() time.Duration {
 	return d
 }
 
+func (g GrafanaConfig) TimeoutDuration() time.Duration {
+	raw := strings.TrimSpace(g.Timeout)
+	if raw == "" {
+		return 10 * time.Second
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 10 * time.Second
+	}
+	return d
+}
+
+func (g GrafanaConfig) DashboardLimitOrDefault() int {
+	if g.DashboardLimit <= 0 {
+		return 10
+	}
+	if g.DashboardLimit > 100 {
+		return 100
+	}
+	return g.DashboardLimit
+}
+
 // Default returns configuration with sensible defaults.
 func Default() Config {
 	return Config{
@@ -125,6 +161,11 @@ func Default() Config {
 			Namespace: "kubeflow",
 			CLIPath:   "kubectl",
 			Timeout:   "15s",
+		},
+		Grafana: GrafanaConfig{
+			Enabled:        false,
+			Timeout:        "10s",
+			DashboardLimit: 10,
 		},
 	}
 }
@@ -209,6 +250,31 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("LEGATOR_KUBEFLOW_ACTIONS_ENABLED"); v != "" {
 		cfg.Kubeflow.ActionsEnabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("LEGATOR_GRAFANA_ENABLED"); v != "" {
+		cfg.Grafana.Enabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("LEGATOR_GRAFANA_BASE_URL"); v != "" {
+		cfg.Grafana.BaseURL = v
+	}
+	if v := os.Getenv("LEGATOR_GRAFANA_API_TOKEN"); v != "" {
+		cfg.Grafana.APIToken = v
+	}
+	if v := os.Getenv("LEGATOR_GRAFANA_TIMEOUT"); v != "" {
+		cfg.Grafana.Timeout = v
+	}
+	if v := os.Getenv("LEGATOR_GRAFANA_DASHBOARD_LIMIT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Grafana.DashboardLimit = n
+		}
+	}
+	if v := os.Getenv("LEGATOR_GRAFANA_TLS_SKIP_VERIFY"); v != "" {
+		cfg.Grafana.TLSSkipVerify = v == "true" || v == "1"
+	}
+	if v := os.Getenv("LEGATOR_GRAFANA_ORG_ID"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Grafana.OrgID = n
+		}
 	}
 	if v := os.Getenv("LEGATOR_JOBS_RETRY_MAX_ATTEMPTS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {

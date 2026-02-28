@@ -114,6 +114,7 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 
 📖 **Full guide:** [docs/getting-started.md](docs/getting-started.md)
 📖 **Kubeflow adapter:** [docs/kubeflow-adapter.md](docs/kubeflow-adapter.md)
+📖 **Grafana adapter:** [docs/grafana-adapter.md](docs/grafana-adapter.md)
 
 ## Features
 
@@ -135,6 +136,7 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 | Windows probe support (MVP) | ✅ |
 | Cloud connectors (AWS/GCP/Azure, agentless inventory ingestion) | ✅ |
 | Kubeflow adapter MVP (read-only status/inventory + guarded refresh action) | ✅ |
+| Grafana adapter Stage 2.1 (read-only status + capacity snapshot) | ✅ |
 | Auto-discovery + registration assist (network/SSH scan + guided registration) | ✅ |
 | BYOK model dock (multi-vendor key profiles + runtime model switching + usage tracking) | ✅ |
 | Tags + group commands | ✅ |
@@ -171,6 +173,13 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 | `LEGATOR_KUBEFLOW_CONTEXT` | — | Optional kubeconfig context override |
 | `LEGATOR_KUBEFLOW_TIMEOUT` | `15s` | Timeout per kubectl call for adapter reads |
 | `LEGATOR_KUBEFLOW_ACTIONS_ENABLED` | `false` | Enable guarded action endpoint (`POST /api/v1/kubeflow/actions/refresh`) |
+| `LEGATOR_GRAFANA_ENABLED` | `false` | Enable Grafana adapter endpoints |
+| `LEGATOR_GRAFANA_BASE_URL` | — | Grafana base URL for adapter reads |
+| `LEGATOR_GRAFANA_API_TOKEN` | — | Optional Bearer token for Grafana API reads |
+| `LEGATOR_GRAFANA_TIMEOUT` | `10s` | Timeout per Grafana adapter API call |
+| `LEGATOR_GRAFANA_DASHBOARD_LIMIT` | `10` | Max dashboards scanned per snapshot (capped at 100) |
+| `LEGATOR_GRAFANA_TLS_SKIP_VERIFY` | `false` | Skip TLS verify for self-signed Grafana certs |
+| `LEGATOR_GRAFANA_ORG_ID` | `0` | Optional Grafana organization ID header |
 | `LEGATOR_JOBS_RETRY_MAX_ATTEMPTS` | `1` | Global default max attempts for scheduled-job retries (includes first attempt) |
 | `LEGATOR_JOBS_RETRY_INITIAL_BACKOFF` | `5s` | Global default initial retry delay for scheduled-job retries |
 | `LEGATOR_JOBS_RETRY_MULTIPLIER` | `2` | Global default exponential multiplier for scheduled-job retries |
@@ -213,6 +222,7 @@ make release-build    # Cross-compile release binaries (incl. windows/amd64 prob
 - **Model Dock**: `GET/POST /api/v1/model-profiles`, `PUT/DELETE /api/v1/model-profiles/{id}`, `POST /api/v1/model-profiles/{id}/activate`, `GET /api/v1/model-profiles/active`, `GET /api/v1/model-usage`
 - **Cloud Connectors**: `GET/POST /api/v1/cloud/connectors`, `PUT/DELETE /api/v1/cloud/connectors/{id}`, `POST /api/v1/cloud/connectors/{id}/scan`, `GET /api/v1/cloud/assets`
 - **Kubeflow**: `GET /api/v1/kubeflow/status`, `GET /api/v1/kubeflow/inventory`, `POST /api/v1/kubeflow/actions/refresh` (disabled by default)
+- **Grafana**: `GET /api/v1/grafana/status`, `GET /api/v1/grafana/snapshot` (disabled by default)
 - **Network Devices**: `GET/POST /api/v1/network/devices`, `GET/PUT/DELETE /api/v1/network/devices/{id}`, `POST /api/v1/network/devices/{id}/test`, `POST /api/v1/network/devices/{id}/inventory`
 - **Discovery**: `POST /api/v1/discovery/scan`, `GET /api/v1/discovery/runs`, `GET /api/v1/discovery/runs/{id}`, `POST /api/v1/discovery/install-token`
 - **Metrics**: `GET /api/v1/metrics`

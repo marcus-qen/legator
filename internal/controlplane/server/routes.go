@@ -251,6 +251,15 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/v1/kubeflow/actions/refresh", s.withPermission(auth.PermFleetWrite, s.handleKubeflowUnavailable))
 	}
 
+	// Grafana API (read-only capacity snapshot)
+	if s.grafanaHandlers != nil {
+		mux.HandleFunc("GET /api/v1/grafana/status", s.withPermission(auth.PermFleetRead, s.grafanaHandlers.HandleStatus))
+		mux.HandleFunc("GET /api/v1/grafana/snapshot", s.withPermission(auth.PermFleetRead, s.grafanaHandlers.HandleSnapshot))
+	} else {
+		mux.HandleFunc("GET /api/v1/grafana/status", s.withPermission(auth.PermFleetRead, s.handleGrafanaUnavailable))
+		mux.HandleFunc("GET /api/v1/grafana/snapshot", s.withPermission(auth.PermFleetRead, s.handleGrafanaUnavailable))
+	}
+
 	// Network Devices API
 	if s.networkDeviceHandlers != nil {
 		mux.HandleFunc("GET /api/v1/network/devices", s.withPermission(auth.PermFleetRead, s.networkDeviceHandlers.HandleListDevices))
@@ -1658,6 +1667,10 @@ func (s *Server) handleCloudConnectorsUnavailable(w http.ResponseWriter, r *http
 
 func (s *Server) handleKubeflowUnavailable(w http.ResponseWriter, r *http.Request) {
 	writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "kubeflow adapter unavailable")
+}
+
+func (s *Server) handleGrafanaUnavailable(w http.ResponseWriter, r *http.Request) {
+	writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "grafana adapter unavailable")
 }
 
 func (s *Server) handleDiscoveryUnavailable(w http.ResponseWriter, r *http.Request) {

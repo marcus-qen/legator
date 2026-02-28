@@ -67,6 +67,13 @@ Environment variables override config file values. All vars are prefixed with `L
 | `LEGATOR_KUBEFLOW_CLI_PATH` | `kubeflow.cli_path` | `kubectl` | kubectl binary path/name |
 | `LEGATOR_KUBEFLOW_TIMEOUT` | `kubeflow.timeout` | `15s` | Timeout per kubectl command |
 | `LEGATOR_KUBEFLOW_ACTIONS_ENABLED` | `kubeflow.actions_enabled` | `false` | Enable guarded Kubeflow action endpoint (`POST /api/v1/kubeflow/actions/refresh`) |
+| `LEGATOR_GRAFANA_ENABLED` | `grafana.enabled` | `false` | Enable Grafana adapter routes |
+| `LEGATOR_GRAFANA_BASE_URL` | `grafana.base_url` | — | Grafana base URL for read-only adapter calls |
+| `LEGATOR_GRAFANA_API_TOKEN` | `grafana.api_token` | — | Optional Bearer token for Grafana API |
+| `LEGATOR_GRAFANA_TIMEOUT` | `grafana.timeout` | `10s` | Timeout per Grafana API request |
+| `LEGATOR_GRAFANA_DASHBOARD_LIMIT` | `grafana.dashboard_limit` | `10` | Maximum dashboards scanned per snapshot (capped at 100) |
+| `LEGATOR_GRAFANA_TLS_SKIP_VERIFY` | `grafana.tls_skip_verify` | `false` | Skip TLS verification for self-signed certs |
+| `LEGATOR_GRAFANA_ORG_ID` | `grafana.org_id` | `0` | Optional Grafana org ID header (`X-Grafana-Org-Id`) |
 | `LEGATOR_EXTERNAL_URL` | `external_url` | — | Public URL used in generated install commands |
 
 ### Example `legator.json`
@@ -96,6 +103,15 @@ Environment variables override config file values. All vars are prefixed with `L
     "cli_path": "kubectl",
     "timeout": "15s",
     "actions_enabled": false
+  },
+  "grafana": {
+    "enabled": false,
+    "base_url": "",
+    "api_token": "",
+    "timeout": "10s",
+    "dashboard_limit": 10,
+    "tls_skip_verify": false,
+    "org_id": 0
   },
   "log_level": "info",
   "external_url": "",

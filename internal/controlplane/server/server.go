@@ -30,6 +30,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/discovery"
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
+	"github.com/marcus-qen/legator/internal/controlplane/grafana"
 	"github.com/marcus-qen/legator/internal/controlplane/jobs"
 	"github.com/marcus-qen/legator/internal/controlplane/kubeflow"
 	"github.com/marcus-qen/legator/internal/controlplane/llm"
@@ -121,6 +122,7 @@ type Server struct {
 	networkDeviceHandlers *networkdevices.Handler
 
 	kubeflowHandlers *kubeflow.Handler
+	grafanaHandlers  *grafana.Handler
 
 	discoveryStore    *discovery.Store
 	discoveryHandlers *discovery.Handler
@@ -194,6 +196,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initCloudConnectors()
 	s.initNetworkDevices()
 	s.initKubeflow()
+	s.initGrafana()
 	s.initDiscovery()
 	s.initLLM()
 	s.initHub()
@@ -642,6 +645,28 @@ func (s *Server) initKubeflow() {
 	s.logger.Info("kubeflow adapter enabled",
 		zap.String("namespace", s.cfg.Kubeflow.NamespaceOrDefault()),
 		zap.Bool("actions_enabled", s.cfg.Kubeflow.ActionsEnabled),
+	)
+}
+
+func (s *Server) initGrafana() {
+	if !s.cfg.Grafana.Enabled {
+		return
+	}
+
+	client := grafana.NewHTTPClient(grafana.ClientConfig{
+		BaseURL:        s.cfg.Grafana.BaseURL,
+		APIToken:       s.cfg.Grafana.APIToken,
+		Timeout:        s.cfg.Grafana.TimeoutDuration(),
+		DashboardLimit: s.cfg.Grafana.DashboardLimitOrDefault(),
+		TLSSkipVerify:  s.cfg.Grafana.TLSSkipVerify,
+		OrgID:          s.cfg.Grafana.OrgID,
+	})
+	s.grafanaHandlers = grafana.NewHandler(client)
+	s.logger.Info("grafana adapter enabled",
+		zap.String("base_url", strings.TrimSpace(s.cfg.Grafana.BaseURL)),
+		zap.Int("dashboard_limit", s.cfg.Grafana.DashboardLimitOrDefault()),
+		zap.Bool("tls_skip_verify", s.cfg.Grafana.TLSSkipVerify),
+		zap.Int("org_id", s.cfg.Grafana.OrgID),
 	)
 }
 
