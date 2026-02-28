@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -23,6 +24,15 @@ func TestDefaultConfig(t *testing.T) {
 	if !cfg.MCPEnabled {
 		t.Error("expected MCP enabled by default")
 	}
+	if cfg.Kubeflow.Enabled {
+		t.Error("expected kubeflow disabled by default")
+	}
+	if cfg.Kubeflow.Namespace != "kubeflow" {
+		t.Errorf("expected kubeflow namespace default kubeflow, got %s", cfg.Kubeflow.Namespace)
+	}
+	if cfg.Kubeflow.TimeoutDuration().String() != (15 * time.Second).String() {
+		t.Errorf("expected kubeflow timeout default 15s, got %s", cfg.Kubeflow.TimeoutDuration())
+	}
 }
 
 func TestLoadFromFile(t *testing.T) {
@@ -34,6 +44,15 @@ func TestLoadFromFile(t *testing.T) {
 		"auth_enabled": true,
 		"audit_retention": "90d",
 		"mcp_enabled": false,
+		"kubeflow": {
+			"enabled": true,
+			"namespace": "ml-platform",
+			"kubeconfig": "/etc/kubeconfig",
+			"context": "lab",
+			"cli_path": "kubectl",
+			"timeout": "20s",
+			"actions_enabled": true
+		},
 		"oidc": {
 			"enabled": true,
 			"provider_url": "https://id.example.com/realms/dev",
@@ -69,6 +88,24 @@ func TestLoadFromFile(t *testing.T) {
 	}
 	if cfg.MCPEnabled {
 		t.Error("expected mcp_enabled=false from file")
+	}
+	if !cfg.Kubeflow.Enabled {
+		t.Fatal("expected kubeflow enabled from file")
+	}
+	if cfg.Kubeflow.Namespace != "ml-platform" {
+		t.Fatalf("unexpected kubeflow namespace: %s", cfg.Kubeflow.Namespace)
+	}
+	if cfg.Kubeflow.Kubeconfig != "/etc/kubeconfig" {
+		t.Fatalf("unexpected kubeflow kubeconfig: %s", cfg.Kubeflow.Kubeconfig)
+	}
+	if cfg.Kubeflow.Context != "lab" {
+		t.Fatalf("unexpected kubeflow context: %s", cfg.Kubeflow.Context)
+	}
+	if cfg.Kubeflow.TimeoutDuration() != 20*time.Second {
+		t.Fatalf("unexpected kubeflow timeout: %s", cfg.Kubeflow.TimeoutDuration())
+	}
+	if !cfg.Kubeflow.ActionsEnabled {
+		t.Fatal("expected kubeflow actions enabled from file")
 	}
 	if !cfg.OIDC.Enabled {
 		t.Fatal("expected oidc enabled")
@@ -113,6 +150,10 @@ func TestLoadFromEnvOnly(t *testing.T) {
 	t.Setenv("LEGATOR_LOG_LEVEL", "debug")
 	t.Setenv("LEGATOR_AUDIT_RETENTION", "30d")
 	t.Setenv("LEGATOR_MCP_ENABLED", "false")
+	t.Setenv("LEGATOR_KUBEFLOW_ENABLED", "1")
+	t.Setenv("LEGATOR_KUBEFLOW_NAMESPACE", "kubeflow-user")
+	t.Setenv("LEGATOR_KUBEFLOW_TIMEOUT", "45s")
+	t.Setenv("LEGATOR_KUBEFLOW_ACTIONS_ENABLED", "true")
 
 	cfg := LoadFromEnv()
 	if cfg.DataDir != "/tmp/env-test" {
@@ -126,6 +167,18 @@ func TestLoadFromEnvOnly(t *testing.T) {
 	}
 	if cfg.MCPEnabled {
 		t.Error("expected MCP disabled from env")
+	}
+	if !cfg.Kubeflow.Enabled {
+		t.Error("expected kubeflow enabled from env")
+	}
+	if cfg.Kubeflow.Namespace != "kubeflow-user" {
+		t.Errorf("expected kubeflow namespace kubeflow-user, got %s", cfg.Kubeflow.Namespace)
+	}
+	if cfg.Kubeflow.TimeoutDuration() != 45*time.Second {
+		t.Errorf("expected kubeflow timeout 45s, got %s", cfg.Kubeflow.TimeoutDuration())
+	}
+	if !cfg.Kubeflow.ActionsEnabled {
+		t.Error("expected kubeflow actions enabled from env")
 	}
 }
 

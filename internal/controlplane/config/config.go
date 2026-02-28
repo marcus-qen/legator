@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/marcus-qen/legator/internal/controlplane/oidc"
 )
@@ -37,6 +39,9 @@ type Config struct {
 	// Rate limiting
 	RateLimit RateLimitConfig `json:"rate_limit,omitempty"`
 
+	// Kubeflow adapter settings (optional)
+	Kubeflow KubeflowConfig `json:"kubeflow,omitempty"`
+
 	// Log level (debug, info, warn, error)
 	LogLevel string `json:"log_level"`
 
@@ -63,6 +68,36 @@ type RateLimitConfig struct {
 	RequestsPerMinute int `json:"requests_per_minute"`
 }
 
+// KubeflowConfig controls the Kubeflow adapter integration.
+type KubeflowConfig struct {
+	Enabled        bool   `json:"enabled"`
+	Namespace      string `json:"namespace,omitempty"`
+	Kubeconfig     string `json:"kubeconfig,omitempty"`
+	Context        string `json:"context,omitempty"`
+	CLIPath        string `json:"cli_path,omitempty"`
+	Timeout        string `json:"timeout,omitempty"`
+	ActionsEnabled bool   `json:"actions_enabled,omitempty"`
+}
+
+func (k KubeflowConfig) NamespaceOrDefault() string {
+	if namespace := strings.TrimSpace(k.Namespace); namespace != "" {
+		return namespace
+	}
+	return "kubeflow"
+}
+
+func (k KubeflowConfig) TimeoutDuration() time.Duration {
+	raw := strings.TrimSpace(k.Timeout)
+	if raw == "" {
+		return 15 * time.Second
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 15 * time.Second
+	}
+	return d
+}
+
 // Default returns configuration with sensible defaults.
 func Default() Config {
 	return Config{
@@ -73,6 +108,12 @@ func Default() Config {
 		MCPEnabled: true,
 		RateLimit: RateLimitConfig{
 			RequestsPerMinute: 120,
+		},
+		Kubeflow: KubeflowConfig{
+			Enabled:   false,
+			Namespace: "kubeflow",
+			CLIPath:   "kubectl",
+			Timeout:   "15s",
 		},
 	}
 }
@@ -136,6 +177,27 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("LEGATOR_EXTERNAL_URL"); v != "" {
 		cfg.ExternalURL = v
+	}
+	if v := os.Getenv("LEGATOR_KUBEFLOW_ENABLED"); v != "" {
+		cfg.Kubeflow.Enabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("LEGATOR_KUBEFLOW_NAMESPACE"); v != "" {
+		cfg.Kubeflow.Namespace = v
+	}
+	if v := os.Getenv("LEGATOR_KUBEFLOW_KUBECONFIG"); v != "" {
+		cfg.Kubeflow.Kubeconfig = v
+	}
+	if v := os.Getenv("LEGATOR_KUBEFLOW_CONTEXT"); v != "" {
+		cfg.Kubeflow.Context = v
+	}
+	if v := os.Getenv("LEGATOR_KUBEFLOW_CLI_PATH"); v != "" {
+		cfg.Kubeflow.CLIPath = v
+	}
+	if v := os.Getenv("LEGATOR_KUBEFLOW_TIMEOUT"); v != "" {
+		cfg.Kubeflow.Timeout = v
+	}
+	if v := os.Getenv("LEGATOR_KUBEFLOW_ACTIONS_ENABLED"); v != "" {
+		cfg.Kubeflow.ActionsEnabled = v == "true" || v == "1"
 	}
 	if v := os.Getenv("LEGATOR_MCP_ENABLED"); v != "" {
 		cfg.MCPEnabled = v == "true" || v == "1"

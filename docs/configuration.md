@@ -60,6 +60,13 @@ Environment variables override config file values. All vars are prefixed with `L
 | `LEGATOR_TLS_KEY` | `tls_key` | — | TLS private key path |
 | `LEGATOR_LOG_LEVEL` | `log_level` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 | `LEGATOR_RATE_LIMIT` | `rate_limit.requests_per_minute` | `120` | Per-key request limit per minute |
+| `LEGATOR_KUBEFLOW_ENABLED` | `kubeflow.enabled` | `false` | Enable Kubeflow adapter routes |
+| `LEGATOR_KUBEFLOW_NAMESPACE` | `kubeflow.namespace` | `kubeflow` | Namespace used for Kubeflow resource reads |
+| `LEGATOR_KUBEFLOW_KUBECONFIG` | `kubeflow.kubeconfig` | — | Optional kubeconfig path for kubectl |
+| `LEGATOR_KUBEFLOW_CONTEXT` | `kubeflow.context` | — | Optional kubeconfig context override |
+| `LEGATOR_KUBEFLOW_CLI_PATH` | `kubeflow.cli_path` | `kubectl` | kubectl binary path/name |
+| `LEGATOR_KUBEFLOW_TIMEOUT` | `kubeflow.timeout` | `15s` | Timeout per kubectl command |
+| `LEGATOR_KUBEFLOW_ACTIONS_ENABLED` | `kubeflow.actions_enabled` | `false` | Enable guarded Kubeflow action endpoint (`POST /api/v1/kubeflow/actions/refresh`) |
 | `LEGATOR_EXTERNAL_URL` | `external_url` | — | Public URL used in generated install commands |
 
 ### Example `legator.json`
@@ -80,6 +87,15 @@ Environment variables override config file values. All vars are prefixed with `L
   },
   "rate_limit": {
     "requests_per_minute": 120
+  },
+  "kubeflow": {
+    "enabled": false,
+    "namespace": "kubeflow",
+    "kubeconfig": "",
+    "context": "",
+    "cli_path": "kubectl",
+    "timeout": "15s",
+    "actions_enabled": false
   },
   "log_level": "info",
   "external_url": "",

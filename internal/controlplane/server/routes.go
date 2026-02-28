@@ -234,6 +234,17 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/v1/cloud/assets", s.withPermission(auth.PermFleetRead, s.handleCloudConnectorsUnavailable))
 	}
 
+	// Kubeflow API (MVP read-only + guarded refresh action)
+	if s.kubeflowHandlers != nil {
+		mux.HandleFunc("GET /api/v1/kubeflow/status", s.withPermission(auth.PermFleetRead, s.kubeflowHandlers.HandleStatus))
+		mux.HandleFunc("GET /api/v1/kubeflow/inventory", s.withPermission(auth.PermFleetRead, s.kubeflowHandlers.HandleInventory))
+		mux.HandleFunc("POST /api/v1/kubeflow/actions/refresh", s.withPermission(auth.PermFleetWrite, s.kubeflowHandlers.HandleRefresh))
+	} else {
+		mux.HandleFunc("GET /api/v1/kubeflow/status", s.withPermission(auth.PermFleetRead, s.handleKubeflowUnavailable))
+		mux.HandleFunc("GET /api/v1/kubeflow/inventory", s.withPermission(auth.PermFleetRead, s.handleKubeflowUnavailable))
+		mux.HandleFunc("POST /api/v1/kubeflow/actions/refresh", s.withPermission(auth.PermFleetWrite, s.handleKubeflowUnavailable))
+	}
+
 	// Network Devices API
 	if s.networkDeviceHandlers != nil {
 		mux.HandleFunc("GET /api/v1/network/devices", s.withPermission(auth.PermFleetRead, s.networkDeviceHandlers.HandleListDevices))
@@ -1616,6 +1627,10 @@ func (s *Server) handleModelDockUnavailable(w http.ResponseWriter, r *http.Reque
 
 func (s *Server) handleCloudConnectorsUnavailable(w http.ResponseWriter, r *http.Request) {
 	writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "cloud connectors unavailable")
+}
+
+func (s *Server) handleKubeflowUnavailable(w http.ResponseWriter, r *http.Request) {
+	writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "kubeflow adapter unavailable")
 }
 
 func (s *Server) handleDiscoveryUnavailable(w http.ResponseWriter, r *http.Request) {

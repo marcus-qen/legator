@@ -31,6 +31,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/jobs"
+	"github.com/marcus-qen/legator/internal/controlplane/kubeflow"
 	"github.com/marcus-qen/legator/internal/controlplane/llm"
 	"github.com/marcus-qen/legator/internal/controlplane/mcpserver"
 	"github.com/marcus-qen/legator/internal/controlplane/metrics"
@@ -119,6 +120,8 @@ type Server struct {
 	networkDeviceStore    *networkdevices.Store
 	networkDeviceHandlers *networkdevices.Handler
 
+	kubeflowHandlers *kubeflow.Handler
+
 	discoveryStore    *discovery.Store
 	discoveryHandlers *discovery.Handler
 
@@ -190,6 +193,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initModelDock()
 	s.initCloudConnectors()
 	s.initNetworkDevices()
+	s.initKubeflow()
 	s.initDiscovery()
 	s.initLLM()
 	s.initHub()
@@ -600,6 +604,25 @@ func (s *Server) initNetworkDevices() {
 	s.networkDeviceStore = store
 	s.networkDeviceHandlers = networkdevices.NewHandler(store, networkdevices.NewSSHProber())
 	s.logger.Info("network device store opened", zap.String("path", networkDBPath))
+}
+
+func (s *Server) initKubeflow() {
+	if !s.cfg.Kubeflow.Enabled {
+		return
+	}
+
+	client := kubeflow.NewCLIClient(kubeflow.ClientConfig{
+		Binary:     s.cfg.Kubeflow.CLIPath,
+		Kubeconfig: s.cfg.Kubeflow.Kubeconfig,
+		Context:    s.cfg.Kubeflow.Context,
+		Namespace:  s.cfg.Kubeflow.Namespace,
+		Timeout:    s.cfg.Kubeflow.TimeoutDuration(),
+	})
+	s.kubeflowHandlers = kubeflow.NewHandler(client, kubeflow.HandlerOptions{ActionsEnabled: s.cfg.Kubeflow.ActionsEnabled})
+	s.logger.Info("kubeflow adapter enabled",
+		zap.String("namespace", s.cfg.Kubeflow.NamespaceOrDefault()),
+		zap.Bool("actions_enabled", s.cfg.Kubeflow.ActionsEnabled),
+	)
 }
 
 func (s *Server) initDiscovery() {

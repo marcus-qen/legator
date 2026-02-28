@@ -1,3 +1,12 @@
+## [Unreleased]
+
+### Added
+- **Kubeflow adapter MVP (read-only + guarded action)**
+  - Added `internal/controlplane/kubeflow` adapter/client boundary with kubectl-backed status + inventory reads.
+  - Added API routes: `GET /api/v1/kubeflow/status`, `GET /api/v1/kubeflow/inventory`.
+  - Added guarded action route `POST /api/v1/kubeflow/actions/refresh` (fleet:write + disabled by default unless `LEGATOR_KUBEFLOW_ACTIONS_ENABLED=true`).
+  - Added config support and docs (`docs/kubeflow-adapter.md`).
+
 ## [v1.0.0-alpha.16] — 2026-02-28
 
 ### Added
