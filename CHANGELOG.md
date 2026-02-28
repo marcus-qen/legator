@@ -1,11 +1,27 @@
 ## [Unreleased]
 
+## [v1.0.0-alpha.17] — 2026-02-28
+
 ### Added
+- **Scheduled probe jobs (cron engine)**
+  - Added recurring job execution with probe/tag/all targeting.
+  - Added jobs persistence (`jobs.db`) and scheduler wiring in control plane startup.
+  - Added API routes for create/list/get/update/delete, run-now, enable/disable, and run history.
+- **Jobs UX + reliability phase 2**
+  - Added filtered run-history queries (`status`, `probe_id`, `started_after`, `started_before`, `limit`).
+  - Added global run-history endpoint: `GET /api/v1/jobs/runs` for operator-wide failed-run visibility.
+  - Added run summary counters in responses (`failed_count`, `success_count`, `running_count`).
+  - Added scheduler overlap guards and safer run completion semantics under fanout concurrency.
 - **Kubeflow adapter MVP (read-only + guarded action)**
   - Added `internal/controlplane/kubeflow` adapter/client boundary with kubectl-backed status + inventory reads.
   - Added API routes: `GET /api/v1/kubeflow/status`, `GET /api/v1/kubeflow/inventory`.
   - Added guarded action route `POST /api/v1/kubeflow/actions/refresh` (fleet:write + disabled by default unless `LEGATOR_KUBEFLOW_ACTIONS_ENABLED=true`).
   - Added config support and docs (`docs/kubeflow-adapter.md`).
+
+### Changed
+- Added `PRAGMA busy_timeout=5000` to all SQLite-backed stores (15 total) to reduce `SQLITE_BUSY` failures under concurrent writes.
+- Expanded test coverage for jobs handlers/scheduler/store and kubeflow adapter endpoints.
+- E2E baseline increased to **67/67 passing**.
 
 ## [v1.0.0-alpha.16] — 2026-02-28
 
