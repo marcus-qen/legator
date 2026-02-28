@@ -28,7 +28,14 @@ func newTestHandler(t *testing.T, scanner ScannerAPI) *Handler {
 		t.Fatalf("new store: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	return NewHandler(store, scanner, api.NewTokenStore())
+
+	tokenStore, err := api.NewTokenStore(filepath.Join(t.TempDir(), "tokens.db"))
+	if err != nil {
+		t.Fatalf("new token store: %v", err)
+	}
+	t.Cleanup(func() { _ = tokenStore.Close() })
+
+	return NewHandler(store, scanner, tokenStore)
 }
 
 func TestHandleScanPersistsRunAndCandidates(t *testing.T) {

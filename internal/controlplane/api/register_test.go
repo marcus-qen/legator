@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -25,8 +26,18 @@ func (auditRecorderStub) Record(_ audit.Event) {}
 
 func (auditRecorderStub) Emit(_ audit.EventType, _, _, _ string) {}
 
+func newTestTokenStore(t *testing.T) *TokenStore {
+	t.Helper()
+	ts, err := NewTokenStore(filepath.Join(t.TempDir(), "tokens.db"))
+	if err != nil {
+		t.Fatalf("new token store: %v", err)
+	}
+	t.Cleanup(func() { _ = ts.Close() })
+	return ts
+}
+
 func TestTokenGeneration(t *testing.T) {
-	ts := NewTokenStore()
+	ts := newTestTokenStore(t)
 
 	token := ts.Generate()
 	if token.Value == "" {
@@ -41,7 +52,7 @@ func TestTokenGeneration(t *testing.T) {
 }
 
 func TestTokenConsume(t *testing.T) {
-	ts := NewTokenStore()
+	ts := newTestTokenStore(t)
 	token := ts.Generate()
 
 	// First consume should succeed
@@ -56,7 +67,7 @@ func TestTokenConsume(t *testing.T) {
 }
 
 func TestTokenConsumeMultiUse(t *testing.T) {
-	ts := NewTokenStore()
+	ts := newTestTokenStore(t)
 	token := ts.GenerateWithOptions(GenerateOptions{MultiUse: true})
 
 	if !ts.Consume(token.Value) {
@@ -71,7 +82,7 @@ func TestTokenConsumeMultiUse(t *testing.T) {
 }
 
 func TestTokenInvalid(t *testing.T) {
-	ts := NewTokenStore()
+	ts := newTestTokenStore(t)
 
 	if ts.Consume("nonexistent") {
 		t.Error("nonexistent token should fail")
@@ -79,7 +90,7 @@ func TestTokenInvalid(t *testing.T) {
 }
 
 func TestRegisterHandler(t *testing.T) {
-	ts := NewTokenStore()
+	ts := newTestTokenStore(t)
 	fm := fleet.NewManager(testLogger())
 	handler := HandleRegister(ts, fm, testLogger())
 
@@ -127,7 +138,7 @@ func TestRegisterHandler(t *testing.T) {
 }
 
 func TestRegisterHandler_InvalidToken(t *testing.T) {
-	ts := NewTokenStore()
+	ts := newTestTokenStore(t)
 	fm := fleet.NewManager(testLogger())
 	handler := HandleRegister(ts, fm, testLogger())
 
@@ -149,7 +160,7 @@ func TestRegisterHandler_InvalidToken(t *testing.T) {
 }
 
 func TestRegisterHandler_ReusedToken(t *testing.T) {
-	ts := NewTokenStore()
+	ts := newTestTokenStore(t)
 	fm := fleet.NewManager(testLogger())
 	handler := HandleRegister(ts, fm, testLogger())
 
@@ -178,7 +189,7 @@ func TestRegisterHandler_ReusedToken(t *testing.T) {
 }
 
 func TestGenerateTokenHandler(t *testing.T) {
-	ts := NewTokenStore()
+	ts := newTestTokenStore(t)
 	handler := HandleGenerateToken(ts, testLogger())
 
 	req := httptest.NewRequest("POST", "/api/v1/tokens", nil)
@@ -199,7 +210,7 @@ func TestGenerateTokenHandler(t *testing.T) {
 }
 
 func TestGenerateTokenHandler_MultiUseQueryParam(t *testing.T) {
-	ts := NewTokenStore()
+	ts := newTestTokenStore(t)
 	handler := HandleGenerateToken(ts, testLogger())
 
 	req := httptest.NewRequest("POST", "/api/v1/tokens?multi_use=true", nil)
@@ -223,7 +234,7 @@ func TestGenerateTokenHandler_MultiUseQueryParam(t *testing.T) {
 }
 
 func TestGenerateTokenWithAuditHandler_MultiUseQueryParam(t *testing.T) {
-	ts := NewTokenStore()
+	ts := newTestTokenStore(t)
 	handler := HandleGenerateTokenWithAudit(ts, auditRecorderStub{}, testLogger())
 
 	req := httptest.NewRequest("POST", "/api/v1/tokens?multi_use=true", nil)
@@ -268,7 +279,7 @@ func TestGenerateAPIKey(t *testing.T) {
 }
 
 func TestListActiveTokens(t *testing.T) {
-	ts := NewTokenStore()
+	ts := newTestTokenStore(t)
 
 	// No tokens initially
 	if got := len(ts.ListActive()); got != 0 {
@@ -294,8 +305,114 @@ func TestListActiveTokens(t *testing.T) {
 	}
 }
 
+func TestTokenStorePersistsAcrossCloseReopen(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "tokens.db")
+
+	ts, err := NewTokenStore(dbPath)
+	if err != nil {
+		t.Fatalf("new token store: %v", err)
+	}
+
+	single := ts.Generate()
+	multi := ts.GenerateWithOptions(GenerateOptions{MultiUse: true})
+	if !ts.Consume(single.Value) {
+		t.Fatal("expected single-use token consume to succeed")
+	}
+	if !ts.Consume(multi.Value) {
+		t.Fatal("expected multi-use token consume to succeed")
+	}
+
+	if err := ts.Close(); err != nil {
+		t.Fatalf("close token store: %v", err)
+	}
+
+	reopened, err := NewTokenStore(dbPath)
+	if err != nil {
+		t.Fatalf("reopen token store: %v", err)
+	}
+	defer func() { _ = reopened.Close() }()
+
+	if got := reopened.Count(); got != 2 {
+		t.Fatalf("expected 2 total tokens after reopen, got %d", got)
+	}
+	if got := len(reopened.ListActive()); got != 1 {
+		t.Fatalf("expected 1 active token after reopen, got %d", got)
+	}
+	if reopened.Consume(single.Value) {
+		t.Fatal("single-use token should remain consumed after reopen")
+	}
+	if !reopened.Consume(multi.Value) {
+		t.Fatal("expected multi-use token consume to succeed after reopen")
+	}
+	if !reopened.Consume(multi.Value) {
+		t.Fatal("expected multi-use token to be consumable repeatedly after reopen")
+	}
+}
+
+func TestTokenStoreMultiUseAcrossReopen(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "tokens.db")
+
+	ts, err := NewTokenStore(dbPath)
+	if err != nil {
+		t.Fatalf("new token store: %v", err)
+	}
+
+	token := ts.GenerateWithOptions(GenerateOptions{MultiUse: true})
+	if err := ts.Close(); err != nil {
+		t.Fatalf("close token store: %v", err)
+	}
+
+	reopened, err := NewTokenStore(dbPath)
+	if err != nil {
+		t.Fatalf("reopen token store: %v", err)
+	}
+	defer func() { _ = reopened.Close() }()
+
+	if !reopened.Consume(token.Value) {
+		t.Fatal("expected first consume to succeed after reopen")
+	}
+	if !reopened.Consume(token.Value) {
+		t.Fatal("expected second consume to succeed after reopen for multi-use token")
+	}
+}
+
+func TestTokenStoreListActiveSkipsExpiredAfterReopen(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "tokens.db")
+
+	ts, err := NewTokenStore(dbPath)
+	if err != nil {
+		t.Fatalf("new token store: %v", err)
+	}
+
+	token := ts.Generate()
+	expiredAt := time.Now().UTC().Add(-1 * time.Minute)
+	if _, err := ts.db.Exec("UPDATE tokens SET expires_at = ? WHERE value = ?", expiredAt.Format(time.RFC3339Nano), token.Value); err != nil {
+		t.Fatalf("expire token in db: %v", err)
+	}
+
+	if err := ts.Close(); err != nil {
+		t.Fatalf("close token store: %v", err)
+	}
+
+	reopened, err := NewTokenStore(dbPath)
+	if err != nil {
+		t.Fatalf("reopen token store: %v", err)
+	}
+	defer func() { _ = reopened.Close() }()
+
+	if got := reopened.Count(); got != 1 {
+		t.Fatalf("expected total count 1 after reopen, got %d", got)
+	}
+	if got := len(reopened.ListActive()); got != 0 {
+		t.Fatalf("expected no active tokens after reopen when expired, got %d", got)
+	}
+	if reopened.Consume(token.Value) {
+		t.Fatal("expected consume to fail for expired token after reopen")
+	}
+}
+
 func TestHandleListTokens(t *testing.T) {
-	ts := NewTokenStore()
+	ts := newTestTokenStore(t)
 	ts.Generate()
 	ts.Generate()
 
@@ -325,7 +442,7 @@ func TestHandleListTokens(t *testing.T) {
 }
 
 func TestTokenInstallCommand(t *testing.T) {
-	ts := NewTokenStore()
+	ts := newTestTokenStore(t)
 	ts.SetServerURL("https://legator.example.com")
 
 	token := ts.Generate()
@@ -341,7 +458,7 @@ func TestTokenInstallCommand(t *testing.T) {
 }
 
 func TestTokenInstallCommandEmpty(t *testing.T) {
-	ts := NewTokenStore()
+	ts := newTestTokenStore(t)
 	// No server URL set
 
 	token := ts.Generate()
@@ -351,7 +468,7 @@ func TestTokenInstallCommandEmpty(t *testing.T) {
 }
 
 func TestGenerateTokenHandlerAddsInstallCommandFromRequestHost(t *testing.T) {
-	ts := NewTokenStore() // no configured external URL
+	ts := newTestTokenStore(t) // no configured external URL
 	handler := HandleGenerateToken(ts, testLogger())
 
 	req := httptest.NewRequest("POST", "/api/v1/tokens", nil)
@@ -376,7 +493,7 @@ func TestGenerateTokenHandlerAddsInstallCommandFromRequestHost(t *testing.T) {
 }
 
 func TestHandleListTokensAddsInstallCommandFromRequestHost(t *testing.T) {
-	ts := NewTokenStore() // no configured external URL
+	ts := newTestTokenStore(t) // no configured external URL
 	ts.Generate()
 
 	handler := HandleListTokens(ts)
@@ -408,7 +525,7 @@ func TestHandleListTokensAddsInstallCommandFromRequestHost(t *testing.T) {
 }
 
 func TestNoExpiryToken(t *testing.T) {
-	ts := NewTokenStore()
+	ts := newTestTokenStore(t)
 	token := ts.GenerateWithOptions(GenerateOptions{MultiUse: true, NoExpiry: true})
 	if token == nil {
 		t.Fatal("expected token, got nil")
