@@ -33,6 +33,35 @@ func TestStoreRegisterAndGet(t *testing.T) {
 	}
 }
 
+func TestStoreFindByHostname(t *testing.T) {
+	dbPath := tempDBPath(t)
+
+	s1, err := NewStore(dbPath, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s1.Register("p1", "web-01", "linux", "amd64")
+	s1.Close()
+
+	s2, err := NewStore(dbPath, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+
+	ps, ok := s2.FindByHostname("web-01")
+	if !ok {
+		t.Fatal("expected to find probe by hostname")
+	}
+	if ps.ID != "p1" {
+		t.Fatalf("expected p1, got %s", ps.ID)
+	}
+
+	if _, ok := s2.FindByHostname("missing"); ok {
+		t.Fatal("expected missing hostname to return not found")
+	}
+}
+
 func TestStoreListAndCount(t *testing.T) {
 	s, err := NewStore(tempDBPath(t), testLogger())
 	if err != nil {

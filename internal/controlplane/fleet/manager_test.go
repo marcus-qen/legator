@@ -33,6 +33,24 @@ func TestRegisterAndGet(t *testing.T) {
 	}
 }
 
+func TestFindByHostname(t *testing.T) {
+	m := NewManager(testLogger())
+	m.Register("probe-1", "web-01", "linux", "amd64")
+	m.Register("probe-2", "db-01", "linux", "amd64")
+
+	ps, ok := m.FindByHostname("web-01")
+	if !ok {
+		t.Fatal("expected to find probe by hostname")
+	}
+	if ps.ID != "probe-1" {
+		t.Fatalf("expected probe-1, got %s", ps.ID)
+	}
+
+	if _, ok := m.FindByHostname("missing"); ok {
+		t.Fatal("expected missing hostname to return not found")
+	}
+}
+
 func TestHeartbeat(t *testing.T) {
 	m := NewManager(testLogger())
 	m.Register("probe-1", "web-01", "linux", "amd64")

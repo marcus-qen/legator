@@ -13,6 +13,7 @@ type Fleet interface {
 	Heartbeat(id string, hb *protocol.HeartbeatPayload) error
 	UpdateInventory(id string, inv *protocol.InventoryPayload) error
 	Get(id string) (*ProbeState, bool)
+	FindByHostname(hostname string) (*ProbeState, bool)
 	List() []*ProbeState
 	Inventory(filter InventoryFilter) FleetInventory
 	SetPolicy(id string, level protocol.CapabilityLevel) error

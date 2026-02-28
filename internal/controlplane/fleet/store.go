@@ -78,7 +78,22 @@ func (s *Store) Manager() *Manager {
 
 // ── Delegated reads (in-memory) ─────────────────────────────
 
-func (s *Store) Get(id string) (*ProbeState, bool)               { return s.mgr.Get(id) }
+func (s *Store) Get(id string) (*ProbeState, bool) { return s.mgr.Get(id) }
+
+func (s *Store) FindByHostname(hostname string) (*ProbeState, bool) {
+	if ps, ok := s.mgr.FindByHostname(hostname); ok {
+		return ps, true
+	}
+
+	var id string
+	err := s.db.QueryRow(`SELECT id FROM probes WHERE hostname = ? LIMIT 1`, hostname).Scan(&id)
+	if err != nil {
+		return nil, false
+	}
+
+	return s.mgr.Get(id)
+}
+
 func (s *Store) List() []*ProbeState                             { return s.mgr.List() }
 func (s *Store) Inventory(filter InventoryFilter) FleetInventory { return s.mgr.Inventory(filter) }
 func (s *Store) Count() map[string]int                           { return s.mgr.Count() }
