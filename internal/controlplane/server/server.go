@@ -162,10 +162,17 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	if err := s.initFleet(); err != nil {
 		return nil, err
 	}
-	s.tokenStore = api.NewTokenStore()
+	tokensDBPath := filepath.Join(s.cfg.DataDir, "tokens.db")
+	tokenStore, err := api.NewTokenStore(tokensDBPath)
+	if err != nil {
+		return nil, fmt.Errorf("open token store: %w", err)
+	}
+	s.tokenStore = tokenStore
+	s.logger.Info("token store opened", zap.String("path", tokensDBPath))
 	if s.cfg.ExternalURL != "" {
 		s.tokenStore.SetServerURL(s.cfg.ExternalURL)
 	}
+
 	s.cmdTracker = cmdtracker.New(2 * time.Minute)
 	s.initAudit()
 	s.initApprovals()
@@ -298,6 +305,9 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) Close() {
 	if s.fleetStore != nil {
 		s.fleetStore.Close()
+	}
+	if s.tokenStore != nil {
+		s.tokenStore.Close()
 	}
 	if s.auditStore != nil {
 		s.auditStore.Close()

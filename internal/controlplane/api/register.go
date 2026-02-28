@@ -2,15 +2,12 @@
 package api
 
 import (
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,41 +20,6 @@ import (
 type AuditRecorder interface {
 	Record(evt audit.Event)
 	Emit(typ audit.EventType, probeID, actor, summary string)
-}
-
-// Token represents a registration token.
-type Token struct {
-	Value          string    `json:"token"`
-	Created        time.Time `json:"created"`
-	Expires        time.Time `json:"expires"`
-	Used           bool      `json:"used"`
-	MultiUse       bool      `json:"multi_use,omitempty"`
-	InstallCommand string    `json:"install_command,omitempty"`
-}
-
-// TokenStore manages registration tokens.
-type TokenStore struct {
-	tokens    map[string]*Token
-	secret    []byte
-	serverURL string // used to generate install commands
-	mu        sync.RWMutex
-}
-
-// NewTokenStore creates a token store with a random HMAC secret.
-func NewTokenStore() *TokenStore {
-	secret := make([]byte, 32)
-	_, _ = rand.Read(secret)
-	return &TokenStore{
-		tokens: make(map[string]*Token),
-		secret: secret,
-	}
-}
-
-// SetServerURL sets the server URL used in install commands.
-func (ts *TokenStore) SetServerURL(url string) {
-	ts.mu.Lock()
-	defer ts.mu.Unlock()
-	ts.serverURL = strings.TrimRight(strings.TrimSpace(url), "/")
 }
 
 func installCommand(serverURL, token string) string {
@@ -104,92 +66,6 @@ func tokenWithInstallCommand(token *Token, fallbackBaseURL string) Token {
 		copy.InstallCommand = installCommand(fallbackBaseURL, copy.Value)
 	}
 	return copy
-}
-
-// GenerateOptions controls token generation behavior.
-type GenerateOptions struct {
-	MultiUse bool
-	NoExpiry bool
-}
-
-// Generate creates a new registration token valid for 30 minutes.
-func (ts *TokenStore) Generate() *Token {
-	return ts.GenerateWithOptions(GenerateOptions{})
-}
-
-// GenerateWithOptions creates a new registration token using options.
-func (ts *TokenStore) GenerateWithOptions(opts GenerateOptions) *Token {
-	ts.mu.Lock()
-	defer ts.mu.Unlock()
-
-	now := time.Now().UTC()
-	id := uuid.New().String()[:12]
-
-	mac := hmac.New(sha256.New, ts.secret)
-	mac.Write([]byte(id))
-	sig := hex.EncodeToString(mac.Sum(nil))[:16]
-
-	expiry := now.Add(30 * time.Minute)
-	if opts.NoExpiry {
-		expiry = now.Add(100 * 365 * 24 * time.Hour)
-	}
-
-	token := &Token{
-		Value:    fmt.Sprintf("prb_%s_%d_%s", id, now.Unix(), sig),
-		Created:  now,
-		Expires:  expiry,
-		MultiUse: opts.MultiUse,
-	}
-
-	if ts.serverURL != "" {
-		token.InstallCommand = installCommand(ts.serverURL, token.Value)
-	}
-
-	ts.tokens[token.Value] = token
-	return token
-}
-
-// Consume validates and consumes a token. Returns false if invalid, expired, or already used.
-func (ts *TokenStore) Consume(value string) bool {
-	ts.mu.Lock()
-	defer ts.mu.Unlock()
-
-	t, ok := ts.tokens[value]
-	if !ok {
-		return false
-	}
-	if time.Now().UTC().After(t.Expires) {
-		return false
-	}
-	if t.Used {
-		return false
-	}
-	if !t.MultiUse {
-		t.Used = true
-	}
-	return true
-}
-
-// ListActive returns all tokens that are still valid for registration.
-func (ts *TokenStore) ListActive() []*Token {
-	ts.mu.RLock()
-	defer ts.mu.RUnlock()
-
-	now := time.Now().UTC()
-	var active []*Token
-	for _, t := range ts.tokens {
-		if !t.Used && now.Before(t.Expires) {
-			active = append(active, t)
-		}
-	}
-	return active
-}
-
-// Count returns the total number of tokens (active + used + expired).
-func (ts *TokenStore) Count() int {
-	ts.mu.RLock()
-	defer ts.mu.RUnlock()
-	return len(ts.tokens)
 }
 
 // RegisterRequest is the probe registration request.
