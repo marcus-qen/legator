@@ -1,3 +1,18 @@
+## [v1.0.0-alpha.16] — 2026-02-28
+
+### Added
+- **Persistent token storage** — Registration tokens now survive control plane restarts. SQLite-backed `tokens.db` with in-memory cache. Fixes DaemonSet CrashLoopBackOff caused by lost tokens on restart.
+- **Probe re-registration deduplication** — When a probe registers with a hostname that already exists, the existing probe ID is reused and credentials rotated. Eliminates duplicate probe entries after DaemonSet rolling updates.
+- `FindByHostname()` on the Fleet interface for hostname-based probe lookup.
+- 3 new persistence tests for token store (survive-reopen, multi-use, expired).
+- 5 new dedup tests + 1 E2E scenario. Total: **60/60 E2E**.
+
+### Changed
+- `NewTokenStore` now takes a `dbPath` parameter and returns an error.
+- Token store types and methods moved to dedicated `token_store.go`.
+- Registration handlers use shared `registerProbe()` helper.
+- Audit log distinguishes "Probe registered" vs "Probe re-registered".
+
 ## [v1.0.0-alpha.15] — 2026-02-27
 
 ### Changed
