@@ -1,9 +1,6 @@
 package commanddispatch
 
-import (
-	"github.com/marcus-qen/legator/internal/controlplane/core/projectiondispatch"
-	"github.com/marcus-qen/legator/internal/controlplane/core/transportwriter"
-)
+import "github.com/marcus-qen/legator/internal/controlplane/core/transportwriter"
 
 // ProjectionDispatchSurface identifies transport shells expected to consume
 // command-dispatch and command-read projections in upcoming kernel splits.
@@ -15,15 +12,15 @@ const (
 )
 
 var (
-	defaultCommandDispatchProjectionSurfaceRegistry = projectiondispatch.NewPolicyRegistry(map[ProjectionDispatchSurface]ProjectionDispatchSurface{
+	defaultCommandDispatchProjectionSurfaceRegistry = newCommandDispatchProjectionSurfaceRegistry(map[ProjectionDispatchSurface]ProjectionDispatchSurface{
 		ProjectionDispatchSurfaceHTTP: ProjectionDispatchSurfaceHTTP,
 		ProjectionDispatchSurfaceMCP:  ProjectionDispatchSurfaceMCP,
 	})
-	defaultCommandReadProjectionSurfaceRegistry = projectiondispatch.NewPolicyRegistry(map[ProjectionDispatchSurface]ProjectionDispatchSurface{
+	defaultCommandReadProjectionSurfaceRegistry = newCommandReadProjectionSurfaceRegistry(map[ProjectionDispatchSurface]ProjectionDispatchSurface{
 		ProjectionDispatchSurfaceHTTP: ProjectionDispatchSurfaceHTTP,
 		ProjectionDispatchSurfaceMCP:  ProjectionDispatchSurfaceMCP,
 	})
-	defaultCommandInvokeProjectionDispatchSurfaceRegistry = projectiondispatch.NewPolicyRegistry(map[ProjectionDispatchSurface]ProjectionDispatchSurface{
+	defaultCommandInvokeProjectionDispatchSurfaceRegistry = newCommandInvokeProjectionSurfaceRegistry(map[ProjectionDispatchSurface]ProjectionDispatchSurface{
 		ProjectionDispatchSurfaceHTTP: ProjectionDispatchSurfaceHTTP,
 		ProjectionDispatchSurfaceMCP:  ProjectionDispatchSurfaceMCP,
 	})
