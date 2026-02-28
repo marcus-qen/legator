@@ -8,3 +8,12 @@ import "github.com/marcus-qen/legator/internal/controlplane/core/projectiondispa
 func newDecideApprovalResponseDispatchPolicyRegistry(policies map[DecideApprovalRenderSurface]decideApprovalResponseDispatchPolicy) projectiondispatch.PolicyRegistry[DecideApprovalRenderSurface, decideApprovalResponseDispatchPolicy] {
 	return projectiondispatch.NewPolicyRegistry(policies)
 }
+
+func newDefaultDecideApprovalResponseDispatchPolicyRegistry() projectiondispatch.PolicyRegistry[DecideApprovalRenderSurface, decideApprovalResponseDispatchPolicy] {
+	return projectiondispatch.NewHTTPMCPIdentityPolicyRegistry(
+		DecideApprovalRenderSurfaceHTTP,
+		decideApprovalResponseDispatchPolicy(projectiondispatch.PolicyFunc[*DecideApprovalProjection, DecideApprovalResponseDispatchWriter](dispatchDecideApprovalResponseHTTP)),
+		DecideApprovalRenderSurfaceMCP,
+		decideApprovalResponseDispatchPolicy(projectiondispatch.PolicyFunc[*DecideApprovalProjection, DecideApprovalResponseDispatchWriter](dispatchDecideApprovalResponseMCP)),
+	)
+}

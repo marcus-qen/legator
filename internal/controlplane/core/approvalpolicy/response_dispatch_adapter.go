@@ -15,10 +15,7 @@ type DecideApprovalResponseDispatchWriter struct {
 
 type decideApprovalResponseDispatchPolicy = projectiondispatch.Policy[*DecideApprovalProjection, DecideApprovalResponseDispatchWriter]
 
-var defaultDecideApprovalResponseDispatchPolicyRegistry = newDecideApprovalResponseDispatchPolicyRegistry(map[DecideApprovalRenderSurface]decideApprovalResponseDispatchPolicy{
-	DecideApprovalRenderSurfaceHTTP: projectiondispatch.PolicyFunc[*DecideApprovalProjection, DecideApprovalResponseDispatchWriter](dispatchDecideApprovalResponseHTTP),
-	DecideApprovalRenderSurfaceMCP:  projectiondispatch.PolicyFunc[*DecideApprovalProjection, DecideApprovalResponseDispatchWriter](dispatchDecideApprovalResponseMCP),
-})
+var defaultDecideApprovalResponseDispatchPolicyRegistry = newDefaultDecideApprovalResponseDispatchPolicyRegistry()
 
 // DispatchDecideApprovalResponseForSurface dispatches the shared decide
 // projection to transport writers using centralized surface normalization.
