@@ -76,6 +76,25 @@ When a command is queued or denied, `POST /api/v1/probes/{id}/command` now inclu
   - `capacity` signal snapshot (when available)
   - `indicators[]` with `drove_outcome` to show which signals triggered the decision
 
+## Stage 2.3 operator explainability panel
+
+The approvals workflow now renders Stage 2.2 rationale fields directly in the operator UI (`/approvals`):
+
+- Human-readable summary (`policy_rationale.summary`)
+- Decision badge (`policy_decision`)
+- Capacity indicators (availability, datasource count, coverage percentages)
+- Indicator list highlighting which signals **drove** the final outcome
+- Expandable machine-readable JSON rationale block for precise triage/export
+
+### Approval payload continuity
+
+Queued approvals now persist the same additive explainability fields already emitted by command dispatch responses:
+
+- `policy_decision`
+- `policy_rationale`
+
+This is additive-only and does not change existing approval route contracts.
+
 ## Example
 
 ```bash

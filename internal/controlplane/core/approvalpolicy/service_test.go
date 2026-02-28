@@ -71,6 +71,16 @@ func TestSubmitCommandApproval_Required(t *testing.T) {
 	if req.RiskLevel != "high" {
 		t.Fatalf("expected risk=high, got %s", req.RiskLevel)
 	}
+	if req.PolicyDecision != string(CommandPolicyDecisionQueue) {
+		t.Fatalf("expected policy decision queue, got %q", req.PolicyDecision)
+	}
+	rationale, ok := req.PolicyRationale.(CommandPolicyRationale)
+	if !ok {
+		t.Fatalf("expected typed policy rationale, got %T", req.PolicyRationale)
+	}
+	if rationale.Summary == "" {
+		t.Fatal("expected rationale summary on approval request")
+	}
 	if queue.PendingCount() != 1 {
 		t.Fatalf("expected 1 pending approval, got %d", queue.PendingCount())
 	}
@@ -129,6 +139,16 @@ func TestSubmitCommandApprovalWithContext_CapacityLimitedQueuesLowRisk(t *testin
 	}
 	if result.Request == nil {
 		t.Fatal("expected approval request for queue outcome")
+	}
+	if result.Request.PolicyDecision != string(CommandPolicyDecisionQueue) {
+		t.Fatalf("expected queued request policy_decision=queue, got %q", result.Request.PolicyDecision)
+	}
+	rationale, ok := result.Request.PolicyRationale.(CommandPolicyRationale)
+	if !ok {
+		t.Fatalf("expected typed policy rationale on queued request, got %T", result.Request.PolicyRationale)
+	}
+	if rationale.Capacity == nil || rationale.Capacity.Availability != "limited" {
+		t.Fatalf("expected queued rationale capacity availability=limited, got %+v", rationale.Capacity)
 	}
 	if queue.PendingCount() != 1 {
 		t.Fatalf("expected 1 pending approval, got %d", queue.PendingCount())

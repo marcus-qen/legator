@@ -599,6 +599,66 @@ textarea {
   overflow: auto;
 }
 
+.policy-explainability {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.policy-summary {
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.policy-capacity-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.policy-indicators {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.policy-indicator {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-2);
+  padding: 7px 8px;
+  display: grid;
+  gap: 4px;
+}
+
+.policy-indicator-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.policy-indicator-name {
+  font-weight: 600;
+}
+
+.policy-indicator-meta,
+.policy-indicator-message,
+.policy-thresholds {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.policy-machine summary {
+  cursor: pointer;
+  color: var(--fg-1);
+}
+
+.policy-machine-json {
+  margin-top: 8px;
+}
+
 .chat-input {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

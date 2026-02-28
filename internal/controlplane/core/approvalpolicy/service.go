@@ -18,6 +18,7 @@ var (
 
 type approvalQueue interface {
 	Submit(probeID string, cmd *protocol.CommandPayload, reason, riskLevel, requester string) (*approval.Request, error)
+	SubmitWithPolicyDetails(probeID string, cmd *protocol.CommandPayload, reason, riskLevel, requester, policyDecision string, policyRationale any) (*approval.Request, error)
 	Decide(id string, decision approval.Decision, decidedBy string) (*approval.Request, error)
 	WaitForDecision(id string, timeout time.Duration) (*approval.Request, error)
 }
@@ -179,7 +180,15 @@ func (s *Service) SubmitCommandApprovalWithContext(ctx context.Context, probeID 
 		return result, nil
 	}
 
-	req, err := s.approvals.Submit(probeID, cmd, reason, decision.RiskLevel, requester)
+	req, err := s.approvals.SubmitWithPolicyDetails(
+		probeID,
+		cmd,
+		reason,
+		decision.RiskLevel,
+		requester,
+		string(decision.Outcome),
+		decision.Rationale,
+	)
 	if err != nil {
 		return result, err
 	}

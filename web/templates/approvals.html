@@ -27,6 +27,15 @@
   const decidedBy = {{if .CurrentUser}}"{{.CurrentUser.Username}}"{{else}}"operator"{{end}};
   const canDecide = {{if hasPermission .CurrentUser "approval:write"}}true{{else}}false{{end}};
 
+  function esc(value) {
+    return String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
   function riskClass(risk) {
     const r = (risk || '').toLowerCase();
     if (r === 'high' || r === 'critical') return 'tag-offline';
@@ -34,9 +43,29 @@
     return 'tag-online';
   }
 
+  function explainabilityDecisionClass(decision) {
+    const normalized = String(decision || '').toLowerCase();
+    if (normalized === 'deny') return 'tag-offline';
+    if (normalized === 'queue') return 'tag-degraded';
+    return 'tag-online';
+  }
+
+  function explainabilitySeverityClass(severity) {
+    const normalized = String(severity || '').toLowerCase();
+    if (normalized === 'critical' || normalized === 'error') return 'tag-offline';
+    if (normalized === 'warn' || normalized === 'warning') return 'tag-degraded';
+    return 'tag-online';
+  }
+
   function fmtTime(value) {
     if (!value) return '—';
     return new Date(value).toLocaleString();
+  }
+
+  function fmtPercent(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '—';
+    return (num * 100).toFixed(0) + '%';
   }
 
   function notify(message, ok) {
@@ -75,6 +104,95 @@
 
   window.approvalsDecide = decide;
 
+  function renderPolicyExplainability(approval) {
+    const decision = String(approval.policy_decision || 'queue').toLowerCase();
+    const rationale = approval && typeof approval.policy_rationale === 'object' && approval.policy_rationale
+      ? approval.policy_rationale
+      : null;
+
+    if (!rationale) {
+      return '<section class="panel policy-explainability"><div class="muted">No policy rationale captured for this request.</div></section>';
+    }
+
+    const summary = rationale.summary || `${decision.toUpperCase()} decision`;
+    const indicators = Array.isArray(rationale.indicators) ? rationale.indicators : [];
+    const drivers = indicators.filter((item) => item && item.drove_outcome);
+    const capacity = rationale.capacity && typeof rationale.capacity === 'object' ? rationale.capacity : null;
+    const thresholds = rationale.thresholds && typeof rationale.thresholds === 'object' ? rationale.thresholds : null;
+
+    const indicatorRows = indicators.length
+      ? indicators.map((indicator) => {
+          const name = esc(indicator.name || 'indicator');
+          const severity = String(indicator.severity || 'info').toUpperCase();
+          const message = esc(indicator.message || '');
+          const source = esc(indicator.source || 'policy');
+          const effect = esc(indicator.effect || 'none');
+          const value = esc(indicator.value === undefined ? '—' : JSON.stringify(indicator.value));
+          const threshold = esc(indicator.threshold === undefined ? '—' : JSON.stringify(indicator.threshold));
+          const comparator = esc(indicator.comparator || '');
+          const drove = indicator.drove_outcome ? '<span class="tag tag-degraded">drove outcome</span>' : '<span class="muted">supporting signal</span>';
+
+          return `
+            <li class="policy-indicator">
+              <div class="policy-indicator-head">
+                <span class="policy-indicator-name">${name}</span>
+                <span class="tag ${explainabilitySeverityClass(indicator.severity)}">${esc(severity)}</span>
+                ${drove}
+              </div>
+              <div class="policy-indicator-meta muted">source=${source}${comparator ? ` · check: value ${comparator} threshold` : ''} · effect=${effect}</div>
+              <div class="policy-indicator-meta muted">value=${value} · threshold=${threshold}</div>
+              ${message ? `<div class="policy-indicator-message">${message}</div>` : ''}
+            </li>
+          `;
+        }).join('')
+      : '<li class="muted">No indicator details provided.</li>';
+
+    const capacityHtml = capacity
+      ? `
+        <div class="policy-capacity-grid">
+          <span class="tag">availability ${esc(String(capacity.availability || 'unknown').toUpperCase())}</span>
+          <span class="tag">datasources ${esc(String(capacity.datasource_count ?? '—'))}</span>
+          <span class="tag">dashboards ${esc(fmtPercent(capacity.dashboard_coverage))}</span>
+          <span class="tag">queries ${esc(fmtPercent(capacity.query_coverage))}</span>
+          <span class="tag">partial ${capacity.partial ? 'true' : 'false'}</span>
+        </div>
+      `
+      : '<div class="muted">No capacity snapshot was attached (fallback or risk-only path).</div>';
+
+    const thresholdHtml = thresholds
+      ? `
+        <div class="muted policy-thresholds">
+          thresholds → datasources ≥ ${esc(String(thresholds.min_datasource_count ?? '—'))},
+          dashboard coverage ≥ ${esc(fmtPercent(thresholds.min_dashboard_coverage))},
+          query coverage ≥ ${esc(fmtPercent(thresholds.min_query_coverage))}
+        </div>
+      `
+      : '';
+
+    const machinePayload = {
+      policy_decision: decision,
+      policy_rationale: rationale,
+    };
+
+    return `
+      <section class="panel policy-explainability" data-testid="policy-explainability">
+        <div class="panel-header">
+          <h3 class="panel-title">Policy explainability</h3>
+          <span class="tag ${explainabilityDecisionClass(decision)}">${esc(decision.toUpperCase())}</span>
+        </div>
+        <div class="policy-summary">${esc(summary)}</div>
+        ${drivers.length ? `<div class="muted">Drivers: ${drivers.map((d) => esc(d.name || d.message || 'indicator')).join(', ')}</div>` : ''}
+        ${capacityHtml}
+        ${thresholdHtml}
+        <ul class="policy-indicators">${indicatorRows}</ul>
+        <details class="policy-machine">
+          <summary>Machine-readable rationale</summary>
+          <pre class="chat-code policy-machine-json">${esc(JSON.stringify(machinePayload, null, 2))}</pre>
+        </details>
+      </section>
+    `;
+  }
+
   function render(items) {
     const list = document.getElementById('approvals-list');
     const empty = document.getElementById('empty-state');
@@ -91,20 +209,22 @@
     empty.classList.add('hidden');
     list.innerHTML = pending.map((approval) => {
       const risk = approval.risk_level || approval.risk || 'unknown';
+      const commandPayload = esc(JSON.stringify(approval.command || approval.task || approval, null, 2));
       return `
         <article class="panel">
           <div class="panel-header">
-            <h2 class="panel-title"><span class="tag ${riskClass(risk)}">${String(risk).toUpperCase()}</span> ${approval.probe_id || 'unknown probe'}</h2>
-            <span class="panel-sub">${fmtTime(approval.created_at || approval.submitted_at)}</span>
+            <h2 class="panel-title"><span class="tag ${riskClass(risk)}">${esc(String(risk).toUpperCase())}</span> ${esc(approval.probe_id || 'unknown probe')}</h2>
+            <span class="panel-sub">${esc(fmtTime(approval.created_at || approval.submitted_at))}</span>
           </div>
-          <pre class="chat-code">${JSON.stringify(approval.command || approval.task || approval, null, 2)}</pre>
+          <pre class="chat-code">${commandPayload}</pre>
+          ${renderPolicyExplainability(approval)}
           <div class="actions-row">
             ${canDecide
               ? `<button class="btn btn-primary" onclick="approvalsDecide('${approval.id}','approved')">Approve</button>
                  <button class="btn btn-danger" onclick="approvalsDecide('${approval.id}','denied')">Deny</button>`
               : '<span class="muted">Read-only access</span>'}
           </div>
-          <div class="muted">Approval ID: <span class="id-text">${approval.id}</span></div>
+          <div class="muted">Approval ID: <span class="id-text">${esc(approval.id)}</span></div>
         </article>
       `;
     }).join('');

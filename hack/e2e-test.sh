@@ -444,6 +444,20 @@ else
   fail "Expected at least 1 pending approval, got $PENDING_COUNT"
 fi
 
+PENDING_EXPLAINABILITY=$(echo "$PENDING_APPROVALS" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('approvals',[]); first=items[0] if items else {}; rationale=first.get('policy_rationale') or {}; indicators=rationale.get('indicators') if isinstance(rationale, dict) else []; ok=first.get('policy_decision')=='queue' and isinstance(rationale, dict) and bool(rationale.get('summary')) and isinstance(indicators, list) and len(indicators)>0; print('ok' if ok else 'bad')" 2>/dev/null || echo "bad")
+if [[ "$PENDING_EXPLAINABILITY" == "ok" ]]; then
+  pass "Pending approval exposes policy_decision + policy_rationale for operator explainability"
+else
+  fail "Pending approval explainability payload missing or incomplete: $PENDING_APPROVALS"
+fi
+
+APPROVALS_PAGE=$(curl -sf "$CP_URL/approvals")
+if echo "$APPROVALS_PAGE" | grep -q "Policy explainability"; then
+  pass "Approvals UI includes explainability panel"
+else
+  fail "Approvals UI missing explainability panel marker"
+fi
+
 # 14. Approval queue — deny the request
 echo ""
 echo "14. Denying approval request..."
