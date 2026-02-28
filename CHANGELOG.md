@@ -98,6 +98,9 @@
 - **Kernel split S42 (domain dispatch policy-registry constructors)**
   - Added tiny approval + command constructors for dispatch policy registries so adapters declare explicit HTTP/MCP policy intent without inline `NewPolicyRegistry(...)` setup call-shapes.
   - Replaced remaining inline adapter registry wiring in approval response + command dispatch/read/invoke adapters and added strict constructor-vs-legacy setup parity tests to preserve resolve-vs-unsupported branching, HTTP-first/MCP-fallback outcomes, and command handled-flag behavior.
+- **Kernel split S43 (surface-registry constructor split completion)**
+  - Added tiny constructors for the remaining approval render-target registry + command projection surface registries used by resolver hooks, replacing the last inline `NewPolicyRegistry(...)` setup call-shapes in those areas.
+  - Added strict constructor-vs-legacy parity tests covering resolver hit/miss behavior plus unsupported fallback paths (including HTTP-first/MCP-fallback semantics).
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
 - **Kernel split S13 (approval decide render-target registry boundary)**

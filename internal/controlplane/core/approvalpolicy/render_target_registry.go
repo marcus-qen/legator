@@ -3,7 +3,6 @@ package approvalpolicy
 import (
 	"io"
 
-	"github.com/marcus-qen/legator/internal/controlplane/core/projectiondispatch"
 	"github.com/marcus-qen/legator/internal/controlplane/core/transportwriter"
 )
 
@@ -16,7 +15,7 @@ const (
 	DecideApprovalRenderSurfaceMCP  DecideApprovalRenderSurface = "mcp"
 )
 
-var defaultDecideApprovalRenderTargetRegistry = projectiondispatch.NewPolicyRegistry(map[DecideApprovalRenderSurface]DecideApprovalRenderTarget{
+var defaultDecideApprovalRenderTargetRegistry = newDecideApprovalRenderTargetRegistry(map[DecideApprovalRenderSurface]DecideApprovalRenderTarget{
 	DecideApprovalRenderSurfaceHTTP: DecideApprovalRenderTargetHTTP,
 	DecideApprovalRenderSurfaceMCP:  DecideApprovalRenderTargetMCP,
 })
