@@ -42,6 +42,12 @@ func NewStore(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("open jobs db: %w", err)
 	}
 
+	// SQLite pragmas (busy_timeout, WAL) are connection-scoped with modernc.
+	// Keep a single pooled connection to ensure deterministic write behavior
+	// under concurrent scheduler/result goroutines.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("set WAL: %w", err)
