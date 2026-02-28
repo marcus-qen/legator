@@ -398,4 +398,59 @@ func TestStoreRaceCompleteVsCancelOnlyOneWins(t *testing.T) {
 	}
 }
 
+func TestStorePersistsRetryPolicyAndAttemptMetadata(t *testing.T) {
+	store := newTestStore(t)
+	job, err := store.CreateJob(Job{
+		Name:     "retry-meta",
+		Command:  "false",
+		Schedule: "1h",
+		Target:   Target{Kind: TargetKindProbe, Value: "probe-1"},
+		RetryPolicy: &RetryPolicy{
+			MaxAttempts:    5,
+			InitialBackoff: "3s",
+			Multiplier:     2.5,
+			MaxBackoff:     "20s",
+		},
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if job.RetryPolicy == nil || job.RetryPolicy.MaxAttempts != 5 {
+		t.Fatalf("expected retry policy to persist, got %#v", job.RetryPolicy)
+	}
+
+	run, err := store.RecordRunStart(JobRun{
+		JobID:            job.ID,
+		ProbeID:          "probe-1",
+		RequestID:        "retry-meta-attempt-2",
+		ExecutionID:      "exec-1",
+		Attempt:          2,
+		MaxAttempts:      5,
+		Status:           RunStatusRunning,
+		RetryScheduledAt: nil,
+	})
+	if err != nil {
+		t.Fatalf("record run: %v", err)
+	}
+	retryAt := time.Now().UTC().Add(5 * time.Second)
+	if err := store.CompleteRunWithRetry(run.ID, RunStatusFailed, intPtr(1), "boom", &retryAt); err != nil {
+		t.Fatalf("complete run with retry: %v", err)
+	}
+
+	storedRun, err := store.GetRun(run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if storedRun.Attempt != 2 || storedRun.MaxAttempts != 5 {
+		t.Fatalf("unexpected attempt metadata: attempt=%d max=%d", storedRun.Attempt, storedRun.MaxAttempts)
+	}
+	if storedRun.ExecutionID != "exec-1" {
+		t.Fatalf("unexpected execution id: %s", storedRun.ExecutionID)
+	}
+	if storedRun.RetryScheduledAt == nil {
+		t.Fatal("expected retry_scheduled_at to be stored")
+	}
+}
+
 func intPtr(v int) *int { return &v }

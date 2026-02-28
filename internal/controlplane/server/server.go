@@ -470,7 +470,20 @@ func (s *Server) initJobs() {
 	}
 
 	s.jobsStore = store
-	s.jobsScheduler = jobs.NewScheduler(store, s.hub, s.fleetMgr, s.cmdTracker, s.logger.Named("jobs"))
+	retryPolicy := jobs.RetryPolicy{
+		MaxAttempts:    s.cfg.Jobs.RetryMaxAttempts,
+		InitialBackoff: s.cfg.Jobs.RetryInitialBackoff,
+		Multiplier:     s.cfg.Jobs.RetryMultiplier,
+		MaxBackoff:     s.cfg.Jobs.RetryMaxBackoff,
+	}
+	s.jobsScheduler = jobs.NewScheduler(
+		store,
+		s.hub,
+		s.fleetMgr,
+		s.cmdTracker,
+		s.logger.Named("jobs"),
+		jobs.WithDefaultRetryPolicy(retryPolicy),
+	)
 	s.jobsHandler = jobs.NewHandler(store, s.jobsScheduler)
 	s.logger.Info("jobs scheduler initialized", zap.String("path", jobsDBPath))
 }

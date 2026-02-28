@@ -62,42 +62,60 @@ func NewStore(dbPath string) (*Store, error) {
 	}
 
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS jobs (
-		id           TEXT PRIMARY KEY,
-		name         TEXT NOT NULL,
-		command      TEXT NOT NULL,
-		schedule     TEXT NOT NULL,
-		target_kind  TEXT NOT NULL,
-		target_value TEXT NOT NULL DEFAULT '',
-		enabled      INTEGER NOT NULL DEFAULT 1,
-		created_at   TEXT NOT NULL,
-		updated_at   TEXT NOT NULL,
-		last_run_at  TEXT,
-		last_status  TEXT NOT NULL DEFAULT ''
+		id                    TEXT PRIMARY KEY,
+		name                  TEXT NOT NULL,
+		command               TEXT NOT NULL,
+		schedule              TEXT NOT NULL,
+		target_kind           TEXT NOT NULL,
+		target_value          TEXT NOT NULL DEFAULT '',
+		retry_max_attempts    INTEGER,
+		retry_initial_backoff TEXT,
+		retry_multiplier      REAL,
+		retry_max_backoff     TEXT,
+		enabled               INTEGER NOT NULL DEFAULT 1,
+		created_at            TEXT NOT NULL,
+		updated_at            TEXT NOT NULL,
+		last_run_at           TEXT,
+		last_status           TEXT NOT NULL DEFAULT ''
 	)`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("create jobs table: %w", err)
 	}
 
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS job_runs (
-		id         TEXT PRIMARY KEY,
-		job_id     TEXT NOT NULL,
-		probe_id   TEXT NOT NULL,
-		request_id TEXT NOT NULL,
-		started_at TEXT NOT NULL,
-		ended_at   TEXT,
-		status     TEXT NOT NULL,
-		exit_code  INTEGER,
-		output     TEXT NOT NULL DEFAULT '',
+		id                 TEXT PRIMARY KEY,
+		job_id             TEXT NOT NULL,
+		probe_id           TEXT NOT NULL,
+		request_id         TEXT NOT NULL,
+		execution_id       TEXT NOT NULL DEFAULT '',
+		attempt            INTEGER NOT NULL DEFAULT 1,
+		max_attempts       INTEGER NOT NULL DEFAULT 1,
+		retry_scheduled_at TEXT,
+		started_at         TEXT NOT NULL,
+		ended_at           TEXT,
+		status             TEXT NOT NULL,
+		exit_code          INTEGER,
+		output             TEXT NOT NULL DEFAULT '',
 		FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
 	)`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("create job_runs table: %w", err)
 	}
 
+	if err := ensureJobColumns(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := ensureRunColumns(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_enabled ON jobs(enabled)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_updated_at ON jobs(updated_at)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_job_runs_job_started ON job_runs(job_id, started_at DESC)`)
 	_, _ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_job_runs_request_id ON job_runs(request_id)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_job_runs_execution_attempt ON job_runs(execution_id, attempt)`)
 
 	s := &Store{db: db}
 	if err := s.pruneRunsOlderThan(runRetention); err != nil {
@@ -106,6 +124,79 @@ func NewStore(dbPath string) (*Store, error) {
 	}
 
 	return s, nil
+}
+
+func ensureJobColumns(db *sql.DB) error {
+	if err := ensureColumn(db, "jobs", "retry_max_attempts", "retry_max_attempts INTEGER"); err != nil {
+		return fmt.Errorf("add jobs.retry_max_attempts: %w", err)
+	}
+	if err := ensureColumn(db, "jobs", "retry_initial_backoff", "retry_initial_backoff TEXT"); err != nil {
+		return fmt.Errorf("add jobs.retry_initial_backoff: %w", err)
+	}
+	if err := ensureColumn(db, "jobs", "retry_multiplier", "retry_multiplier REAL"); err != nil {
+		return fmt.Errorf("add jobs.retry_multiplier: %w", err)
+	}
+	if err := ensureColumn(db, "jobs", "retry_max_backoff", "retry_max_backoff TEXT"); err != nil {
+		return fmt.Errorf("add jobs.retry_max_backoff: %w", err)
+	}
+	return nil
+}
+
+func ensureRunColumns(db *sql.DB) error {
+	if err := ensureColumn(db, "job_runs", "execution_id", "execution_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("add job_runs.execution_id: %w", err)
+	}
+	if err := ensureColumn(db, "job_runs", "attempt", "attempt INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return fmt.Errorf("add job_runs.attempt: %w", err)
+	}
+	if err := ensureColumn(db, "job_runs", "max_attempts", "max_attempts INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return fmt.Errorf("add job_runs.max_attempts: %w", err)
+	}
+	if err := ensureColumn(db, "job_runs", "retry_scheduled_at", "retry_scheduled_at TEXT"); err != nil {
+		return fmt.Errorf("add job_runs.retry_scheduled_at: %w", err)
+	}
+	return nil
+}
+
+func ensureColumn(db *sql.DB, table, column, definition string) error {
+	exists, err := hasColumn(db, table, column)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	_, err = db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s", table, definition))
+	return err
+}
+
+func hasColumn(db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			cid       int
+			name      string
+			typeName  string
+			notNull   int
+			defaultV  sql.NullString
+			primaryKV int
+		)
+		if err := rows.Scan(&cid, &name, &typeName, &notNull, &defaultV, &primaryKV); err != nil {
+			return false, err
+		}
+		if strings.EqualFold(name, column) {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 // Close closes the underlying database.
@@ -136,14 +227,18 @@ func (s *Store) CreateJob(job Job) (*Job, error) {
 		enabled = 1
 	}
 
-	_, err := s.db.Exec(`INSERT INTO jobs (id, name, command, schedule, target_kind, target_value, enabled, created_at, updated_at, last_run_at, last_status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err := s.db.Exec(`INSERT INTO jobs (id, name, command, schedule, target_kind, target_value, retry_max_attempts, retry_initial_backoff, retry_multiplier, retry_max_backoff, enabled, created_at, updated_at, last_run_at, last_status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID,
 		strings.TrimSpace(job.Name),
 		strings.TrimSpace(job.Command),
 		strings.TrimSpace(job.Schedule),
 		job.Target.Kind,
 		job.Target.Value,
+		nullableRetryMaxAttempts(job.RetryPolicy),
+		nullableRetryDuration(job.RetryPolicy, func(p *RetryPolicy) string { return p.InitialBackoff }),
+		nullableRetryMultiplier(job.RetryPolicy),
+		nullableRetryDuration(job.RetryPolicy, func(p *RetryPolicy) string { return p.MaxBackoff }),
 		enabled,
 		job.CreatedAt.Format(time.RFC3339Nano),
 		job.UpdatedAt.Format(time.RFC3339Nano),
@@ -174,13 +269,17 @@ func (s *Store) UpdateJob(job Job) (*Job, error) {
 	}
 
 	res, err := s.db.Exec(`UPDATE jobs
-		SET name = ?, command = ?, schedule = ?, target_kind = ?, target_value = ?, enabled = ?, updated_at = ?, last_status = ?
+		SET name = ?, command = ?, schedule = ?, target_kind = ?, target_value = ?, retry_max_attempts = ?, retry_initial_backoff = ?, retry_multiplier = ?, retry_max_backoff = ?, enabled = ?, updated_at = ?, last_status = ?
 		WHERE id = ?`,
 		strings.TrimSpace(job.Name),
 		strings.TrimSpace(job.Command),
 		strings.TrimSpace(job.Schedule),
 		job.Target.Kind,
 		job.Target.Value,
+		nullableRetryMaxAttempts(job.RetryPolicy),
+		nullableRetryDuration(job.RetryPolicy, func(p *RetryPolicy) string { return p.InitialBackoff }),
+		nullableRetryMultiplier(job.RetryPolicy),
+		nullableRetryDuration(job.RetryPolicy, func(p *RetryPolicy) string { return p.MaxBackoff }),
 		enabled,
 		now.Format(time.RFC3339Nano),
 		strings.TrimSpace(job.LastStatus),
@@ -223,14 +322,14 @@ func (s *Store) SetEnabled(id string, enabled bool) (*Job, error) {
 
 // GetJob returns one job by id.
 func (s *Store) GetJob(id string) (*Job, error) {
-	row := s.db.QueryRow(`SELECT id, name, command, schedule, target_kind, target_value, enabled, created_at, updated_at, last_run_at, last_status
+	row := s.db.QueryRow(`SELECT id, name, command, schedule, target_kind, target_value, retry_max_attempts, retry_initial_backoff, retry_multiplier, retry_max_backoff, enabled, created_at, updated_at, last_run_at, last_status
 		FROM jobs WHERE id = ?`, id)
 	return scanJob(row)
 }
 
 // ListJobs returns all jobs sorted by updated time (newest first).
 func (s *Store) ListJobs() ([]Job, error) {
-	rows, err := s.db.Query(`SELECT id, name, command, schedule, target_kind, target_value, enabled, created_at, updated_at, last_run_at, last_status
+	rows, err := s.db.Query(`SELECT id, name, command, schedule, target_kind, target_value, retry_max_attempts, retry_initial_backoff, retry_multiplier, retry_max_backoff, enabled, created_at, updated_at, last_run_at, last_status
 		FROM jobs ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
@@ -277,6 +376,15 @@ func (s *Store) RecordRunStart(run JobRun) (*JobRun, error) {
 	if run.ID == "" {
 		run.ID = uuid.NewString()
 	}
+	if run.ExecutionID = strings.TrimSpace(run.ExecutionID); run.ExecutionID == "" {
+		run.ExecutionID = run.ID
+	}
+	if run.Attempt <= 0 {
+		run.Attempt = 1
+	}
+	if run.MaxAttempts <= 0 {
+		run.MaxAttempts = run.Attempt
+	}
 	if run.StartedAt.IsZero() {
 		run.StartedAt = now
 	}
@@ -293,12 +401,16 @@ func (s *Store) RecordRunStart(run JobRun) (*JobRun, error) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	_, err = tx.Exec(`INSERT INTO job_runs (id, job_id, probe_id, request_id, started_at, ended_at, status, exit_code, output)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err = tx.Exec(`INSERT INTO job_runs (id, job_id, probe_id, request_id, execution_id, attempt, max_attempts, retry_scheduled_at, started_at, ended_at, status, exit_code, output)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		run.ID,
 		run.JobID,
 		run.ProbeID,
 		run.RequestID,
+		run.ExecutionID,
+		run.Attempt,
+		run.MaxAttempts,
+		nullableTime(run.RetryScheduledAt),
 		run.StartedAt.UTC().Format(time.RFC3339Nano),
 		nullableTime(run.EndedAt),
 		run.Status,
@@ -333,11 +445,16 @@ func (s *Store) MarkRunRunning(runID string) error {
 	if runID == "" {
 		return fmt.Errorf("run id required")
 	}
-	return s.transitionRun(runID, []string{RunStatusPending}, RunStatusRunning, nil, "", false)
+	return s.transitionRun(runID, []string{RunStatusPending}, RunStatusRunning, nil, "", false, nil)
 }
 
 // CompleteRun finalizes a previously recorded job run.
 func (s *Store) CompleteRun(runID, status string, exitCode *int, output string) error {
+	return s.CompleteRunWithRetry(runID, status, exitCode, output, nil)
+}
+
+// CompleteRunWithRetry finalizes a run and optionally records when a retry is scheduled.
+func (s *Store) CompleteRunWithRetry(runID, status string, exitCode *int, output string, retryScheduledAt *time.Time) error {
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
 		return fmt.Errorf("run id required")
@@ -347,7 +464,7 @@ func (s *Store) CompleteRun(runID, status string, exitCode *int, output string) 
 		return fmt.Errorf("status must be success or failed")
 	}
 
-	return s.transitionRun(runID, []string{RunStatusRunning}, status, exitCode, output, true)
+	return s.transitionRun(runID, []string{RunStatusRunning}, status, exitCode, output, true, retryScheduledAt)
 }
 
 // CancelRun transitions a run from pending/running to canceled.
@@ -360,12 +477,12 @@ func (s *Store) CancelRun(runID, reason string) error {
 	if reason == "" {
 		reason = "run canceled"
 	}
-	return s.transitionRun(runID, []string{RunStatusPending, RunStatusRunning}, RunStatusCanceled, nil, reason, true)
+	return s.transitionRun(runID, []string{RunStatusPending, RunStatusRunning}, RunStatusCanceled, nil, reason, true, nil)
 }
 
 // GetRun returns one run by id.
 func (s *Store) GetRun(id string) (*JobRun, error) {
-	row := s.db.QueryRow(`SELECT id, job_id, probe_id, request_id, started_at, ended_at, status, exit_code, output
+	row := s.db.QueryRow(`SELECT id, job_id, probe_id, request_id, execution_id, attempt, max_attempts, retry_scheduled_at, started_at, ended_at, status, exit_code, output
 		FROM job_runs WHERE id = ?`, id)
 	return scanRun(row)
 }
@@ -377,7 +494,7 @@ func (s *Store) ListActiveRunsByJob(jobID string) ([]JobRun, error) {
 		return nil, fmt.Errorf("job id required")
 	}
 
-	rows, err := s.db.Query(`SELECT id, job_id, probe_id, request_id, started_at, ended_at, status, exit_code, output
+	rows, err := s.db.Query(`SELECT id, job_id, probe_id, request_id, execution_id, attempt, max_attempts, retry_scheduled_at, started_at, ended_at, status, exit_code, output
 		FROM job_runs
 		WHERE job_id = ? AND status IN (?, ?)
 		ORDER BY started_at DESC`, jobID, RunStatusPending, RunStatusRunning)
@@ -397,7 +514,7 @@ func (s *Store) ListActiveRunsByJob(jobID string) ([]JobRun, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) transitionRun(runID string, fromStatuses []string, toStatus string, exitCode *int, output string, setEndedAt bool) error {
+func (s *Store) transitionRun(runID string, fromStatuses []string, toStatus string, exitCode *int, output string, setEndedAt bool, retryScheduledAt *time.Time) error {
 	if !isKnownRunStatus(toStatus) {
 		return fmt.Errorf("invalid status: %s", toStatus)
 	}
@@ -445,13 +562,15 @@ func (s *Store) transitionRun(runID string, fromStatuses []string, toStatus stri
 		SET ended_at = COALESCE(?, ended_at),
 			status = ?,
 			exit_code = COALESCE(?, exit_code),
-			output = CASE WHEN ? THEN ? ELSE output END
+			output = CASE WHEN ? THEN ? ELSE output END,
+			retry_scheduled_at = ?
 		WHERE id = ? AND status = ?`,
 		endedAtValue,
 		toStatus,
 		nullableInt(exitCode),
 		outputValue.Valid,
 		outputValue.String,
+		nullableTime(retryScheduledAt),
 		runID,
 		current,
 	)
@@ -561,7 +680,7 @@ func (s *Store) ListRuns(query RunQuery) ([]JobRun, error) {
 		args = append(args, query.StartedBefore.UTC().Format(time.RFC3339Nano))
 	}
 
-	stmt := `SELECT id, job_id, probe_id, request_id, started_at, ended_at, status, exit_code, output FROM job_runs`
+	stmt := `SELECT id, job_id, probe_id, request_id, execution_id, attempt, max_attempts, retry_scheduled_at, started_at, ended_at, status, exit_code, output FROM job_runs`
 	if len(clauses) > 0 {
 		stmt += ` WHERE ` + strings.Join(clauses, " AND ")
 	}
@@ -612,6 +731,10 @@ func scanJob(s scanner) (*Job, error) {
 		enabled              int
 		createdAt, updatedAt string
 		lastRunAt            sql.NullString
+		retryMaxAttempts     sql.NullInt64
+		retryInitialBackoff  sql.NullString
+		retryMultiplier      sql.NullFloat64
+		retryMaxBackoff      sql.NullString
 	)
 
 	if err := s.Scan(
@@ -621,6 +744,10 @@ func scanJob(s scanner) (*Job, error) {
 		&job.Schedule,
 		&job.Target.Kind,
 		&job.Target.Value,
+		&retryMaxAttempts,
+		&retryInitialBackoff,
+		&retryMultiplier,
+		&retryMaxBackoff,
 		&enabled,
 		&createdAt,
 		&updatedAt,
@@ -628,6 +755,23 @@ func scanJob(s scanner) (*Job, error) {
 		&job.LastStatus,
 	); err != nil {
 		return nil, err
+	}
+
+	if retryMaxAttempts.Valid || retryInitialBackoff.Valid || retryMultiplier.Valid || retryMaxBackoff.Valid {
+		rp := &RetryPolicy{}
+		if retryMaxAttempts.Valid {
+			rp.MaxAttempts = int(retryMaxAttempts.Int64)
+		}
+		if retryInitialBackoff.Valid {
+			rp.InitialBackoff = retryInitialBackoff.String
+		}
+		if retryMultiplier.Valid {
+			rp.Multiplier = retryMultiplier.Float64
+		}
+		if retryMaxBackoff.Valid {
+			rp.MaxBackoff = retryMaxBackoff.String
+		}
+		job.RetryPolicy = rp
 	}
 
 	job.Enabled = enabled == 1
@@ -644,10 +788,11 @@ func scanJob(s scanner) (*Job, error) {
 
 func scanRun(s scanner) (*JobRun, error) {
 	var (
-		run       JobRun
-		startedAt string
-		endedAt   sql.NullString
-		exitCode  sql.NullInt64
+		run              JobRun
+		startedAt        string
+		endedAt          sql.NullString
+		retryScheduledAt sql.NullString
+		exitCode         sql.NullInt64
 	)
 
 	if err := s.Scan(
@@ -655,6 +800,10 @@ func scanRun(s scanner) (*JobRun, error) {
 		&run.JobID,
 		&run.ProbeID,
 		&run.RequestID,
+		&run.ExecutionID,
+		&run.Attempt,
+		&run.MaxAttempts,
+		&retryScheduledAt,
 		&startedAt,
 		&endedAt,
 		&run.Status,
@@ -665,6 +814,12 @@ func scanRun(s scanner) (*JobRun, error) {
 	}
 
 	run.StartedAt, _ = time.Parse(time.RFC3339Nano, startedAt)
+	if retryScheduledAt.Valid && retryScheduledAt.String != "" {
+		ts, err := time.Parse(time.RFC3339Nano, retryScheduledAt.String)
+		if err == nil {
+			run.RetryScheduledAt = &ts
+		}
+	}
 	if endedAt.Valid && endedAt.String != "" {
 		ts, err := time.Parse(time.RFC3339Nano, endedAt.String)
 		if err == nil {
@@ -674,6 +829,15 @@ func scanRun(s scanner) (*JobRun, error) {
 	if exitCode.Valid {
 		v := int(exitCode.Int64)
 		run.ExitCode = &v
+	}
+	if run.Attempt <= 0 {
+		run.Attempt = 1
+	}
+	if run.MaxAttempts <= 0 {
+		run.MaxAttempts = run.Attempt
+	}
+	if strings.TrimSpace(run.ExecutionID) == "" {
+		run.ExecutionID = run.ID
 	}
 	return &run, nil
 }
@@ -704,6 +868,10 @@ func validateJob(job Job) error {
 		return fmt.Errorf("invalid target kind: %s", job.Target.Kind)
 	}
 
+	if err := validateRetryPolicy(job.RetryPolicy); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -719,6 +887,31 @@ func nullableInt(v *int) sql.NullInt64 {
 		return sql.NullInt64{}
 	}
 	return sql.NullInt64{Int64: int64(*v), Valid: true}
+}
+
+func nullableRetryMaxAttempts(policy *RetryPolicy) sql.NullInt64 {
+	if policy == nil || policy.MaxAttempts <= 0 {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: int64(policy.MaxAttempts), Valid: true}
+}
+
+func nullableRetryMultiplier(policy *RetryPolicy) sql.NullFloat64 {
+	if policy == nil || policy.Multiplier <= 0 {
+		return sql.NullFloat64{}
+	}
+	return sql.NullFloat64{Float64: policy.Multiplier, Valid: true}
+}
+
+func nullableRetryDuration(policy *RetryPolicy, get func(*RetryPolicy) string) sql.NullString {
+	if policy == nil || get == nil {
+		return sql.NullString{}
+	}
+	value := strings.TrimSpace(get(policy))
+	if value == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: value, Valid: true}
 }
 
 func truncateOutput(output string) string {

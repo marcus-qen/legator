@@ -42,6 +42,9 @@ type Config struct {
 	// Kubeflow adapter settings (optional)
 	Kubeflow KubeflowConfig `json:"kubeflow,omitempty"`
 
+	// Scheduled jobs defaults
+	Jobs JobsConfig `json:"jobs,omitempty"`
+
 	// Log level (debug, info, warn, error)
 	LogLevel string `json:"log_level"`
 
@@ -77,6 +80,14 @@ type KubeflowConfig struct {
 	CLIPath        string `json:"cli_path,omitempty"`
 	Timeout        string `json:"timeout,omitempty"`
 	ActionsEnabled bool   `json:"actions_enabled,omitempty"`
+}
+
+// JobsConfig controls scheduler defaults for retry behavior.
+type JobsConfig struct {
+	RetryMaxAttempts    int     `json:"retry_max_attempts,omitempty"`
+	RetryInitialBackoff string  `json:"retry_initial_backoff,omitempty"`
+	RetryMultiplier     float64 `json:"retry_multiplier,omitempty"`
+	RetryMaxBackoff     string  `json:"retry_max_backoff,omitempty"`
 }
 
 func (k KubeflowConfig) NamespaceOrDefault() string {
@@ -198,6 +209,22 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("LEGATOR_KUBEFLOW_ACTIONS_ENABLED"); v != "" {
 		cfg.Kubeflow.ActionsEnabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("LEGATOR_JOBS_RETRY_MAX_ATTEMPTS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Jobs.RetryMaxAttempts = n
+		}
+	}
+	if v := os.Getenv("LEGATOR_JOBS_RETRY_INITIAL_BACKOFF"); v != "" {
+		cfg.Jobs.RetryInitialBackoff = v
+	}
+	if v := os.Getenv("LEGATOR_JOBS_RETRY_MULTIPLIER"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.Jobs.RetryMultiplier = f
+		}
+	}
+	if v := os.Getenv("LEGATOR_JOBS_RETRY_MAX_BACKOFF"); v != "" {
+		cfg.Jobs.RetryMaxBackoff = v
 	}
 	if v := os.Getenv("LEGATOR_MCP_ENABLED"); v != "" {
 		cfg.MCPEnabled = v == "true" || v == "1"

@@ -359,6 +359,51 @@ else
   fail "Global canceled-run visibility missing: $CANCELED_GLOBAL"
 fi
 
+# 10d. Retry policy: bounded attempts + attempt metadata
+echo ""
+echo "10d. Scheduled job retry policy (bounded retries + metadata)..."
+JOB_RETRY_CREATE=$(curl -sf -X POST "$CP_URL/api/v1/jobs" \
+  -H "Content-Type: application/json" \
+  -d "{\"name\":\"e2e scheduled retry\",\"command\":\"false\",\"schedule\":\"1h\",\"target\":{\"kind\":\"probe\",\"value\":\"$PROBE_ID\"},\"retry_policy\":{\"max_attempts\":3,\"initial_backoff\":\"200ms\",\"multiplier\":2,\"max_backoff\":\"300ms\"},\"enabled\":true}")
+JOB_RETRY_ID=$(echo "$JOB_RETRY_CREATE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+if [[ -n "$JOB_RETRY_ID" ]]; then
+  pass "Retry job created (id=$JOB_RETRY_ID)"
+else
+  fail "Retry job creation failed: $JOB_RETRY_CREATE"
+fi
+
+JOB_RETRY_RUN=$(curl -sf -X POST "$CP_URL/api/v1/jobs/$JOB_RETRY_ID/run")
+if echo "$JOB_RETRY_RUN" | grep -q "dispatched"; then
+  pass "Retry job dispatched"
+else
+  fail "Retry job dispatch failed: $JOB_RETRY_RUN"
+fi
+
+JOB_RETRY_RUNS=""
+for _ in $(seq 1 40); do
+  JOB_RETRY_RUNS=$(curl -sf "$CP_URL/api/v1/jobs/$JOB_RETRY_ID/runs?limit=10")
+  JOB_RETRY_DONE=$(echo "$JOB_RETRY_RUNS" | python3 -c "import sys,json; d=json.load(sys.stdin); runs=d.get('runs',[]); print('yes' if len(runs)==3 and all(r.get('status') in ('failed','success','canceled') for r in runs) else 'no')" 2>/dev/null || echo "no")
+  if [[ "$JOB_RETRY_DONE" == "yes" ]]; then
+    break
+  fi
+  sleep 0.2
+done
+
+JOB_RETRY_META=$(echo "$JOB_RETRY_RUNS" | python3 -c "import sys,json; d=json.load(sys.stdin); runs=d.get('runs',[]); attempts=sorted(r.get('attempt') for r in runs); maxes=set(r.get('max_attempts') for r in runs); statuses=set(r.get('status') for r in runs); retry_fields=[bool(r.get('retry_scheduled_at')) for r in sorted(runs,key=lambda x:x.get('attempt',0))]; ok=(len(runs)==3 and attempts==[1,2,3] and maxes=={3} and statuses=={'failed'} and retry_fields[:2]==[True,True] and retry_fields[2:]==[False]); print('ok' if ok else 'bad')" 2>/dev/null || echo "bad")
+if [[ "$JOB_RETRY_META" == "ok" ]]; then
+  pass "Retry attempts bounded with attempt metadata + retry schedule fields"
+else
+  fail "Retry metadata validation failed: $JOB_RETRY_RUNS"
+fi
+
+sleep 0.5
+JOB_RETRY_COUNT_AFTER=$(curl -sf "$CP_URL/api/v1/jobs/$JOB_RETRY_ID/runs?limit=10" | python3 -c "import sys,json; print(json.load(sys.stdin).get('count',0))" 2>/dev/null || echo "0")
+if [[ "$JOB_RETRY_COUNT_AFTER" == "3" ]]; then
+  pass "Retry max-attempt bound enforced (no 4th attempt)"
+else
+  fail "Expected exactly 3 retry attempts, got $JOB_RETRY_COUNT_AFTER"
+fi
+
 # 11. Task endpoint returns 503 without LLM config
 echo ""
 echo "11. Checking task endpoint (no LLM configured)..."

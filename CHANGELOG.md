@@ -5,6 +5,14 @@
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.
   - Added run statuses `pending` and `canceled` in run-history filtering/summaries.
+- **Jobs retry policy + exponential backoff controls**
+  - Added additive per-job `retry_policy` fields: `max_attempts`, `initial_backoff`, `multiplier`, `max_backoff`.
+  - Added global retry defaults via env vars:
+    - `LEGATOR_JOBS_RETRY_MAX_ATTEMPTS`
+    - `LEGATOR_JOBS_RETRY_INITIAL_BACKOFF`
+    - `LEGATOR_JOBS_RETRY_MULTIPLIER`
+    - `LEGATOR_JOBS_RETRY_MAX_BACKOFF`
+  - Added run-attempt correlation metadata: `execution_id`, `attempt`, `max_attempts`, `retry_scheduled_at`.
 
 ### Changed
 - Enforced run lifecycle transitions with immutable terminal states:
@@ -12,6 +20,7 @@
   - `pending|running -> canceled`
 - Hardened run completion/cancellation races with compare-and-swap status transitions in the jobs store.
 - Scheduler now records runs as `pending`, moves to `running` only when dispatch starts, and preserves cancellation outcome under late results.
+- Scheduler now retries failed or dispatch-failed attempts using exponential backoff + max-attempt bounds, and cancels queued retries when a job is canceled.
 
 ## [v1.0.0-alpha.17] — 2026-02-28
 

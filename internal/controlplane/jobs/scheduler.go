@@ -27,6 +27,16 @@ type sender interface {
 	SendTo(probeID string, msgType protocol.MessageType, payload any) error
 }
 
+type SchedulerOption func(*Scheduler)
+
+// WithDefaultRetryPolicy sets the global retry defaults used when a job does not
+// provide a specific retry policy value.
+func WithDefaultRetryPolicy(policy RetryPolicy) SchedulerOption {
+	return func(s *Scheduler) {
+		s.defaultRetryPolicy = policy
+	}
+}
+
 // Scheduler dispatches due jobs and records run history.
 type Scheduler struct {
 	store   *Store
@@ -35,32 +45,42 @@ type Scheduler struct {
 	tracker trackable
 	logger  *zap.Logger
 
-	mu            sync.Mutex
-	cancel        context.CancelFunc
-	ticker        *time.Ticker
-	inFlight      map[string]string // request_id -> run_id
-	runRequest    map[string]string // run_id -> request_id
-	requestTarget map[string]string // request_id -> jobID::probeID
-	activeTargets map[string]struct{}
-	wg            sync.WaitGroup
+	mu                 sync.Mutex
+	cancel             context.CancelFunc
+	ticker             *time.Ticker
+	inFlight           map[string]string // request_id -> run_id
+	runRequest         map[string]string // run_id -> request_id
+	requestTarget      map[string]string // request_id -> jobID::probeID
+	activeTargets      map[string]struct{}
+	pendingRetryCancel map[string]context.CancelFunc // jobID::probeID -> retry cancel
+	defaultRetryPolicy RetryPolicy
+	wg                 sync.WaitGroup
 }
 
 // NewScheduler creates a recurring job scheduler.
-func NewScheduler(store *Store, hub sender, fleetMgr fleet.Fleet, tracker trackable, logger *zap.Logger) *Scheduler {
+func NewScheduler(store *Store, hub sender, fleetMgr fleet.Fleet, tracker trackable, logger *zap.Logger, opts ...SchedulerOption) *Scheduler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Scheduler{
-		store:         store,
-		hub:           hub,
-		fleet:         fleetMgr,
-		tracker:       tracker,
-		logger:        logger,
-		inFlight:      make(map[string]string),
-		runRequest:    make(map[string]string),
-		requestTarget: make(map[string]string),
-		activeTargets: make(map[string]struct{}),
+	s := &Scheduler{
+		store:              store,
+		hub:                hub,
+		fleet:              fleetMgr,
+		tracker:            tracker,
+		logger:             logger,
+		inFlight:           make(map[string]string),
+		runRequest:         make(map[string]string),
+		requestTarget:      make(map[string]string),
+		activeTargets:      make(map[string]struct{}),
+		pendingRetryCancel: make(map[string]context.CancelFunc),
+		defaultRetryPolicy: RetryPolicy{},
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
+	}
+	return s
 }
 
 // Start starts the scheduler loop. It is safe to call Start multiple times.
@@ -109,10 +129,17 @@ func (s *Scheduler) Stop() {
 	for requestID := range s.inFlight {
 		s.tracker.Cancel(requestID)
 	}
+	for targetKey, cancelRetry := range s.pendingRetryCancel {
+		if cancelRetry != nil {
+			cancelRetry()
+		}
+		delete(s.pendingRetryCancel, targetKey)
+	}
 	s.inFlight = make(map[string]string)
 	s.runRequest = make(map[string]string)
 	s.requestTarget = make(map[string]string)
 	s.activeTargets = make(map[string]struct{})
+	s.pendingRetryCancel = make(map[string]context.CancelFunc)
 	s.mu.Unlock()
 
 	s.wg.Wait()
@@ -130,6 +157,7 @@ func (s *Scheduler) TriggerNow(jobID string) error {
 type CancelJobSummary struct {
 	CanceledRuns        int
 	AlreadyTerminalRuns int
+	CanceledRetries     int
 }
 
 // CancelJob cancels all pending/running runs for a job.
@@ -153,6 +181,9 @@ func (s *Scheduler) CancelJob(jobID string) (CancelJobSummary, error) {
 			s.tracker.Cancel(requestID)
 		}
 	}
+	if canceled := s.cancelScheduledRetriesForJob(jobID); canceled > 0 {
+		summary.CanceledRetries = canceled
+	}
 
 	return summary, nil
 }
@@ -173,6 +204,7 @@ func (s *Scheduler) CancelRun(jobID, runID string) (*JobRun, error) {
 	if requestID := s.requestIDForRun(runID); requestID != "" {
 		s.tracker.Cancel(requestID)
 	}
+	s.cancelScheduledRetry(inFlightTargetKey(run.JobID, run.ProbeID))
 	return s.store.GetRun(runID)
 }
 
@@ -216,6 +248,11 @@ func (s *Scheduler) dispatchJob(job Job, now time.Time) error {
 		return fmt.Errorf("no probes resolved for target")
 	}
 
+	policy, err := resolveRetryPolicy(job.RetryPolicy, s.defaultRetryPolicy)
+	if err != nil {
+		return fmt.Errorf("resolve retry policy: %w", err)
+	}
+
 	for _, probeID := range probeIDs {
 		targetKey := inFlightTargetKey(job.ID, probeID)
 		if !s.claimTarget(targetKey) {
@@ -223,87 +260,93 @@ func (s *Scheduler) dispatchJob(job Job, now time.Time) error {
 			continue
 		}
 
-		if !s.probeOnline(probeID) {
-			s.recordOfflineRun(job.ID, probeID, now)
-			s.releaseTarget(targetKey)
-			continue
-		}
-
-		requestID := fmt.Sprintf("job-%s-%d-%s", job.ID, now.UnixNano(), probeID)
-		run, err := s.store.RecordRunStart(JobRun{
-			JobID:     job.ID,
-			ProbeID:   probeID,
-			RequestID: requestID,
-			StartedAt: now,
-			Status:    RunStatusPending,
-		})
-		if err != nil {
-			s.releaseTarget(targetKey)
-			s.logger.Warn("record run start failed", zap.String("job_id", job.ID), zap.String("probe_id", probeID), zap.Error(err))
-			continue
-		}
-
-		payload := protocol.CommandPayload{
-			RequestID: requestID,
-			Command:   "/bin/sh",
-			Args:      []string{"-lc", job.Command},
-			Timeout:   defaultCommandTimeout,
-			Level:     protocol.CapObserve,
-		}
-
-		pending := s.tracker.Track(requestID, probeID, job.Command, payload.Level)
-		if pending == nil {
-			if err := s.store.MarkRunRunning(run.ID); err == nil {
-				s.completeRun(run.ID, RunStatusFailed, nil, "command tracking unavailable")
-			}
-			s.releaseTarget(targetKey)
-			continue
-		}
-
-		s.mu.Lock()
-		s.inFlight[requestID] = run.ID
-		s.runRequest[run.ID] = requestID
-		s.requestTarget[requestID] = targetKey
-		s.mu.Unlock()
-
-		if err := s.store.MarkRunRunning(run.ID); err != nil {
-			s.tracker.Cancel(requestID)
-			s.clearInFlight(requestID)
-			if !IsInvalidRunTransition(err) {
-				s.logger.Warn("mark run running failed", zap.String("run_id", run.ID), zap.Error(err))
-			}
-			continue
-		}
-
-		if err := s.hub.SendTo(probeID, protocol.MsgCommand, payload); err != nil {
-			s.tracker.Cancel(requestID)
-			s.completeRun(run.ID, RunStatusFailed, nil, "probe offline")
-			s.clearInFlight(requestID)
-			continue
-		}
-
-		s.wg.Add(1)
-		go s.awaitRunResult(run.ID, requestID, pending)
+		executionID := fmt.Sprintf("jobexec-%s-%s-%d", job.ID, probeID, now.UnixNano())
+		s.dispatchAttempt(job, probeID, targetKey, executionID, 1, policy, now)
 	}
 
 	return nil
 }
 
-func (s *Scheduler) awaitRunResult(runID, requestID string, pending *cmdtracker.PendingCommand) {
+func (s *Scheduler) dispatchAttempt(job Job, probeID, targetKey, executionID string, attempt int, policy resolvedRetryPolicy, now time.Time) {
+	requestID := fmt.Sprintf("job-%s-%s-attempt-%d-%d", job.ID, probeID, attempt, now.UnixNano())
+	run, err := s.store.RecordRunStart(JobRun{
+		JobID:       job.ID,
+		ProbeID:     probeID,
+		RequestID:   requestID,
+		ExecutionID: executionID,
+		Attempt:     attempt,
+		MaxAttempts: policy.MaxAttempts,
+		StartedAt:   now,
+		Status:      RunStatusPending,
+	})
+	if err != nil {
+		s.releaseTarget(targetKey)
+		s.logger.Warn("record run start failed",
+			zap.String("job_id", job.ID),
+			zap.String("probe_id", probeID),
+			zap.Int("attempt", attempt),
+			zap.Error(err),
+		)
+		return
+	}
+
+	if err := s.store.MarkRunRunning(run.ID); err != nil {
+		if !IsInvalidRunTransition(err) {
+			s.logger.Warn("mark run running failed", zap.String("run_id", run.ID), zap.Error(err))
+		}
+		s.releaseTarget(targetKey)
+		return
+	}
+
+	if !s.probeOnline(probeID) {
+		s.finishAttempt(*run, job, policy, targetKey, requestID, false, RunStatusFailed, nil, "probe offline")
+		return
+	}
+
+	payload := protocol.CommandPayload{
+		RequestID: requestID,
+		Command:   "/bin/sh",
+		Args:      []string{"-lc", job.Command},
+		Timeout:   defaultCommandTimeout,
+		Level:     protocol.CapObserve,
+	}
+
+	pending := s.tracker.Track(requestID, probeID, job.Command, payload.Level)
+	if pending == nil {
+		s.finishAttempt(*run, job, policy, targetKey, requestID, false, RunStatusFailed, nil, "command tracking unavailable")
+		return
+	}
+
+	s.mu.Lock()
+	s.inFlight[requestID] = run.ID
+	s.runRequest[run.ID] = requestID
+	s.requestTarget[requestID] = targetKey
+	s.mu.Unlock()
+
+	if err := s.hub.SendTo(probeID, protocol.MsgCommand, payload); err != nil {
+		s.tracker.Cancel(requestID)
+		s.finishAttempt(*run, job, policy, targetKey, requestID, true, RunStatusFailed, nil, "probe offline")
+		return
+	}
+
+	s.wg.Add(1)
+	go s.awaitRunResult(*run, requestID, pending, job, policy, targetKey)
+}
+
+func (s *Scheduler) awaitRunResult(run JobRun, requestID string, pending *cmdtracker.PendingCommand, job Job, policy resolvedRetryPolicy, targetKey string) {
 	defer s.wg.Done()
 
 	if pending == nil || pending.Result == nil {
-		s.completeRun(runID, RunStatusFailed, nil, "command tracking unavailable")
-		s.clearInFlight(requestID)
+		s.finishAttempt(run, job, policy, targetKey, requestID, true, RunStatusFailed, nil, "command tracking unavailable")
 		return
 	}
 
 	result, ok := <-pending.Result
 	if !ok || result == nil {
-		if err := s.store.CancelRun(runID, "command canceled"); err != nil && !IsInvalidRunTransition(err) {
-			s.logger.Warn("cancel run failed", zap.String("run_id", runID), zap.Error(err))
+		if err := s.store.CancelRun(run.ID, "command canceled"); err != nil && !IsInvalidRunTransition(err) {
+			s.logger.Warn("cancel run failed", zap.String("run_id", run.ID), zap.Error(err))
 		}
-		s.clearInFlight(requestID)
+		s.clearInFlight(requestID, true)
 		return
 	}
 
@@ -313,24 +356,99 @@ func (s *Scheduler) awaitRunResult(runID, requestID string, pending *cmdtracker.
 	}
 	exitCode := result.ExitCode
 	output := formatResultOutput(result)
-	s.completeRun(runID, status, &exitCode, output)
-	s.clearInFlight(requestID)
+	s.finishAttempt(run, job, policy, targetKey, requestID, true, status, &exitCode, output)
 }
 
-func (s *Scheduler) completeRun(runID, status string, exitCode *int, output string) {
-	if err := s.store.CompleteRun(runID, status, exitCode, output); err != nil {
-		if IsInvalidRunTransition(err) {
-			return
+func (s *Scheduler) finishAttempt(run JobRun, job Job, policy resolvedRetryPolicy, targetKey, requestID string, hadInFlight bool, status string, exitCode *int, output string) {
+	var retryScheduledAt *time.Time
+	if status == RunStatusFailed && run.Attempt < policy.MaxAttempts {
+		delay := policy.nextRetryDelay(run.Attempt)
+		ts := time.Now().UTC().Add(delay)
+		retryScheduledAt = &ts
+	}
+
+	if err := s.store.CompleteRunWithRetry(run.ID, status, exitCode, output, retryScheduledAt); err != nil {
+		if !IsInvalidRunTransition(err) {
+			s.logger.Warn("complete run failed", zap.String("run_id", run.ID), zap.Error(err))
 		}
-		s.logger.Warn("complete run failed", zap.String("run_id", runID), zap.Error(err))
+		if hadInFlight {
+			s.clearInFlight(requestID, true)
+		} else {
+			s.releaseTarget(targetKey)
+		}
+		return
+	}
+
+	if retryScheduledAt != nil {
+		s.logger.Info("scheduling job retry",
+			zap.String("job_id", job.ID),
+			zap.String("probe_id", run.ProbeID),
+			zap.Int("attempt", run.Attempt+1),
+			zap.Int("max_attempts", policy.MaxAttempts),
+			zap.Time("retry_scheduled_at", *retryScheduledAt),
+		)
+		s.scheduleRetry(job, run.ProbeID, targetKey, run.ExecutionID, run.Attempt+1, policy, *retryScheduledAt)
+	}
+
+	releaseTarget := retryScheduledAt == nil
+	if hadInFlight {
+		s.clearInFlight(requestID, releaseTarget)
+	} else if releaseTarget {
+		s.releaseTarget(targetKey)
 	}
 }
 
-func (s *Scheduler) clearInFlight(requestID string) {
+func (s *Scheduler) scheduleRetry(job Job, probeID, targetKey, executionID string, attempt int, policy resolvedRetryPolicy, scheduledAt time.Time) {
+	delay := time.Until(scheduledAt)
+	if delay < 0 {
+		delay = 0
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s.mu.Lock()
+	if existing := s.pendingRetryCancel[targetKey]; existing != nil {
+		existing()
+	}
+	s.pendingRetryCancel[targetKey] = cancel
+	s.mu.Unlock()
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+
+		s.mu.Lock()
+		delete(s.pendingRetryCancel, targetKey)
+		s.mu.Unlock()
+
+		latest, err := s.store.GetJob(job.ID)
+		if err != nil || !latest.Enabled {
+			s.releaseTarget(targetKey)
+			return
+		}
+		if attempt > policy.MaxAttempts {
+			s.releaseTarget(targetKey)
+			return
+		}
+
+		s.dispatchAttempt(*latest, probeID, targetKey, executionID, attempt, policy, time.Now().UTC())
+	}()
+}
+
+func (s *Scheduler) clearInFlight(requestID string, releaseTarget bool) {
 	s.mu.Lock()
 	if targetKey, ok := s.requestTarget[requestID]; ok {
 		delete(s.requestTarget, requestID)
-		delete(s.activeTargets, targetKey)
+		if releaseTarget {
+			delete(s.activeTargets, targetKey)
+		}
 	}
 	if runID, ok := s.inFlight[requestID]; ok {
 		delete(s.runRequest, runID)
@@ -373,27 +491,49 @@ func (s *Scheduler) releaseTarget(targetKey string) {
 	s.mu.Unlock()
 }
 
-func inFlightTargetKey(jobID, probeID string) string {
-	return strings.TrimSpace(jobID) + "::" + strings.TrimSpace(probeID)
+func (s *Scheduler) cancelScheduledRetry(targetKey string) {
+	targetKey = strings.TrimSpace(targetKey)
+	if targetKey == "" {
+		return
+	}
+
+	s.mu.Lock()
+	cancel, ok := s.pendingRetryCancel[targetKey]
+	if ok {
+		delete(s.pendingRetryCancel, targetKey)
+		delete(s.activeTargets, targetKey)
+	}
+	s.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
 }
 
-func (s *Scheduler) recordOfflineRun(jobID, probeID string, now time.Time) {
-	run, err := s.store.RecordRunStart(JobRun{
-		JobID:     jobID,
-		ProbeID:   probeID,
-		RequestID: fmt.Sprintf("job-%s-%d-%s", jobID, now.UnixNano(), probeID),
-		StartedAt: now,
-		Status:    RunStatusPending,
-	})
-	if err != nil {
-		s.logger.Warn("record offline run failed", zap.String("job_id", jobID), zap.String("probe_id", probeID), zap.Error(err))
-		return
+func (s *Scheduler) cancelScheduledRetriesForJob(jobID string) int {
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return 0
 	}
-	if err := s.store.MarkRunRunning(run.ID); err != nil {
-		s.logger.Warn("mark offline run running failed", zap.String("run_id", run.ID), zap.Error(err))
-		return
+	prefix := jobID + "::"
+
+	s.mu.Lock()
+	keys := make([]string, 0)
+	for targetKey := range s.pendingRetryCancel {
+		if strings.HasPrefix(targetKey, prefix) {
+			keys = append(keys, targetKey)
+		}
 	}
-	s.completeRun(run.ID, RunStatusFailed, nil, "probe offline")
+	s.mu.Unlock()
+
+	for _, key := range keys {
+		s.cancelScheduledRetry(key)
+	}
+	return len(keys)
+}
+
+func inFlightTargetKey(jobID, probeID string) string {
+	return strings.TrimSpace(jobID) + "::" + strings.TrimSpace(probeID)
 }
 
 func (s *Scheduler) probeOnline(probeID string) bool {
