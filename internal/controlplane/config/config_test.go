@@ -33,6 +33,15 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Kubeflow.TimeoutDuration().String() != (15 * time.Second).String() {
 		t.Errorf("expected kubeflow timeout default 15s, got %s", cfg.Kubeflow.TimeoutDuration())
 	}
+	if cfg.Grafana.Enabled {
+		t.Error("expected grafana disabled by default")
+	}
+	if cfg.Grafana.TimeoutDuration() != 10*time.Second {
+		t.Errorf("expected grafana timeout default 10s, got %s", cfg.Grafana.TimeoutDuration())
+	}
+	if cfg.Grafana.DashboardLimitOrDefault() != 10 {
+		t.Errorf("expected grafana dashboard limit default 10, got %d", cfg.Grafana.DashboardLimitOrDefault())
+	}
 }
 
 func TestLoadFromFile(t *testing.T) {
@@ -52,6 +61,15 @@ func TestLoadFromFile(t *testing.T) {
 			"cli_path": "kubectl",
 			"timeout": "20s",
 			"actions_enabled": true
+		},
+		"grafana": {
+			"enabled": true,
+			"base_url": "https://grafana.lab.local",
+			"api_token": "token",
+			"timeout": "12s",
+			"dashboard_limit": 25,
+			"tls_skip_verify": true,
+			"org_id": 2
 		},
 		"oidc": {
 			"enabled": true,
@@ -107,6 +125,27 @@ func TestLoadFromFile(t *testing.T) {
 	if !cfg.Kubeflow.ActionsEnabled {
 		t.Fatal("expected kubeflow actions enabled from file")
 	}
+	if !cfg.Grafana.Enabled {
+		t.Fatal("expected grafana enabled from file")
+	}
+	if cfg.Grafana.BaseURL != "https://grafana.lab.local" {
+		t.Fatalf("unexpected grafana base url: %s", cfg.Grafana.BaseURL)
+	}
+	if cfg.Grafana.APIToken != "token" {
+		t.Fatalf("unexpected grafana api token: %s", cfg.Grafana.APIToken)
+	}
+	if cfg.Grafana.TimeoutDuration() != 12*time.Second {
+		t.Fatalf("unexpected grafana timeout: %s", cfg.Grafana.TimeoutDuration())
+	}
+	if cfg.Grafana.DashboardLimitOrDefault() != 25 {
+		t.Fatalf("unexpected grafana dashboard limit: %d", cfg.Grafana.DashboardLimitOrDefault())
+	}
+	if !cfg.Grafana.TLSSkipVerify {
+		t.Fatal("expected grafana tls skip verify from file")
+	}
+	if cfg.Grafana.OrgID != 2 {
+		t.Fatalf("unexpected grafana org id: %d", cfg.Grafana.OrgID)
+	}
 	if !cfg.OIDC.Enabled {
 		t.Fatal("expected oidc enabled")
 	}
@@ -154,6 +193,13 @@ func TestLoadFromEnvOnly(t *testing.T) {
 	t.Setenv("LEGATOR_KUBEFLOW_NAMESPACE", "kubeflow-user")
 	t.Setenv("LEGATOR_KUBEFLOW_TIMEOUT", "45s")
 	t.Setenv("LEGATOR_KUBEFLOW_ACTIONS_ENABLED", "true")
+	t.Setenv("LEGATOR_GRAFANA_ENABLED", "true")
+	t.Setenv("LEGATOR_GRAFANA_BASE_URL", "https://grafana.example.com")
+	t.Setenv("LEGATOR_GRAFANA_API_TOKEN", "env-token")
+	t.Setenv("LEGATOR_GRAFANA_TIMEOUT", "18s")
+	t.Setenv("LEGATOR_GRAFANA_DASHBOARD_LIMIT", "40")
+	t.Setenv("LEGATOR_GRAFANA_TLS_SKIP_VERIFY", "1")
+	t.Setenv("LEGATOR_GRAFANA_ORG_ID", "9")
 
 	cfg := LoadFromEnv()
 	if cfg.DataDir != "/tmp/env-test" {
@@ -179,6 +225,27 @@ func TestLoadFromEnvOnly(t *testing.T) {
 	}
 	if !cfg.Kubeflow.ActionsEnabled {
 		t.Error("expected kubeflow actions enabled from env")
+	}
+	if !cfg.Grafana.Enabled {
+		t.Error("expected grafana enabled from env")
+	}
+	if cfg.Grafana.BaseURL != "https://grafana.example.com" {
+		t.Errorf("expected grafana base URL override, got %s", cfg.Grafana.BaseURL)
+	}
+	if cfg.Grafana.APIToken != "env-token" {
+		t.Errorf("expected grafana api token override, got %s", cfg.Grafana.APIToken)
+	}
+	if cfg.Grafana.TimeoutDuration() != 18*time.Second {
+		t.Errorf("expected grafana timeout 18s, got %s", cfg.Grafana.TimeoutDuration())
+	}
+	if cfg.Grafana.DashboardLimitOrDefault() != 40 {
+		t.Errorf("expected grafana dashboard limit 40, got %d", cfg.Grafana.DashboardLimitOrDefault())
+	}
+	if !cfg.Grafana.TLSSkipVerify {
+		t.Error("expected grafana tls skip verify from env")
+	}
+	if cfg.Grafana.OrgID != 9 {
+		t.Errorf("expected grafana org id 9, got %d", cfg.Grafana.OrgID)
 	}
 }
 

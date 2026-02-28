@@ -294,6 +294,24 @@ func TestPermissionsKubeflowRoutes(t *testing.T) {
 	}
 }
 
+func TestPermissionsGrafanaRoutes(t *testing.T) {
+	srv := newAuthTestServer(t)
+	readToken := createAPIKey(t, srv, "fleet-read", auth.PermFleetRead)
+	writeToken := createAPIKey(t, srv, "fleet-write", auth.PermFleetWrite)
+
+	for _, path := range []string{"/api/v1/grafana/status", "/api/v1/grafana/snapshot"} {
+		readResp := makeRequest(t, srv, http.MethodGet, path, readToken, "")
+		if readResp.Code == http.StatusUnauthorized || readResp.Code == http.StatusForbidden {
+			t.Fatalf("expected fleet:read to access %s, got %d body=%s", path, readResp.Code, readResp.Body.String())
+		}
+
+		writeResp := makeRequest(t, srv, http.MethodGet, path, writeToken, "")
+		if writeResp.Code != http.StatusForbidden {
+			t.Fatalf("expected fleet:write-only token to be denied on read route %s, got %d body=%s", path, writeResp.Code, writeResp.Body.String())
+		}
+	}
+}
+
 func TestPermissionsJobsRoutes(t *testing.T) {
 	srv := newAuthTestServer(t)
 	readToken := createAPIKey(t, srv, "fleet-read", auth.PermFleetRead)

@@ -1,6 +1,19 @@
 ## [Unreleased]
 
 ### Added
+- **Stage 2.1 Grafana adapter (read-only capacity snapshot connector)**
+  - Added `internal/controlplane/grafana` adapter/client boundary with read-only HTTP retrieval from Grafana APIs (`/api/health`, `/api/datasources`, `/api/search`, `/api/dashboards/uid/:uid`).
+  - Added API routes: `GET /api/v1/grafana/status`, `GET /api/v1/grafana/snapshot`.
+  - Added config support (disabled by default):
+    - `LEGATOR_GRAFANA_ENABLED`
+    - `LEGATOR_GRAFANA_BASE_URL`
+    - `LEGATOR_GRAFANA_API_TOKEN`
+    - `LEGATOR_GRAFANA_TIMEOUT`
+    - `LEGATOR_GRAFANA_DASHBOARD_LIMIT`
+    - `LEGATOR_GRAFANA_TLS_SKIP_VERIFY`
+    - `LEGATOR_GRAFANA_ORG_ID`
+  - Added docs: `docs/grafana-adapter.md` and updated configuration/reference docs.
+  - Added tests for client parsing/error mapping, HTTP handlers, server permission gates, and config wiring.
 - **Jobs cancellation API + lifecycle guardrails**
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.
