@@ -79,6 +79,9 @@
 - **Kernel split S36 (shared unsupported-surface fallback dispatch invocation helper)**
   - Added `transportwriter.DispatchUnsupportedSurfaceFallback(...)` to centralize unsupported-surface fallback invocation (`envelope + writer construction + dispatch`) while keeping approval + command domain policy seams explicit.
   - Replaced duplicated approval/command fallback call-shapes with the shared helper and added strict parity tests against the legacy repeated invocation path to preserve HTTP-first/MCP-fallback precedence and exact HTTP + MCP error text semantics.
+- **Kernel split S37 (shared unsupported-surface scope-envelope builder seam)**
+  - Added `transportwriter.UnsupportedSurfaceEnvelopeBuilderForScope(...)` as a tiny shared seam for scope-to-envelope wiring and routed approval/command unsupported-surface envelope wrappers through it while keeping domain scope ownership intact.
+  - Added strict parity coverage that compares seam-built envelopes against the legacy `UnsupportedSurfaceMessage(scope, surface) -> UnsupportedSurfaceEnvelope(...)` wiring path to preserve exact message/envelope semantics and fallback precedence behavior.
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
 - **Kernel split S13 (approval decide render-target registry boundary)**
