@@ -19,3 +19,30 @@ func newCommandReadProjectionSurfaceRegistry(surfaces map[ProjectionDispatchSurf
 func newCommandInvokeProjectionSurfaceRegistry(surfaces map[ProjectionDispatchSurface]ProjectionDispatchSurface) projectiondispatch.PolicyRegistry[ProjectionDispatchSurface, ProjectionDispatchSurface] {
 	return projectiondispatch.NewIdentitySurfaceRegistry(surfaces)
 }
+
+// newDefaultCommandDispatchProjectionSurfaceRegistry builds the canonical
+// HTTP/MCP command-dispatch resolver hook registry.
+func newDefaultCommandDispatchProjectionSurfaceRegistry() projectiondispatch.PolicyRegistry[ProjectionDispatchSurface, ProjectionDispatchSurface] {
+	return newCommandDispatchProjectionSurfaceRegistry(projectiondispatch.NewHTTPMCPIdentitySurfaceSeed(
+		ProjectionDispatchSurfaceHTTP,
+		ProjectionDispatchSurfaceMCP,
+	))
+}
+
+// newDefaultCommandReadProjectionSurfaceRegistry builds the canonical HTTP/MCP
+// command-read resolver hook registry.
+func newDefaultCommandReadProjectionSurfaceRegistry() projectiondispatch.PolicyRegistry[ProjectionDispatchSurface, ProjectionDispatchSurface] {
+	return newCommandReadProjectionSurfaceRegistry(projectiondispatch.NewHTTPMCPIdentitySurfaceSeed(
+		ProjectionDispatchSurfaceHTTP,
+		ProjectionDispatchSurfaceMCP,
+	))
+}
+
+// newDefaultCommandInvokeProjectionSurfaceRegistry builds the canonical
+// HTTP/MCP command-invoke resolver hook registry.
+func newDefaultCommandInvokeProjectionSurfaceRegistry() projectiondispatch.PolicyRegistry[ProjectionDispatchSurface, ProjectionDispatchSurface] {
+	return newCommandInvokeProjectionSurfaceRegistry(projectiondispatch.NewHTTPMCPIdentitySurfaceSeed(
+		ProjectionDispatchSurfaceHTTP,
+		ProjectionDispatchSurfaceMCP,
+	))
+}

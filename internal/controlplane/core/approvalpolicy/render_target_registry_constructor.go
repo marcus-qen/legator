@@ -7,3 +7,12 @@ import "github.com/marcus-qen/legator/internal/controlplane/core/projectiondispa
 func newDecideApprovalRenderSurfaceRegistry(surfaces map[DecideApprovalRenderSurface]DecideApprovalRenderSurface) projectiondispatch.PolicyRegistry[DecideApprovalRenderSurface, DecideApprovalRenderSurface] {
 	return projectiondispatch.NewIdentitySurfaceRegistry(surfaces)
 }
+
+// newDefaultDecideApprovalRenderSurfaceRegistry builds the canonical
+// HTTP/MCP decide-approval resolver hook registry.
+func newDefaultDecideApprovalRenderSurfaceRegistry() projectiondispatch.PolicyRegistry[DecideApprovalRenderSurface, DecideApprovalRenderSurface] {
+	return newDecideApprovalRenderSurfaceRegistry(projectiondispatch.NewHTTPMCPIdentitySurfaceSeed(
+		DecideApprovalRenderSurfaceHTTP,
+		DecideApprovalRenderSurfaceMCP,
+	))
+}
