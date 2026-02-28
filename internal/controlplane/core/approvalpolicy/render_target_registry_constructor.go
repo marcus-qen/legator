@@ -11,8 +11,8 @@ func newDecideApprovalRenderSurfaceRegistry(surfaces map[DecideApprovalRenderSur
 // newDefaultDecideApprovalRenderSurfaceRegistry builds the canonical
 // HTTP/MCP decide-approval resolver hook registry.
 func newDefaultDecideApprovalRenderSurfaceRegistry() projectiondispatch.PolicyRegistry[DecideApprovalRenderSurface, DecideApprovalRenderSurface] {
-	return newDecideApprovalRenderSurfaceRegistry(projectiondispatch.NewHTTPMCPIdentitySurfaceSeed(
+	return projectiondispatch.NewHTTPMCPIdentitySurfaceRegistry(
 		DecideApprovalRenderSurfaceHTTP,
 		DecideApprovalRenderSurfaceMCP,
-	))
+	)
 }
