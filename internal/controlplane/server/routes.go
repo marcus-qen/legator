@@ -533,25 +533,47 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	cmd = invokeInput.Command
 
-	// Check if this command needs approval
-	req, needsApproval, err := s.approvalCore.SubmitCommandApproval(id, &cmd, ps.PolicyLevel, "Manual command dispatch", "api")
+	policyResult, err := s.approvalCore.SubmitCommandApprovalWithContext(r.Context(), id, &cmd, ps.PolicyLevel, "Manual command dispatch", "api")
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", fmt.Sprintf("approval queue: %s", err.Error()))
 		return
 	}
-	if needsApproval {
-		s.emitAudit(audit.EventApprovalRequest, id, "api",
-			fmt.Sprintf("Approval required for: %s (risk: %s)", cmd.Command, req.RiskLevel))
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"status":      "pending_approval",
-			"approval_id": req.ID,
-			"risk_level":  req.RiskLevel,
-			"expires_at":  req.ExpiresAt,
-			"message":     "Command requires human approval. Use POST /api/v1/approvals/{id}/decide to approve or deny.",
-		})
-		return
+	if policyResult != nil {
+		w.Header().Set("X-Legator-Policy-Decision", string(policyResult.Decision.Outcome))
+		switch policyResult.Decision.Outcome {
+		case coreapprovalpolicy.CommandPolicyDecisionDeny:
+			s.emitAudit(audit.EventAuthorizationDenied, id, "api", fmt.Sprintf("Command denied by capacity policy: %s", cmd.Command))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":          "denied",
+				"policy_decision": policyResult.Decision.Outcome,
+				"risk_level":      policyResult.Decision.RiskLevel,
+				"policy_rationale": policyResult.Decision.Rationale,
+				"message":         "Command denied by capacity policy.",
+			})
+			return
+		case coreapprovalpolicy.CommandPolicyDecisionQueue:
+			req := policyResult.Request
+			if req == nil {
+				writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "approval queue unavailable")
+				return
+			}
+			s.emitAudit(audit.EventApprovalRequest, id, "api",
+				fmt.Sprintf("Approval required for: %s (risk: %s)", cmd.Command, req.RiskLevel))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":           "pending_approval",
+				"approval_id":      req.ID,
+				"risk_level":       req.RiskLevel,
+				"expires_at":       req.ExpiresAt,
+				"policy_decision":  policyResult.Decision.Outcome,
+				"policy_rationale": policyResult.Decision.Rationale,
+				"message":          "Command requires human approval. Use POST /api/v1/approvals/{id}/decide to approve or deny.",
+			})
+			return
+		}
 	}
 
 	projection := corecommanddispatch.InvokeCommandForSurface(r.Context(), invokeInput, s.dispatchCore)

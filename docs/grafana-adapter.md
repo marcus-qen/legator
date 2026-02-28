@@ -48,7 +48,33 @@ If disabled, both return:
   - `query_coverage`
   - `datasource_count`
 
-These fields are additive and intended for future policy consumption.
+These fields are additive and consumed by Stage 2.2 command policy evaluation.
+
+## Stage 2.2 policy integration (allow / deny / queue)
+
+Command dispatch now evaluates a capacity-aware policy decision before dispatching:
+
+- `allow` — command proceeds (existing behaviour)
+- `queue` — command is routed to the approval queue
+- `deny` — command is rejected immediately when capacity risk is too high
+
+Policy evaluation is **safe-by-default**:
+
+- If Grafana is disabled or unavailable, Legator falls back to risk-only approval logic.
+- Fallback is surfaced in machine-readable rationale (`fallback: true`).
+
+### Additive API response fields
+
+When a command is queued or denied, `POST /api/v1/probes/{id}/command` now includes:
+
+- `policy_decision` (`allow` / `queue` / `deny`)
+- `policy_rationale` object:
+  - `policy` version id
+  - `summary`
+  - `fallback` bool
+  - `thresholds`
+  - `capacity` signal snapshot (when available)
+  - `indicators[]` with `drove_outcome` to show which signals triggered the decision
 
 ## Example
 

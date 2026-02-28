@@ -137,6 +137,7 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 | Cloud connectors (AWS/GCP/Azure, agentless inventory ingestion) | ✅ |
 | Kubeflow adapter MVP (read-only status/inventory + guarded refresh action) | ✅ |
 | Grafana adapter Stage 2.1 (read-only status + capacity snapshot) | ✅ |
+| Capacity-aware policy decisions Stage 2.2 (allow/deny/queue + rationale payloads) | ✅ |
 | Auto-discovery + registration assist (network/SSH scan + guided registration) | ✅ |
 | BYOK model dock (multi-vendor key profiles + runtime model switching + usage tracking) | ✅ |
 | Tags + group commands | ✅ |
