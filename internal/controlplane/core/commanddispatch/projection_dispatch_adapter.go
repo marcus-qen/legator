@@ -23,12 +23,12 @@ type commandDispatchAdapterWriter struct {
 	handled *bool
 }
 
-var defaultCommandDispatchErrorPolicyRegistry = projectiondispatch.NewPolicyRegistry(map[ProjectionDispatchSurface]commandDispatchErrorPolicy{
+var defaultCommandDispatchErrorPolicyRegistry = newCommandDispatchErrorPolicyRegistry(map[ProjectionDispatchSurface]commandDispatchErrorPolicy{
 	ProjectionDispatchSurfaceHTTP: projectiondispatch.PolicyFunc[*CommandResultEnvelope, commandDispatchAdapterWriter](dispatchCommandEnvelopeHTTPError),
 	ProjectionDispatchSurfaceMCP:  projectiondispatch.PolicyFunc[*CommandResultEnvelope, commandDispatchAdapterWriter](dispatchCommandEnvelopeMCPError),
 })
 
-var defaultCommandReadPolicyRegistry = projectiondispatch.NewPolicyRegistry(map[ProjectionDispatchSurface]commandReadPolicy{
+var defaultCommandReadPolicyRegistry = newCommandReadPolicyRegistry(map[ProjectionDispatchSurface]commandReadPolicy{
 	ProjectionDispatchSurfaceHTTP: projectiondispatch.PolicyFunc[*protocol.CommandResultPayload, commandDispatchAdapterWriter](dispatchCommandReadHTTP),
 	ProjectionDispatchSurfaceMCP:  projectiondispatch.PolicyFunc[*protocol.CommandResultPayload, commandDispatchAdapterWriter](dispatchCommandReadMCP),
 })
