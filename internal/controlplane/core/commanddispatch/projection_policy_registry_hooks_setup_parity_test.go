@@ -25,18 +25,9 @@ func TestCommandProjectionResolverHooks_DefaultSetupParityWithLegacyInlineRegist
 }
 
 func TestCommandProjectionResolverHooks_DefaultSetupParityWithDefaultIdentitySurfaceRegistryHelperFixture(t *testing.T) {
-	legacyDispatchRegistry := projectiondispatch.NewHTTPMCPDefaultIdentitySurfaceRegistry(
-		ProjectionDispatchSurfaceHTTP,
-		ProjectionDispatchSurfaceMCP,
-	)
-	legacyReadRegistry := projectiondispatch.NewHTTPMCPDefaultIdentitySurfaceRegistry(
-		ProjectionDispatchSurfaceHTTP,
-		ProjectionDispatchSurfaceMCP,
-	)
-	legacyInvokeRegistry := projectiondispatch.NewHTTPMCPDefaultIdentitySurfaceRegistry(
-		ProjectionDispatchSurfaceHTTP,
-		ProjectionDispatchSurfaceMCP,
-	)
+	legacyDispatchRegistry := projectiondispatch.NewHTTPMCPDefaultResolverHookRegistryFixture[ProjectionDispatchSurface]()
+	legacyReadRegistry := projectiondispatch.NewHTTPMCPDefaultResolverHookRegistryFixture[ProjectionDispatchSurface]()
+	legacyInvokeRegistry := projectiondispatch.NewHTTPMCPDefaultResolverHookRegistryFixture[ProjectionDispatchSurface]()
 
 	assertCommandProjectionResolverHooksParity(t, legacyDispatchRegistry, legacyReadRegistry, legacyInvokeRegistry)
 }

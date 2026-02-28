@@ -119,6 +119,9 @@
 - **Kernel split S49 (default HTTP/MCP identity-surface constructor wiring helper)**
   - Added `projectiondispatch.NewHTTPMCPDefaultIdentitySurfaceRegistry(...)` and routed default command/approval resolver registry constructors through it while keeping domain wrappers local.
   - Added strict parity coverage for resolver hit/miss and unsupported fallback invariants (including HTTP-first/MCP-fallback behavior) across helper-level and default resolver-hook fixtures.
+- **Kernel split S50 (default resolver-hook fixture helper split)**
+  - Added `projectiondispatch.NewHTTPMCPDefaultResolverHookRegistryFixture(...)` as a tiny shared fixture helper for default HTTP/MCP resolver-hook parity tests.
+  - Routed approval + command resolver-hook default-fixture parity tests through the shared helper and added strict helper-vs-legacy parity coverage to lock resolver hit/miss plus unsupported fallback HTTP-first/MCP-fallback behavior (while preserving existing handled-flag parity assertions in command default-policy coverage).
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
 - **Kernel split S13 (approval decide render-target registry boundary)**

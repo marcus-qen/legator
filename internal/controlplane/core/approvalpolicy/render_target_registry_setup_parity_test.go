@@ -17,10 +17,7 @@ func TestDecideApprovalResolverHooks_DefaultSetupParityWithLegacyInlineRegistryS
 }
 
 func TestDecideApprovalResolverHooks_DefaultSetupParityWithDefaultIdentitySurfaceRegistryHelperFixture(t *testing.T) {
-	legacySurfaceRegistry := projectiondispatch.NewHTTPMCPDefaultIdentitySurfaceRegistry(
-		DecideApprovalRenderSurfaceHTTP,
-		DecideApprovalRenderSurfaceMCP,
-	)
+	legacySurfaceRegistry := projectiondispatch.NewHTTPMCPDefaultResolverHookRegistryFixture[DecideApprovalRenderSurface]()
 
 	assertDecideApprovalResolverHooksParity(t, legacySurfaceRegistry)
 }
