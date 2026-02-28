@@ -41,22 +41,25 @@ func TestNewDefaultCommandProjectionSurfaceRegistries_HTTPMCPIdentitySurfaceRegi
 
 	legacyConstructors := map[string]func() projectiondispatch.PolicyRegistry[ProjectionDispatchSurface, ProjectionDispatchSurface]{
 		"dispatch": func() projectiondispatch.PolicyRegistry[ProjectionDispatchSurface, ProjectionDispatchSurface] {
-			return newCommandDispatchProjectionSurfaceRegistry(projectiondispatch.NewHTTPMCPIdentitySurfaceSeed(
+			return projectiondispatch.NewHTTPMCPDefaultIdentitySurfaceRegistryFixture(
+				newCommandDispatchProjectionSurfaceRegistry,
 				ProjectionDispatchSurfaceHTTP,
 				ProjectionDispatchSurfaceMCP,
-			))
+			)
 		},
 		"read": func() projectiondispatch.PolicyRegistry[ProjectionDispatchSurface, ProjectionDispatchSurface] {
-			return newCommandReadProjectionSurfaceRegistry(projectiondispatch.NewHTTPMCPIdentitySurfaceSeed(
+			return projectiondispatch.NewHTTPMCPDefaultIdentitySurfaceRegistryFixture(
+				newCommandReadProjectionSurfaceRegistry,
 				ProjectionDispatchSurfaceHTTP,
 				ProjectionDispatchSurfaceMCP,
-			))
+			)
 		},
 		"invoke": func() projectiondispatch.PolicyRegistry[ProjectionDispatchSurface, ProjectionDispatchSurface] {
-			return newCommandInvokeProjectionSurfaceRegistry(projectiondispatch.NewHTTPMCPIdentitySurfaceSeed(
+			return projectiondispatch.NewHTTPMCPDefaultIdentitySurfaceRegistryFixture(
+				newCommandInvokeProjectionSurfaceRegistry,
 				ProjectionDispatchSurfaceHTTP,
 				ProjectionDispatchSurfaceMCP,
-			))
+			)
 		},
 	}
 

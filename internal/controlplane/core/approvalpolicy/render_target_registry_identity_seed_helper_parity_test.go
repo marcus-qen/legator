@@ -19,10 +19,11 @@ func TestNewDefaultDecideApprovalRenderSurfaceRegistry_HTTPMCPIdentitySurfaceReg
 
 func TestNewDefaultDecideApprovalRenderSurfaceRegistry_HTTPMCPIdentitySurfaceRegistryHelperParityWithLegacyComposedSetup(t *testing.T) {
 	newRegistry := newDefaultDecideApprovalRenderSurfaceRegistry()
-	legacyRegistry := newDecideApprovalRenderSurfaceRegistry(projectiondispatch.NewHTTPMCPIdentitySurfaceSeed(
+	legacyRegistry := projectiondispatch.NewHTTPMCPDefaultIdentitySurfaceRegistryFixture(
+		newDecideApprovalRenderSurfaceRegistry,
 		DecideApprovalRenderSurfaceHTTP,
 		DecideApprovalRenderSurfaceMCP,
-	))
+	)
 
 	assertDefaultDecideApprovalRegistryParity(t, newRegistry, legacyRegistry)
 }
