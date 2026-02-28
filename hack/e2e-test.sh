@@ -253,6 +253,46 @@ else
   fail "Job run history missing/invalid: $JOB_RUNS"
 fi
 
+JOB_RUNS_FILTERED=$(curl -sf "$CP_URL/api/v1/jobs/$JOB_ID/runs?status=failed&limit=1")
+JOB_RUNS_FILTERED_COUNT=$(echo "$JOB_RUNS_FILTERED" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count',0)); print(d.get('failed_count',-1))" 2>/dev/null || echo "0
+-1")
+JOB_FILTER_COUNT=$(echo "$JOB_RUNS_FILTERED_COUNT" | head -n1)
+JOB_FILTER_FAILED=$(echo "$JOB_RUNS_FILTERED_COUNT" | tail -n1)
+if [[ "$JOB_FILTER_COUNT" -ge 0 ]] && [[ "$JOB_FILTER_FAILED" -ge 0 ]]; then
+  pass "Job run filters + failed summary available (count=$JOB_FILTER_COUNT failed=$JOB_FILTER_FAILED)"
+else
+  fail "Job run filter query invalid: $JOB_RUNS_FILTERED"
+fi
+
+JOB_FAIL_CREATE=$(curl -sf -X POST "$CP_URL/api/v1/jobs" \
+  -H "Content-Type: application/json" \
+  -d "{\"name\":\"e2e scheduled fail\",\"command\":\"false\",\"schedule\":\"1h\",\"target\":{\"kind\":\"probe\",\"value\":\"$PROBE_ID\"},\"enabled\":true}")
+JOB_FAIL_ID=$(echo "$JOB_FAIL_CREATE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+if [[ -n "$JOB_FAIL_ID" ]]; then
+  pass "Failing job created (id=$JOB_FAIL_ID)"
+else
+  fail "Failing job creation failed: $JOB_FAIL_CREATE"
+fi
+
+JOB_FAIL_RUN=$(curl -sf -X POST "$CP_URL/api/v1/jobs/$JOB_FAIL_ID/run")
+if echo "$JOB_FAIL_RUN" | grep -q "dispatched"; then
+  pass "Failing job dispatched"
+else
+  fail "Failing job dispatch failed: $JOB_FAIL_RUN"
+fi
+
+sleep 2
+FAILED_GLOBAL=$(curl -sf "$CP_URL/api/v1/jobs/runs?status=failed&limit=20")
+FAILED_GLOBAL_COUNT=$(echo "$FAILED_GLOBAL" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count',0)); print(d.get('failed_count',-1))" 2>/dev/null || echo "0
+-1")
+FAILED_GLOBAL_TOTAL=$(echo "$FAILED_GLOBAL_COUNT" | head -n1)
+FAILED_GLOBAL_FAILED=$(echo "$FAILED_GLOBAL_COUNT" | tail -n1)
+if [[ "$FAILED_GLOBAL_TOTAL" -ge 1 ]] && [[ "$FAILED_GLOBAL_FAILED" -ge 1 ]]; then
+  pass "Global failed-run visibility works (count=$FAILED_GLOBAL_TOTAL failed=$FAILED_GLOBAL_FAILED)"
+else
+  fail "Global failed-run visibility missing: $FAILED_GLOBAL"
+fi
+
 # 11. Task endpoint returns 503 without LLM config
 echo ""
 echo "11. Checking task endpoint (no LLM configured)..."

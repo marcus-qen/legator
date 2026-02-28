@@ -2,7 +2,9 @@ package jobs
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -208,12 +210,61 @@ func (h *Handler) HandleListRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runs, err := h.store.ListRunsByJob(id, 50)
+	query, err := parseRunQuery(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	query.JobID = id
+
+	runs, err := h.store.ListRuns(query)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"job_id": id, "runs": runs, "count": len(runs)})
+	summary := summarizeRuns(runs)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"job_id":        id,
+		"runs":          runs,
+		"count":         len(runs),
+		"failed_count":  summary.Failed,
+		"success_count": summary.Success,
+		"running_count": summary.Running,
+	})
+}
+
+// HandleListAllRuns serves GET /api/v1/jobs/runs.
+func (h *Handler) HandleListAllRuns(w http.ResponseWriter, r *http.Request) {
+	query, err := parseRunQuery(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if jobID := strings.TrimSpace(r.URL.Query().Get("job_id")); jobID != "" {
+		if _, err := h.store.GetJob(jobID); err != nil {
+			if IsNotFound(err) {
+				writeError(w, http.StatusNotFound, "not_found", "job not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		query.JobID = jobID
+	}
+
+	runs, err := h.store.ListRuns(query)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	summary := summarizeRuns(runs)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"runs":          runs,
+		"count":         len(runs),
+		"failed_count":  summary.Failed,
+		"success_count": summary.Success,
+		"running_count": summary.Running,
+	})
 }
 
 // HandleEnableJob serves POST /api/v1/jobs/{id}/enable.
@@ -242,6 +293,70 @@ func handleToggleJob(w http.ResponseWriter, r *http.Request, store *Store, enabl
 		return
 	}
 	writeJSON(w, http.StatusOK, job)
+}
+
+type runSummary struct {
+	Running int
+	Success int
+	Failed  int
+}
+
+func summarizeRuns(runs []JobRun) runSummary {
+	summary := runSummary{}
+	for _, run := range runs {
+		switch run.Status {
+		case RunStatusRunning:
+			summary.Running++
+		case RunStatusSuccess:
+			summary.Success++
+		case RunStatusFailed:
+			summary.Failed++
+		}
+	}
+	return summary
+}
+
+func parseRunQuery(r *http.Request) (RunQuery, error) {
+	query := RunQuery{}
+
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			return RunQuery{}, fmt.Errorf("limit must be a positive integer")
+		}
+		query.Limit = parsed
+	}
+
+	query.ProbeID = strings.TrimSpace(r.URL.Query().Get("probe_id"))
+
+	if status := strings.TrimSpace(r.URL.Query().Get("status")); status != "" {
+		switch status {
+		case RunStatusRunning, RunStatusSuccess, RunStatusFailed:
+			query.Status = status
+		default:
+			return RunQuery{}, fmt.Errorf("status must be one of: running, success, failed")
+		}
+	}
+
+	if raw := strings.TrimSpace(r.URL.Query().Get("started_after")); raw != "" {
+		ts, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			return RunQuery{}, fmt.Errorf("started_after must be RFC3339")
+		}
+		query.StartedAfter = &ts
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("started_before")); raw != "" {
+		ts, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			return RunQuery{}, fmt.Errorf("started_before must be RFC3339")
+		}
+		query.StartedBefore = &ts
+	}
+	if query.StartedAfter != nil && query.StartedBefore != nil && query.StartedAfter.After(*query.StartedBefore) {
+		return RunQuery{}, fmt.Errorf("started_after must be <= started_before")
+	}
+
+	return query, nil
 }
 
 func validateSchedule(schedule string) error {

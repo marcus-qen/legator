@@ -153,6 +153,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Scheduled jobs
 	if s.jobsHandler != nil {
 		mux.HandleFunc("GET /api/v1/jobs", s.withPermission(auth.PermFleetRead, s.jobsHandler.HandleListJobs))
+		mux.HandleFunc("GET /api/v1/jobs/runs", s.withPermission(auth.PermFleetRead, s.jobsHandler.HandleListAllRuns))
 		mux.HandleFunc("POST /api/v1/jobs", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleCreateJob))
 		mux.HandleFunc("GET /api/v1/jobs/{id}", s.withPermission(auth.PermFleetRead, s.jobsHandler.HandleGetJob))
 		mux.HandleFunc("PUT /api/v1/jobs/{id}", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleUpdateJob))
@@ -163,6 +164,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/v1/jobs/{id}/disable", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleDisableJob))
 	} else {
 		mux.HandleFunc("GET /api/v1/jobs", s.withPermission(auth.PermFleetRead, s.handleJobsUnavailable))
+		mux.HandleFunc("GET /api/v1/jobs/runs", s.withPermission(auth.PermFleetRead, s.handleJobsUnavailable))
 		mux.HandleFunc("POST /api/v1/jobs", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
 		mux.HandleFunc("GET /api/v1/jobs/{id}", s.withPermission(auth.PermFleetRead, s.handleJobsUnavailable))
 		mux.HandleFunc("PUT /api/v1/jobs/{id}", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
