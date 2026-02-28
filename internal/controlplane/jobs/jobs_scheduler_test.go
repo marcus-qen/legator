@@ -261,6 +261,299 @@ func TestSchedulerCancelJobMarksRunCanceledAndIgnoresLateResult(t *testing.T) {
 	t.Fatalf("expected canceled status after cancel race, got %#v", updated)
 }
 
+func TestSchedulerRetriesWithBackoffAndCap(t *testing.T) {
+	store := newTestStore(t)
+	fleetMgr := fleet.NewManager(zap.NewNop())
+	fleetMgr.Register("probe-1", "probe-1", "linux", "amd64")
+	if err := fleetMgr.SetOnline("probe-1"); err != nil {
+		t.Fatalf("set online: %v", err)
+	}
+
+	tracker := newFakeTracker()
+	var (
+		mu            sync.Mutex
+		dispatchTimes []time.Time
+	)
+	sender := &fakeSender{sendFn: func(probeID string, msgType protocol.MessageType, payload any) error {
+		cmd, ok := payload.(protocol.CommandPayload)
+		if !ok {
+			return fmt.Errorf("unexpected payload type %T", payload)
+		}
+		mu.Lock()
+		dispatchTimes = append(dispatchTimes, time.Now())
+		mu.Unlock()
+		go tracker.complete(cmd.RequestID, &protocol.CommandResultPayload{RequestID: cmd.RequestID, ExitCode: 1, Stderr: "boom"})
+		return nil
+	}}
+	scheduler := NewScheduler(store, sender, fleetMgr, tracker, zap.NewNop())
+
+	job, err := store.CreateJob(Job{
+		Name:     "retry-backoff",
+		Command:  "false",
+		Schedule: "1h",
+		Target:   Target{Kind: TargetKindProbe, Value: "probe-1"},
+		RetryPolicy: &RetryPolicy{
+			MaxAttempts:    3,
+			InitialBackoff: "20ms",
+			Multiplier:     3,
+			MaxBackoff:     "40ms",
+		},
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	if err := scheduler.TriggerNow(job.ID); err != nil {
+		t.Fatalf("trigger now: %v", err)
+	}
+
+	waitForRuns(t, store, job.ID, 3, 3*time.Second)
+	runs, err := store.ListRunsByJob(job.ID, 10)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 3 {
+		t.Fatalf("expected 3 attempts, got %d", len(runs))
+	}
+
+	byAttempt := make(map[int]JobRun, len(runs))
+	for _, run := range runs {
+		byAttempt[run.Attempt] = run
+		if run.MaxAttempts != 3 {
+			t.Fatalf("run attempt %d max_attempts=%d want 3", run.Attempt, run.MaxAttempts)
+		}
+		if run.Status != RunStatusFailed {
+			t.Fatalf("run attempt %d status=%s want failed", run.Attempt, run.Status)
+		}
+	}
+	if byAttempt[1].RetryScheduledAt == nil || byAttempt[2].RetryScheduledAt == nil {
+		t.Fatalf("expected retry_scheduled_at for attempts 1 and 2, got %#v", byAttempt)
+	}
+	if byAttempt[3].RetryScheduledAt != nil {
+		t.Fatalf("expected final attempt to have no retry_scheduled_at, got %v", byAttempt[3].RetryScheduledAt)
+	}
+
+	mu.Lock()
+	timesCopy := append([]time.Time(nil), dispatchTimes...)
+	mu.Unlock()
+	if len(timesCopy) != 3 {
+		t.Fatalf("expected 3 dispatches, got %d", len(timesCopy))
+	}
+	delay1 := timesCopy[1].Sub(timesCopy[0])
+	delay2 := timesCopy[2].Sub(timesCopy[1])
+	if delay1 < 15*time.Millisecond {
+		t.Fatalf("first retry delay too short: %s", delay1)
+	}
+	if delay2 < 30*time.Millisecond {
+		t.Fatalf("second retry delay too short (cap expected): %s", delay2)
+	}
+}
+
+func TestSchedulerNoRetryAfterSuccess(t *testing.T) {
+	store := newTestStore(t)
+	fleetMgr := fleet.NewManager(zap.NewNop())
+	fleetMgr.Register("probe-1", "probe-1", "linux", "amd64")
+	if err := fleetMgr.SetOnline("probe-1"); err != nil {
+		t.Fatalf("set online: %v", err)
+	}
+
+	tracker := newFakeTracker()
+	sender := &fakeSender{sendFn: func(probeID string, msgType protocol.MessageType, payload any) error {
+		cmd := payload.(protocol.CommandPayload)
+		go tracker.complete(cmd.RequestID, &protocol.CommandResultPayload{RequestID: cmd.RequestID, ExitCode: 0, Stdout: "ok"})
+		return nil
+	}}
+	scheduler := NewScheduler(store, sender, fleetMgr, tracker, zap.NewNop())
+
+	job, err := store.CreateJob(Job{
+		Name:     "retry-success",
+		Command:  "echo ok",
+		Schedule: "1h",
+		Target:   Target{Kind: TargetKindProbe, Value: "probe-1"},
+		RetryPolicy: &RetryPolicy{
+			MaxAttempts:    4,
+			InitialBackoff: "20ms",
+			Multiplier:     2,
+		},
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if err := scheduler.TriggerNow(job.ID); err != nil {
+		t.Fatalf("trigger now: %v", err)
+	}
+
+	waitForRuns(t, store, job.ID, 1, 2*time.Second)
+	time.Sleep(120 * time.Millisecond)
+	runs, err := store.ListRunsByJob(job.ID, 10)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run for successful execution, got %d", len(runs))
+	}
+	if runs[0].Status != RunStatusSuccess {
+		t.Fatalf("expected success status, got %s", runs[0].Status)
+	}
+}
+
+func TestSchedulerCancelJobStopsScheduledRetry(t *testing.T) {
+	store := newTestStore(t)
+	fleetMgr := fleet.NewManager(zap.NewNop())
+	fleetMgr.Register("probe-1", "probe-1", "linux", "amd64")
+	if err := fleetMgr.SetOnline("probe-1"); err != nil {
+		t.Fatalf("set online: %v", err)
+	}
+
+	tracker := newFakeTracker()
+	sender := &fakeSender{sendFn: func(probeID string, msgType protocol.MessageType, payload any) error {
+		cmd := payload.(protocol.CommandPayload)
+		go tracker.complete(cmd.RequestID, &protocol.CommandResultPayload{RequestID: cmd.RequestID, ExitCode: 1, Stderr: "boom"})
+		return nil
+	}}
+	scheduler := NewScheduler(store, sender, fleetMgr, tracker, zap.NewNop())
+
+	job, err := store.CreateJob(Job{
+		Name:     "cancel-retry",
+		Command:  "false",
+		Schedule: "1h",
+		Target:   Target{Kind: TargetKindProbe, Value: "probe-1"},
+		RetryPolicy: &RetryPolicy{
+			MaxAttempts:    3,
+			InitialBackoff: "250ms",
+			Multiplier:     2,
+		},
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if err := scheduler.TriggerNow(job.ID); err != nil {
+		t.Fatalf("trigger now: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		runs, err := store.ListRunsByJob(job.ID, 10)
+		if err != nil {
+			t.Fatalf("list runs: %v", err)
+		}
+		if len(runs) >= 1 && runs[0].Status == RunStatusFailed && runs[0].RetryScheduledAt != nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	summary, err := scheduler.CancelJob(job.ID)
+	if err != nil {
+		t.Fatalf("cancel job: %v", err)
+	}
+	if summary.CanceledRetries < 1 {
+		t.Fatalf("expected at least one canceled scheduled retry, got %+v", summary)
+	}
+
+	time.Sleep(400 * time.Millisecond)
+	runs, err := store.ListRunsByJob(job.ID, 10)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected queued retry to be canceled; got %d runs", len(runs))
+	}
+}
+
+func TestSchedulerRetriesOnDispatchFailure(t *testing.T) {
+	store := newTestStore(t)
+	fleetMgr := fleet.NewManager(zap.NewNop())
+	fleetMgr.Register("probe-1", "probe-1", "linux", "amd64")
+	if err := fleetMgr.SetOnline("probe-1"); err != nil {
+		t.Fatalf("set online: %v", err)
+	}
+
+	tracker := newFakeTracker()
+	attempts := 0
+	sender := &fakeSender{sendFn: func(probeID string, msgType protocol.MessageType, payload any) error {
+		attempts++
+		cmd := payload.(protocol.CommandPayload)
+		if attempts < 3 {
+			return fmt.Errorf("probe offline")
+		}
+		go tracker.complete(cmd.RequestID, &protocol.CommandResultPayload{RequestID: cmd.RequestID, ExitCode: 0, Stdout: "ok"})
+		return nil
+	}}
+	scheduler := NewScheduler(store, sender, fleetMgr, tracker, zap.NewNop())
+
+	job, err := store.CreateJob(Job{
+		Name:     "dispatch-retries",
+		Command:  "echo ok",
+		Schedule: "1h",
+		Target:   Target{Kind: TargetKindProbe, Value: "probe-1"},
+		RetryPolicy: &RetryPolicy{
+			MaxAttempts:    3,
+			InitialBackoff: "20ms",
+			Multiplier:     2,
+		},
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if err := scheduler.TriggerNow(job.ID); err != nil {
+		t.Fatalf("trigger now: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		runs, err := store.ListRunsByJob(job.ID, 10)
+		if err != nil {
+			t.Fatalf("list runs: %v", err)
+		}
+		if len(runs) == 3 {
+			var foundSuccess bool
+			for _, run := range runs {
+				if run.Status == RunStatusSuccess {
+					foundSuccess = true
+				}
+			}
+			if foundSuccess {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	runs, _ := store.ListRunsByJob(job.ID, 10)
+	t.Fatalf("expected success after dispatch retries, got %#v", runs)
+}
+
+func waitForRuns(t *testing.T, store *Store, jobID string, want int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		runs, err := store.ListRunsByJob(jobID, 50)
+		if err != nil {
+			t.Fatalf("list runs: %v", err)
+		}
+		if len(runs) == want {
+			allTerminal := true
+			for _, run := range runs {
+				if run.Status == RunStatusPending || run.Status == RunStatusRunning {
+					allTerminal = false
+					break
+				}
+			}
+			if allTerminal {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	runs, _ := store.ListRunsByJob(jobID, 50)
+	t.Fatalf("timed out waiting for %d runs, got %#v", want, runs)
+}
+
 type fakeSender struct {
 	sendFn func(probeID string, msgType protocol.MessageType, payload any) error
 }

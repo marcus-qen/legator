@@ -33,11 +33,12 @@ func (h *Handler) HandleListJobs(w http.ResponseWriter, _ *http.Request) {
 // HandleCreateJob serves POST /api/v1/jobs.
 func (h *Handler) HandleCreateJob(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name     string `json:"name"`
-		Command  string `json:"command"`
-		Schedule string `json:"schedule"`
-		Target   Target `json:"target"`
-		Enabled  *bool  `json:"enabled"`
+		Name        string       `json:"name"`
+		Command     string       `json:"command"`
+		Schedule    string       `json:"schedule"`
+		Target      Target       `json:"target"`
+		RetryPolicy *RetryPolicy `json:"retry_policy"`
+		Enabled     *bool        `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
@@ -54,12 +55,13 @@ func (h *Handler) HandleCreateJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	job := Job{
-		Name:       strings.TrimSpace(req.Name),
-		Command:    strings.TrimSpace(req.Command),
-		Schedule:   strings.TrimSpace(req.Schedule),
-		Target:     req.Target,
-		Enabled:    enabled,
-		LastStatus: "",
+		Name:        strings.TrimSpace(req.Name),
+		Command:     strings.TrimSpace(req.Command),
+		Schedule:    strings.TrimSpace(req.Schedule),
+		Target:      req.Target,
+		RetryPolicy: req.RetryPolicy,
+		Enabled:     enabled,
+		LastStatus:  "",
 	}
 	created, err := h.store.CreateJob(job)
 	if err != nil {
@@ -110,11 +112,12 @@ func (h *Handler) HandleUpdateJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name     string `json:"name"`
-		Command  string `json:"command"`
-		Schedule string `json:"schedule"`
-		Target   Target `json:"target"`
-		Enabled  *bool  `json:"enabled"`
+		Name        string       `json:"name"`
+		Command     string       `json:"command"`
+		Schedule    string       `json:"schedule"`
+		Target      Target       `json:"target"`
+		RetryPolicy *RetryPolicy `json:"retry_policy"`
+		Enabled     *bool        `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
@@ -129,17 +132,22 @@ func (h *Handler) HandleUpdateJob(w http.ResponseWriter, r *http.Request) {
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
+	retryPolicy := existing.RetryPolicy
+	if req.RetryPolicy != nil {
+		retryPolicy = req.RetryPolicy
+	}
 
 	updated, err := h.store.UpdateJob(Job{
-		ID:         id,
-		Name:       strings.TrimSpace(req.Name),
-		Command:    strings.TrimSpace(req.Command),
-		Schedule:   strings.TrimSpace(req.Schedule),
-		Target:     req.Target,
-		Enabled:    enabled,
-		CreatedAt:  existing.CreatedAt,
-		LastRunAt:  existing.LastRunAt,
-		LastStatus: existing.LastStatus,
+		ID:          id,
+		Name:        strings.TrimSpace(req.Name),
+		Command:     strings.TrimSpace(req.Command),
+		Schedule:    strings.TrimSpace(req.Schedule),
+		Target:      req.Target,
+		RetryPolicy: retryPolicy,
+		Enabled:     enabled,
+		CreatedAt:   existing.CreatedAt,
+		LastRunAt:   existing.LastRunAt,
+		LastStatus:  existing.LastStatus,
 	})
 	if err != nil {
 		if IsNotFound(err) {
@@ -228,6 +236,7 @@ func (h *Handler) HandleCancelJob(w http.ResponseWriter, r *http.Request) {
 		"status":                "cancel_requested",
 		"canceled_runs":         summary.CanceledRuns,
 		"already_terminal_runs": summary.AlreadyTerminalRuns,
+		"canceled_retries":      summary.CanceledRetries,
 	})
 }
 

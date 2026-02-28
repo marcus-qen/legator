@@ -147,6 +147,48 @@ func TestHandleListAllRunsSupportsJobFilter(t *testing.T) {
 	}
 }
 
+func TestHandleCreateAndUpdateJobRetryPolicy(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	defer store.Close()
+
+	h := NewHandler(store, nil)
+	createBody := `{"name":"retry-job","command":"false","schedule":"1h","target":{"kind":"probe","value":"probe-1"},"retry_policy":{"max_attempts":4,"initial_backoff":"5s","multiplier":2,"max_backoff":"30s"},"enabled":true}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs", strings.NewReader(createBody))
+	rr := httptest.NewRecorder()
+	h.HandleCreateJob(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201 create, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var created Job
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created job: %v", err)
+	}
+	if created.RetryPolicy == nil || created.RetryPolicy.MaxAttempts != 4 {
+		t.Fatalf("expected retry policy in create response, got %#v", created.RetryPolicy)
+	}
+
+	updateBody := `{"name":"retry-job-v2","command":"false","schedule":"1h","target":{"kind":"probe","value":"probe-1"},"enabled":true}`
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/jobs/"+created.ID, strings.NewReader(updateBody))
+	req.SetPathValue("id", created.ID)
+	rr = httptest.NewRecorder()
+	h.HandleUpdateJob(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 update, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var updated Job
+	if err := json.Unmarshal(rr.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode updated job: %v", err)
+	}
+	if updated.RetryPolicy == nil || updated.RetryPolicy.MaxAttempts != 4 {
+		t.Fatalf("expected retry policy preserved on update, got %#v", updated.RetryPolicy)
+	}
+}
+
 func TestHandleCancelRunAndTransitionConflict(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "jobs.db"))
 	if err != nil {

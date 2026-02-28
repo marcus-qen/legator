@@ -171,6 +171,10 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 | `LEGATOR_KUBEFLOW_CONTEXT` | — | Optional kubeconfig context override |
 | `LEGATOR_KUBEFLOW_TIMEOUT` | `15s` | Timeout per kubectl call for adapter reads |
 | `LEGATOR_KUBEFLOW_ACTIONS_ENABLED` | `false` | Enable guarded action endpoint (`POST /api/v1/kubeflow/actions/refresh`) |
+| `LEGATOR_JOBS_RETRY_MAX_ATTEMPTS` | `1` | Global default max attempts for scheduled-job retries (includes first attempt) |
+| `LEGATOR_JOBS_RETRY_INITIAL_BACKOFF` | `5s` | Global default initial retry delay for scheduled-job retries |
+| `LEGATOR_JOBS_RETRY_MULTIPLIER` | `2` | Global default exponential multiplier for scheduled-job retries |
+| `LEGATOR_JOBS_RETRY_MAX_BACKOFF` | none | Optional global cap for retry delay progression |
 | `LEGATOR_SERVER_URL` | — | Probe auto-init: control plane URL |
 | `LEGATOR_TOKEN` | — | Probe auto-init: registration token |
 | `LEGATOR_TAGS` | — | Probe auto-init: comma-separated tags |
@@ -192,6 +196,12 @@ make release-build    # Cross-compile release binaries (incl. windows/amd64 prob
 
 - **Fleet**: `GET /api/v1/probes`, `GET /api/v1/fleet/summary`, `POST /api/v1/probes/{id}/command`
 - **Jobs**: `GET/POST /api/v1/jobs`, `POST /api/v1/jobs/{id}/run`, `POST /api/v1/jobs/{id}/cancel`, `GET /api/v1/jobs/{id}/runs`, `POST /api/v1/jobs/{id}/runs/{runId}/cancel`, `GET /api/v1/jobs/runs`
+  - Optional per-job retry policy (additive):
+    - `retry_policy.max_attempts`
+    - `retry_policy.initial_backoff` (duration, e.g. `10s`)
+    - `retry_policy.multiplier` (exponential factor, e.g. `2`)
+    - `retry_policy.max_backoff` (optional cap duration)
+  - Run history now includes correlation metadata: `execution_id`, `attempt`, `max_attempts`, `retry_scheduled_at`.
 - **Chat**: `GET/POST /api/v1/probes/{id}/chat`, `GET /ws/chat`
 - **Fleet Chat**: `GET/POST /api/v1/fleet/chat`
 - **Policy**: `GET/POST /api/v1/policies`, `POST /api/v1/probes/{id}/apply-policy/{policyId}`

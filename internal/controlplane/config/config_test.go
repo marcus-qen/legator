@@ -219,6 +219,27 @@ func TestHasTLS(t *testing.T) {
 	}
 }
 
+func TestJobsRetryEnvOverrides(t *testing.T) {
+	t.Setenv("LEGATOR_JOBS_RETRY_MAX_ATTEMPTS", "4")
+	t.Setenv("LEGATOR_JOBS_RETRY_INITIAL_BACKOFF", "3s")
+	t.Setenv("LEGATOR_JOBS_RETRY_MULTIPLIER", "2.5")
+	t.Setenv("LEGATOR_JOBS_RETRY_MAX_BACKOFF", "30s")
+
+	cfg := LoadFromEnv()
+	if cfg.Jobs.RetryMaxAttempts != 4 {
+		t.Fatalf("expected retry max attempts 4, got %d", cfg.Jobs.RetryMaxAttempts)
+	}
+	if cfg.Jobs.RetryInitialBackoff != "3s" {
+		t.Fatalf("expected initial backoff 3s, got %s", cfg.Jobs.RetryInitialBackoff)
+	}
+	if cfg.Jobs.RetryMultiplier != 2.5 {
+		t.Fatalf("expected retry multiplier 2.5, got %v", cfg.Jobs.RetryMultiplier)
+	}
+	if cfg.Jobs.RetryMaxBackoff != "30s" {
+		t.Fatalf("expected max backoff 30s, got %s", cfg.Jobs.RetryMaxBackoff)
+	}
+}
+
 func TestOIDCEnvOverrides(t *testing.T) {
 	t.Setenv("LEGATOR_OIDC_ENABLED", "true")
 	t.Setenv("LEGATOR_OIDC_PROVIDER_URL", "https://keycloak.example.com/realms/dev")
