@@ -1,9 +1,6 @@
 package commanddispatch
 
-import (
-	"github.com/marcus-qen/legator/internal/controlplane/core/projectiondispatch"
-	"github.com/marcus-qen/legator/internal/protocol"
-)
+import "github.com/marcus-qen/legator/internal/controlplane/core/projectiondispatch"
 
 // newCommandDispatchErrorPolicyRegistry builds the command-dispatch error
 // policy registry from explicit surface→policy intent.
@@ -18,19 +15,19 @@ func newCommandReadPolicyRegistry(policies map[ProjectionDispatchSurface]command
 }
 
 func newDefaultCommandDispatchErrorPolicyRegistry() projectiondispatch.PolicyRegistry[ProjectionDispatchSurface, commandDispatchErrorPolicy] {
-	return projectiondispatch.NewHTTPMCPIdentityPolicyRegistry(
+	return projectiondispatch.NewHTTPMCPDefaultPolicyRegistry(
 		ProjectionDispatchSurfaceHTTP,
-		commandDispatchErrorPolicy(projectiondispatch.PolicyFunc[*CommandResultEnvelope, commandDispatchAdapterWriter](dispatchCommandEnvelopeHTTPError)),
+		dispatchCommandEnvelopeHTTPError,
 		ProjectionDispatchSurfaceMCP,
-		commandDispatchErrorPolicy(projectiondispatch.PolicyFunc[*CommandResultEnvelope, commandDispatchAdapterWriter](dispatchCommandEnvelopeMCPError)),
+		dispatchCommandEnvelopeMCPError,
 	)
 }
 
 func newDefaultCommandReadPolicyRegistry() projectiondispatch.PolicyRegistry[ProjectionDispatchSurface, commandReadPolicy] {
-	return projectiondispatch.NewHTTPMCPIdentityPolicyRegistry(
+	return projectiondispatch.NewHTTPMCPDefaultPolicyRegistry(
 		ProjectionDispatchSurfaceHTTP,
-		commandReadPolicy(projectiondispatch.PolicyFunc[*protocol.CommandResultPayload, commandDispatchAdapterWriter](dispatchCommandReadHTTP)),
+		dispatchCommandReadHTTP,
 		ProjectionDispatchSurfaceMCP,
-		commandReadPolicy(projectiondispatch.PolicyFunc[*protocol.CommandResultPayload, commandDispatchAdapterWriter](dispatchCommandReadMCP)),
+		dispatchCommandReadMCP,
 	)
 }
