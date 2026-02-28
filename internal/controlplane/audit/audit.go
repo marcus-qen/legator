@@ -25,6 +25,15 @@ const (
 	EventInventoryUpdate   EventType = "inventory.updated"
 	EventProbeKeyRotated   EventType = "probe.key_rotated"
 	EventProbeDeregistered EventType = "probe.deregistered"
+	EventJobCreated        EventType = "job.created"
+	EventJobUpdated        EventType = "job.updated"
+	EventJobDeleted        EventType = "job.deleted"
+	EventJobRunQueued      EventType = "job.run.queued"
+	EventJobRunStarted     EventType = "job.run.started"
+	EventJobRunRetryScheduled EventType = "job.run.retry_scheduled"
+	EventJobRunSucceeded   EventType = "job.run.succeeded"
+	EventJobRunFailed      EventType = "job.run.failed"
+	EventJobRunCanceled    EventType = "job.run.canceled"
 )
 
 // Event is a single audit log entry.

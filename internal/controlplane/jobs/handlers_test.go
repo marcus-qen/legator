@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -186,6 +187,72 @@ func TestHandleCreateAndUpdateJobRetryPolicy(t *testing.T) {
 	}
 	if updated.RetryPolicy == nil || updated.RetryPolicy.MaxAttempts != 4 {
 		t.Fatalf("expected retry policy preserved on update, got %#v", updated.RetryPolicy)
+	}
+}
+
+func TestHandleMutationEndpointsEmitLifecycleEvents(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	defer store.Close()
+
+	var (
+		mu     sync.Mutex
+		events []LifecycleEvent
+	)
+	h := NewHandler(store, nil, WithHandlerLifecycleObserver(LifecycleObserverFunc(func(event LifecycleEvent) {
+		mu.Lock()
+		events = append(events, event)
+		mu.Unlock()
+	})))
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/jobs", strings.NewReader(`{"name":"emit","command":"echo hi","schedule":"1h","target":{"kind":"probe","value":"probe-1"},"enabled":true}`))
+	createRR := httptest.NewRecorder()
+	h.HandleCreateJob(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("expected 201 create, got %d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	var created Job
+	if err := json.Unmarshal(createRR.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	updateReq := httptest.NewRequest(http.MethodPut, "/api/v1/jobs/"+created.ID, strings.NewReader(`{"name":"emit-2","command":"echo hi","schedule":"1h","target":{"kind":"probe","value":"probe-1"},"enabled":true}`))
+	updateReq.SetPathValue("id", created.ID)
+	updateRR := httptest.NewRecorder()
+	h.HandleUpdateJob(updateRR, updateReq)
+	if updateRR.Code != http.StatusOK {
+		t.Fatalf("expected 200 update, got %d body=%s", updateRR.Code, updateRR.Body.String())
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/jobs/"+created.ID, nil)
+	deleteReq.SetPathValue("id", created.ID)
+	deleteRR := httptest.NewRecorder()
+	h.HandleDeleteJob(deleteRR, deleteReq)
+	if deleteRR.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 delete, got %d body=%s", deleteRR.Code, deleteRR.Body.String())
+	}
+
+	mu.Lock()
+	got := append([]LifecycleEvent(nil), events...)
+	mu.Unlock()
+	if len(got) != 3 {
+		t.Fatalf("expected 3 lifecycle events, got %d (%+v)", len(got), got)
+	}
+
+	wantTypes := []LifecycleEventType{EventJobCreated, EventJobUpdated, EventJobDeleted}
+	for i, wantType := range wantTypes {
+		if got[i].Type != wantType {
+			t.Fatalf("event[%d] type=%s want %s", i, got[i].Type, wantType)
+		}
+		if got[i].JobID != created.ID {
+			t.Fatalf("event[%d] job_id=%q want %q", i, got[i].JobID, created.ID)
+		}
+		if got[i].Timestamp.IsZero() {
+			t.Fatalf("event[%d] expected non-zero timestamp", i)
+		}
 	}
 }
 

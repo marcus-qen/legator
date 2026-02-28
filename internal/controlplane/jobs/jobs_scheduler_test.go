@@ -129,6 +129,172 @@ func TestSchedulerTriggerNowRecordsRun(t *testing.T) {
 	t.Fatalf("expected successful run to be recorded, got %#v", runs)
 }
 
+func TestSchedulerEmitsRunLifecycleCorrelationMetadata(t *testing.T) {
+	store := newTestStore(t)
+
+	fleetMgr := fleet.NewManager(zap.NewNop())
+	fleetMgr.Register("probe-1", "probe-1", "linux", "amd64")
+	if err := fleetMgr.SetOnline("probe-1"); err != nil {
+		t.Fatalf("set online: %v", err)
+	}
+
+	tracker := newFakeTracker()
+	sender := &fakeSender{
+		sendFn: func(probeID string, msgType protocol.MessageType, payload any) error {
+			cmd, ok := payload.(protocol.CommandPayload)
+			if !ok {
+				return fmt.Errorf("unexpected payload type %T", payload)
+			}
+			go tracker.complete(cmd.RequestID, &protocol.CommandResultPayload{RequestID: cmd.RequestID, ExitCode: 0, Stdout: "ok"})
+			return nil
+		},
+	}
+
+	var (
+		emitMu sync.Mutex
+		emits  []LifecycleEvent
+	)
+	scheduler := NewScheduler(
+		store,
+		sender,
+		fleetMgr,
+		tracker,
+		zap.NewNop(),
+		WithLifecycleObserver(LifecycleObserverFunc(func(event LifecycleEvent) {
+			emitMu.Lock()
+			emits = append(emits, event)
+			emitMu.Unlock()
+		})),
+	)
+
+	job, err := store.CreateJob(Job{Name: "emit-run", Command: "echo ok", Schedule: "1h", Target: Target{Kind: TargetKindProbe, Value: "probe-1"}, Enabled: true})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if err := scheduler.TriggerNow(job.ID); err != nil {
+		t.Fatalf("trigger now: %v", err)
+	}
+
+	waitForLifecycleEvent(t, &emitMu, &emits, EventJobRunSucceeded, 2*time.Second)
+
+	emitMu.Lock()
+	eventsCopy := append([]LifecycleEvent(nil), emits...)
+	emitMu.Unlock()
+
+	queued := findLifecycleEvent(eventsCopy, EventJobRunQueued)
+	started := findLifecycleEvent(eventsCopy, EventJobRunStarted)
+	succeeded := findLifecycleEvent(eventsCopy, EventJobRunSucceeded)
+	if queued == nil || started == nil || succeeded == nil {
+		t.Fatalf("expected queued/started/succeeded events, got %+v", eventsCopy)
+	}
+
+	for _, evt := range []*LifecycleEvent{queued, started, succeeded} {
+		if evt.JobID != job.ID {
+			t.Fatalf("event %s job_id=%q want %q", evt.Type, evt.JobID, job.ID)
+		}
+		if evt.RunID == "" || evt.ExecutionID == "" || evt.ProbeID == "" || evt.RequestID == "" {
+			t.Fatalf("event %s missing correlation metadata: %+v", evt.Type, evt)
+		}
+		if evt.Attempt != 1 || evt.MaxAttempts != 1 {
+			t.Fatalf("event %s attempt metadata invalid: %+v", evt.Type, evt)
+		}
+	}
+}
+
+func TestSchedulerEmitsRetryAndCanceledLifecycleEvents(t *testing.T) {
+	store := newTestStore(t)
+	fleetMgr := fleet.NewManager(zap.NewNop())
+	fleetMgr.Register("probe-1", "probe-1", "linux", "amd64")
+	if err := fleetMgr.SetOnline("probe-1"); err != nil {
+		t.Fatalf("set online: %v", err)
+	}
+
+	tracker := newFakeTracker()
+	attempts := 0
+	sender := &fakeSender{sendFn: func(probeID string, msgType protocol.MessageType, payload any) error {
+		cmd := payload.(protocol.CommandPayload)
+		attempts++
+		if attempts == 1 {
+			go tracker.complete(cmd.RequestID, &protocol.CommandResultPayload{RequestID: cmd.RequestID, ExitCode: 1, Stderr: "boom"})
+			return nil
+		}
+		return nil
+	}}
+
+	var (
+		emitMu sync.Mutex
+		emits  []LifecycleEvent
+	)
+	scheduler := NewScheduler(
+		store,
+		sender,
+		fleetMgr,
+		tracker,
+		zap.NewNop(),
+		WithLifecycleObserver(LifecycleObserverFunc(func(event LifecycleEvent) {
+			emitMu.Lock()
+			emits = append(emits, event)
+			emitMu.Unlock()
+		})),
+	)
+
+	job, err := store.CreateJob(Job{
+		Name:     "emit-retry-cancel",
+		Command:  "false",
+		Schedule: "1h",
+		Target:   Target{Kind: TargetKindProbe, Value: "probe-1"},
+		RetryPolicy: &RetryPolicy{
+			MaxAttempts:    2,
+			InitialBackoff: "30ms",
+			Multiplier:     2,
+		},
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if err := scheduler.TriggerNow(job.ID); err != nil {
+		t.Fatalf("trigger now: %v", err)
+	}
+
+	waitForLifecycleEvent(t, &emitMu, &emits, EventJobRunRetryScheduled, 2*time.Second)
+	waitForLifecycleCondition(t, &emitMu, &emits, 2*time.Second, func(events []LifecycleEvent) bool {
+		for _, event := range events {
+			if event.Type == EventJobRunQueued && event.Attempt == 2 {
+				return true
+			}
+		}
+		return false
+	})
+	if _, err := scheduler.CancelJob(job.ID); err != nil {
+		t.Fatalf("cancel job: %v", err)
+	}
+	waitForLifecycleEvent(t, &emitMu, &emits, EventJobRunCanceled, 2*time.Second)
+
+	emitMu.Lock()
+	eventsCopy := append([]LifecycleEvent(nil), emits...)
+	emitMu.Unlock()
+
+	failed := findLifecycleEvent(eventsCopy, EventJobRunFailed)
+	retry := findLifecycleEvent(eventsCopy, EventJobRunRetryScheduled)
+	canceled := findLifecycleEvent(eventsCopy, EventJobRunCanceled)
+	if failed == nil || retry == nil || canceled == nil {
+		t.Fatalf("expected failed/retry/canceled events, got %+v", eventsCopy)
+	}
+
+	for _, evt := range []*LifecycleEvent{failed, retry, canceled} {
+		if evt.JobID != job.ID {
+			t.Fatalf("event %s job_id=%q want %q", evt.Type, evt.JobID, job.ID)
+		}
+		if evt.RunID == "" || evt.ExecutionID == "" || evt.ProbeID == "" || evt.RequestID == "" {
+			t.Fatalf("event %s missing correlation metadata: %+v", evt.Type, evt)
+		}
+		if evt.Attempt <= 0 || evt.MaxAttempts != 2 {
+			t.Fatalf("event %s attempt metadata invalid: %+v", evt.Type, evt)
+		}
+	}
+}
+
 func TestSchedulerSkipsOverlappingRunsForSameTarget(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "jobs.db"))
 	if err != nil {
@@ -552,6 +718,40 @@ func waitForRuns(t *testing.T, store *Store, jobID string, want int, timeout tim
 	}
 	runs, _ := store.ListRunsByJob(jobID, 50)
 	t.Fatalf("timed out waiting for %d runs, got %#v", want, runs)
+}
+
+func waitForLifecycleEvent(t *testing.T, mu *sync.Mutex, events *[]LifecycleEvent, want LifecycleEventType, timeout time.Duration) {
+	t.Helper()
+	waitForLifecycleCondition(t, mu, events, timeout, func(events []LifecycleEvent) bool {
+		return findLifecycleEvent(events, want) != nil
+	})
+}
+
+func waitForLifecycleCondition(t *testing.T, mu *sync.Mutex, events *[]LifecycleEvent, timeout time.Duration, predicate func([]LifecycleEvent) bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		copyEvents := append([]LifecycleEvent(nil), (*events)...)
+		mu.Unlock()
+		if predicate(copyEvents) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	mu.Lock()
+	copyEvents := append([]LifecycleEvent(nil), (*events)...)
+	mu.Unlock()
+	t.Fatalf("timed out waiting for lifecycle condition, got %+v", copyEvents)
+}
+
+func findLifecycleEvent(events []LifecycleEvent, want LifecycleEventType) *LifecycleEvent {
+	for i := range events {
+		if events[i].Type == want {
+			return &events[i]
+		}
+	}
+	return nil
 }
 
 type fakeSender struct {

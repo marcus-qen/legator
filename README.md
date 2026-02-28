@@ -217,6 +217,11 @@ make release-build    # Cross-compile release binaries (incl. windows/amd64 prob
 - **Discovery**: `POST /api/v1/discovery/scan`, `GET /api/v1/discovery/runs`, `GET /api/v1/discovery/runs/{id}`, `POST /api/v1/discovery/install-token`
 - **Metrics**: `GET /api/v1/metrics`
 - **Events**: `GET /api/v1/events` (SSE stream)
+  - Job lifecycle events are emitted to both audit and SSE/event bus surfaces:
+    - `job.created`, `job.updated`, `job.deleted`
+    - `job.run.queued`, `job.run.started`, `job.run.retry_scheduled`
+    - `job.run.succeeded`, `job.run.failed`, `job.run.canceled`
+  - Job run events carry correlation metadata where available: `job_id`, `run_id`, `execution_id`, `probe_id`, `attempt`, `max_attempts`, `request_id`.
 
 ## Status
 
