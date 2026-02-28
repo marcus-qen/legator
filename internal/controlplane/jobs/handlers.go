@@ -295,6 +295,53 @@ func (h *Handler) HandleCancelRun(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleRetryRun serves POST /api/v1/jobs/{id}/runs/{runId}/retry.
+// Retry is intentionally minimal: it validates the referenced run and
+// dispatches a new immediate job execution using the existing TriggerNow flow.
+func (h *Handler) HandleRetryRun(w http.ResponseWriter, r *http.Request) {
+	jobID := strings.TrimSpace(r.PathValue("id"))
+	runID := strings.TrimSpace(r.PathValue("runId"))
+	if jobID == "" || runID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "missing job id or run id")
+		return
+	}
+	if h.scheduler == nil {
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "jobs scheduler unavailable")
+		return
+	}
+
+	run, err := h.store.GetRun(runID)
+	if err != nil {
+		if IsNotFound(err) {
+			writeError(w, http.StatusNotFound, "not_found", "run not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	if strings.TrimSpace(run.JobID) != jobID {
+		writeError(w, http.StatusNotFound, "not_found", "run not found")
+		return
+	}
+
+	if run.Status != RunStatusFailed && run.Status != RunStatusCanceled {
+		writeError(w, http.StatusConflict, "invalid_transition", "only failed or canceled runs can be retried")
+		return
+	}
+
+	if err := h.scheduler.TriggerNow(jobID); err != nil {
+		writeError(w, http.StatusBadGateway, "dispatch_failed", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"job_id":        jobID,
+		"source_run_id": runID,
+		"status":        "retry_dispatched",
+	})
+}
+
 // HandleListRuns serves GET /api/v1/jobs/{id}/runs.
 func (h *Handler) HandleListRuns(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.PathValue("id"))

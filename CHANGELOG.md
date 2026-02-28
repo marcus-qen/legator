@@ -21,6 +21,10 @@
   - Added MCP job resources: `legator://jobs/list`, `legator://jobs/active-runs`.
   - Wired MCP job streaming to existing command-stream/event-bus infrastructure and enabled scheduler command stream emission for async job runs.
   - Added MCP-vs-HTTP parity coverage for job listing/run listing payloads plus MCP resource payload tests.
+- **Stage 1.5 async backbone: jobs dashboard + failed-run triage UI**
+  - Added `/jobs` operator dashboard with health summary cards, job-level controls (run now, enable/disable, cancel active runs), global run history filters (`status`, `job_id`, `probe_id`, `started_after`, `started_before`, `limit`), and failed-run triage output/details panel.
+  - Added run-level retry trigger endpoint `POST /api/v1/jobs/{id}/runs/{runId}/retry` (minimal additive behavior: validates failed/canceled source run and dispatches immediate retry via existing scheduler trigger flow).
+  - Added coverage for jobs dashboard template rendering/snippets, `/jobs` page handler + permission gate, and retry endpoint behavior/contracts.
 
 ### Changed
 - Enforced run lifecycle transitions with immutable terminal states:

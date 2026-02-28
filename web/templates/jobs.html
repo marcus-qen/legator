@@ -1,0 +1,698 @@
+{{define "title"}}Jobs — Legator{{end}}
+
+{{define "header"}}
+<div>
+  <h1 class="page-title">Jobs Dashboard</h1>
+  <span class="page-meta">Async execution health, run history, and failed-run triage</span>
+</div>
+<div class="right">
+  <button class="btn" type="button" id="jobs-refresh">Refresh</button>
+</div>
+{{end}}
+
+{{define "content"}}
+<section class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Health Summary</h2>
+    <span class="panel-sub" id="jobs-last-updated">Last updated: never</span>
+  </div>
+  <div class="jobs-summary-grid">
+    <article class="jobs-summary-card">
+      <span class="jobs-summary-label">Total jobs</span>
+      <strong class="jobs-summary-value" id="jobs-summary-total">0</strong>
+    </article>
+    <article class="jobs-summary-card">
+      <span class="jobs-summary-label">Enabled</span>
+      <strong class="jobs-summary-value" id="jobs-summary-enabled">0</strong>
+    </article>
+    <article class="jobs-summary-card">
+      <span class="jobs-summary-label">Disabled</span>
+      <strong class="jobs-summary-value" id="jobs-summary-disabled">0</strong>
+    </article>
+    <article class="jobs-summary-card">
+      <span class="jobs-summary-label">Running/Pending runs</span>
+      <strong class="jobs-summary-value" id="jobs-summary-active-runs">0</strong>
+    </article>
+    <article class="jobs-summary-card">
+      <span class="jobs-summary-label">Failed runs</span>
+      <strong class="jobs-summary-value" id="jobs-summary-failed-runs">0</strong>
+    </article>
+    <article class="jobs-summary-card">
+      <span class="jobs-summary-label">Latest failed job status</span>
+      <strong class="jobs-summary-value" id="jobs-summary-failed-jobs">0</strong>
+    </article>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Jobs</h2>
+    <span class="panel-sub" id="jobs-list-meta">0 jobs</span>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Target</th>
+          <th>Schedule</th>
+          <th>State</th>
+          <th>Last run</th>
+          <th>Last status</th>
+          <th>Active runs</th>
+          <th>Controls</th>
+        </tr>
+      </thead>
+      <tbody id="jobs-list-body">
+        <tr><td colspan="8" class="empty-state">Loading jobs…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="jobs-layout">
+  <section class="panel">
+    <div class="panel-header">
+      <h2 class="panel-title">Run History</h2>
+      <span class="panel-sub" id="jobs-runs-meta">0 runs</span>
+    </div>
+
+    <form id="jobs-run-filters" class="jobs-filter-grid" autocomplete="off">
+      <label>
+        <span class="muted">Status</span>
+        <select class="input" id="jobs-filter-status">
+          <option value="failed" selected>failed</option>
+          <option value="">all</option>
+          <option value="pending">pending</option>
+          <option value="running">running</option>
+          <option value="success">success</option>
+          <option value="canceled">canceled</option>
+        </select>
+      </label>
+      <label>
+        <span class="muted">Job</span>
+        <select class="input" id="jobs-filter-job">
+          <option value="">all jobs</option>
+        </select>
+      </label>
+      <label>
+        <span class="muted">Probe ID</span>
+        <input class="input" id="jobs-filter-probe" placeholder="probe-1" />
+      </label>
+      <label>
+        <span class="muted">Started after</span>
+        <input class="input" type="datetime-local" id="jobs-filter-after" />
+      </label>
+      <label>
+        <span class="muted">Started before</span>
+        <input class="input" type="datetime-local" id="jobs-filter-before" />
+      </label>
+      <label>
+        <span class="muted">Limit</span>
+        <select class="input" id="jobs-filter-limit">
+          <option value="25">25</option>
+          <option value="50" selected>50</option>
+          <option value="100">100</option>
+          <option value="200">200</option>
+        </select>
+      </label>
+      <div class="actions-row jobs-filter-actions">
+        <button class="btn btn-primary" type="submit">Apply Filters</button>
+        <button class="btn" type="button" id="jobs-filter-reset">Reset</button>
+      </div>
+    </form>
+
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Started</th>
+            <th>Job</th>
+            <th>Probe</th>
+            <th>Status</th>
+            <th>Attempt</th>
+            <th>Exit</th>
+            <th>Duration</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="jobs-runs-body">
+          <tr><td colspan="8" class="empty-state">Loading run history…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel jobs-triage-panel">
+    <div class="panel-header">
+      <h2 class="panel-title">Failed-run Triage</h2>
+      <span class="panel-sub" id="jobs-triage-status">No run selected</span>
+    </div>
+
+    <dl class="kv-grid" id="jobs-triage-meta"></dl>
+
+    <div class="actions-row" id="jobs-triage-actions"></div>
+
+    <h3 class="panel-title jobs-triage-output-title">Output</h3>
+    <pre id="jobs-triage-output" class="code-box">Select a run to inspect details/output.</pre>
+  </section>
+</section>
+{{end}}
+
+{{define "scripts"}}
+<script>
+(() => {
+  const state = {
+    jobs: [],
+    runs: [],
+    activeRunsByJob: {},
+    runHealth: {
+      count: 0,
+      running_count: 0,
+      pending_count: 0,
+      failed_count: 0,
+      success_count: 0,
+      canceled_count: 0,
+    },
+    selectedRunId: '',
+    canWrite: false,
+    retryEndpointSupported: true,
+  };
+
+  const listBody = document.getElementById('jobs-list-body');
+  const listMeta = document.getElementById('jobs-list-meta');
+  const runsBody = document.getElementById('jobs-runs-body');
+  const runsMeta = document.getElementById('jobs-runs-meta');
+  const lastUpdated = document.getElementById('jobs-last-updated');
+
+  const filterForm = document.getElementById('jobs-run-filters');
+  const filterStatus = document.getElementById('jobs-filter-status');
+  const filterJob = document.getElementById('jobs-filter-job');
+  const filterProbe = document.getElementById('jobs-filter-probe');
+  const filterAfter = document.getElementById('jobs-filter-after');
+  const filterBefore = document.getElementById('jobs-filter-before');
+  const filterLimit = document.getElementById('jobs-filter-limit');
+
+  const triageStatus = document.getElementById('jobs-triage-status');
+  const triageMeta = document.getElementById('jobs-triage-meta');
+  const triageOutput = document.getElementById('jobs-triage-output');
+  const triageActions = document.getElementById('jobs-triage-actions');
+
+  function toast(message, kind = 'info') {
+    if (window.LegatorUI?.showToast) {
+      window.LegatorUI.showToast(message, kind);
+    }
+  }
+
+  function esc(value) {
+    return String(value || '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  function formatTime(value) {
+    if (!value) return '—';
+    const dt = new Date(value);
+    if (Number.isNaN(dt.getTime())) return value;
+    return dt.toLocaleString();
+  }
+
+  function formatDuration(run) {
+    if (!run || !run.started_at) return '—';
+    const started = new Date(run.started_at).getTime();
+    if (Number.isNaN(started)) return '—';
+
+    const end = run.ended_at ? new Date(run.ended_at).getTime() : Date.now();
+    if (Number.isNaN(end) || end < started) return '—';
+
+    let totalSeconds = Math.floor((end - started) / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    totalSeconds -= hours * 3600;
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds - minutes * 60;
+
+    if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+    if (minutes > 0) return `${minutes}m ${seconds}s`;
+    return `${seconds}s`;
+  }
+
+  function targetLabel(target) {
+    if (!target || !target.kind) return '—';
+    if (target.kind === 'all') return 'all probes';
+    if (target.kind === 'tag') return `tag:${target.value || '—'}`;
+    return `probe:${target.value || '—'}`;
+  }
+
+  function statusTag(status) {
+    const normalized = String(status || 'pending').toLowerCase();
+    return `<span class="tag job-status job-status-${esc(normalized)}">${esc(normalized)}</span>`;
+  }
+
+  function buildRunFilters() {
+    const query = new URLSearchParams();
+
+    const status = filterStatus.value.trim();
+    const jobID = filterJob.value.trim();
+    const probeID = filterProbe.value.trim();
+    const after = filterAfter.value;
+    const before = filterBefore.value;
+    const limit = filterLimit.value.trim();
+
+    if (status) query.set('status', status);
+    if (jobID) query.set('job_id', jobID);
+    if (probeID) query.set('probe_id', probeID);
+    if (limit) query.set('limit', limit);
+    if (after) {
+      const dt = new Date(after);
+      if (!Number.isNaN(dt.getTime())) {
+        query.set('started_after', dt.toISOString());
+      }
+    }
+    if (before) {
+      const dt = new Date(before);
+      if (!Number.isNaN(dt.getTime())) {
+        query.set('started_before', dt.toISOString());
+      }
+    }
+
+    return query;
+  }
+
+  async function requestJSON(url, options = {}) {
+    const response = await fetch(url, {
+      cache: 'no-store',
+      credentials: 'include',
+      ...options,
+    });
+
+    let payload = null;
+    if (response.status !== 204) {
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+    }
+
+    if (!response.ok) {
+      const message = payload?.message || payload?.error || response.statusText || 'Request failed';
+      const error = new Error(message);
+      error.status = response.status;
+      throw error;
+    }
+
+    return payload;
+  }
+
+  function updateSummaryCards() {
+    const enabled = state.jobs.filter((job) => job.enabled).length;
+    const disabled = state.jobs.length - enabled;
+    const failedJobs = state.jobs.filter((job) => String(job.last_status || '').toLowerCase() === 'failed').length;
+    const activeRuns = Number(state.runHealth.running_count || 0) + Number(state.runHealth.pending_count || 0);
+
+    document.getElementById('jobs-summary-total').textContent = String(state.jobs.length);
+    document.getElementById('jobs-summary-enabled').textContent = String(enabled);
+    document.getElementById('jobs-summary-disabled').textContent = String(disabled);
+    document.getElementById('jobs-summary-active-runs').textContent = String(activeRuns);
+    document.getElementById('jobs-summary-failed-runs').textContent = String(state.runHealth.failed_count || 0);
+    document.getElementById('jobs-summary-failed-jobs').textContent = String(failedJobs);
+  }
+
+  function renderJobFilterOptions() {
+    const selected = filterJob.value;
+    const options = ['<option value="">all jobs</option>'];
+
+    for (const job of state.jobs) {
+      options.push(`<option value="${esc(job.id)}">${esc(job.name || job.id)}</option>`);
+    }
+
+    filterJob.innerHTML = options.join('');
+    if (selected && state.jobs.some((job) => job.id === selected)) {
+      filterJob.value = selected;
+    }
+  }
+
+  function renderJobsList() {
+    listMeta.textContent = `${state.jobs.length} jobs`;
+
+    if (!state.jobs.length) {
+      listBody.innerHTML = '<tr><td colspan="8" class="empty-state">No jobs configured.</td></tr>';
+      return;
+    }
+
+    listBody.innerHTML = state.jobs.map((job) => {
+      const isEnabled = Boolean(job.enabled);
+      const actionButtons = state.canWrite
+        ? `
+          <div class="actions-row">
+            <button class="btn btn-small" type="button" data-job-action="run" data-job-id="${esc(job.id)}">Run now</button>
+            <button class="btn btn-small" type="button" data-job-action="toggle" data-job-id="${esc(job.id)}" data-enable="${String(!isEnabled)}">${isEnabled ? 'Disable' : 'Enable'}</button>
+            <button class="btn btn-small" type="button" data-job-action="cancel" data-job-id="${esc(job.id)}">Cancel active</button>
+          </div>
+        `
+        : '<span class="muted">Read-only</span>';
+
+      return `
+        <tr>
+          <td>${esc(job.name || '—')}</td>
+          <td>${esc(targetLabel(job.target))}</td>
+          <td>${esc(job.schedule || '—')}</td>
+          <td>${statusTag(isEnabled ? 'enabled' : 'disabled')}</td>
+          <td>${esc(formatTime(job.last_run_at))}</td>
+          <td>${statusTag(job.last_status || 'pending')}</td>
+          <td>${esc(String(state.activeRunsByJob[job.id] || 0))}</td>
+          <td>${actionButtons}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function renderRunsTable() {
+    const count = state.runs.length;
+    runsMeta.textContent = `${count} run${count === 1 ? '' : 's'}`;
+
+    if (!count) {
+      runsBody.innerHTML = '<tr><td colspan="8" class="empty-state">No runs matched the filters.</td></tr>';
+      renderTriage();
+      return;
+    }
+
+    const jobByID = Object.fromEntries(state.jobs.map((job) => [job.id, job]));
+
+    runsBody.innerHTML = state.runs.map((run) => {
+      const selectedClass = run.id === state.selectedRunId ? ' jobs-run-row-selected' : '';
+      const job = jobByID[run.job_id];
+      const status = String(run.status || '').toLowerCase();
+
+      const actions = [];
+      if (state.canWrite && (status === 'pending' || status === 'running')) {
+        actions.push(`<button class="btn btn-small" type="button" data-run-action="cancel" data-job-id="${esc(run.job_id)}" data-run-id="${esc(run.id)}">Cancel</button>`);
+      }
+      if (state.canWrite && (status === 'failed' || status === 'canceled')) {
+        actions.push(`<button class="btn btn-small" type="button" data-run-action="retry" data-job-id="${esc(run.job_id)}" data-run-id="${esc(run.id)}">Retry trigger</button>`);
+      }
+
+      return `
+        <tr class="jobs-run-row${selectedClass}" data-select-run="${esc(run.id)}">
+          <td>${esc(formatTime(run.started_at))}</td>
+          <td>${esc(job?.name || run.job_id)}</td>
+          <td class="id-text">${esc(run.probe_id || '—')}</td>
+          <td>${statusTag(run.status)}</td>
+          <td>${esc(String(run.attempt || 1))}/${esc(String(run.max_attempts || 1))}</td>
+          <td>${run.exit_code === null || run.exit_code === undefined ? '—' : esc(String(run.exit_code))}</td>
+          <td>${esc(formatDuration(run))}</td>
+          <td>${actions.join(' ') || '<span class="muted">—</span>'}</td>
+        </tr>
+      `;
+    }).join('');
+
+    if (!state.selectedRunId || !state.runs.some((run) => run.id === state.selectedRunId)) {
+      const preferred = state.runs.find((run) => String(run.status).toLowerCase() === 'failed') || state.runs[0];
+      state.selectedRunId = preferred?.id || '';
+    }
+
+    renderTriage();
+  }
+
+  function renderTriage() {
+    const run = state.runs.find((item) => item.id === state.selectedRunId) || null;
+    if (!run) {
+      triageStatus.textContent = 'No run selected';
+      triageMeta.innerHTML = '';
+      triageOutput.textContent = 'Select a run to inspect details/output.';
+      triageActions.innerHTML = '';
+      return;
+    }
+
+    const job = state.jobs.find((item) => item.id === run.job_id) || null;
+    const status = String(run.status || '').toLowerCase();
+    const retryAt = run.retry_scheduled_at ? formatTime(run.retry_scheduled_at) : '—';
+
+    triageStatus.textContent = `${status.toUpperCase()} · ${run.id}`;
+    triageMeta.innerHTML = [
+      ['Job', job?.name || run.job_id],
+      ['Probe', run.probe_id || '—'],
+      ['Started', formatTime(run.started_at)],
+      ['Ended', formatTime(run.ended_at)],
+      ['Status', status],
+      ['Attempt', `${run.attempt || 1}/${run.max_attempts || 1}`],
+      ['Exit code', run.exit_code === null || run.exit_code === undefined ? '—' : String(run.exit_code)],
+      ['Retry scheduled', retryAt],
+      ['Request ID', run.request_id || '—'],
+      ['Execution ID', run.execution_id || '—'],
+    ].map(([key, value]) => `<dt>${esc(key)}</dt><dd>${esc(value)}</dd>`).join('');
+
+    triageOutput.textContent = run.output || '(no output captured)';
+
+    if (!state.canWrite) {
+      triageActions.innerHTML = '<span class="muted">Read-only</span>';
+      return;
+    }
+
+    const actions = [
+      `<button class="btn btn-small" type="button" data-triage-action="run" data-job-id="${esc(run.job_id)}">Run now</button>`,
+      `<button class="btn btn-small" type="button" data-triage-action="cancel-job" data-job-id="${esc(run.job_id)}">Cancel active job runs</button>`,
+    ];
+
+    if (status === 'pending' || status === 'running') {
+      actions.push(`<button class="btn btn-small" type="button" data-triage-action="cancel-run" data-job-id="${esc(run.job_id)}" data-run-id="${esc(run.id)}">Cancel this run</button>`);
+    }
+
+    if (status === 'failed' || status === 'canceled') {
+      actions.push(`<button class="btn btn-small" type="button" data-triage-action="retry" data-job-id="${esc(run.job_id)}" data-run-id="${esc(run.id)}">Retry trigger</button>`);
+    }
+
+    triageActions.innerHTML = actions.join('');
+  }
+
+  function markUpdated() {
+    lastUpdated.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+  }
+
+  async function loadPermissions() {
+    try {
+      const me = await requestJSON('/api/v1/me');
+      const permissions = Array.isArray(me?.permissions) ? me.permissions : [];
+      state.canWrite = permissions.includes('admin') || permissions.includes('fleet:write');
+    } catch {
+      state.canWrite = false;
+    }
+  }
+
+  async function loadJobs() {
+    const jobs = await requestJSON('/api/v1/jobs');
+    state.jobs = Array.isArray(jobs) ? jobs : [];
+    state.jobs.sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id)));
+
+    renderJobFilterOptions();
+    renderJobsList();
+    updateSummaryCards();
+  }
+
+  async function loadRunHealth() {
+    const payload = await requestJSON('/api/v1/jobs/runs?limit=200');
+
+    state.runHealth = {
+      count: payload?.count || 0,
+      running_count: payload?.running_count || 0,
+      pending_count: payload?.pending_count || 0,
+      failed_count: payload?.failed_count || 0,
+      success_count: payload?.success_count || 0,
+      canceled_count: payload?.canceled_count || 0,
+    };
+
+    const allRuns = Array.isArray(payload?.runs) ? payload.runs : [];
+    const activeByJob = {};
+    for (const run of allRuns) {
+      const status = String(run.status || '').toLowerCase();
+      if (status !== 'pending' && status !== 'running') continue;
+      activeByJob[run.job_id] = (activeByJob[run.job_id] || 0) + 1;
+    }
+    state.activeRunsByJob = activeByJob;
+
+    renderJobsList();
+    updateSummaryCards();
+  }
+
+  async function loadRuns() {
+    const query = buildRunFilters();
+    const suffix = query.toString();
+    const payload = await requestJSON(`/api/v1/jobs/runs${suffix ? `?${suffix}` : ''}`);
+    state.runs = Array.isArray(payload?.runs) ? payload.runs : [];
+    renderRunsTable();
+  }
+
+  async function runJob(jobID) {
+    await requestJSON(`/api/v1/jobs/${encodeURIComponent(jobID)}/run`, { method: 'POST' });
+    toast('Job dispatched', 'success');
+    await refreshData();
+  }
+
+  async function toggleJob(jobID, enable) {
+    const action = enable ? 'enable' : 'disable';
+    await requestJSON(`/api/v1/jobs/${encodeURIComponent(jobID)}/${action}`, { method: 'POST' });
+    toast(enable ? 'Job enabled' : 'Job disabled', 'success');
+    await refreshData();
+  }
+
+  async function cancelJob(jobID) {
+    const payload = await requestJSON(`/api/v1/jobs/${encodeURIComponent(jobID)}/cancel`, { method: 'POST' });
+    const canceled = Number(payload?.canceled_runs || 0);
+    const retries = Number(payload?.canceled_retries || 0);
+    toast(`Cancel requested (${canceled} runs, ${retries} retries)`, 'success');
+    await refreshData();
+  }
+
+  async function cancelRun(jobID, runID) {
+    await requestJSON(`/api/v1/jobs/${encodeURIComponent(jobID)}/runs/${encodeURIComponent(runID)}/cancel`, { method: 'POST' });
+    toast('Run canceled', 'success');
+    await refreshData();
+  }
+
+  async function retryRun(jobID, runID) {
+    if (state.retryEndpointSupported) {
+      try {
+        await requestJSON(`/api/v1/jobs/${encodeURIComponent(jobID)}/runs/${encodeURIComponent(runID)}/retry`, { method: 'POST' });
+        toast('Retry dispatched', 'success');
+        await refreshData();
+        return;
+      } catch (error) {
+        if (error?.status !== 404) {
+          throw error;
+        }
+        state.retryEndpointSupported = false;
+      }
+    }
+
+    await requestJSON(`/api/v1/jobs/${encodeURIComponent(jobID)}/run`, { method: 'POST' });
+    toast('Retry fallback dispatched via run-now', 'success');
+    await refreshData();
+  }
+
+  async function refreshData() {
+    try {
+      await Promise.all([loadJobs(), loadRunHealth(), loadRuns()]);
+      markUpdated();
+    } catch (error) {
+      toast(`Refresh failed: ${error.message}`, 'error');
+    }
+  }
+
+  document.getElementById('jobs-refresh').addEventListener('click', () => {
+    refreshData();
+  });
+
+  filterForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    await refreshData();
+  });
+
+  document.getElementById('jobs-filter-reset').addEventListener('click', async () => {
+    filterStatus.value = 'failed';
+    filterJob.value = '';
+    filterProbe.value = '';
+    filterAfter.value = '';
+    filterBefore.value = '';
+    filterLimit.value = '50';
+    await refreshData();
+  });
+
+  listBody.addEventListener('click', async (event) => {
+    const button = event.target.closest('button[data-job-action]');
+    if (!button) return;
+
+    if (!state.canWrite) {
+      toast('You need fleet:write permission for job controls.', 'error');
+      return;
+    }
+
+    const action = button.dataset.jobAction;
+    const jobID = button.dataset.jobId;
+    const enable = button.dataset.enable === 'true';
+
+    try {
+      if (action === 'run') await runJob(jobID);
+      if (action === 'toggle') await toggleJob(jobID, enable);
+      if (action === 'cancel') await cancelJob(jobID);
+    } catch (error) {
+      toast(`Action failed: ${error.message}`, 'error');
+    }
+  });
+
+  runsBody.addEventListener('click', async (event) => {
+    const actionButton = event.target.closest('button[data-run-action]');
+    if (actionButton) {
+      if (!state.canWrite) {
+        toast('You need fleet:write permission for run controls.', 'error');
+        return;
+      }
+
+      const action = actionButton.dataset.runAction;
+      const jobID = actionButton.dataset.jobId;
+      const runID = actionButton.dataset.runId;
+
+      try {
+        if (action === 'cancel') await cancelRun(jobID, runID);
+        if (action === 'retry') await retryRun(jobID, runID);
+      } catch (error) {
+        toast(`Action failed: ${error.message}`, 'error');
+      }
+      return;
+    }
+
+    const row = event.target.closest('tr[data-select-run]');
+    if (!row) return;
+
+    state.selectedRunId = row.dataset.selectRun;
+    renderRunsTable();
+  });
+
+  triageActions.addEventListener('click', async (event) => {
+    const button = event.target.closest('button[data-triage-action]');
+    if (!button) return;
+
+    if (!state.canWrite) {
+      toast('You need fleet:write permission for run controls.', 'error');
+      return;
+    }
+
+    const action = button.dataset.triageAction;
+    const jobID = button.dataset.jobId;
+    const runID = button.dataset.runId;
+
+    try {
+      if (action === 'run') await runJob(jobID);
+      if (action === 'cancel-job') await cancelJob(jobID);
+      if (action === 'cancel-run') await cancelRun(jobID, runID);
+      if (action === 'retry') await retryRun(jobID, runID);
+    } catch (error) {
+      toast(`Action failed: ${error.message}`, 'error');
+    }
+  });
+
+  async function init() {
+    await loadPermissions();
+    await refreshData();
+
+    if (window.LegatorUI?.connectSSE) {
+      window.LegatorUI.connectSSE({
+        'job.created': refreshData,
+        'job.updated': refreshData,
+        'job.deleted': refreshData,
+        'job.run.started': refreshData,
+        'job.run.succeeded': refreshData,
+        'job.run.failed': refreshData,
+        'job.run.canceled': refreshData,
+      });
+    }
+
+    window.setInterval(refreshData, 30000);
+  }
+
+  init();
+})();
+</script>
+{{end}}

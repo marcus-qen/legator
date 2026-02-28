@@ -162,6 +162,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/v1/jobs/{id}/cancel", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleCancelJob))
 		mux.HandleFunc("GET /api/v1/jobs/{id}/runs", s.withPermission(auth.PermFleetRead, s.jobsHandler.HandleListRuns))
 		mux.HandleFunc("POST /api/v1/jobs/{id}/runs/{runId}/cancel", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleCancelRun))
+		mux.HandleFunc("POST /api/v1/jobs/{id}/runs/{runId}/retry", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleRetryRun))
 		mux.HandleFunc("POST /api/v1/jobs/{id}/enable", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleEnableJob))
 		mux.HandleFunc("POST /api/v1/jobs/{id}/disable", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleDisableJob))
 	} else {
@@ -175,6 +176,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/v1/jobs/{id}/cancel", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
 		mux.HandleFunc("GET /api/v1/jobs/{id}/runs", s.withPermission(auth.PermFleetRead, s.handleJobsUnavailable))
 		mux.HandleFunc("POST /api/v1/jobs/{id}/runs/{runId}/cancel", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
+		mux.HandleFunc("POST /api/v1/jobs/{id}/runs/{runId}/retry", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
 		mux.HandleFunc("POST /api/v1/jobs/{id}/enable", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
 		mux.HandleFunc("POST /api/v1/jobs/{id}/disable", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
 	}
@@ -290,6 +292,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /cloud-connectors", s.handleCloudConnectorsPage)
 	mux.HandleFunc("GET /network-devices", s.handleNetworkDevicesPage)
 	mux.HandleFunc("GET /discovery", s.handleDiscoveryPage)
+	mux.HandleFunc("GET /jobs", s.handleJobsPage)
 
 	// WebSocket for probes
 	mux.HandleFunc("GET /ws/probe", s.hub.HandleProbeWS)
@@ -1556,6 +1559,26 @@ func (s *Server) handleDiscoveryPage(w http.ResponseWriter, r *http.Request) {
 		ActiveNav:   "discovery",
 	}
 	if err := s.pages.Render(w, "discovery", data); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
+	}
+}
+
+func (s *Server) handleJobsPage(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
+	if s.pages == nil {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, "<h1>Jobs</h1><p>Template not loaded</p>")
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data := BasePage{
+		CurrentUser: s.currentTemplateUser(r),
+		Version:     Version,
+		ActiveNav:   "jobs",
+	}
+	if err := s.pages.Render(w, "jobs", data); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
 	}
 }

@@ -335,6 +335,127 @@ func TestHandleCancelRunAndTransitionConflict(t *testing.T) {
 	}
 }
 
+func TestHandleRetryRunDispatchesFromFailedRun(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	defer store.Close()
+
+	fleetMgr := fleet.NewManager(zap.NewNop())
+	fleetMgr.Register("probe-1", "probe-1", "linux", "amd64")
+	if err := fleetMgr.SetOnline("probe-1"); err != nil {
+		t.Fatalf("set online: %v", err)
+	}
+
+	tracker := newFakeTracker()
+	sender := &fakeSender{sendFn: func(probeID string, msgType protocol.MessageType, payload any) error { return nil }}
+	scheduler := NewScheduler(store, sender, fleetMgr, tracker, zap.NewNop())
+	h := NewHandler(store, scheduler)
+
+	job, err := store.CreateJob(Job{Name: "retry-test", Command: "echo retry", Schedule: "1h", Target: Target{Kind: TargetKindProbe, Value: "probe-1"}, Enabled: true})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	run, err := store.RecordRunStart(JobRun{JobID: job.ID, ProbeID: "probe-1", RequestID: "failed-run", StartedAt: time.Now().UTC().Add(-30 * time.Second)})
+	if err != nil {
+		t.Fatalf("record run: %v", err)
+	}
+	if err := store.CompleteRun(run.ID, RunStatusFailed, intPtr(2), "boom"); err != nil {
+		t.Fatalf("complete run: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/"+job.ID+"/runs/"+run.ID+"/retry", nil)
+	req.SetPathValue("id", job.ID)
+	req.SetPathValue("runId", run.ID)
+	rr := httptest.NewRecorder()
+	h.HandleRetryRun(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 retry, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Status      string `json:"status"`
+		SourceRunID string `json:"source_run_id"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload.Status != "retry_dispatched" || payload.SourceRunID != run.ID {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		runs, err := store.ListRunsByJob(job.ID, 10)
+		if err != nil {
+			t.Fatalf("list runs: %v", err)
+		}
+		if len(runs) >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected a new run after retry trigger, got %d runs", len(runs))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestHandleRetryRunRejectsNonFailedRun(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	defer store.Close()
+
+	h := NewHandler(store, nil)
+
+	job, err := store.CreateJob(Job{Name: "retry-status-test", Command: "echo ok", Schedule: "1h", Target: Target{Kind: TargetKindProbe, Value: "probe-1"}, Enabled: true})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	run, err := store.RecordRunStart(JobRun{JobID: job.ID, ProbeID: "probe-1", RequestID: "success-run", StartedAt: time.Now().UTC().Add(-10 * time.Second)})
+	if err != nil {
+		t.Fatalf("record run: %v", err)
+	}
+	if err := store.CompleteRun(run.ID, RunStatusSuccess, intPtr(0), "ok"); err != nil {
+		t.Fatalf("complete run: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/"+job.ID+"/runs/"+run.ID+"/retry", nil)
+	req.SetPathValue("id", job.ID)
+	req.SetPathValue("runId", run.ID)
+	rr := httptest.NewRecorder()
+	h.HandleRetryRun(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 when scheduler is unavailable, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	fleetMgr := fleet.NewManager(zap.NewNop())
+	fleetMgr.Register("probe-1", "probe-1", "linux", "amd64")
+	if err := fleetMgr.SetOnline("probe-1"); err != nil {
+		t.Fatalf("set online: %v", err)
+	}
+
+	tracker := newFakeTracker()
+	sender := &fakeSender{sendFn: func(probeID string, msgType protocol.MessageType, payload any) error { return nil }}
+	scheduler := NewScheduler(store, sender, fleetMgr, tracker, zap.NewNop())
+	h = NewHandler(store, scheduler)
+	rr = httptest.NewRecorder()
+	h.HandleRetryRun(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for retry on successful run, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "only failed or canceled") {
+		t.Fatalf("unexpected body: %s", rr.Body.String())
+	}
+}
+
 func TestHandleCancelJobCancelsActiveRuns(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "jobs.db"))
 	if err != nil {

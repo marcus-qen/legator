@@ -337,6 +337,7 @@ func TestPermissionsJobsRoutes(t *testing.T) {
 		{method: http.MethodPost, path: "/api/v1/jobs/" + createdJob.ID + "/run"},
 		{method: http.MethodPost, path: "/api/v1/jobs/" + createdJob.ID + "/cancel"},
 		{method: http.MethodPost, path: "/api/v1/jobs/" + createdJob.ID + "/runs/nonexistent/cancel"},
+		{method: http.MethodPost, path: "/api/v1/jobs/" + createdJob.ID + "/runs/nonexistent/retry"},
 		{method: http.MethodPost, path: "/api/v1/jobs/" + createdJob.ID + "/enable"},
 		{method: http.MethodPost, path: "/api/v1/jobs/" + createdJob.ID + "/disable"},
 		{method: http.MethodPut, path: "/api/v1/jobs/" + createdJob.ID, body: createBody},
@@ -374,6 +375,23 @@ func TestPermissionsApprovalsAndAuditPagesUseScopeSpecificPermissions(t *testing
 	auditAllowed := makeRequest(t, srv, http.MethodGet, "/audit", auditRead, "")
 	if auditAllowed.Code == http.StatusUnauthorized || auditAllowed.Code == http.StatusForbidden {
 		t.Fatalf("expected audit:read to access /audit, got %d body=%s", auditAllowed.Code, auditAllowed.Body.String())
+	}
+}
+
+func TestPermissionsJobsPageRequiresFleetRead(t *testing.T) {
+	srv := newAuthTestServer(t)
+
+	fleetRead := createAPIKey(t, srv, "fleet-read", auth.PermFleetRead)
+	approvalRead := createAPIKey(t, srv, "approval-read", auth.PermApprovalRead)
+
+	allowed := makeRequest(t, srv, http.MethodGet, "/jobs", fleetRead, "")
+	if allowed.Code == http.StatusUnauthorized || allowed.Code == http.StatusForbidden {
+		t.Fatalf("expected fleet:read to access /jobs, got %d body=%s", allowed.Code, allowed.Body.String())
+	}
+
+	denied := makeRequest(t, srv, http.MethodGet, "/jobs", approvalRead, "")
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("expected /jobs to deny approval:read-only token, got %d body=%s", denied.Code, denied.Body.String())
 	}
 }
 
