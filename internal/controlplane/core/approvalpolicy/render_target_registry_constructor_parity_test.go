@@ -10,16 +10,16 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/core/projectiondispatch"
 )
 
-func TestNewDecideApprovalRenderTargetRegistry_ParityWithLegacyInlineSetup(t *testing.T) {
-	targets := map[DecideApprovalRenderSurface]DecideApprovalRenderTarget{
-		DecideApprovalRenderSurfaceHTTP: DecideApprovalRenderTargetHTTP,
-		DecideApprovalRenderSurfaceMCP:  DecideApprovalRenderTargetMCP,
+func TestNewDecideApprovalRenderSurfaceRegistry_ParityWithLegacyInlineSetup(t *testing.T) {
+	surfaces := map[DecideApprovalRenderSurface]DecideApprovalRenderSurface{
+		DecideApprovalRenderSurfaceHTTP: DecideApprovalRenderSurfaceHTTP,
+		DecideApprovalRenderSurfaceMCP:  DecideApprovalRenderSurfaceMCP,
 	}
 
-	newRegistry := newDecideApprovalRenderTargetRegistry(targets)
-	legacyRegistry := projectiondispatch.NewPolicyRegistry(targets)
+	newRegistry := newDecideApprovalRenderSurfaceRegistry(surfaces)
+	legacyRegistry := projectiondispatch.NewPolicyRegistry(surfaces)
 
-	targets[DecideApprovalRenderSurfaceHTTP] = DecideApprovalRenderTarget("mutated")
+	surfaces[DecideApprovalRenderSurfaceHTTP] = DecideApprovalRenderSurface("mutated")
 
 	tests := []DecideApprovalRenderSurface{
 		DecideApprovalRenderSurfaceHTTP,
@@ -29,26 +29,26 @@ func TestNewDecideApprovalRenderTargetRegistry_ParityWithLegacyInlineSetup(t *te
 
 	for _, surface := range tests {
 		t.Run(string(surface), func(t *testing.T) {
-			newTarget, newOK := newRegistry.Resolve(surface)
-			legacyTarget, legacyOK := legacyRegistry.Resolve(surface)
+			newResolved, newOK := newRegistry.Resolve(surface)
+			legacyResolved, legacyOK := legacyRegistry.Resolve(surface)
 			if newOK != legacyOK {
 				t.Fatalf("resolve presence parity mismatch for %q: new=%v legacy=%v", surface, newOK, legacyOK)
 			}
-			if newTarget != legacyTarget {
-				t.Fatalf("resolve value parity mismatch for %q: new=%q legacy=%q", surface, newTarget, legacyTarget)
+			if newResolved != legacyResolved {
+				t.Fatalf("resolve value parity mismatch for %q: new=%q legacy=%q", surface, newResolved, legacyResolved)
 			}
 		})
 	}
 }
 
-func TestNewDecideApprovalRenderTargetRegistry_ResolverHitMissAndUnsupportedFallbackParityWithLegacyInlineSetup(t *testing.T) {
-	targets := map[DecideApprovalRenderSurface]DecideApprovalRenderTarget{
-		DecideApprovalRenderSurfaceHTTP: DecideApprovalRenderTargetHTTP,
-		DecideApprovalRenderSurfaceMCP:  DecideApprovalRenderTargetMCP,
+func TestNewDecideApprovalRenderSurfaceRegistry_ResolverHitMissAndUnsupportedFallbackParityWithLegacyInlineSetup(t *testing.T) {
+	surfaces := map[DecideApprovalRenderSurface]DecideApprovalRenderSurface{
+		DecideApprovalRenderSurfaceHTTP: DecideApprovalRenderSurfaceHTTP,
+		DecideApprovalRenderSurfaceMCP:  DecideApprovalRenderSurfaceMCP,
 	}
 
-	newRegistry := newDecideApprovalRenderTargetRegistry(targets)
-	legacyRegistry := projectiondispatch.NewPolicyRegistry(targets)
+	newRegistry := newDecideApprovalRenderSurfaceRegistry(surfaces)
+	legacyRegistry := projectiondispatch.NewPolicyRegistry(surfaces)
 
 	tests := []struct {
 		name            string
@@ -116,7 +116,7 @@ type decideApprovalRenderTargetRegistryFlowCapture struct {
 	httpErr          *HTTPErrorContract
 }
 
-func orchestrateDecideApprovalForSurfaceWithRegistryCapture(registry projectiondispatch.PolicyRegistry[DecideApprovalRenderSurface, DecideApprovalRenderTarget], surface DecideApprovalRenderSurface) decideApprovalRenderTargetRegistryFlowCapture {
+func orchestrateDecideApprovalForSurfaceWithRegistryCapture(registry projectiondispatch.PolicyRegistry[DecideApprovalRenderSurface, DecideApprovalRenderSurface], surface DecideApprovalRenderSurface) decideApprovalRenderTargetRegistryFlowCapture {
 	capture := decideApprovalRenderTargetRegistryFlowCapture{}
 	request := &approval.Request{ID: "req-render-target-registry", Decision: approval.DecisionDenied}
 	decide := func(*DecideApprovalRequest) (*ApprovalDecisionResult, error) {
@@ -145,14 +145,14 @@ func orchestrateDecideApprovalForSurfaceWithRegistryCapture(registry projectiond
 }
 
 func orchestrateDecideApprovalForSurfaceWithRegistry(
-	registry projectiondispatch.PolicyRegistry[DecideApprovalRenderSurface, DecideApprovalRenderTarget],
+	registry projectiondispatch.PolicyRegistry[DecideApprovalRenderSurface, DecideApprovalRenderSurface],
 	body io.Reader,
 	decide func(*DecideApprovalRequest) (*ApprovalDecisionResult, error),
 	surface DecideApprovalRenderSurface,
 ) *DecideApprovalProjection {
-	target, ok := registry.Resolve(surface)
+	resolvedSurface, ok := registry.Resolve(surface)
 	if !ok {
 		return SelectDecideApprovalProjection(&DecideApprovalTransportContract{}, DecideApprovalRenderTarget(surface))
 	}
-	return OrchestrateDecideApproval(body, decide, target)
+	return OrchestrateDecideApproval(body, decide, DecideApprovalRenderTarget(resolvedSurface))
 }

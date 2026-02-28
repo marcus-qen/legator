@@ -101,6 +101,9 @@
 - **Kernel split S43 (surface-registry constructor split completion)**
   - Added tiny constructors for the remaining approval render-target registry + command projection surface registries used by resolver hooks, replacing the last inline `NewPolicyRegistry(...)` setup call-shapes in those areas.
   - Added strict constructor-vs-legacy parity tests covering resolver hit/miss behavior plus unsupported fallback paths (including HTTP-first/MCP-fallback semantics).
+- **Kernel split S44 (shared identity surface-registry constructor seam)**
+  - Added `projectiondispatch.NewIdentitySurfaceRegistry(...)` and routed approval + command resolver-hook surface registry constructors through this shared seam while keeping domain constructors in their owning packages.
+  - Preserved resolver hit/miss behavior, unsupported fallback behavior, and HTTP-first/MCP-fallback semantics, with strict approval+command parity tests against legacy inline constructor/setup wiring.
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
 - **Kernel split S13 (approval decide render-target registry boundary)**

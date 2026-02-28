@@ -15,21 +15,25 @@ const (
 	DecideApprovalRenderSurfaceMCP  DecideApprovalRenderSurface = "mcp"
 )
 
-var defaultDecideApprovalRenderTargetRegistry = newDecideApprovalRenderTargetRegistry(map[DecideApprovalRenderSurface]DecideApprovalRenderTarget{
-	DecideApprovalRenderSurfaceHTTP: DecideApprovalRenderTargetHTTP,
-	DecideApprovalRenderSurfaceMCP:  DecideApprovalRenderTargetMCP,
+var defaultDecideApprovalRenderSurfaceRegistry = newDecideApprovalRenderSurfaceRegistry(map[DecideApprovalRenderSurface]DecideApprovalRenderSurface{
+	DecideApprovalRenderSurfaceHTTP: DecideApprovalRenderSurfaceHTTP,
+	DecideApprovalRenderSurfaceMCP:  DecideApprovalRenderSurfaceMCP,
 })
 
 // ResolveDecideApprovalRenderTarget resolves the projection render target for a
 // transport shell using the shared render-target registry.
 func ResolveDecideApprovalRenderTarget(surface DecideApprovalRenderSurface) (DecideApprovalRenderTarget, bool) {
-	return defaultDecideApprovalRenderTargetRegistry.Resolve(surface)
+	resolvedSurface, ok := defaultDecideApprovalRenderSurfaceRegistry.Resolve(surface)
+	if !ok {
+		return "", false
+	}
+	return DecideApprovalRenderTarget(resolvedSurface), true
 }
 
 // ResolveDecideApprovalTransportSurface resolves a decide surface to the
 // shared transportwriter surface via the shared resolver seam.
 func ResolveDecideApprovalTransportSurface(surface DecideApprovalRenderSurface) (transportwriter.Surface, bool) {
-	return transportwriter.ResolveSurfaceToTransport(defaultDecideApprovalRenderTargetRegistry, surface)
+	return transportwriter.ResolveSurfaceToTransport(defaultDecideApprovalRenderSurfaceRegistry, surface)
 }
 
 // OrchestrateDecideApprovalForSurface runs the shared decide orchestration after
