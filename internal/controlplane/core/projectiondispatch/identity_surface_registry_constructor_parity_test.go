@@ -12,6 +12,33 @@ func TestNewIdentitySurfaceRegistry_ParityWithNewPolicyRegistry(t *testing.T) {
 	legacyRegistry := NewPolicyRegistry(surfaces)
 	surfaces["http"] = "mutated"
 
+	assertIdentitySurfaceRegistryResolveParity(t, newRegistry, legacyRegistry)
+}
+
+func TestNewHTTPMCPIdentitySurfaceRegistry_ParityWithLegacyInlineSetup(t *testing.T) {
+	newRegistry := NewHTTPMCPIdentitySurfaceRegistry("http", "mcp")
+	legacyRegistry := NewPolicyRegistry(map[string]string{
+		"http": "http",
+		"mcp":  "mcp",
+	})
+
+	assertIdentitySurfaceRegistryResolveParity(t, newRegistry, legacyRegistry)
+}
+
+func TestNewHTTPMCPIdentitySurfaceRegistry_ParityWithComposedSeedAndIdentityRegistrySetup(t *testing.T) {
+	newRegistry := NewHTTPMCPIdentitySurfaceRegistry("http", "mcp")
+	legacyRegistry := NewIdentitySurfaceRegistry(NewHTTPMCPIdentitySurfaceSeed("http", "mcp"))
+
+	assertIdentitySurfaceRegistryResolveParity(t, newRegistry, legacyRegistry)
+}
+
+func assertIdentitySurfaceRegistryResolveParity(
+	t *testing.T,
+	newRegistry PolicyRegistry[string, string],
+	legacyRegistry PolicyRegistry[string, string],
+) {
+	t.Helper()
+
 	tests := []string{"http", "mcp", "bogus"}
 	for _, surface := range tests {
 		t.Run(surface, func(t *testing.T) {

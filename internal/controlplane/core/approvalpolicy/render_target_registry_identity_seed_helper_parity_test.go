@@ -7,12 +7,32 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/core/projectiondispatch"
 )
 
-func TestNewDefaultDecideApprovalRenderSurfaceRegistry_IdentitySeedHelperParityWithLegacyInlineSetup(t *testing.T) {
+func TestNewDefaultDecideApprovalRenderSurfaceRegistry_HTTPMCPIdentitySurfaceRegistryHelperParityWithLegacyInlineSetup(t *testing.T) {
 	newRegistry := newDefaultDecideApprovalRenderSurfaceRegistry()
 	legacyRegistry := projectiondispatch.NewPolicyRegistry(map[DecideApprovalRenderSurface]DecideApprovalRenderSurface{
 		DecideApprovalRenderSurfaceHTTP: DecideApprovalRenderSurfaceHTTP,
 		DecideApprovalRenderSurfaceMCP:  DecideApprovalRenderSurfaceMCP,
 	})
+
+	assertDefaultDecideApprovalRegistryParity(t, newRegistry, legacyRegistry)
+}
+
+func TestNewDefaultDecideApprovalRenderSurfaceRegistry_HTTPMCPIdentitySurfaceRegistryHelperParityWithLegacyComposedSetup(t *testing.T) {
+	newRegistry := newDefaultDecideApprovalRenderSurfaceRegistry()
+	legacyRegistry := newDecideApprovalRenderSurfaceRegistry(projectiondispatch.NewHTTPMCPIdentitySurfaceSeed(
+		DecideApprovalRenderSurfaceHTTP,
+		DecideApprovalRenderSurfaceMCP,
+	))
+
+	assertDefaultDecideApprovalRegistryParity(t, newRegistry, legacyRegistry)
+}
+
+func assertDefaultDecideApprovalRegistryParity(
+	t *testing.T,
+	newRegistry projectiondispatch.PolicyRegistry[DecideApprovalRenderSurface, DecideApprovalRenderSurface],
+	legacyRegistry projectiondispatch.PolicyRegistry[DecideApprovalRenderSurface, DecideApprovalRenderSurface],
+) {
+	t.Helper()
 
 	tests := []DecideApprovalRenderSurface{
 		DecideApprovalRenderSurfaceHTTP,
