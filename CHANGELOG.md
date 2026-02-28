@@ -95,6 +95,9 @@
   - Added a tiny shared resolved-policy dispatch helper in `core/projectiondispatch` that composes resolve + policy-registry dispatch and preserves unsupported callback passthrough behavior.
   - Standardized approval response and command dispatch/read/invoke adapter dispatch call-shapes through the helper while keeping domain-owned policy registries and fallback semantics local.
   - Added strict parity tests against the pre-helper nested resolve+dispatch branch to lock unchanged HTTP-first/MCP-fallback behavior and command handled-flag outcomes.
+- **Kernel split S42 (domain dispatch policy-registry constructors)**
+  - Added tiny approval + command constructors for dispatch policy registries so adapters declare explicit HTTP/MCP policy intent without inline `NewPolicyRegistry(...)` setup call-shapes.
+  - Replaced remaining inline adapter registry wiring in approval response + command dispatch/read/invoke adapters and added strict constructor-vs-legacy setup parity tests to preserve resolve-vs-unsupported branching, HTTP-first/MCP-fallback outcomes, and command handled-flag behavior.
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
 - **Kernel split S13 (approval decide render-target registry boundary)**
