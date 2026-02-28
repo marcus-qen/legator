@@ -1,6 +1,7 @@
 package approvalpolicy
 
 import (
+	"github.com/marcus-qen/legator/internal/controlplane/core/projectiondispatch"
 	"github.com/marcus-qen/legator/internal/controlplane/core/transportwriter"
 )
 
@@ -18,9 +19,18 @@ func DispatchDecideApprovalResponseForSurface(projection *DecideApprovalProjecti
 	builder := DecideApprovalResponseEnvelopeBuilder{Projection: projection}
 	transportSurface, ok := ResolveDecideApprovalTransportSurface(surface)
 	if !ok {
-		dispatchUnsupportedDecideApprovalSurfaceFallback(surface, writer)
+		dispatchUnsupportedDecideApprovalSurfaceAdapterFallback(surface, writer)
 		return
 	}
 
 	transportwriter.WriteFromBuilder(transportSurface, builder, newDecideApprovalWriterKernel(writer))
+}
+
+func dispatchUnsupportedDecideApprovalSurfaceAdapterFallback(surface DecideApprovalRenderSurface, writer DecideApprovalResponseDispatchWriter) {
+	projectiondispatch.DispatchUnsupportedSurfaceAdapterFallback(
+		surface,
+		writer,
+		dispatchUnsupportedDecideApprovalSurfaceFallback,
+		nil,
+	)
 }

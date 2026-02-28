@@ -38,8 +38,9 @@ var defaultCommandReadPolicyRegistry = projectiondispatch.NewPolicyRegistry(map[
 func DispatchCommandErrorsForSurface(envelope *CommandResultEnvelope, surface ProjectionDispatchSurface, writer CommandProjectionDispatchWriter) bool {
 	resolved, ok := ResolveCommandDispatchProjectionSurface(surface)
 	if !ok {
-		dispatchUnsupportedCommandDispatchSurfaceFallback(surface, writer)
-		return true
+		handled := false
+		dispatchUnsupportedCommandSurfaceAdapterFallback(surface, writer, &handled)
+		return handled
 	}
 
 	handled := false
@@ -58,7 +59,7 @@ func DispatchCommandErrorsForSurface(envelope *CommandResultEnvelope, surface Pr
 func DispatchCommandReadForSurface(result *protocol.CommandResultPayload, surface ProjectionDispatchSurface, writer CommandProjectionDispatchWriter) {
 	resolved, ok := ResolveCommandReadProjectionSurface(surface)
 	if !ok {
-		dispatchUnsupportedCommandDispatchSurfaceFallback(surface, writer)
+		dispatchUnsupportedCommandSurfaceAdapterFallback(surface, writer, nil)
 		return
 	}
 
@@ -116,10 +117,16 @@ func dispatchCommandReadMCP(result *protocol.CommandResultPayload, writer comman
 }
 
 func dispatchUnsupportedCommandSurfaceAdapter(surface ProjectionDispatchSurface, writer commandDispatchAdapterWriter) {
-	dispatchUnsupportedCommandDispatchSurfaceFallback(surface, writer.writer)
-	if writer.handled != nil {
-		*writer.handled = true
-	}
+	dispatchUnsupportedCommandSurfaceAdapterFallback(surface, writer.writer, writer.handled)
+}
+
+func dispatchUnsupportedCommandSurfaceAdapterFallback(surface ProjectionDispatchSurface, writer CommandProjectionDispatchWriter, handled *bool) {
+	projectiondispatch.DispatchUnsupportedSurfaceAdapterFallback(
+		surface,
+		writer,
+		dispatchUnsupportedCommandDispatchSurfaceFallback,
+		handled,
+	)
 }
 
 func unsupportedCommandDispatchResponseEnvelope(surface ProjectionDispatchSurface) *transportwriter.ResponseEnvelope {

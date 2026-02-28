@@ -85,6 +85,9 @@
 - **Kernel split S38 (typed unsupported-surface adapter seam)**
   - Added tiny shared typed-surface adapters (`BuildUnsupportedSurfaceEnvelope(...)` and `UnsupportedSurfaceMessageForSurface(...)`) so `string`, `ProjectionDispatchSurface`, `DecideApprovalRenderSurface`, and transport surfaces all reuse the same scope-bound unsupported-surface call path.
   - Removed remaining direct `string(surface)` casts from approval/command unsupported-surface production paths while preserving exact message/envelope text and HTTP-first/MCP-fallback semantics, with strict typed-seam-vs-legacy-cast parity tests.
+- **Kernel split S39 (projection adapter unsupported-surface helper seam)**
+  - Added tiny shared projection-adapter helper for unsupported-surface fallback dispatch plus optional handled-flag wiring, and routed approval/command projection adapters through it without changing domain-owned fallback/envelope construction.
+  - Added strict adapter-level parity tests against pre-helper inline branches to lock unchanged HTTP-first/MCP-fallback behavior and command handled-flag outcomes.
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
 - **Kernel split S13 (approval decide render-target registry boundary)**
