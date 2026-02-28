@@ -14,7 +14,19 @@ import (
 const (
 	maxRunOutputBytes = 10 * 1024
 	runRetention      = 7 * 24 * time.Hour
+	defaultRunLimit   = 50
+	maxRunListLimit   = 500
 )
+
+// RunQuery controls filtering for job run history lookups.
+type RunQuery struct {
+	JobID         string
+	ProbeID       string
+	Status        string
+	StartedAfter  *time.Time
+	StartedBefore *time.Time
+	Limit         int
+}
 
 // Store persists scheduled jobs and job run history in SQLite.
 type Store struct {
@@ -323,17 +335,25 @@ func (s *Store) CompleteRun(runID, status string, exitCode *int, output string) 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var jobID string
-	if err := tx.QueryRow(`SELECT job_id FROM job_runs WHERE id = ?`, runID).Scan(&jobID); err != nil {
+	var (
+		jobID      string
+		startedAtS string
+	)
+	if err := tx.QueryRow(`SELECT job_id, started_at FROM job_runs WHERE id = ?`, runID).Scan(&jobID, &startedAtS); err != nil {
 		return err
 	}
+	startedAt, err := time.Parse(time.RFC3339Nano, startedAtS)
+	if err != nil {
+		return fmt.Errorf("parse run started_at: %w", err)
+	}
 
-	res, err := tx.Exec(`UPDATE job_runs SET ended_at = ?, status = ?, exit_code = ?, output = ? WHERE id = ?`,
+	res, err := tx.Exec(`UPDATE job_runs SET ended_at = ?, status = ?, exit_code = ?, output = ? WHERE id = ? AND status = ?`,
 		endedAt.Format(time.RFC3339Nano),
 		status,
 		nullableInt(exitCode),
 		truncateOutput(output),
 		runID,
+		RunStatusRunning,
 	)
 	if err != nil {
 		return err
@@ -343,9 +363,45 @@ func (s *Store) CompleteRun(runID, status string, exitCode *int, output string) 
 		return sql.ErrNoRows
 	}
 
-	_, err = tx.Exec(`UPDATE jobs SET last_status = ?, updated_at = ? WHERE id = ?`, status, endedAt.Format(time.RFC3339Nano), jobID)
-	if err != nil {
+	latestStartedAt := ""
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(started_at), '') FROM job_runs WHERE job_id = ?`, jobID).Scan(&latestStartedAt); err != nil {
 		return err
+	}
+
+	if latestStartedAt == startedAt.Format(time.RFC3339Nano) {
+		var (
+			runningCount int
+			failedCount  int
+		)
+		if err := tx.QueryRow(`SELECT
+			SUM(CASE WHEN status = ? THEN 1 ELSE 0 END),
+			SUM(CASE WHEN status = ? THEN 1 ELSE 0 END)
+			FROM job_runs
+			WHERE job_id = ? AND started_at = ?`,
+			RunStatusRunning,
+			RunStatusFailed,
+			jobID,
+			latestStartedAt,
+		).Scan(&runningCount, &failedCount); err != nil {
+			return err
+		}
+
+		finalStatus := RunStatusSuccess
+		switch {
+		case runningCount > 0:
+			finalStatus = RunStatusRunning
+		case failedCount > 0:
+			finalStatus = RunStatusFailed
+		}
+
+		if _, err := tx.Exec(`UPDATE jobs SET last_status = ?, updated_at = ? WHERE id = ? AND last_run_at = ?`,
+			finalStatus,
+			endedAt.Format(time.RFC3339Nano),
+			jobID,
+			latestStartedAt,
+		); err != nil {
+			return err
+		}
 	}
 
 	return tx.Commit()
@@ -353,12 +409,44 @@ func (s *Store) CompleteRun(runID, status string, exitCode *int, output string) 
 
 // ListRunsByJob returns the most recent runs for one job.
 func (s *Store) ListRunsByJob(jobID string, limit int) ([]JobRun, error) {
-	if limit <= 0 {
-		limit = 50
+	return s.ListRuns(RunQuery{JobID: jobID, Limit: limit})
+}
+
+// ListRuns returns recent runs using optional filters.
+func (s *Store) ListRuns(query RunQuery) ([]JobRun, error) {
+	clauses := make([]string, 0, 5)
+	args := make([]any, 0, 6)
+
+	if jobID := strings.TrimSpace(query.JobID); jobID != "" {
+		clauses = append(clauses, "job_id = ?")
+		args = append(args, jobID)
+	}
+	if probeID := strings.TrimSpace(query.ProbeID); probeID != "" {
+		clauses = append(clauses, "probe_id = ?")
+		args = append(args, probeID)
+	}
+	if status := strings.TrimSpace(query.Status); status != "" {
+		clauses = append(clauses, "status = ?")
+		args = append(args, status)
+	}
+	if query.StartedAfter != nil {
+		clauses = append(clauses, "started_at >= ?")
+		args = append(args, query.StartedAfter.UTC().Format(time.RFC3339Nano))
+	}
+	if query.StartedBefore != nil {
+		clauses = append(clauses, "started_at <= ?")
+		args = append(args, query.StartedBefore.UTC().Format(time.RFC3339Nano))
 	}
 
-	rows, err := s.db.Query(`SELECT id, job_id, probe_id, request_id, started_at, ended_at, status, exit_code, output
-		FROM job_runs WHERE job_id = ? ORDER BY started_at DESC LIMIT ?`, jobID, limit)
+	stmt := `SELECT id, job_id, probe_id, request_id, started_at, ended_at, status, exit_code, output FROM job_runs`
+	if len(clauses) > 0 {
+		stmt += ` WHERE ` + strings.Join(clauses, " AND ")
+	}
+	stmt += ` ORDER BY started_at DESC LIMIT ?`
+	limit := normalizeRunLimit(query.Limit)
+	args = append(args, limit)
+
+	rows, err := s.db.Query(stmt, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -373,6 +461,16 @@ func (s *Store) ListRunsByJob(jobID string, limit int) ([]JobRun, error) {
 		out = append(out, *run)
 	}
 	return out, rows.Err()
+}
+
+func normalizeRunLimit(limit int) int {
+	if limit <= 0 {
+		return defaultRunLimit
+	}
+	if limit > maxRunListLimit {
+		return maxRunListLimit
+	}
+	return limit
 }
 
 func (s *Store) pruneRunsOlderThan(age time.Duration) error {

@@ -295,6 +295,9 @@ func TestPermissionsJobsRoutes(t *testing.T) {
 	if rr := makeRequest(t, srv, http.MethodGet, "/api/v1/jobs", readToken, ""); rr.Code == http.StatusUnauthorized || rr.Code == http.StatusForbidden {
 		t.Fatalf("expected fleet:read to list jobs, got %d body=%s", rr.Code, rr.Body.String())
 	}
+	if rr := makeRequest(t, srv, http.MethodGet, "/api/v1/jobs/runs", readToken, ""); rr.Code == http.StatusUnauthorized || rr.Code == http.StatusForbidden {
+		t.Fatalf("expected fleet:read to list all job runs, got %d body=%s", rr.Code, rr.Body.String())
+	}
 	if rr := makeRequest(t, srv, http.MethodGet, "/api/v1/jobs/"+createdJob.ID, readToken, ""); rr.Code == http.StatusUnauthorized || rr.Code == http.StatusForbidden {
 		t.Fatalf("expected fleet:read to get job, got %d body=%s", rr.Code, rr.Body.String())
 	}

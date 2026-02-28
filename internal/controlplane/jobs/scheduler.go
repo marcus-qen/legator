@@ -34,11 +34,13 @@ type Scheduler struct {
 	tracker trackable
 	logger  *zap.Logger
 
-	mu       sync.Mutex
-	cancel   context.CancelFunc
-	ticker   *time.Ticker
-	inFlight map[string]string // request_id -> run_id
-	wg       sync.WaitGroup
+	mu            sync.Mutex
+	cancel        context.CancelFunc
+	ticker        *time.Ticker
+	inFlight      map[string]string // request_id -> run_id
+	requestTarget map[string]string // request_id -> jobID::probeID
+	activeTargets map[string]struct{}
+	wg            sync.WaitGroup
 }
 
 // NewScheduler creates a recurring job scheduler.
@@ -47,12 +49,14 @@ func NewScheduler(store *Store, hub sender, fleetMgr fleet.Fleet, tracker tracka
 		logger = zap.NewNop()
 	}
 	return &Scheduler{
-		store:    store,
-		hub:      hub,
-		fleet:    fleetMgr,
-		tracker:  tracker,
-		logger:   logger,
-		inFlight: make(map[string]string),
+		store:         store,
+		hub:           hub,
+		fleet:         fleetMgr,
+		tracker:       tracker,
+		logger:        logger,
+		inFlight:      make(map[string]string),
+		requestTarget: make(map[string]string),
+		activeTargets: make(map[string]struct{}),
 	}
 }
 
@@ -103,6 +107,8 @@ func (s *Scheduler) Stop() {
 		s.tracker.Cancel(requestID)
 	}
 	s.inFlight = make(map[string]string)
+	s.requestTarget = make(map[string]string)
+	s.activeTargets = make(map[string]struct{})
 	s.mu.Unlock()
 
 	s.wg.Wait()
@@ -158,8 +164,15 @@ func (s *Scheduler) dispatchJob(job Job, now time.Time) error {
 	}
 
 	for _, probeID := range probeIDs {
+		targetKey := inFlightTargetKey(job.ID, probeID)
+		if !s.claimTarget(targetKey) {
+			s.logger.Debug("skipping overlapping run for target", zap.String("job_id", job.ID), zap.String("probe_id", probeID))
+			continue
+		}
+
 		if !s.probeOnline(probeID) {
 			s.recordOfflineRun(job.ID, probeID, now)
+			s.releaseTarget(targetKey)
 			continue
 		}
 
@@ -172,6 +185,7 @@ func (s *Scheduler) dispatchJob(job Job, now time.Time) error {
 			Status:    RunStatusRunning,
 		})
 		if err != nil {
+			s.releaseTarget(targetKey)
 			s.logger.Warn("record run start failed", zap.String("job_id", job.ID), zap.String("probe_id", probeID), zap.Error(err))
 			continue
 		}
@@ -185,14 +199,21 @@ func (s *Scheduler) dispatchJob(job Job, now time.Time) error {
 		}
 
 		pending := s.tracker.Track(requestID, probeID, job.Command, payload.Level)
+		if pending == nil {
+			s.completeRun(run.ID, RunStatusFailed, nil, "command tracking unavailable")
+			s.releaseTarget(targetKey)
+			continue
+		}
 		if err := s.hub.SendTo(probeID, protocol.MsgCommand, payload); err != nil {
 			s.tracker.Cancel(requestID)
 			s.completeRun(run.ID, RunStatusFailed, nil, "probe offline")
+			s.releaseTarget(targetKey)
 			continue
 		}
 
 		s.mu.Lock()
 		s.inFlight[requestID] = run.ID
+		s.requestTarget[requestID] = targetKey
 		s.mu.Unlock()
 
 		s.wg.Add(1)
@@ -204,6 +225,12 @@ func (s *Scheduler) dispatchJob(job Job, now time.Time) error {
 
 func (s *Scheduler) awaitRunResult(runID, requestID string, pending *cmdtracker.PendingCommand) {
 	defer s.wg.Done()
+
+	if pending == nil || pending.Result == nil {
+		s.completeRun(runID, RunStatusFailed, nil, "command tracking unavailable")
+		s.clearInFlight(requestID)
+		return
+	}
 
 	result, ok := <-pending.Result
 	if !ok || result == nil {
@@ -230,8 +257,40 @@ func (s *Scheduler) completeRun(runID, status string, exitCode *int, output stri
 
 func (s *Scheduler) clearInFlight(requestID string) {
 	s.mu.Lock()
+	if targetKey, ok := s.requestTarget[requestID]; ok {
+		delete(s.requestTarget, requestID)
+		delete(s.activeTargets, targetKey)
+	}
 	delete(s.inFlight, requestID)
 	s.mu.Unlock()
+}
+
+func (s *Scheduler) claimTarget(targetKey string) bool {
+	targetKey = strings.TrimSpace(targetKey)
+	if targetKey == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.activeTargets[targetKey]; ok {
+		return false
+	}
+	s.activeTargets[targetKey] = struct{}{}
+	return true
+}
+
+func (s *Scheduler) releaseTarget(targetKey string) {
+	targetKey = strings.TrimSpace(targetKey)
+	if targetKey == "" {
+		return
+	}
+	s.mu.Lock()
+	delete(s.activeTargets, targetKey)
+	s.mu.Unlock()
+}
+
+func inFlightTargetKey(jobID, probeID string) string {
+	return strings.TrimSpace(jobID) + "::" + strings.TrimSpace(probeID)
 }
 
 func (s *Scheduler) recordOfflineRun(jobID, probeID string, now time.Time) {

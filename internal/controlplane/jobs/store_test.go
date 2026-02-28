@@ -164,4 +164,106 @@ func TestStoreRunHistoryAndAutoPrune(t *testing.T) {
 	}
 }
 
+func TestStoreListRunsFilters(t *testing.T) {
+	store := newTestStore(t)
+	job := createTestJob(t, store)
+
+	base := time.Now().UTC().Add(-time.Minute)
+	runSuccess, err := store.RecordRunStart(JobRun{JobID: job.ID, ProbeID: "probe-1", RequestID: "list-success", StartedAt: base})
+	if err != nil {
+		t.Fatalf("record success run: %v", err)
+	}
+	if err := store.CompleteRun(runSuccess.ID, RunStatusSuccess, intPtr(0), "ok"); err != nil {
+		t.Fatalf("complete success run: %v", err)
+	}
+
+	runFailed, err := store.RecordRunStart(JobRun{JobID: job.ID, ProbeID: "probe-2", RequestID: "list-failed", StartedAt: base.Add(10 * time.Second)})
+	if err != nil {
+		t.Fatalf("record failed run: %v", err)
+	}
+	if err := store.CompleteRun(runFailed.ID, RunStatusFailed, intPtr(2), "failed"); err != nil {
+		t.Fatalf("complete failed run: %v", err)
+	}
+
+	runs, err := store.ListRuns(RunQuery{JobID: job.ID, Status: RunStatusFailed, Limit: 10})
+	if err != nil {
+		t.Fatalf("list filtered runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected one failed run, got %d", len(runs))
+	}
+	if runs[0].RequestID != "list-failed" {
+		t.Fatalf("unexpected run returned: %s", runs[0].RequestID)
+	}
+
+	after := base.Add(5 * time.Second)
+	runs, err = store.ListRuns(RunQuery{JobID: job.ID, StartedAfter: &after, Limit: 10})
+	if err != nil {
+		t.Fatalf("list runs by time: %v", err)
+	}
+	if len(runs) != 1 || runs[0].RequestID != "list-failed" {
+		t.Fatalf("expected only failed run in time filter, got %#v", runs)
+	}
+}
+
+func TestStoreCompleteRunStatusTransitionsWithFanout(t *testing.T) {
+	store := newTestStore(t)
+	job := createTestJob(t, store)
+
+	started := time.Now().UTC().Add(-time.Minute)
+	runA, err := store.RecordRunStart(JobRun{JobID: job.ID, ProbeID: "probe-a", RequestID: "fanout-a", StartedAt: started})
+	if err != nil {
+		t.Fatalf("record runA: %v", err)
+	}
+	runB, err := store.RecordRunStart(JobRun{JobID: job.ID, ProbeID: "probe-b", RequestID: "fanout-b", StartedAt: started})
+	if err != nil {
+		t.Fatalf("record runB: %v", err)
+	}
+
+	if err := store.CompleteRun(runA.ID, RunStatusSuccess, intPtr(0), "ok"); err != nil {
+		t.Fatalf("complete runA: %v", err)
+	}
+	mid, err := store.GetJob(job.ID)
+	if err != nil {
+		t.Fatalf("get job mid: %v", err)
+	}
+	if mid.LastStatus != RunStatusRunning {
+		t.Fatalf("expected status running while fanout still active, got %s", mid.LastStatus)
+	}
+
+	if err := store.CompleteRun(runB.ID, RunStatusFailed, intPtr(1), "boom"); err != nil {
+		t.Fatalf("complete runB: %v", err)
+	}
+	ended, err := store.GetJob(job.ID)
+	if err != nil {
+		t.Fatalf("get job ended: %v", err)
+	}
+	if ended.LastStatus != RunStatusFailed {
+		t.Fatalf("expected status failed after fanout completion, got %s", ended.LastStatus)
+	}
+
+	newerStart := started.Add(2 * time.Minute)
+	runC, err := store.RecordRunStart(JobRun{JobID: job.ID, ProbeID: "probe-c", RequestID: "fanout-c", StartedAt: newerStart})
+	if err != nil {
+		t.Fatalf("record runC: %v", err)
+	}
+	afterStart, err := store.GetJob(job.ID)
+	if err != nil {
+		t.Fatalf("get job after start: %v", err)
+	}
+	if afterStart.LastStatus != RunStatusRunning {
+		t.Fatalf("expected running after newer batch start, got %s", afterStart.LastStatus)
+	}
+	if err := store.CompleteRun(runC.ID, RunStatusSuccess, intPtr(0), "ok"); err != nil {
+		t.Fatalf("complete runC: %v", err)
+	}
+	final, err := store.GetJob(job.ID)
+	if err != nil {
+		t.Fatalf("get job final: %v", err)
+	}
+	if final.LastStatus != RunStatusSuccess {
+		t.Fatalf("expected final success, got %s", final.LastStatus)
+	}
+}
+
 func intPtr(v int) *int { return &v }

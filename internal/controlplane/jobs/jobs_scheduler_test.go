@@ -129,6 +129,64 @@ func TestSchedulerTriggerNowRecordsRun(t *testing.T) {
 	t.Fatalf("expected successful run to be recorded, got %#v", runs)
 }
 
+func TestSchedulerSkipsOverlappingRunsForSameTarget(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	defer store.Close()
+
+	fleetMgr := fleet.NewManager(zap.NewNop())
+	fleetMgr.Register("probe-1", "probe-1", "linux", "amd64")
+	if err := fleetMgr.SetOnline("probe-1"); err != nil {
+		t.Fatalf("set online: %v", err)
+	}
+
+	tracker := newFakeTracker()
+	sender := &fakeSender{sendFn: func(probeID string, msgType protocol.MessageType, payload any) error { return nil }}
+	scheduler := NewScheduler(store, sender, fleetMgr, tracker, zap.NewNop())
+
+	job, err := store.CreateJob(Job{
+		Name:     "overlap",
+		Command:  "echo overlap",
+		Schedule: "1h",
+		Target:   Target{Kind: TargetKindProbe, Value: "probe-1"},
+		Enabled:  true,
+	})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	if err := scheduler.TriggerNow(job.ID); err != nil {
+		t.Fatalf("first trigger: %v", err)
+	}
+	if err := scheduler.TriggerNow(job.ID); err != nil {
+		t.Fatalf("second trigger: %v", err)
+	}
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		runs, err := store.ListRunsByJob(job.ID, 50)
+		if err != nil {
+			t.Fatalf("list runs: %v", err)
+		}
+		if len(runs) > 0 {
+			if len(runs) != 1 {
+				t.Fatalf("expected one in-flight run, got %d", len(runs))
+			}
+			if runs[0].Status != RunStatusRunning {
+				t.Fatalf("expected running status while pending, got %s", runs[0].Status)
+			}
+			tracker.complete(runs[0].RequestID, &protocol.CommandResultPayload{RequestID: runs[0].RequestID, ExitCode: 0, Stdout: "ok"})
+			time.Sleep(20 * time.Millisecond)
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("expected at least one run to be recorded")
+}
+
 type fakeSender struct {
 	sendFn func(probeID string, msgType protocol.MessageType, payload any) error
 }
