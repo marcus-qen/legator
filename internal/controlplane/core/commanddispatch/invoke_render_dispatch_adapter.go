@@ -19,10 +19,7 @@ type CommandInvokeRenderDispatchWriter struct {
 
 type commandInvokeProjectionDispatchPolicy = projectiondispatch.Policy[*CommandInvokeProjection, CommandInvokeRenderDispatchWriter]
 
-var defaultCommandInvokeProjectionDispatchPolicyRegistry = newCommandInvokeProjectionDispatchPolicyRegistry(map[ProjectionDispatchSurface]commandInvokeProjectionDispatchPolicy{
-	ProjectionDispatchSurfaceHTTP: projectiondispatch.PolicyFunc[*CommandInvokeProjection, CommandInvokeRenderDispatchWriter](dispatchCommandInvokeProjectionHTTP),
-	ProjectionDispatchSurfaceMCP:  projectiondispatch.PolicyFunc[*CommandInvokeProjection, CommandInvokeRenderDispatchWriter](dispatchCommandInvokeProjectionMCP),
-})
+var defaultCommandInvokeProjectionDispatchPolicyRegistry = newDefaultCommandInvokeProjectionDispatchPolicyRegistry()
 
 // DispatchCommandInvokeProjection emits command invoke projection outputs for
 // the target transport surface using centralized sequencing + fallback policy.

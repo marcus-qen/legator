@@ -7,3 +7,12 @@ import "github.com/marcus-qen/legator/internal/controlplane/core/projectiondispa
 func newCommandInvokeProjectionDispatchPolicyRegistry(policies map[ProjectionDispatchSurface]commandInvokeProjectionDispatchPolicy) projectiondispatch.PolicyRegistry[ProjectionDispatchSurface, commandInvokeProjectionDispatchPolicy] {
 	return projectiondispatch.NewPolicyRegistry(policies)
 }
+
+func newDefaultCommandInvokeProjectionDispatchPolicyRegistry() projectiondispatch.PolicyRegistry[ProjectionDispatchSurface, commandInvokeProjectionDispatchPolicy] {
+	return projectiondispatch.NewHTTPMCPIdentityPolicyRegistry(
+		ProjectionDispatchSurfaceHTTP,
+		commandInvokeProjectionDispatchPolicy(projectiondispatch.PolicyFunc[*CommandInvokeProjection, CommandInvokeRenderDispatchWriter](dispatchCommandInvokeProjectionHTTP)),
+		ProjectionDispatchSurfaceMCP,
+		commandInvokeProjectionDispatchPolicy(projectiondispatch.PolicyFunc[*CommandInvokeProjection, CommandInvokeRenderDispatchWriter](dispatchCommandInvokeProjectionMCP)),
+	)
+}

@@ -23,15 +23,9 @@ type commandDispatchAdapterWriter struct {
 	handled *bool
 }
 
-var defaultCommandDispatchErrorPolicyRegistry = newCommandDispatchErrorPolicyRegistry(map[ProjectionDispatchSurface]commandDispatchErrorPolicy{
-	ProjectionDispatchSurfaceHTTP: projectiondispatch.PolicyFunc[*CommandResultEnvelope, commandDispatchAdapterWriter](dispatchCommandEnvelopeHTTPError),
-	ProjectionDispatchSurfaceMCP:  projectiondispatch.PolicyFunc[*CommandResultEnvelope, commandDispatchAdapterWriter](dispatchCommandEnvelopeMCPError),
-})
+var defaultCommandDispatchErrorPolicyRegistry = newDefaultCommandDispatchErrorPolicyRegistry()
 
-var defaultCommandReadPolicyRegistry = newCommandReadPolicyRegistry(map[ProjectionDispatchSurface]commandReadPolicy{
-	ProjectionDispatchSurfaceHTTP: projectiondispatch.PolicyFunc[*protocol.CommandResultPayload, commandDispatchAdapterWriter](dispatchCommandReadHTTP),
-	ProjectionDispatchSurfaceMCP:  projectiondispatch.PolicyFunc[*protocol.CommandResultPayload, commandDispatchAdapterWriter](dispatchCommandReadMCP),
-})
+var defaultCommandReadPolicyRegistry = newDefaultCommandReadPolicyRegistry()
 
 // DispatchCommandErrorsForSurface emits transport-specific errors from the
 // command dispatch envelope. It returns true when an error was emitted.
