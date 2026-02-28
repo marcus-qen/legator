@@ -1378,6 +1378,114 @@ body[data-page='discovery'] .discovery-run-cidr {
   font-weight: 600;
 }
 
+body[data-page='jobs'] .jobs-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+body[data-page='jobs'] .jobs-summary-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-2);
+  padding: 8px;
+  display: grid;
+  gap: 4px;
+}
+
+body[data-page='jobs'] .jobs-summary-label {
+  color: var(--fg-1);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+body[data-page='jobs'] .jobs-summary-value {
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+body[data-page='jobs'] .jobs-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+  gap: 12px;
+}
+
+body[data-page='jobs'] .jobs-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+body[data-page='jobs'] .jobs-filter-actions {
+  align-self: end;
+  margin: 0;
+}
+
+body[data-page='jobs'] .jobs-triage-panel {
+  align-self: start;
+}
+
+body[data-page='jobs'] .jobs-triage-output-title {
+  margin-top: 12px;
+  margin-bottom: 6px;
+}
+
+body[data-page='jobs'] .jobs-run-row {
+  cursor: pointer;
+}
+
+body[data-page='jobs'] .jobs-run-row:hover {
+  background: rgba(212, 160, 83, 0.07) !important;
+}
+
+body[data-page='jobs'] .jobs-run-row-selected {
+  background: rgba(96, 165, 250, 0.12) !important;
+}
+
+.job-status-enabled {
+  border-color: rgba(74, 222, 128, 0.5);
+  color: var(--green);
+  background: rgba(74, 222, 128, 0.09);
+}
+
+.job-status-disabled {
+  border-color: rgba(248, 113, 113, 0.5);
+  color: var(--red);
+  background: rgba(248, 113, 113, 0.09);
+}
+
+.job-status-pending {
+  border-color: rgba(251, 191, 36, 0.5);
+  color: var(--amber);
+  background: rgba(251, 191, 36, 0.09);
+}
+
+.job-status-running {
+  border-color: rgba(96, 165, 250, 0.5);
+  color: var(--blue);
+  background: rgba(96, 165, 250, 0.09);
+}
+
+.job-status-failed {
+  border-color: rgba(248, 113, 113, 0.5);
+  color: var(--red);
+  background: rgba(248, 113, 113, 0.09);
+}
+
+.job-status-success {
+  border-color: rgba(74, 222, 128, 0.5);
+  color: var(--green);
+  background: rgba(74, 222, 128, 0.09);
+}
+
+.job-status-canceled {
+  border-color: rgba(148, 163, 184, 0.5);
+  color: #cbd5e1;
+  background: rgba(148, 163, 184, 0.08);
+}
+
 @media (max-width: 980px) {
   .grid-two {
     grid-template-columns: 1fr;
@@ -1417,6 +1525,14 @@ body[data-page='discovery'] .discovery-run-cidr {
 
   .content {
     padding: 10px;
+  }
+
+  body[data-page='jobs'] .jobs-layout {
+    grid-template-columns: 1fr;
+  }
+
+  body[data-page='jobs'] .jobs-filter-grid {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -195,7 +195,7 @@ make release-build    # Cross-compile release binaries (incl. windows/amd64 prob
 50+ REST endpoints. Key groups:
 
 - **Fleet**: `GET /api/v1/probes`, `GET /api/v1/fleet/summary`, `POST /api/v1/probes/{id}/command`
-- **Jobs**: `GET/POST /api/v1/jobs`, `POST /api/v1/jobs/{id}/run`, `POST /api/v1/jobs/{id}/cancel`, `GET /api/v1/jobs/{id}/runs`, `POST /api/v1/jobs/{id}/runs/{runId}/cancel`, `GET /api/v1/jobs/runs`
+- **Jobs**: `GET/POST /api/v1/jobs`, `POST /api/v1/jobs/{id}/run`, `POST /api/v1/jobs/{id}/cancel`, `GET /api/v1/jobs/{id}/runs`, `POST /api/v1/jobs/{id}/runs/{runId}/cancel`, `POST /api/v1/jobs/{id}/runs/{runId}/retry`, `GET /api/v1/jobs/runs`
   - Optional per-job retry policy (additive):
     - `retry_policy.max_attempts`
     - `retry_policy.initial_backoff` (duration, e.g. `10s`)

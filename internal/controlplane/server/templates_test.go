@@ -111,6 +111,32 @@ func TestProbeDetailTemplateIncludesIncrementalSSEAnchors(t *testing.T) {
 	}
 }
 
+func TestJobsTemplateIncludesRunHistoryAndTriageControls(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "web", "templates", "jobs.html")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read jobs template: %v", err)
+	}
+
+	html := string(content)
+	required := []string{
+		`id="jobs-list-body"`,
+		`id="jobs-run-filters"`,
+		`id="jobs-runs-body"`,
+		`id="jobs-triage-output"`,
+		`/api/v1/jobs/runs`,
+		`/api/v1/jobs/${encodeURIComponent(jobID)}/run`,
+		`/api/v1/jobs/${encodeURIComponent(jobID)}/runs/${encodeURIComponent(runID)}/cancel`,
+		`/api/v1/jobs/${encodeURIComponent(jobID)}/runs/${encodeURIComponent(runID)}/retry`,
+	}
+
+	for _, snippet := range required {
+		if !strings.Contains(html, snippet) {
+			t.Fatalf("jobs template missing expected snippet: %s", snippet)
+		}
+	}
+}
+
 func TestTemplateHasPermission(t *testing.T) {
 	admin := &TemplateUser{Permissions: map[auth.Permission]struct{}{auth.PermAdmin: {}}}
 	if !templateHasPermission(admin, string(auth.PermFleetWrite)) {

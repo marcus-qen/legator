@@ -1296,6 +1296,23 @@ func TestHandleFleetChatPage_RendersTemplate(t *testing.T) {
 	}
 }
 
+func TestHandleJobsPage_RendersTemplate(t *testing.T) {
+	srv := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs", nil)
+	rr := httptest.NewRecorder()
+
+	srv.handleJobsPage(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "Jobs") {
+		t.Fatalf("expected jobs page content, got: %s", body)
+	}
+}
+
 func TestHandleApplyPolicy_NotFound(t *testing.T) {
 	srv := newTestServer(t)
 
