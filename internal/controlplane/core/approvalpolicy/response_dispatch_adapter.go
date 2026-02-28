@@ -18,7 +18,7 @@ func DispatchDecideApprovalResponseForSurface(projection *DecideApprovalProjecti
 	builder := DecideApprovalResponseEnvelopeBuilder{Projection: projection}
 	transportSurface, ok := ResolveDecideApprovalTransportSurface(surface)
 	if !ok {
-		dispatchUnsupportedDecideApprovalSurfaceFallback(string(surface), writer)
+		dispatchUnsupportedDecideApprovalSurfaceFallback(surface, writer)
 		return
 	}
 

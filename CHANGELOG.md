@@ -82,6 +82,9 @@
 - **Kernel split S37 (shared unsupported-surface scope-envelope builder seam)**
   - Added `transportwriter.UnsupportedSurfaceEnvelopeBuilderForScope(...)` as a tiny shared seam for scope-to-envelope wiring and routed approval/command unsupported-surface envelope wrappers through it while keeping domain scope ownership intact.
   - Added strict parity coverage that compares seam-built envelopes against the legacy `UnsupportedSurfaceMessage(scope, surface) -> UnsupportedSurfaceEnvelope(...)` wiring path to preserve exact message/envelope semantics and fallback precedence behavior.
+- **Kernel split S38 (typed unsupported-surface adapter seam)**
+  - Added tiny shared typed-surface adapters (`BuildUnsupportedSurfaceEnvelope(...)` and `UnsupportedSurfaceMessageForSurface(...)`) so `string`, `ProjectionDispatchSurface`, `DecideApprovalRenderSurface`, and transport surfaces all reuse the same scope-bound unsupported-surface call path.
+  - Removed remaining direct `string(surface)` casts from approval/command unsupported-surface production paths while preserving exact message/envelope text and HTTP-first/MCP-fallback semantics, with strict typed-seam-vs-legacy-cast parity tests.
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
 - **Kernel split S13 (approval decide render-target registry boundary)**

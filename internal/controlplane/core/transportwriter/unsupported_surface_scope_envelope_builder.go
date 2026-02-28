@@ -11,3 +11,9 @@ func UnsupportedSurfaceEnvelopeBuilderForScope(scope UnsupportedSurfaceScope) Un
 		return UnsupportedSurfaceEnvelope(UnsupportedSurfaceMessage(scope, surface))
 	}
 }
+
+// BuildUnsupportedSurfaceEnvelope normalizes domain surface types into a
+// shared scope-bound unsupported-surface envelope builder call path.
+func BuildUnsupportedSurfaceEnvelope[Surface ~string](builder UnsupportedSurfaceEnvelopeBuilder, surface Surface) *ResponseEnvelope {
+	return builder(string(surface))
+}

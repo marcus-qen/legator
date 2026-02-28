@@ -6,15 +6,15 @@ const unsupportedDecideApprovalScope = transportwriter.UnsupportedSurfaceScopeAp
 
 var unsupportedDecideApprovalSurfaceEnvelopeBuilder = transportwriter.UnsupportedSurfaceEnvelopeBuilderForScope(unsupportedDecideApprovalScope)
 
-func unsupportedDecideApprovalSurfaceMessage(surface string) string {
-	return transportwriter.UnsupportedSurfaceMessage(unsupportedDecideApprovalScope, surface)
+func unsupportedDecideApprovalSurfaceMessage[Surface ~string](surface Surface) string {
+	return transportwriter.UnsupportedSurfaceMessageForSurface(unsupportedDecideApprovalScope, surface)
 }
 
-func unsupportedDecideApprovalSurfaceEnvelope(surface string) *transportwriter.ResponseEnvelope {
-	return unsupportedDecideApprovalSurfaceEnvelopeBuilder(surface)
+func unsupportedDecideApprovalSurfaceEnvelope[Surface ~string](surface Surface) *transportwriter.ResponseEnvelope {
+	return transportwriter.BuildUnsupportedSurfaceEnvelope(unsupportedDecideApprovalSurfaceEnvelopeBuilder, surface)
 }
 
-func dispatchUnsupportedDecideApprovalSurfaceFallback(surface string, writer DecideApprovalResponseDispatchWriter) {
+func dispatchUnsupportedDecideApprovalSurfaceFallback[Surface ~string](surface Surface, writer DecideApprovalResponseDispatchWriter) {
 	transportwriter.DispatchUnsupportedSurfaceFallback(
 		surface,
 		unsupportedDecideApprovalSurfaceEnvelope,

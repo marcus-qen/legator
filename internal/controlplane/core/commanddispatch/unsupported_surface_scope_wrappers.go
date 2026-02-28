@@ -12,20 +12,20 @@ var (
 	unsupportedCommandDispatchSurfaceEnvelopeBuilder = transportwriter.UnsupportedSurfaceEnvelopeBuilderForScope(unsupportedCommandDispatchScope)
 )
 
-func unsupportedCommandInvokeSurfaceMessage(surface string) string {
-	return transportwriter.UnsupportedSurfaceMessage(unsupportedCommandInvokeScope, surface)
+func unsupportedCommandInvokeSurfaceMessage[Surface ~string](surface Surface) string {
+	return transportwriter.UnsupportedSurfaceMessageForSurface(unsupportedCommandInvokeScope, surface)
 }
 
 func unsupportedCommandDispatchSurfaceMessage(surface ProjectionDispatchSurface) string {
-	return transportwriter.UnsupportedSurfaceMessage(unsupportedCommandDispatchScope, string(surface))
+	return transportwriter.UnsupportedSurfaceMessageForSurface(unsupportedCommandDispatchScope, surface)
 }
 
-func unsupportedCommandInvokeSurfaceEnvelope(surface string) *transportwriter.ResponseEnvelope {
-	return unsupportedCommandInvokeSurfaceEnvelopeBuilder(surface)
+func unsupportedCommandInvokeSurfaceEnvelope[Surface ~string](surface Surface) *transportwriter.ResponseEnvelope {
+	return transportwriter.BuildUnsupportedSurfaceEnvelope(unsupportedCommandInvokeSurfaceEnvelopeBuilder, surface)
 }
 
 func unsupportedCommandDispatchSurfaceEnvelope(surface ProjectionDispatchSurface) *transportwriter.ResponseEnvelope {
-	return unsupportedCommandDispatchSurfaceEnvelopeBuilder(string(surface))
+	return transportwriter.BuildUnsupportedSurfaceEnvelope(unsupportedCommandDispatchSurfaceEnvelopeBuilder, surface)
 }
 
 func dispatchUnsupportedCommandDispatchSurfaceFallback(surface ProjectionDispatchSurface, writer CommandProjectionDispatchWriter) {

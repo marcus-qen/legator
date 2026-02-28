@@ -30,7 +30,7 @@ func (b DecideApprovalResponseEnvelopeBuilder) BuildResponseEnvelope(surface tra
 		}
 		return &transportwriter.ResponseEnvelope{MCPSuccess: normalizeDecideApprovalSuccess(projection.Success)}
 	default:
-		return unsupportedDecideApprovalResponseEnvelope(string(surface))
+		return unsupportedDecideApprovalResponseEnvelope(surface)
 	}
 }
 
@@ -39,12 +39,12 @@ func (b DecideApprovalResponseEnvelopeBuilder) BuildResponseEnvelope(surface tra
 func EncodeDecideApprovalResponseEnvelope(projection *DecideApprovalProjection, surface DecideApprovalRenderSurface) *transportwriter.ResponseEnvelope {
 	transportSurface, ok := ResolveDecideApprovalTransportSurface(surface)
 	if !ok {
-		return unsupportedDecideApprovalResponseEnvelope(string(surface))
+		return unsupportedDecideApprovalResponseEnvelope(surface)
 	}
 	return DecideApprovalResponseEnvelopeBuilder{Projection: projection}.BuildResponseEnvelope(transportSurface)
 }
 
-func unsupportedDecideApprovalResponseEnvelope(surface string) *transportwriter.ResponseEnvelope {
+func unsupportedDecideApprovalResponseEnvelope[Surface ~string](surface Surface) *transportwriter.ResponseEnvelope {
 	return unsupportedDecideApprovalSurfaceEnvelope(surface)
 }
 

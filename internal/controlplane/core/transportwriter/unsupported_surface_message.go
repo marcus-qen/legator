@@ -17,3 +17,9 @@ const (
 func UnsupportedSurfaceMessage(scope UnsupportedSurfaceScope, surface string) string {
 	return fmt.Sprintf("unsupported %s surface %q", scope, surface)
 }
+
+// UnsupportedSurfaceMessageForSurface normalizes domain surface types into
+// the shared unsupported-surface message format contract.
+func UnsupportedSurfaceMessageForSurface[Surface ~string](scope UnsupportedSurfaceScope, surface Surface) string {
+	return UnsupportedSurfaceMessage(scope, string(surface))
+}
