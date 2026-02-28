@@ -39,19 +39,12 @@ func DispatchCommandErrorsForSurface(envelope *CommandResultEnvelope, surface Pr
 	handled := false
 	adapterWriter := commandDispatchAdapterWriter{writer: writer, handled: &handled}
 
-	projectiondispatch.DispatchResolvedOrUnsupported(
+	projectiondispatch.DispatchResolvedPolicyForSurface(
 		surface,
+		envelope,
 		adapterWriter,
 		ResolveCommandDispatchProjectionSurface,
-		func(resolved ProjectionDispatchSurface, writer commandDispatchAdapterWriter) {
-			projectiondispatch.DispatchForSurface(
-				defaultCommandDispatchErrorPolicyRegistry,
-				resolved,
-				envelope,
-				writer,
-				dispatchUnsupportedCommandSurfaceAdapter,
-			)
-		},
+		defaultCommandDispatchErrorPolicyRegistry,
 		dispatchUnsupportedCommandSurfaceAdapter,
 	)
 	return handled
@@ -60,19 +53,12 @@ func DispatchCommandErrorsForSurface(envelope *CommandResultEnvelope, surface Pr
 // DispatchCommandReadForSurface emits transport-specific command-read outputs
 // from the shared command result payload.
 func DispatchCommandReadForSurface(result *protocol.CommandResultPayload, surface ProjectionDispatchSurface, writer CommandProjectionDispatchWriter) {
-	projectiondispatch.DispatchResolvedOrUnsupported(
+	projectiondispatch.DispatchResolvedPolicyForSurface(
 		surface,
+		result,
 		commandDispatchAdapterWriter{writer: writer, handled: nil},
 		ResolveCommandReadProjectionSurface,
-		func(resolved ProjectionDispatchSurface, writer commandDispatchAdapterWriter) {
-			projectiondispatch.DispatchForSurface(
-				defaultCommandReadPolicyRegistry,
-				resolved,
-				result,
-				writer,
-				dispatchUnsupportedCommandSurfaceAdapter,
-			)
-		},
+		defaultCommandReadPolicyRegistry,
 		dispatchUnsupportedCommandSurfaceAdapter,
 	)
 }
