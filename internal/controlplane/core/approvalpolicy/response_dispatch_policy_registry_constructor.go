@@ -10,10 +10,10 @@ func newDecideApprovalResponseDispatchPolicyRegistry(policies map[DecideApproval
 }
 
 func newDefaultDecideApprovalResponseDispatchPolicyRegistry() projectiondispatch.PolicyRegistry[DecideApprovalRenderSurface, decideApprovalResponseDispatchPolicy] {
-	return projectiondispatch.NewHTTPMCPIdentityPolicyRegistry(
+	return projectiondispatch.NewHTTPMCPDefaultPolicyRegistry(
 		DecideApprovalRenderSurfaceHTTP,
-		decideApprovalResponseDispatchPolicy(projectiondispatch.PolicyFunc[*DecideApprovalProjection, DecideApprovalResponseDispatchWriter](dispatchDecideApprovalResponseHTTP)),
+		dispatchDecideApprovalResponseHTTP,
 		DecideApprovalRenderSurfaceMCP,
-		decideApprovalResponseDispatchPolicy(projectiondispatch.PolicyFunc[*DecideApprovalProjection, DecideApprovalResponseDispatchWriter](dispatchDecideApprovalResponseMCP)),
+		dispatchDecideApprovalResponseMCP,
 	)
 }

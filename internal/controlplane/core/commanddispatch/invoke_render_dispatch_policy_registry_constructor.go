@@ -9,10 +9,10 @@ func newCommandInvokeProjectionDispatchPolicyRegistry(policies map[ProjectionDis
 }
 
 func newDefaultCommandInvokeProjectionDispatchPolicyRegistry() projectiondispatch.PolicyRegistry[ProjectionDispatchSurface, commandInvokeProjectionDispatchPolicy] {
-	return projectiondispatch.NewHTTPMCPIdentityPolicyRegistry(
+	return projectiondispatch.NewHTTPMCPDefaultPolicyRegistry(
 		ProjectionDispatchSurfaceHTTP,
-		commandInvokeProjectionDispatchPolicy(projectiondispatch.PolicyFunc[*CommandInvokeProjection, CommandInvokeRenderDispatchWriter](dispatchCommandInvokeProjectionHTTP)),
+		dispatchCommandInvokeProjectionHTTP,
 		ProjectionDispatchSurfaceMCP,
-		commandInvokeProjectionDispatchPolicy(projectiondispatch.PolicyFunc[*CommandInvokeProjection, CommandInvokeRenderDispatchWriter](dispatchCommandInvokeProjectionMCP)),
+		dispatchCommandInvokeProjectionMCP,
 	)
 }
