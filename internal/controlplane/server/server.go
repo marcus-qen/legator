@@ -204,6 +204,8 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 		s.mcpServer = mcpserver.New(
 			s.fleetStore,
 			s.auditStore,
+			s.jobsStore,
+			s.eventBus,
 			s.hub,
 			s.cmdTracker,
 			s.logger,

@@ -26,7 +26,7 @@ func (s *mcpStubSender) SendTo(probeID string, msgType protocol.MessageType, pay
 }
 
 func TestHandleRunCommand_Success(t *testing.T) {
-	srv, fleetStore, _ := newTestMCPServer(t)
+	srv, fleetStore, _, _ := newTestMCPServer(t)
 	fleetStore.Register("probe-run", "host-run", "linux", "amd64")
 
 	tracker := cmdtracker.New(time.Minute)
@@ -51,7 +51,7 @@ func TestHandleRunCommand_Success(t *testing.T) {
 }
 
 func TestHandleRunCommand_DispatchErrorWrapped(t *testing.T) {
-	srv, fleetStore, _ := newTestMCPServer(t)
+	srv, fleetStore, _, _ := newTestMCPServer(t)
 	fleetStore.Register("probe-offline", "host-offline", "linux", "amd64")
 
 	tracker := cmdtracker.New(time.Minute)
@@ -69,7 +69,7 @@ func TestHandleRunCommand_DispatchErrorWrapped(t *testing.T) {
 }
 
 func TestHandleRunCommand_ContextDeadlinePassthrough(t *testing.T) {
-	srv, fleetStore, _ := newTestMCPServer(t)
+	srv, fleetStore, _, _ := newTestMCPServer(t)
 	fleetStore.Register("probe-slow", "host-slow", "linux", "amd64")
 
 	tracker := cmdtracker.New(time.Minute)

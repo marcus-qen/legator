@@ -16,6 +16,11 @@
 - **Stage 1.3 async backbone: job lifecycle events in audit + SSE**
   - Added lifecycle events: `job.created`, `job.updated`, `job.deleted`, `job.run.queued`, `job.run.started`, `job.run.retry_scheduled`, `job.run.succeeded`, `job.run.failed`, `job.run.canceled`.
   - Added consistent correlation payload schema across audit/event bus surfaces: `job_id`, `run_id`, `execution_id`, `probe_id`, `attempt`, `max_attempts`, `request_id`.
+- **Stage 1.4 async backbone: MCP job polling + streaming parity**
+  - Added MCP job tools: `legator_list_jobs`, `legator_list_job_runs`, `legator_get_job_run`, `legator_poll_job_active`, `legator_stream_job_run_output`, `legator_stream_job_events`.
+  - Added MCP job resources: `legator://jobs/list`, `legator://jobs/active-runs`.
+  - Wired MCP job streaming to existing command-stream/event-bus infrastructure and enabled scheduler command stream emission for async job runs.
+  - Added MCP-vs-HTTP parity coverage for job listing/run listing payloads plus MCP resource payload tests.
 
 ### Changed
 - Enforced run lifecycle transitions with immutable terminal states:

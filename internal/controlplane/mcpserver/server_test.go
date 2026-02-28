@@ -11,14 +11,16 @@ import (
 
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
+	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
+	"github.com/marcus-qen/legator/internal/controlplane/jobs"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.uber.org/zap"
 )
 
 func TestToolsRegistered(t *testing.T) {
-	srv, _, _ := newTestMCPServer(t)
+	srv, _, _, _ := newTestMCPServer(t)
 	session := connectClient(t, srv)
 
 	result, err := session.ListTools(context.Background(), &mcp.ListToolsParams{})
@@ -36,11 +38,17 @@ func TestToolsRegistered(t *testing.T) {
 		"legator_decide_approval",
 		"legator_fleet_query",
 		"legator_get_inventory",
+		"legator_get_job_run",
+		"legator_list_job_runs",
+		"legator_list_jobs",
 		"legator_list_probes",
+		"legator_poll_job_active",
 		"legator_probe_health",
 		"legator_probe_info",
 		"legator_run_command",
 		"legator_search_audit",
+		"legator_stream_job_events",
+		"legator_stream_job_run_output",
 	}
 
 	if len(names) != len(expected) {
@@ -54,7 +62,7 @@ func TestToolsRegistered(t *testing.T) {
 }
 
 func TestListProbesTool(t *testing.T) {
-	srv, fleetStore, _ := newTestMCPServer(t)
+	srv, fleetStore, _, _ := newTestMCPServer(t)
 	fleetStore.Register("probe-a", "host-a", "linux", "amd64")
 	fleetStore.Register("probe-b", "host-b", "linux", "arm64")
 	if err := fleetStore.SetTags("probe-a", []string{"prod", "db"}); err != nil {
@@ -90,7 +98,7 @@ func TestListProbesTool(t *testing.T) {
 }
 
 func TestProbeInfoTool(t *testing.T) {
-	srv, fleetStore, _ := newTestMCPServer(t)
+	srv, fleetStore, _, _ := newTestMCPServer(t)
 	fleetStore.Register("probe-info", "host-info", "linux", "amd64")
 
 	session := connectClient(t, srv)
@@ -112,7 +120,7 @@ func TestProbeInfoTool(t *testing.T) {
 }
 
 func TestSearchAuditTool(t *testing.T) {
-	srv, _, auditStore := newTestMCPServer(t)
+	srv, _, auditStore, _ := newTestMCPServer(t)
 	auditStore.Record(audit.Event{Type: audit.EventCommandSent, ProbeID: "probe-a", Actor: "tester", Summary: "sent command"})
 	auditStore.Record(audit.Event{Type: audit.EventProbeRegistered, ProbeID: "probe-b", Actor: "tester", Summary: "registered"})
 
@@ -142,7 +150,7 @@ func TestSearchAuditTool(t *testing.T) {
 	}
 }
 
-func newTestMCPServer(t *testing.T) (*MCPServer, *fleet.Store, *audit.Store) {
+func newTestMCPServer(t *testing.T) (*MCPServer, *fleet.Store, *audit.Store, *jobs.Store) {
 	t.Helper()
 	dir := t.TempDir()
 
@@ -155,17 +163,25 @@ func newTestMCPServer(t *testing.T) (*MCPServer, *fleet.Store, *audit.Store) {
 		_ = fleetStore.Close()
 		t.Fatalf("new audit store: %v", err)
 	}
+	jobsStore, err := jobs.NewStore(filepath.Join(dir, "jobs.db"))
+	if err != nil {
+		_ = fleetStore.Close()
+		_ = auditStore.Close()
+		t.Fatalf("new jobs store: %v", err)
+	}
 
+	eventBus := events.NewBus(64)
 	hub := cpws.NewHub(zap.NewNop(), nil)
 	tracker := cmdtracker.New(time.Minute)
-	srv := New(fleetStore, auditStore, hub, tracker, zap.NewNop(), nil)
+	srv := New(fleetStore, auditStore, jobsStore, eventBus, hub, tracker, zap.NewNop(), nil)
 
 	t.Cleanup(func() {
 		_ = fleetStore.Close()
 		_ = auditStore.Close()
+		_ = jobsStore.Close()
 	})
 
-	return srv, fleetStore, auditStore
+	return srv, fleetStore, auditStore, jobsStore
 }
 
 func connectClient(t *testing.T, srv *MCPServer) *mcp.ClientSession {

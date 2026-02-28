@@ -369,6 +369,7 @@ func (s *Scheduler) dispatchAttempt(job Job, probeID, targetKey, executionID str
 		Args:      []string{"-lc", job.Command},
 		Timeout:   defaultCommandTimeout,
 		Level:     protocol.CapObserve,
+		Stream:    true,
 	}
 
 	pending := s.tracker.Track(requestID, probeID, job.Command, payload.Level)

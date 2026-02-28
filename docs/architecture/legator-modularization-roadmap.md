@@ -100,6 +100,8 @@ Primary next reuse target: research infrastructure workflows (Kubeflow jobs + Gr
 - Job schema + queue + status endpoints
 - Job event emission into audit stream
 - UI and MCP support for job polling/streaming
+  - MCP tools: `legator_list_jobs`, `legator_list_job_runs`, `legator_get_job_run`, `legator_poll_job_active`, `legator_stream_job_run_output`, `legator_stream_job_events`
+  - MCP resources: `legator://jobs/list`, `legator://jobs/active-runs`
 
 ### Acceptance Criteria
 - No long-running task blocks request lifecycle
