@@ -31,6 +31,10 @@ func NewStore(dbPath string, logger *zap.Logger) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("set WAL: %w", err)
 	}
+	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("set busy_timeout: %w", err)
+	}
 
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS probes (
 		id           TEXT PRIMARY KEY,

@@ -51,6 +51,10 @@ func NewTokenStore(dbPath string) (*TokenStore, error) {
 		db.Close()
 		return nil, fmt.Errorf("set WAL: %w", err)
 	}
+	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("set busy_timeout: %w", err)
+	}
 
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS tokens (
 		value           TEXT PRIMARY KEY,
