@@ -17,13 +17,15 @@ type DecideApprovalResponseDispatchWriter struct {
 // projection to transport writers using centralized surface normalization.
 func DispatchDecideApprovalResponseForSurface(projection *DecideApprovalProjection, surface DecideApprovalRenderSurface, writer DecideApprovalResponseDispatchWriter) {
 	builder := DecideApprovalResponseEnvelopeBuilder{Projection: projection}
-	transportSurface, ok := ResolveDecideApprovalTransportSurface(surface)
-	if !ok {
-		dispatchUnsupportedDecideApprovalSurfaceAdapterFallback(surface, writer)
-		return
-	}
-
-	transportwriter.WriteFromBuilder(transportSurface, builder, newDecideApprovalWriterKernel(writer))
+	projectiondispatch.DispatchResolvedOrUnsupported(
+		surface,
+		writer,
+		ResolveDecideApprovalTransportSurface,
+		func(transportSurface transportwriter.Surface, writer DecideApprovalResponseDispatchWriter) {
+			transportwriter.WriteFromBuilder(transportSurface, builder, newDecideApprovalWriterKernel(writer))
+		},
+		dispatchUnsupportedDecideApprovalSurfaceAdapterFallback,
+	)
 }
 
 func dispatchUnsupportedDecideApprovalSurfaceAdapterFallback(surface DecideApprovalRenderSurface, writer DecideApprovalResponseDispatchWriter) {

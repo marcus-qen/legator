@@ -32,17 +32,19 @@ func DispatchCommandInvokeProjection(projection *CommandInvokeProjection, writer
 		return
 	}
 
-	resolved, ok := ResolveCommandInvokeProjectionDispatchSurface(projection.Surface)
-	if !ok {
-		dispatchUnsupportedCommandInvokeProjectionSurface(projection.Surface, writer)
-		return
-	}
-
-	projectiondispatch.DispatchForSurface(
-		defaultCommandInvokeProjectionDispatchPolicyRegistry,
-		resolved,
-		projection,
+	projectiondispatch.DispatchResolvedOrUnsupported(
+		projection.Surface,
 		writer,
+		ResolveCommandInvokeProjectionDispatchSurface,
+		func(resolved ProjectionDispatchSurface, writer CommandInvokeRenderDispatchWriter) {
+			projectiondispatch.DispatchForSurface(
+				defaultCommandInvokeProjectionDispatchPolicyRegistry,
+				resolved,
+				projection,
+				writer,
+				dispatchUnsupportedCommandInvokeProjectionSurface,
+			)
+		},
 		dispatchUnsupportedCommandInvokeProjectionSurface,
 	)
 }
