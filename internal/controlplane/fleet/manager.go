@@ -117,6 +117,18 @@ func (m *Manager) Get(id string) (*ProbeState, bool) {
 	return ps, ok
 }
 
+// FindByHostname returns the first probe matching hostname.
+func (m *Manager) FindByHostname(hostname string) (*ProbeState, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, ps := range m.probes {
+		if ps.Hostname == hostname {
+			return ps, true
+		}
+	}
+	return nil, false
+}
+
 // List returns all probes.
 func (m *Manager) List() []*ProbeState {
 	m.mu.RLock()

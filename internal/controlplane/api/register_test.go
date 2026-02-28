@@ -26,6 +26,16 @@ func (auditRecorderStub) Record(_ audit.Event) {}
 
 func (auditRecorderStub) Emit(_ audit.EventType, _, _, _ string) {}
 
+type captureAuditRecorder struct {
+	events []audit.Event
+}
+
+func (c *captureAuditRecorder) Record(evt audit.Event) {
+	c.events = append(c.events, evt)
+}
+
+func (c *captureAuditRecorder) Emit(_ audit.EventType, _, _, _ string) {}
+
 func newTestTokenStore(t *testing.T) *TokenStore {
 	t.Helper()
 	ts, err := NewTokenStore(filepath.Join(t.TempDir(), "tokens.db"))
@@ -134,6 +144,102 @@ func TestRegisterHandler(t *testing.T) {
 	}
 	if ps.Hostname != "test-host" {
 		t.Errorf("expected hostname test-host, got %s", ps.Hostname)
+	}
+}
+
+func TestRegisterHandler_DeduplicatesByHostname(t *testing.T) {
+	ts := newTestTokenStore(t)
+	fm := fleet.NewManager(testLogger())
+	handler := HandleRegister(ts, fm, testLogger())
+
+	register := func(reqBody RegisterRequest) RegisterResponse {
+		t.Helper()
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest("POST", "/api/v1/register", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp RegisterResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		return resp
+	}
+
+	resp1 := register(RegisterRequest{
+		Token:    ts.Generate().Value,
+		Hostname: "dedup-host",
+		OS:       "linux",
+		Arch:     "amd64",
+		Tags:     []string{"prod"},
+	})
+
+	resp2 := register(RegisterRequest{
+		Token:    ts.Generate().Value,
+		Hostname: "dedup-host",
+		OS:       "linux",
+		Arch:     "arm64",
+		Tags:     []string{"canary"},
+	})
+
+	if resp1.ProbeID != resp2.ProbeID {
+		t.Fatalf("expected same probe id for same hostname, got %s and %s", resp1.ProbeID, resp2.ProbeID)
+	}
+	if resp1.APIKey == resp2.APIKey {
+		t.Fatal("expected API key rotation on re-registration")
+	}
+
+	ps, ok := fm.Get(resp1.ProbeID)
+	if !ok {
+		t.Fatal("expected probe in fleet")
+	}
+	if ps.APIKey != resp2.APIKey {
+		t.Fatalf("expected latest api key %q, got %q", resp2.APIKey, ps.APIKey)
+	}
+	if ps.Arch != "arm64" {
+		t.Fatalf("expected arch to refresh to arm64, got %s", ps.Arch)
+	}
+	if len(ps.Tags) != 1 || ps.Tags[0] != "canary" {
+		t.Fatalf("expected tags to refresh to canary, got %#v", ps.Tags)
+	}
+	if len(fm.List()) != 1 {
+		t.Fatalf("expected single fleet entry after re-registration, got %d", len(fm.List()))
+	}
+}
+
+func TestRegisterHandler_DifferentHostnameGetsDifferentProbeID(t *testing.T) {
+	ts := newTestTokenStore(t)
+	fm := fleet.NewManager(testLogger())
+	handler := HandleRegister(ts, fm, testLogger())
+
+	register := func(reqBody RegisterRequest) RegisterResponse {
+		t.Helper()
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest("POST", "/api/v1/register", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp RegisterResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		return resp
+	}
+
+	resp1 := register(RegisterRequest{Token: ts.Generate().Value, Hostname: "host-a", OS: "linux", Arch: "amd64"})
+	resp2 := register(RegisterRequest{Token: ts.Generate().Value, Hostname: "host-b", OS: "linux", Arch: "amd64"})
+
+	if resp1.ProbeID == resp2.ProbeID {
+		t.Fatalf("expected different probe ids for different hostnames, both were %s", resp1.ProbeID)
+	}
+	if len(fm.List()) != 2 {
+		t.Fatalf("expected two fleet entries, got %d", len(fm.List()))
 	}
 }
 
@@ -251,6 +357,52 @@ func TestGenerateTokenWithAuditHandler_MultiUseQueryParam(t *testing.T) {
 	}
 	if !token.MultiUse {
 		t.Fatal("expected token to be multi-use")
+	}
+}
+
+func TestRegisterWithAuditHandler_ReRegistrationSummary(t *testing.T) {
+	ts := newTestTokenStore(t)
+	fm := fleet.NewManager(testLogger())
+	recorder := &captureAuditRecorder{}
+	handler := HandleRegisterWithAudit(ts, fm, recorder, testLogger())
+
+	register := func(host string) RegisterResponse {
+		t.Helper()
+		reqBody := RegisterRequest{
+			Token:    ts.Generate().Value,
+			Hostname: host,
+			OS:       "linux",
+			Arch:     "amd64",
+		}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest("POST", "/api/v1/register", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp RegisterResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		return resp
+	}
+
+	resp1 := register("audit-host")
+	resp2 := register("audit-host")
+
+	if resp1.ProbeID != resp2.ProbeID {
+		t.Fatalf("expected same probe id on re-register, got %s and %s", resp1.ProbeID, resp2.ProbeID)
+	}
+	if len(recorder.events) != 2 {
+		t.Fatalf("expected 2 audit events, got %d", len(recorder.events))
+	}
+	if recorder.events[0].Summary != "Probe registered: audit-host" {
+		t.Fatalf("unexpected first summary: %s", recorder.events[0].Summary)
+	}
+	if recorder.events[1].Summary != "Probe re-registered: audit-host" {
+		t.Fatalf("unexpected second summary: %s", recorder.events[1].Summary)
 	}
 }
 

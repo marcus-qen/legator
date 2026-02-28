@@ -94,6 +94,36 @@ func GenerateAPIKey() (string, error) {
 	return "lgk_" + hex.EncodeToString(b), nil
 }
 
+type registerProbeResult struct {
+	probeID      string
+	apiKey       string
+	reRegistered bool
+}
+
+func registerProbe(fm fleet.Fleet, req RegisterRequest) (*registerProbeResult, error) {
+	probeID := "prb-" + uuid.New().String()[:8]
+	reRegistered := false
+	if existing, ok := fm.FindByHostname(req.Hostname); ok {
+		probeID = existing.ID
+		reRegistered = true
+	}
+
+	apiKey, err := GenerateAPIKey()
+	if err != nil {
+		return nil, err
+	}
+
+	fm.Register(probeID, req.Hostname, req.OS, req.Arch)
+	_ = fm.SetAPIKey(probeID, apiKey)
+	_ = fm.SetTags(probeID, req.Tags)
+
+	return &registerProbeResult{
+		probeID:      probeID,
+		apiKey:       apiKey,
+		reRegistered: reRegistered,
+	}, nil
+}
+
 // HandleRegister returns an HTTP handler for probe registration.
 func HandleRegister(ts *TokenStore, fm fleet.Fleet, logger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -108,31 +138,31 @@ func HandleRegister(ts *TokenStore, fm fleet.Fleet, logger *zap.Logger) http.Han
 			return
 		}
 
-		// Generate probe identity
-		probeID := "prb-" + uuid.New().String()[:8]
-		apiKey, err := GenerateAPIKey()
+		result, err := registerProbe(fm, req)
 		if err != nil {
 			http.Error(w, `{"error":"failed to generate api key"}`, http.StatusInternalServerError)
 			return
 		}
 
-		// Register in fleet
-		fm.Register(probeID, req.Hostname, req.OS, req.Arch)
-		_ = fm.SetAPIKey(probeID, apiKey)
-		if len(req.Tags) > 0 {
-			_ = fm.SetTags(probeID, req.Tags)
+		if result.reRegistered {
+			logger.Info("probe re-registered",
+				zap.String("probe_id", result.probeID),
+				zap.String("hostname", req.Hostname),
+				zap.String("os", req.OS),
+				zap.String("arch", req.Arch),
+			)
+		} else {
+			logger.Info("probe registered",
+				zap.String("probe_id", result.probeID),
+				zap.String("hostname", req.Hostname),
+				zap.String("os", req.OS),
+				zap.String("arch", req.Arch),
+			)
 		}
 
-		logger.Info("probe registered",
-			zap.String("probe_id", probeID),
-			zap.String("hostname", req.Hostname),
-			zap.String("os", req.OS),
-			zap.String("arch", req.Arch),
-		)
-
 		resp := RegisterResponse{
-			ProbeID:  probeID,
-			APIKey:   apiKey,
+			ProbeID:  result.probeID,
+			APIKey:   result.apiKey,
 			PolicyID: "default-observe",
 		}
 
@@ -192,33 +222,38 @@ func HandleRegisterWithAudit(ts *TokenStore, fm fleet.Fleet, al AuditRecorder, l
 			return
 		}
 
-		probeID := "prb-" + uuid.New().String()[:8]
-		apiKey, err := GenerateAPIKey()
+		result, err := registerProbe(fm, req)
 		if err != nil {
 			http.Error(w, `{"error":"failed to generate api key"}`, http.StatusInternalServerError)
 			return
 		}
 
-		fm.Register(probeID, req.Hostname, req.OS, req.Arch)
-		_ = fm.SetAPIKey(probeID, apiKey)
-		if len(req.Tags) > 0 {
-			_ = fm.SetTags(probeID, req.Tags)
+		summary := "Probe registered: " + req.Hostname
+		if result.reRegistered {
+			summary = "Probe re-registered: " + req.Hostname
 		}
 
 		al.Record(audit.Event{
 			Type:    audit.EventProbeRegistered,
-			ProbeID: probeID,
+			ProbeID: result.probeID,
 			Actor:   "system",
-			Summary: "Probe registered: " + req.Hostname,
+			Summary: summary,
 			Detail:  map[string]string{"os": req.OS, "arch": req.Arch, "hostname": req.Hostname},
 		})
 
-		logger.Info("probe registered",
-			zap.String("probe_id", probeID),
-			zap.String("hostname", req.Hostname),
-		)
+		if result.reRegistered {
+			logger.Info("probe re-registered",
+				zap.String("probe_id", result.probeID),
+				zap.String("hostname", req.Hostname),
+			)
+		} else {
+			logger.Info("probe registered",
+				zap.String("probe_id", result.probeID),
+				zap.String("hostname", req.Hostname),
+			)
+		}
 
-		resp := RegisterResponse{ProbeID: probeID, APIKey: apiKey, PolicyID: "default-observe"}
+		resp := RegisterResponse{ProbeID: result.probeID, APIKey: result.apiKey, PolicyID: "default-observe"}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(resp)

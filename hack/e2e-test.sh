@@ -61,6 +61,7 @@ if [[ "$TOKEN_NO_EXPIRY" == prb_* ]]; then
     -H "Content-Type: application/json" \
     -d "{\"token\":\"$TOKEN_NO_EXPIRY\",\"hostname\":\"e2e-test-no-expiry\",\"os\":\"linux\",\"arch\":\"amd64\"}")
   NO_EXPIRY_PROBE_ID=$(echo "$REG_NO_EXPIRY_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get(\"probe_id\", \"\"))")
+  NO_EXPIRY_API_KEY=$(echo "$REG_NO_EXPIRY_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get(\"api_key\", \"\"))")
 
   if [[ -n "$NO_EXPIRY_PROBE_ID" && "$NO_EXPIRY_PROBE_ID" == prb-* ]]; then
     pass "Non-expiring token used for registration: $NO_EXPIRY_PROBE_ID"
@@ -69,6 +70,38 @@ if [[ "$TOKEN_NO_EXPIRY" == prb_* ]]; then
   fi
 else
   fail "Non-expiring token generation failed: $TOKEN_JSON_NO_EXPIRY"
+fi
+
+# 2c. Re-register same hostname should deduplicate to one probe
+echo ""
+echo "2c. Verifying re-registration deduplicates by hostname..."
+if [[ "$TOKEN_NO_EXPIRY" == prb_* ]]; then
+  REREG_JSON=$(curl -sf -X POST "$CP_URL/api/v1/register" \
+    -H "Content-Type: application/json" \
+    -d "{\"token\":\"$TOKEN_NO_EXPIRY\",\"hostname\":\"e2e-test-no-expiry\",\"os\":\"linux\",\"arch\":\"arm64\",\"tags\":[\"e2e\",\"dedup\"]}")
+  REREG_PROBE_ID=$(echo "$REREG_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get(\"probe_id\", \"\"))")
+  REREG_API_KEY=$(echo "$REREG_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get(\"api_key\", \"\"))")
+
+  if [[ "$REREG_PROBE_ID" == "$NO_EXPIRY_PROBE_ID" ]]; then
+    pass "Re-registration reused existing probe ID"
+  else
+    fail "Expected re-registration to reuse $NO_EXPIRY_PROBE_ID, got $REREG_PROBE_ID"
+  fi
+
+  if [[ -n "$NO_EXPIRY_API_KEY" && "$REREG_API_KEY" != "$NO_EXPIRY_API_KEY" ]]; then
+    pass "Re-registration rotated API key"
+  else
+    fail "Expected API key rotation on re-registration"
+  fi
+
+  DEDUP_COUNT=$(curl -sf "$CP_URL/api/v1/probes" | python3 -c "import sys,json; probes=json.load(sys.stdin); print(sum(1 for p in probes if p.get('hostname') == 'e2e-test-no-expiry'))")
+  if [[ "$DEDUP_COUNT" == "1" ]]; then
+    pass "Fleet has a single entry for re-registered hostname"
+  else
+    fail "Expected 1 fleet entry for deduped hostname, got $DEDUP_COUNT"
+  fi
+else
+  fail "Skipping dedup check due to missing multi-use token"
 fi
 
 # 3. Register probe
