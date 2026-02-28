@@ -30,6 +30,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/discovery"
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
+	"github.com/marcus-qen/legator/internal/controlplane/jobs"
 	"github.com/marcus-qen/legator/internal/controlplane/llm"
 	"github.com/marcus-qen/legator/internal/controlplane/mcpserver"
 	"github.com/marcus-qen/legator/internal/controlplane/metrics"
@@ -96,6 +97,11 @@ type Server struct {
 	// Alerts
 	alertEngine *alerts.Engine
 	alertStore  *alerts.Store
+
+	// Scheduled jobs
+	jobsStore     *jobs.Store
+	jobsScheduler *jobs.Scheduler
+	jobsHandler   *jobs.Handler
 
 	// Events
 	eventBus *events.Bus
@@ -187,6 +193,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initDiscovery()
 	s.initLLM()
 	s.initHub()
+	s.initJobs()
 	s.initDispatchCore()
 	if s.cfg.MCPEnabled {
 		mcpserver.Version = Version
@@ -253,6 +260,10 @@ func (s *Server) Run(ctx context.Context) error {
 	// Forward event bus events to webhooks
 	go s.webhookForwarder(ctx)
 
+	if s.jobsScheduler != nil {
+		s.jobsScheduler.Start(ctx)
+	}
+
 	if s.auditStore != nil && strings.TrimSpace(s.cfg.AuditRetention) != "" {
 		retention, err := parseHumanDuration(s.cfg.AuditRetention)
 		if err != nil {
@@ -318,8 +329,14 @@ func (s *Server) Close() {
 	if s.alertEngine != nil {
 		s.alertEngine.Stop()
 	}
+	if s.jobsScheduler != nil {
+		s.jobsScheduler.Stop()
+	}
 	if s.alertStore != nil {
 		s.alertStore.Close()
+	}
+	if s.jobsStore != nil {
+		s.jobsStore.Close()
 	}
 	if s.webhookStore != nil {
 		s.webhookStore.Close()
@@ -433,6 +450,25 @@ func (s *Server) initAlerts() {
 	s.alertEngine = alerts.NewEngine(store, s.fleetMgr, s.webhookNotifier, s.eventBus, s.logger.Named("alerts"))
 	s.alertEngine.Start()
 	s.logger.Info("alerts engine initialized", zap.String("path", alertsDBPath))
+}
+
+func (s *Server) initJobs() {
+	jobsDBPath := filepath.Join(s.cfg.DataDir, "jobs.db")
+	store, err := jobs.NewStore(jobsDBPath)
+	if err != nil {
+		s.logger.Warn("cannot open jobs database, falling back to in-memory",
+			zap.String("path", jobsDBPath), zap.Error(err))
+		store, err = jobs.NewStore(":memory:")
+		if err != nil {
+			s.logger.Error("cannot initialize jobs store", zap.Error(err))
+			return
+		}
+	}
+
+	s.jobsStore = store
+	s.jobsScheduler = jobs.NewScheduler(store, s.hub, s.fleetMgr, s.cmdTracker, s.logger.Named("jobs"))
+	s.jobsHandler = jobs.NewHandler(store, s.jobsScheduler)
+	s.logger.Info("jobs scheduler initialized", zap.String("path", jobsDBPath))
 }
 
 func (s *Server) initChat() {
