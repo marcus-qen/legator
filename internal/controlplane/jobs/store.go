@@ -18,6 +18,8 @@ const (
 	maxRunListLimit   = 500
 )
 
+var ErrInvalidRunTransition = errors.New("invalid run status transition")
+
 // RunQuery controls filtering for job run history lookups.
 type RunQuery struct {
 	JobID         string
@@ -275,6 +277,9 @@ func (s *Store) RecordRunStart(run JobRun) (*JobRun, error) {
 	if run.Status == "" {
 		run.Status = RunStatusRunning
 	}
+	if !isKnownRunStatus(run.Status) {
+		return nil, fmt.Errorf("invalid run status: %s", run.Status)
+	}
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -300,7 +305,7 @@ func (s *Store) RecordRunStart(run JobRun) (*JobRun, error) {
 
 	_, err = tx.Exec(`UPDATE jobs SET last_run_at = ?, last_status = ?, updated_at = ? WHERE id = ?`,
 		run.StartedAt.UTC().Format(time.RFC3339Nano),
-		RunStatusRunning,
+		run.Status,
 		now.Format(time.RFC3339Nano),
 		run.JobID,
 	)
@@ -316,6 +321,15 @@ func (s *Store) RecordRunStart(run JobRun) (*JobRun, error) {
 	return &out, nil
 }
 
+// MarkRunRunning transitions a run from pending to running.
+func (s *Store) MarkRunRunning(runID string) error {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("run id required")
+	}
+	return s.transitionRun(runID, []string{RunStatusPending}, RunStatusRunning, nil, "", false)
+}
+
 // CompleteRun finalizes a previously recorded job run.
 func (s *Store) CompleteRun(runID, status string, exitCode *int, output string) error {
 	runID = strings.TrimSpace(runID)
@@ -323,12 +337,69 @@ func (s *Store) CompleteRun(runID, status string, exitCode *int, output string) 
 		return fmt.Errorf("run id required")
 	}
 	status = strings.TrimSpace(status)
-	if status == "" {
-		return fmt.Errorf("status required")
+	if status != RunStatusSuccess && status != RunStatusFailed {
+		return fmt.Errorf("status must be success or failed")
 	}
 
-	endedAt := time.Now().UTC()
+	return s.transitionRun(runID, []string{RunStatusRunning}, status, exitCode, output, true)
+}
 
+// CancelRun transitions a run from pending/running to canceled.
+func (s *Store) CancelRun(runID, reason string) error {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("run id required")
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "run canceled"
+	}
+	return s.transitionRun(runID, []string{RunStatusPending, RunStatusRunning}, RunStatusCanceled, nil, reason, true)
+}
+
+// GetRun returns one run by id.
+func (s *Store) GetRun(id string) (*JobRun, error) {
+	row := s.db.QueryRow(`SELECT id, job_id, probe_id, request_id, started_at, ended_at, status, exit_code, output
+		FROM job_runs WHERE id = ?`, id)
+	return scanRun(row)
+}
+
+// ListActiveRunsByJob returns pending/running runs for the given job.
+func (s *Store) ListActiveRunsByJob(jobID string) ([]JobRun, error) {
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return nil, fmt.Errorf("job id required")
+	}
+
+	rows, err := s.db.Query(`SELECT id, job_id, probe_id, request_id, started_at, ended_at, status, exit_code, output
+		FROM job_runs
+		WHERE job_id = ? AND status IN (?, ?)
+		ORDER BY started_at DESC`, jobID, RunStatusPending, RunStatusRunning)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]JobRun, 0)
+	for rows.Next() {
+		run, err := scanRun(rows)
+		if err != nil {
+			continue
+		}
+		out = append(out, *run)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) transitionRun(runID string, fromStatuses []string, toStatus string, exitCode *int, output string, setEndedAt bool) error {
+	if !isKnownRunStatus(toStatus) {
+		return fmt.Errorf("invalid status: %s", toStatus)
+	}
+	if len(fromStatuses) == 0 {
+		return fmt.Errorf("from status required")
+	}
+
+	now := time.Now().UTC()
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -338,73 +409,119 @@ func (s *Store) CompleteRun(runID, status string, exitCode *int, output string) 
 	var (
 		jobID      string
 		startedAtS string
+		current    string
 	)
-	if err := tx.QueryRow(`SELECT job_id, started_at FROM job_runs WHERE id = ?`, runID).Scan(&jobID, &startedAtS); err != nil {
+	if err := tx.QueryRow(`SELECT job_id, started_at, status FROM job_runs WHERE id = ?`, runID).Scan(&jobID, &startedAtS, &current); err != nil {
 		return err
 	}
-	startedAt, err := time.Parse(time.RFC3339Nano, startedAtS)
-	if err != nil {
-		return fmt.Errorf("parse run started_at: %w", err)
+
+	allowed := false
+	for _, candidate := range fromStatuses {
+		if current == candidate {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return fmt.Errorf("%w: %s -> %s", ErrInvalidRunTransition, current, toStatus)
 	}
 
-	res, err := tx.Exec(`UPDATE job_runs SET ended_at = ?, status = ?, exit_code = ?, output = ? WHERE id = ? AND status = ?`,
-		endedAt.Format(time.RFC3339Nano),
-		status,
+	endedAtValue := sql.NullString{}
+	if setEndedAt {
+		endedAtValue = sql.NullString{String: now.Format(time.RFC3339Nano), Valid: true}
+	}
+	outputValue := sql.NullString{}
+	if strings.TrimSpace(output) != "" {
+		outputValue = sql.NullString{String: truncateOutput(output), Valid: true}
+	}
+
+	res, err := tx.Exec(`UPDATE job_runs
+		SET ended_at = COALESCE(?, ended_at),
+			status = ?,
+			exit_code = COALESCE(?, exit_code),
+			output = CASE WHEN ? THEN ? ELSE output END
+		WHERE id = ? AND status = ?`,
+		endedAtValue,
+		toStatus,
 		nullableInt(exitCode),
-		truncateOutput(output),
+		outputValue.Valid,
+		outputValue.String,
 		runID,
-		RunStatusRunning,
+		current,
 	)
 	if err != nil {
 		return err
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
-		return sql.ErrNoRows
+		if err := tx.QueryRow(`SELECT status FROM job_runs WHERE id = ?`, runID).Scan(&current); err != nil {
+			return err
+		}
+		return fmt.Errorf("%w: %s -> %s", ErrInvalidRunTransition, current, toStatus)
 	}
 
+	startedAt, err := time.Parse(time.RFC3339Nano, startedAtS)
+	if err != nil {
+		return fmt.Errorf("parse run started_at: %w", err)
+	}
+	if err := s.updateJobStatusForLatestBatch(tx, jobID, startedAt.Format(time.RFC3339Nano), now); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (s *Store) updateJobStatusForLatestBatch(tx *sql.Tx, jobID, runStartedAt string, now time.Time) error {
 	latestStartedAt := ""
 	if err := tx.QueryRow(`SELECT COALESCE(MAX(started_at), '') FROM job_runs WHERE job_id = ?`, jobID).Scan(&latestStartedAt); err != nil {
 		return err
 	}
-
-	if latestStartedAt == startedAt.Format(time.RFC3339Nano) {
-		var (
-			runningCount int
-			failedCount  int
-		)
-		if err := tx.QueryRow(`SELECT
-			SUM(CASE WHEN status = ? THEN 1 ELSE 0 END),
-			SUM(CASE WHEN status = ? THEN 1 ELSE 0 END)
-			FROM job_runs
-			WHERE job_id = ? AND started_at = ?`,
-			RunStatusRunning,
-			RunStatusFailed,
-			jobID,
-			latestStartedAt,
-		).Scan(&runningCount, &failedCount); err != nil {
-			return err
-		}
-
-		finalStatus := RunStatusSuccess
-		switch {
-		case runningCount > 0:
-			finalStatus = RunStatusRunning
-		case failedCount > 0:
-			finalStatus = RunStatusFailed
-		}
-
-		if _, err := tx.Exec(`UPDATE jobs SET last_status = ?, updated_at = ? WHERE id = ? AND last_run_at = ?`,
-			finalStatus,
-			endedAt.Format(time.RFC3339Nano),
-			jobID,
-			latestStartedAt,
-		); err != nil {
-			return err
-		}
+	if latestStartedAt == "" || latestStartedAt != runStartedAt {
+		return nil
 	}
 
-	return tx.Commit()
+	var (
+		pendingCount  int
+		runningCount  int
+		failedCount   int
+		canceledCount int
+	)
+	if err := tx.QueryRow(`SELECT
+		COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0)
+		FROM job_runs
+		WHERE job_id = ? AND started_at = ?`,
+		RunStatusPending,
+		RunStatusRunning,
+		RunStatusFailed,
+		RunStatusCanceled,
+		jobID,
+		latestStartedAt,
+	).Scan(&pendingCount, &runningCount, &failedCount, &canceledCount); err != nil {
+		return err
+	}
+
+	finalStatus := RunStatusSuccess
+	switch {
+	case runningCount > 0:
+		finalStatus = RunStatusRunning
+	case pendingCount > 0:
+		finalStatus = RunStatusPending
+	case failedCount > 0:
+		finalStatus = RunStatusFailed
+	case canceledCount > 0:
+		finalStatus = RunStatusCanceled
+	}
+
+	_, err := tx.Exec(`UPDATE jobs SET last_status = ?, updated_at = ? WHERE id = ? AND last_run_at = ?`,
+		finalStatus,
+		now.Format(time.RFC3339Nano),
+		jobID,
+		latestStartedAt,
+	)
+	return err
 }
 
 // ListRunsByJob returns the most recent runs for one job.
@@ -608,7 +725,21 @@ func truncateOutput(output string) string {
 	return output[:maxRunOutputBytes-16] + "\n...[truncated]"
 }
 
+func isKnownRunStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case RunStatusPending, RunStatusRunning, RunStatusSuccess, RunStatusFailed, RunStatusCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
 // IsNotFound reports whether err is sql.ErrNoRows.
 func IsNotFound(err error) bool {
 	return errors.Is(err, sql.ErrNoRows)
+}
+
+// IsInvalidRunTransition reports whether err is an invalid run status transition.
+func IsInvalidRunTransition(err error) bool {
+	return errors.Is(err, ErrInvalidRunTransition)
 }

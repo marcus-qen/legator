@@ -186,12 +186,81 @@ func (h *Handler) HandleRunJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
+	if h.scheduler == nil {
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "jobs scheduler unavailable")
+		return
+	}
 
 	if err := h.scheduler.TriggerNow(id); err != nil {
 		writeError(w, http.StatusBadGateway, "dispatch_failed", err.Error())
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "dispatched", "job_id": id})
+}
+
+// HandleCancelJob serves POST /api/v1/jobs/{id}/cancel.
+func (h *Handler) HandleCancelJob(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "missing job id")
+		return
+	}
+	if _, err := h.store.GetJob(id); err != nil {
+		if IsNotFound(err) {
+			writeError(w, http.StatusNotFound, "not_found", "job not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	if h.scheduler == nil {
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "jobs scheduler unavailable")
+		return
+	}
+
+	summary, err := h.scheduler.CancelJob(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"job_id":                id,
+		"status":                "cancel_requested",
+		"canceled_runs":         summary.CanceledRuns,
+		"already_terminal_runs": summary.AlreadyTerminalRuns,
+	})
+}
+
+// HandleCancelRun serves POST /api/v1/jobs/{id}/runs/{runId}/cancel.
+func (h *Handler) HandleCancelRun(w http.ResponseWriter, r *http.Request) {
+	jobID := strings.TrimSpace(r.PathValue("id"))
+	runID := strings.TrimSpace(r.PathValue("runId"))
+	if jobID == "" || runID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "missing job id or run id")
+		return
+	}
+	if h.scheduler == nil {
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "jobs scheduler unavailable")
+		return
+	}
+
+	run, err := h.scheduler.CancelRun(jobID, runID)
+	if err != nil {
+		switch {
+		case IsNotFound(err):
+			writeError(w, http.StatusNotFound, "not_found", "run not found")
+		case IsInvalidRunTransition(err):
+			writeError(w, http.StatusConflict, "invalid_transition", err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"job_id": jobID,
+		"run":    run,
+	})
 }
 
 // HandleListRuns serves GET /api/v1/jobs/{id}/runs.
@@ -224,12 +293,14 @@ func (h *Handler) HandleListRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	summary := summarizeRuns(runs)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"job_id":        id,
-		"runs":          runs,
-		"count":         len(runs),
-		"failed_count":  summary.Failed,
-		"success_count": summary.Success,
-		"running_count": summary.Running,
+		"job_id":         id,
+		"runs":           runs,
+		"count":          len(runs),
+		"failed_count":   summary.Failed,
+		"success_count":  summary.Success,
+		"running_count":  summary.Running,
+		"pending_count":  summary.Pending,
+		"canceled_count": summary.Canceled,
 	})
 }
 
@@ -259,11 +330,13 @@ func (h *Handler) HandleListAllRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	summary := summarizeRuns(runs)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"runs":          runs,
-		"count":         len(runs),
-		"failed_count":  summary.Failed,
-		"success_count": summary.Success,
-		"running_count": summary.Running,
+		"runs":           runs,
+		"count":          len(runs),
+		"failed_count":   summary.Failed,
+		"success_count":  summary.Success,
+		"running_count":  summary.Running,
+		"pending_count":  summary.Pending,
+		"canceled_count": summary.Canceled,
 	})
 }
 
@@ -296,21 +369,27 @@ func handleToggleJob(w http.ResponseWriter, r *http.Request, store *Store, enabl
 }
 
 type runSummary struct {
-	Running int
-	Success int
-	Failed  int
+	Pending  int
+	Running  int
+	Success  int
+	Failed   int
+	Canceled int
 }
 
 func summarizeRuns(runs []JobRun) runSummary {
 	summary := runSummary{}
 	for _, run := range runs {
 		switch run.Status {
+		case RunStatusPending:
+			summary.Pending++
 		case RunStatusRunning:
 			summary.Running++
 		case RunStatusSuccess:
 			summary.Success++
 		case RunStatusFailed:
 			summary.Failed++
+		case RunStatusCanceled:
+			summary.Canceled++
 		}
 	}
 	return summary
@@ -331,10 +410,10 @@ func parseRunQuery(r *http.Request) (RunQuery, error) {
 
 	if status := strings.TrimSpace(r.URL.Query().Get("status")); status != "" {
 		switch status {
-		case RunStatusRunning, RunStatusSuccess, RunStatusFailed:
+		case RunStatusPending, RunStatusRunning, RunStatusSuccess, RunStatusFailed, RunStatusCanceled:
 			query.Status = status
 		default:
-			return RunQuery{}, fmt.Errorf("status must be one of: running, success, failed")
+			return RunQuery{}, fmt.Errorf("status must be one of: pending, running, success, failed, canceled")
 		}
 	}
 

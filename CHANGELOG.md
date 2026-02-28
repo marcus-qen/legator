@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+### Added
+- **Jobs cancellation API + lifecycle guardrails**
+  - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
+  - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.
+  - Added run statuses `pending` and `canceled` in run-history filtering/summaries.
+
+### Changed
+- Enforced run lifecycle transitions with immutable terminal states:
+  - `pending -> running -> success|failed`
+  - `pending|running -> canceled`
+- Hardened run completion/cancellation races with compare-and-swap status transitions in the jobs store.
+- Scheduler now records runs as `pending`, moves to `running` only when dispatch starts, and preserves cancellation outcome under late results.
+
 ## [v1.0.0-alpha.17] — 2026-02-28
 
 ### Added

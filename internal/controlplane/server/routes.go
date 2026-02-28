@@ -159,7 +159,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("PUT /api/v1/jobs/{id}", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleUpdateJob))
 		mux.HandleFunc("DELETE /api/v1/jobs/{id}", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleDeleteJob))
 		mux.HandleFunc("POST /api/v1/jobs/{id}/run", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleRunJob))
+		mux.HandleFunc("POST /api/v1/jobs/{id}/cancel", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleCancelJob))
 		mux.HandleFunc("GET /api/v1/jobs/{id}/runs", s.withPermission(auth.PermFleetRead, s.jobsHandler.HandleListRuns))
+		mux.HandleFunc("POST /api/v1/jobs/{id}/runs/{runId}/cancel", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleCancelRun))
 		mux.HandleFunc("POST /api/v1/jobs/{id}/enable", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleEnableJob))
 		mux.HandleFunc("POST /api/v1/jobs/{id}/disable", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleDisableJob))
 	} else {
@@ -170,7 +172,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("PUT /api/v1/jobs/{id}", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
 		mux.HandleFunc("DELETE /api/v1/jobs/{id}", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
 		mux.HandleFunc("POST /api/v1/jobs/{id}/run", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
+		mux.HandleFunc("POST /api/v1/jobs/{id}/cancel", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
 		mux.HandleFunc("GET /api/v1/jobs/{id}/runs", s.withPermission(auth.PermFleetRead, s.handleJobsUnavailable))
+		mux.HandleFunc("POST /api/v1/jobs/{id}/runs/{runId}/cancel", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
 		mux.HandleFunc("POST /api/v1/jobs/{id}/enable", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
 		mux.HandleFunc("POST /api/v1/jobs/{id}/disable", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
 	}

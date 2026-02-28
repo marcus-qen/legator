@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sort"
 	"strings"
@@ -38,6 +39,7 @@ type Scheduler struct {
 	cancel        context.CancelFunc
 	ticker        *time.Ticker
 	inFlight      map[string]string // request_id -> run_id
+	runRequest    map[string]string // run_id -> request_id
 	requestTarget map[string]string // request_id -> jobID::probeID
 	activeTargets map[string]struct{}
 	wg            sync.WaitGroup
@@ -55,6 +57,7 @@ func NewScheduler(store *Store, hub sender, fleetMgr fleet.Fleet, tracker tracka
 		tracker:       tracker,
 		logger:        logger,
 		inFlight:      make(map[string]string),
+		runRequest:    make(map[string]string),
 		requestTarget: make(map[string]string),
 		activeTargets: make(map[string]struct{}),
 	}
@@ -107,6 +110,7 @@ func (s *Scheduler) Stop() {
 		s.tracker.Cancel(requestID)
 	}
 	s.inFlight = make(map[string]string)
+	s.runRequest = make(map[string]string)
 	s.requestTarget = make(map[string]string)
 	s.activeTargets = make(map[string]struct{})
 	s.mu.Unlock()
@@ -121,6 +125,55 @@ func (s *Scheduler) TriggerNow(jobID string) error {
 		return err
 	}
 	return s.dispatchJob(*job, time.Now().UTC())
+}
+
+type CancelJobSummary struct {
+	CanceledRuns        int
+	AlreadyTerminalRuns int
+}
+
+// CancelJob cancels all pending/running runs for a job.
+func (s *Scheduler) CancelJob(jobID string) (CancelJobSummary, error) {
+	runs, err := s.store.ListActiveRunsByJob(jobID)
+	if err != nil {
+		return CancelJobSummary{}, err
+	}
+
+	summary := CancelJobSummary{}
+	for _, run := range runs {
+		if err := s.store.CancelRun(run.ID, "canceled via API"); err != nil {
+			if IsInvalidRunTransition(err) {
+				summary.AlreadyTerminalRuns++
+				continue
+			}
+			return summary, err
+		}
+		summary.CanceledRuns++
+		if requestID := s.requestIDForRun(run.ID); requestID != "" {
+			s.tracker.Cancel(requestID)
+		}
+	}
+
+	return summary, nil
+}
+
+// CancelRun cancels one run by job/run id pair.
+func (s *Scheduler) CancelRun(jobID, runID string) (*JobRun, error) {
+	run, err := s.store.GetRun(runID)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(run.JobID) != strings.TrimSpace(jobID) {
+		return nil, sql.ErrNoRows
+	}
+
+	if err := s.store.CancelRun(runID, "canceled via API"); err != nil {
+		return nil, err
+	}
+	if requestID := s.requestIDForRun(runID); requestID != "" {
+		s.tracker.Cancel(requestID)
+	}
+	return s.store.GetRun(runID)
 }
 
 func (s *Scheduler) runOnce(now time.Time) {
@@ -182,7 +235,7 @@ func (s *Scheduler) dispatchJob(job Job, now time.Time) error {
 			ProbeID:   probeID,
 			RequestID: requestID,
 			StartedAt: now,
-			Status:    RunStatusRunning,
+			Status:    RunStatusPending,
 		})
 		if err != nil {
 			s.releaseTarget(targetKey)
@@ -200,21 +253,34 @@ func (s *Scheduler) dispatchJob(job Job, now time.Time) error {
 
 		pending := s.tracker.Track(requestID, probeID, job.Command, payload.Level)
 		if pending == nil {
-			s.completeRun(run.ID, RunStatusFailed, nil, "command tracking unavailable")
-			s.releaseTarget(targetKey)
-			continue
-		}
-		if err := s.hub.SendTo(probeID, protocol.MsgCommand, payload); err != nil {
-			s.tracker.Cancel(requestID)
-			s.completeRun(run.ID, RunStatusFailed, nil, "probe offline")
+			if err := s.store.MarkRunRunning(run.ID); err == nil {
+				s.completeRun(run.ID, RunStatusFailed, nil, "command tracking unavailable")
+			}
 			s.releaseTarget(targetKey)
 			continue
 		}
 
 		s.mu.Lock()
 		s.inFlight[requestID] = run.ID
+		s.runRequest[run.ID] = requestID
 		s.requestTarget[requestID] = targetKey
 		s.mu.Unlock()
+
+		if err := s.store.MarkRunRunning(run.ID); err != nil {
+			s.tracker.Cancel(requestID)
+			s.clearInFlight(requestID)
+			if !IsInvalidRunTransition(err) {
+				s.logger.Warn("mark run running failed", zap.String("run_id", run.ID), zap.Error(err))
+			}
+			continue
+		}
+
+		if err := s.hub.SendTo(probeID, protocol.MsgCommand, payload); err != nil {
+			s.tracker.Cancel(requestID)
+			s.completeRun(run.ID, RunStatusFailed, nil, "probe offline")
+			s.clearInFlight(requestID)
+			continue
+		}
 
 		s.wg.Add(1)
 		go s.awaitRunResult(run.ID, requestID, pending)
@@ -234,7 +300,9 @@ func (s *Scheduler) awaitRunResult(runID, requestID string, pending *cmdtracker.
 
 	result, ok := <-pending.Result
 	if !ok || result == nil {
-		s.completeRun(runID, RunStatusFailed, nil, "command canceled")
+		if err := s.store.CancelRun(runID, "command canceled"); err != nil && !IsInvalidRunTransition(err) {
+			s.logger.Warn("cancel run failed", zap.String("run_id", runID), zap.Error(err))
+		}
 		s.clearInFlight(requestID)
 		return
 	}
@@ -251,6 +319,9 @@ func (s *Scheduler) awaitRunResult(runID, requestID string, pending *cmdtracker.
 
 func (s *Scheduler) completeRun(runID, status string, exitCode *int, output string) {
 	if err := s.store.CompleteRun(runID, status, exitCode, output); err != nil {
+		if IsInvalidRunTransition(err) {
+			return
+		}
 		s.logger.Warn("complete run failed", zap.String("run_id", runID), zap.Error(err))
 	}
 }
@@ -261,8 +332,21 @@ func (s *Scheduler) clearInFlight(requestID string) {
 		delete(s.requestTarget, requestID)
 		delete(s.activeTargets, targetKey)
 	}
+	if runID, ok := s.inFlight[requestID]; ok {
+		delete(s.runRequest, runID)
+	}
 	delete(s.inFlight, requestID)
 	s.mu.Unlock()
+}
+
+func (s *Scheduler) requestIDForRun(runID string) string {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.runRequest[runID]
 }
 
 func (s *Scheduler) claimTarget(targetKey string) bool {
@@ -299,10 +383,14 @@ func (s *Scheduler) recordOfflineRun(jobID, probeID string, now time.Time) {
 		ProbeID:   probeID,
 		RequestID: fmt.Sprintf("job-%s-%d-%s", jobID, now.UnixNano(), probeID),
 		StartedAt: now,
-		Status:    RunStatusRunning,
+		Status:    RunStatusPending,
 	})
 	if err != nil {
 		s.logger.Warn("record offline run failed", zap.String("job_id", jobID), zap.String("probe_id", probeID), zap.Error(err))
+		return
+	}
+	if err := s.store.MarkRunRunning(run.ID); err != nil {
+		s.logger.Warn("mark offline run running failed", zap.String("run_id", run.ID), zap.Error(err))
 		return
 	}
 	s.completeRun(run.ID, RunStatusFailed, nil, "probe offline")
