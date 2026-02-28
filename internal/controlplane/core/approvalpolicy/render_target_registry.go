@@ -15,10 +15,7 @@ const (
 	DecideApprovalRenderSurfaceMCP  DecideApprovalRenderSurface = "mcp"
 )
 
-var defaultDecideApprovalRenderSurfaceRegistry = newDecideApprovalRenderSurfaceRegistry(map[DecideApprovalRenderSurface]DecideApprovalRenderSurface{
-	DecideApprovalRenderSurfaceHTTP: DecideApprovalRenderSurfaceHTTP,
-	DecideApprovalRenderSurfaceMCP:  DecideApprovalRenderSurfaceMCP,
-})
+var defaultDecideApprovalRenderSurfaceRegistry = newDefaultDecideApprovalRenderSurfaceRegistry()
 
 // ResolveDecideApprovalRenderTarget resolves the projection render target for a
 // transport shell using the shared render-target registry.

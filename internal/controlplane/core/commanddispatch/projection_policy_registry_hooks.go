@@ -12,18 +12,9 @@ const (
 )
 
 var (
-	defaultCommandDispatchProjectionSurfaceRegistry = newCommandDispatchProjectionSurfaceRegistry(map[ProjectionDispatchSurface]ProjectionDispatchSurface{
-		ProjectionDispatchSurfaceHTTP: ProjectionDispatchSurfaceHTTP,
-		ProjectionDispatchSurfaceMCP:  ProjectionDispatchSurfaceMCP,
-	})
-	defaultCommandReadProjectionSurfaceRegistry = newCommandReadProjectionSurfaceRegistry(map[ProjectionDispatchSurface]ProjectionDispatchSurface{
-		ProjectionDispatchSurfaceHTTP: ProjectionDispatchSurfaceHTTP,
-		ProjectionDispatchSurfaceMCP:  ProjectionDispatchSurfaceMCP,
-	})
-	defaultCommandInvokeProjectionDispatchSurfaceRegistry = newCommandInvokeProjectionSurfaceRegistry(map[ProjectionDispatchSurface]ProjectionDispatchSurface{
-		ProjectionDispatchSurfaceHTTP: ProjectionDispatchSurfaceHTTP,
-		ProjectionDispatchSurfaceMCP:  ProjectionDispatchSurfaceMCP,
-	})
+	defaultCommandDispatchProjectionSurfaceRegistry       = newDefaultCommandDispatchProjectionSurfaceRegistry()
+	defaultCommandReadProjectionSurfaceRegistry           = newDefaultCommandReadProjectionSurfaceRegistry()
+	defaultCommandInvokeProjectionDispatchSurfaceRegistry = newDefaultCommandInvokeProjectionSurfaceRegistry()
 )
 
 // ResolveCommandDispatchProjectionSurface is an extension hook for future

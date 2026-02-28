@@ -104,6 +104,9 @@
 - **Kernel split S44 (shared identity surface-registry constructor seam)**
   - Added `projectiondispatch.NewIdentitySurfaceRegistry(...)` and routed approval + command resolver-hook surface registry constructors through this shared seam while keeping domain constructors in their owning packages.
   - Preserved resolver hit/miss behavior, unsupported fallback behavior, and HTTP-first/MCP-fallback semantics, with strict approval+command parity tests against legacy inline constructor/setup wiring.
+- **Kernel split S45 (canonical identity seed helper)**
+  - Added `projectiondispatch.NewHTTPMCPIdentitySurfaceSeed(...)` and routed approval + command default surface-registry constructors through the shared canonical `{http,mcp}` seed helper.
+  - Preserved resolver hit/miss behavior, unsupported fallback behavior, and HTTP-first/MCP-fallback semantics, with focused identity-seed-helper parity coverage against legacy/default inline setup wiring.
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
 - **Kernel split S13 (approval decide render-target registry boundary)**
