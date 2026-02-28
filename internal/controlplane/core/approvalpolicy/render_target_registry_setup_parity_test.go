@@ -13,6 +13,24 @@ func TestDecideApprovalResolverHooks_DefaultSetupParityWithLegacyInlineRegistryS
 		DecideApprovalRenderSurfaceMCP:  DecideApprovalRenderSurfaceMCP,
 	})
 
+	assertDecideApprovalResolverHooksParity(t, legacySurfaceRegistry)
+}
+
+func TestDecideApprovalResolverHooks_DefaultSetupParityWithDefaultIdentitySurfaceRegistryHelperFixture(t *testing.T) {
+	legacySurfaceRegistry := projectiondispatch.NewHTTPMCPDefaultIdentitySurfaceRegistry(
+		DecideApprovalRenderSurfaceHTTP,
+		DecideApprovalRenderSurfaceMCP,
+	)
+
+	assertDecideApprovalResolverHooksParity(t, legacySurfaceRegistry)
+}
+
+func assertDecideApprovalResolverHooksParity(
+	t *testing.T,
+	legacySurfaceRegistry projectiondispatch.PolicyRegistry[DecideApprovalRenderSurface, DecideApprovalRenderSurface],
+) {
+	t.Helper()
+
 	tests := []DecideApprovalRenderSurface{
 		DecideApprovalRenderSurfaceHTTP,
 		DecideApprovalRenderSurfaceMCP,

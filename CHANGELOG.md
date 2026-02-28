@@ -116,6 +116,9 @@
 - **Kernel split S48 (default HTTP/MCP policy-constructor wiring helper)**
   - Added `projectiondispatch.NewHTTPMCPDefaultPolicyRegistry(...)` to centralize canonical default HTTP/MCP `PolicyFunc` constructor wiring and routed approval + command default policy-registry constructors through it (domain dispatch wrappers remain local).
   - Added strict helper-vs-legacy parity coverage and preserved resolver/unsupported branching, HTTP-first/MCP-fallback behavior, and command handled-flag outcomes through existing default-setup parity locks.
+- **Kernel split S49 (default HTTP/MCP identity-surface constructor wiring helper)**
+  - Added `projectiondispatch.NewHTTPMCPDefaultIdentitySurfaceRegistry(...)` and routed default command/approval resolver registry constructors through it while keeping domain wrappers local.
+  - Added strict parity coverage for resolver hit/miss and unsupported fallback invariants (including HTTP-first/MCP-fallback behavior) across helper-level and default resolver-hook fixtures.
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
 - **Kernel split S13 (approval decide render-target registry boundary)**

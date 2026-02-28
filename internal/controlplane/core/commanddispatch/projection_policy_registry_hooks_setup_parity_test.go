@@ -21,6 +21,34 @@ func TestCommandProjectionResolverHooks_DefaultSetupParityWithLegacyInlineRegist
 		ProjectionDispatchSurfaceMCP:  ProjectionDispatchSurfaceMCP,
 	})
 
+	assertCommandProjectionResolverHooksParity(t, legacyDispatchRegistry, legacyReadRegistry, legacyInvokeRegistry)
+}
+
+func TestCommandProjectionResolverHooks_DefaultSetupParityWithDefaultIdentitySurfaceRegistryHelperFixture(t *testing.T) {
+	legacyDispatchRegistry := projectiondispatch.NewHTTPMCPDefaultIdentitySurfaceRegistry(
+		ProjectionDispatchSurfaceHTTP,
+		ProjectionDispatchSurfaceMCP,
+	)
+	legacyReadRegistry := projectiondispatch.NewHTTPMCPDefaultIdentitySurfaceRegistry(
+		ProjectionDispatchSurfaceHTTP,
+		ProjectionDispatchSurfaceMCP,
+	)
+	legacyInvokeRegistry := projectiondispatch.NewHTTPMCPDefaultIdentitySurfaceRegistry(
+		ProjectionDispatchSurfaceHTTP,
+		ProjectionDispatchSurfaceMCP,
+	)
+
+	assertCommandProjectionResolverHooksParity(t, legacyDispatchRegistry, legacyReadRegistry, legacyInvokeRegistry)
+}
+
+func assertCommandProjectionResolverHooksParity(
+	t *testing.T,
+	legacyDispatchRegistry projectiondispatch.PolicyRegistry[ProjectionDispatchSurface, ProjectionDispatchSurface],
+	legacyReadRegistry projectiondispatch.PolicyRegistry[ProjectionDispatchSurface, ProjectionDispatchSurface],
+	legacyInvokeRegistry projectiondispatch.PolicyRegistry[ProjectionDispatchSurface, ProjectionDispatchSurface],
+) {
+	t.Helper()
+
 	tests := []ProjectionDispatchSurface{
 		ProjectionDispatchSurfaceHTTP,
 		ProjectionDispatchSurfaceMCP,
