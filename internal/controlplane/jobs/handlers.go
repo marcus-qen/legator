@@ -11,13 +11,33 @@ import (
 
 // Handler exposes HTTP endpoints for scheduled jobs.
 type Handler struct {
-	store     *Store
-	scheduler *Scheduler
+	store             *Store
+	scheduler         *Scheduler
+	lifecycleObserver LifecycleObserver
+}
+
+type HandlerOption func(*Handler)
+
+// WithHandlerLifecycleObserver wires lifecycle event notifications for job mutation APIs.
+func WithHandlerLifecycleObserver(observer LifecycleObserver) HandlerOption {
+	return func(h *Handler) {
+		if observer == nil {
+			h.lifecycleObserver = noopLifecycleObserver{}
+			return
+		}
+		h.lifecycleObserver = observer
+	}
 }
 
 // NewHandler creates a jobs API handler.
-func NewHandler(store *Store, scheduler *Scheduler) *Handler {
-	return &Handler{store: store, scheduler: scheduler}
+func NewHandler(store *Store, scheduler *Scheduler, opts ...HandlerOption) *Handler {
+	h := &Handler{store: store, scheduler: scheduler, lifecycleObserver: noopLifecycleObserver{}}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(h)
+		}
+	}
+	return h
 }
 
 // HandleListJobs serves GET /api/v1/jobs.
@@ -69,6 +89,7 @@ func (h *Handler) HandleCreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.emitLifecycleEvent(LifecycleEvent{Type: EventJobCreated, Actor: "api", JobID: created.ID})
 	writeJSON(w, http.StatusCreated, created)
 }
 
@@ -158,6 +179,7 @@ func (h *Handler) HandleUpdateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.emitLifecycleEvent(LifecycleEvent{Type: EventJobUpdated, Actor: "api", JobID: updated.ID})
 	writeJSON(w, http.StatusOK, updated)
 }
 
@@ -176,6 +198,7 @@ func (h *Handler) HandleDeleteJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
+	h.emitLifecycleEvent(LifecycleEvent{Type: EventJobDeleted, Actor: "api", JobID: id})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -351,21 +374,21 @@ func (h *Handler) HandleListAllRuns(w http.ResponseWriter, r *http.Request) {
 
 // HandleEnableJob serves POST /api/v1/jobs/{id}/enable.
 func (h *Handler) HandleEnableJob(w http.ResponseWriter, r *http.Request) {
-	handleToggleJob(w, r, h.store, true)
+	handleToggleJob(w, r, h, true)
 }
 
 // HandleDisableJob serves POST /api/v1/jobs/{id}/disable.
 func (h *Handler) HandleDisableJob(w http.ResponseWriter, r *http.Request) {
-	handleToggleJob(w, r, h.store, false)
+	handleToggleJob(w, r, h, false)
 }
 
-func handleToggleJob(w http.ResponseWriter, r *http.Request, store *Store, enabled bool) {
+func handleToggleJob(w http.ResponseWriter, r *http.Request, handler *Handler, enabled bool) {
 	id := strings.TrimSpace(r.PathValue("id"))
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "missing job id")
 		return
 	}
-	job, err := store.SetEnabled(id, enabled)
+	job, err := handler.store.SetEnabled(id, enabled)
 	if err != nil {
 		if IsNotFound(err) {
 			writeError(w, http.StatusNotFound, "not_found", "job not found")
@@ -374,6 +397,7 @@ func handleToggleJob(w http.ResponseWriter, r *http.Request, store *Store, enabl
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
+	handler.emitLifecycleEvent(LifecycleEvent{Type: EventJobUpdated, Actor: "api", JobID: job.ID})
 	writeJSON(w, http.StatusOK, job)
 }
 
@@ -450,6 +474,13 @@ func parseRunQuery(r *http.Request) (RunQuery, error) {
 func validateSchedule(schedule string) error {
 	_, err := isScheduleDue(schedule, nil, time.Now().UTC(), time.Now().UTC())
 	return err
+}
+
+func (h *Handler) emitLifecycleEvent(evt LifecycleEvent) {
+	if h == nil || h.lifecycleObserver == nil {
+		return
+	}
+	h.lifecycleObserver.ObserveJobLifecycleEvent(evt.normalize())
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

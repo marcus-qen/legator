@@ -37,6 +37,17 @@ func WithDefaultRetryPolicy(policy RetryPolicy) SchedulerOption {
 	}
 }
 
+// WithLifecycleObserver wires lifecycle event notifications for scheduler transitions.
+func WithLifecycleObserver(observer LifecycleObserver) SchedulerOption {
+	return func(s *Scheduler) {
+		if observer == nil {
+			s.lifecycleObserver = noopLifecycleObserver{}
+			return
+		}
+		s.lifecycleObserver = observer
+	}
+}
+
 // Scheduler dispatches due jobs and records run history.
 type Scheduler struct {
 	store   *Store
@@ -54,6 +65,7 @@ type Scheduler struct {
 	activeTargets      map[string]struct{}
 	pendingRetryCancel map[string]context.CancelFunc // jobID::probeID -> retry cancel
 	defaultRetryPolicy RetryPolicy
+	lifecycleObserver  LifecycleObserver
 	wg                 sync.WaitGroup
 }
 
@@ -74,6 +86,7 @@ func NewScheduler(store *Store, hub sender, fleetMgr fleet.Fleet, tracker tracka
 		activeTargets:      make(map[string]struct{}),
 		pendingRetryCancel: make(map[string]context.CancelFunc),
 		defaultRetryPolicy: RetryPolicy{},
+		lifecycleObserver:  noopLifecycleObserver{},
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -177,6 +190,17 @@ func (s *Scheduler) CancelJob(jobID string) (CancelJobSummary, error) {
 			return summary, err
 		}
 		summary.CanceledRuns++
+		s.emitLifecycleEvent(LifecycleEvent{
+			Type:        EventJobRunCanceled,
+			Actor:       "scheduler",
+			JobID:       run.JobID,
+			RunID:       run.ID,
+			ExecutionID: run.ExecutionID,
+			ProbeID:     run.ProbeID,
+			Attempt:     run.Attempt,
+			MaxAttempts: run.MaxAttempts,
+			RequestID:   run.RequestID,
+		})
 		if requestID := s.requestIDForRun(run.ID); requestID != "" {
 			s.tracker.Cancel(requestID)
 		}
@@ -201,6 +225,17 @@ func (s *Scheduler) CancelRun(jobID, runID string) (*JobRun, error) {
 	if err := s.store.CancelRun(runID, "canceled via API"); err != nil {
 		return nil, err
 	}
+	s.emitLifecycleEvent(LifecycleEvent{
+		Type:        EventJobRunCanceled,
+		Actor:       "scheduler",
+		JobID:       run.JobID,
+		RunID:       run.ID,
+		ExecutionID: run.ExecutionID,
+		ProbeID:     run.ProbeID,
+		Attempt:     run.Attempt,
+		MaxAttempts: run.MaxAttempts,
+		RequestID:   run.RequestID,
+	})
 	if requestID := s.requestIDForRun(runID); requestID != "" {
 		s.tracker.Cancel(requestID)
 	}
@@ -290,6 +325,19 @@ func (s *Scheduler) dispatchAttempt(job Job, probeID, targetKey, executionID str
 		return
 	}
 
+	s.emitLifecycleEvent(LifecycleEvent{
+		Type:        EventJobRunQueued,
+		Actor:       "scheduler",
+		Timestamp:   run.StartedAt,
+		JobID:       run.JobID,
+		RunID:       run.ID,
+		ExecutionID: run.ExecutionID,
+		ProbeID:     run.ProbeID,
+		Attempt:     run.Attempt,
+		MaxAttempts: run.MaxAttempts,
+		RequestID:   run.RequestID,
+	})
+
 	if err := s.store.MarkRunRunning(run.ID); err != nil {
 		if !IsInvalidRunTransition(err) {
 			s.logger.Warn("mark run running failed", zap.String("run_id", run.ID), zap.Error(err))
@@ -297,6 +345,18 @@ func (s *Scheduler) dispatchAttempt(job Job, probeID, targetKey, executionID str
 		s.releaseTarget(targetKey)
 		return
 	}
+
+	s.emitLifecycleEvent(LifecycleEvent{
+		Type:        EventJobRunStarted,
+		Actor:       "scheduler",
+		JobID:       run.JobID,
+		RunID:       run.ID,
+		ExecutionID: run.ExecutionID,
+		ProbeID:     run.ProbeID,
+		Attempt:     run.Attempt,
+		MaxAttempts: run.MaxAttempts,
+		RequestID:   run.RequestID,
+	})
 
 	if !s.probeOnline(probeID) {
 		s.finishAttempt(*run, job, policy, targetKey, requestID, false, RunStatusFailed, nil, "probe offline")
@@ -343,8 +403,22 @@ func (s *Scheduler) awaitRunResult(run JobRun, requestID string, pending *cmdtra
 
 	result, ok := <-pending.Result
 	if !ok || result == nil {
-		if err := s.store.CancelRun(run.ID, "command canceled"); err != nil && !IsInvalidRunTransition(err) {
-			s.logger.Warn("cancel run failed", zap.String("run_id", run.ID), zap.Error(err))
+		if err := s.store.CancelRun(run.ID, "command canceled"); err != nil {
+			if !IsInvalidRunTransition(err) {
+				s.logger.Warn("cancel run failed", zap.String("run_id", run.ID), zap.Error(err))
+			}
+		} else {
+			s.emitLifecycleEvent(LifecycleEvent{
+				Type:        EventJobRunCanceled,
+				Actor:       "scheduler",
+				JobID:       run.JobID,
+				RunID:       run.ID,
+				ExecutionID: run.ExecutionID,
+				ProbeID:     run.ProbeID,
+				Attempt:     run.Attempt,
+				MaxAttempts: run.MaxAttempts,
+				RequestID:   run.RequestID,
+			})
 		}
 		s.clearInFlight(requestID, true)
 		return
@@ -379,6 +453,25 @@ func (s *Scheduler) finishAttempt(run JobRun, job Job, policy resolvedRetryPolic
 		return
 	}
 
+	terminalType := EventJobRunFailed
+	switch status {
+	case RunStatusSuccess:
+		terminalType = EventJobRunSucceeded
+	case RunStatusCanceled:
+		terminalType = EventJobRunCanceled
+	}
+	s.emitLifecycleEvent(LifecycleEvent{
+		Type:        terminalType,
+		Actor:       "scheduler",
+		JobID:       run.JobID,
+		RunID:       run.ID,
+		ExecutionID: run.ExecutionID,
+		ProbeID:     run.ProbeID,
+		Attempt:     run.Attempt,
+		MaxAttempts: run.MaxAttempts,
+		RequestID:   run.RequestID,
+	})
+
 	if retryScheduledAt != nil {
 		s.logger.Info("scheduling job retry",
 			zap.String("job_id", job.ID),
@@ -387,6 +480,18 @@ func (s *Scheduler) finishAttempt(run JobRun, job Job, policy resolvedRetryPolic
 			zap.Int("max_attempts", policy.MaxAttempts),
 			zap.Time("retry_scheduled_at", *retryScheduledAt),
 		)
+		s.emitLifecycleEvent(LifecycleEvent{
+			Type:        EventJobRunRetryScheduled,
+			Actor:       "scheduler",
+			Timestamp:   *retryScheduledAt,
+			JobID:       run.JobID,
+			RunID:       run.ID,
+			ExecutionID: run.ExecutionID,
+			ProbeID:     run.ProbeID,
+			Attempt:     run.Attempt,
+			MaxAttempts: run.MaxAttempts,
+			RequestID:   run.RequestID,
+		})
 		s.scheduleRetry(job, run.ProbeID, targetKey, run.ExecutionID, run.Attempt+1, policy, *retryScheduledAt)
 	}
 
@@ -530,6 +635,13 @@ func (s *Scheduler) cancelScheduledRetriesForJob(jobID string) int {
 		s.cancelScheduledRetry(key)
 	}
 	return len(keys)
+}
+
+func (s *Scheduler) emitLifecycleEvent(evt LifecycleEvent) {
+	if s == nil || s.lifecycleObserver == nil {
+		return
+	}
+	s.lifecycleObserver.ObserveJobLifecycleEvent(evt.normalize())
 }
 
 func inFlightTargetKey(jobID, probeID string) string {

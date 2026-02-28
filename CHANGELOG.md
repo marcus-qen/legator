@@ -13,6 +13,9 @@
     - `LEGATOR_JOBS_RETRY_MULTIPLIER`
     - `LEGATOR_JOBS_RETRY_MAX_BACKOFF`
   - Added run-attempt correlation metadata: `execution_id`, `attempt`, `max_attempts`, `retry_scheduled_at`.
+- **Stage 1.3 async backbone: job lifecycle events in audit + SSE**
+  - Added lifecycle events: `job.created`, `job.updated`, `job.deleted`, `job.run.queued`, `job.run.started`, `job.run.retry_scheduled`, `job.run.succeeded`, `job.run.failed`, `job.run.canceled`.
+  - Added consistent correlation payload schema across audit/event bus surfaces: `job_id`, `run_id`, `execution_id`, `probe_id`, `attempt`, `max_attempts`, `request_id`.
 
 ### Changed
 - Enforced run lifecycle transitions with immutable terminal states:
@@ -21,6 +24,7 @@
 - Hardened run completion/cancellation races with compare-and-swap status transitions in the jobs store.
 - Scheduler now records runs as `pending`, moves to `running` only when dispatch starts, and preserves cancellation outcome under late results.
 - Scheduler now retries failed or dispatch-failed attempts using exponential backoff + max-attempt bounds, and cancels queued retries when a job is canceled.
+- Job handlers/scheduler now publish lifecycle events through a shared observer seam so existing API responses remain unchanged while audit + SSE consumers receive async job transitions.
 
 ## [v1.0.0-alpha.17] — 2026-02-28
 

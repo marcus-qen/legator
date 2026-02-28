@@ -19,6 +19,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/config"
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
+	"github.com/marcus-qen/legator/internal/controlplane/jobs"
 	"github.com/marcus-qen/legator/internal/controlplane/policy"
 	"github.com/marcus-qen/legator/internal/protocol"
 	"go.uber.org/zap"
@@ -97,6 +98,58 @@ func TestNew_InitializesCoreComponents(t *testing.T) {
 	}
 	if srv.httpServer == nil {
 		t.Fatal("http server not initialized")
+	}
+}
+
+func TestHandleJobLifecycleEventPublishesAuditAndEventBus(t *testing.T) {
+	srv := newTestServer(t)
+	const subID = "job-lifecycle-test"
+	ch := srv.eventBus.Subscribe(subID)
+	defer srv.eventBus.Unsubscribe(subID)
+
+	event := jobs.LifecycleEvent{
+		Type:        jobs.EventJobRunQueued,
+		Actor:       "scheduler",
+		Timestamp:   time.Now().UTC(),
+		JobID:       "job-123",
+		RunID:       "run-123",
+		ExecutionID: "exec-123",
+		ProbeID:     "probe-123",
+		Attempt:     1,
+		MaxAttempts: 3,
+		RequestID:   "req-123",
+	}
+	srv.handleJobLifecycleEvent(event)
+
+	select {
+	case got := <-ch:
+		if got.Type != events.JobRunQueued {
+			t.Fatalf("expected event type %s, got %s", events.JobRunQueued, got.Type)
+		}
+		detail, ok := got.Detail.(map[string]any)
+		if !ok {
+			t.Fatalf("expected detail map, got %T", got.Detail)
+		}
+		if detail["job_id"] != "job-123" || detail["request_id"] != "req-123" {
+			t.Fatalf("unexpected event detail: %+v", detail)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected lifecycle event on event bus")
+	}
+
+	auditEvents := srv.queryAudit(audit.Filter{Type: audit.EventJobRunQueued, Limit: 5})
+	if len(auditEvents) == 0 {
+		t.Fatal("expected job lifecycle audit event")
+	}
+	if auditEvents[0].Actor != "scheduler" {
+		t.Fatalf("expected actor scheduler, got %q", auditEvents[0].Actor)
+	}
+	detail, ok := auditEvents[0].Detail.(map[string]any)
+	if !ok {
+		t.Fatalf("expected audit detail map, got %T", auditEvents[0].Detail)
+	}
+	if detail["run_id"] != "run-123" || detail["execution_id"] != "exec-123" {
+		t.Fatalf("unexpected audit detail: %+v", detail)
 	}
 }
 

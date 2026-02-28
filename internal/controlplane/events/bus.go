@@ -26,6 +26,15 @@ const (
 	ChatMessage       EventType = "chat.message"
 	AlertFired        EventType = "alert.fired"
 	AlertResolved     EventType = "alert.resolved"
+	JobCreated        EventType = "job.created"
+	JobUpdated        EventType = "job.updated"
+	JobDeleted        EventType = "job.deleted"
+	JobRunQueued      EventType = "job.run.queued"
+	JobRunStarted     EventType = "job.run.started"
+	JobRunRetryScheduled EventType = "job.run.retry_scheduled"
+	JobRunSucceeded   EventType = "job.run.succeeded"
+	JobRunFailed      EventType = "job.run.failed"
+	JobRunCanceled    EventType = "job.run.canceled"
 )
 
 // Event represents a fleet event.

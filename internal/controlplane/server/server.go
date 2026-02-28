@@ -483,8 +483,13 @@ func (s *Server) initJobs() {
 		s.cmdTracker,
 		s.logger.Named("jobs"),
 		jobs.WithDefaultRetryPolicy(retryPolicy),
+		jobs.WithLifecycleObserver(jobs.LifecycleObserverFunc(s.handleJobLifecycleEvent)),
 	)
-	s.jobsHandler = jobs.NewHandler(store, s.jobsScheduler)
+	s.jobsHandler = jobs.NewHandler(
+		store,
+		s.jobsScheduler,
+		jobs.WithHandlerLifecycleObserver(jobs.LifecycleObserverFunc(s.handleJobLifecycleEvent)),
+	)
 	s.logger.Info("jobs scheduler initialized", zap.String("path", jobsDBPath))
 }
 
@@ -1032,6 +1037,30 @@ func (s *Server) metricsAuditCounter() metrics.AuditCounter {
 		return s.auditStore
 	}
 	return s.auditLog
+}
+
+func (s *Server) handleJobLifecycleEvent(event jobs.LifecycleEvent) {
+	event = event.Normalized()
+	actor := event.Actor
+	if actor == "" {
+		actor = "jobs"
+	}
+
+	detail := event.CorrelationMetadata()
+	var payload any = detail
+	if len(detail) == 0 {
+		payload = nil
+	}
+
+	s.recordAudit(audit.Event{
+		Timestamp: event.Timestamp,
+		Type:      audit.EventType(event.Type),
+		ProbeID:   event.ProbeID,
+		Actor:     actor,
+		Summary:   event.Summary(),
+		Detail:    payload,
+	})
+	s.publishEvent(events.EventType(event.Type), event.ProbeID, event.Summary(), payload)
 }
 
 // publishEvent emits an event to the bus for SSE subscribers.
