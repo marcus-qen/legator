@@ -7,9 +7,11 @@ const (
 	TargetKindTag   = "tag"
 	TargetKindAll   = "all"
 
-	RunStatusRunning = "running"
-	RunStatusSuccess = "success"
-	RunStatusFailed  = "failed"
+	RunStatusPending  = "pending"
+	RunStatusRunning  = "running"
+	RunStatusSuccess  = "success"
+	RunStatusFailed   = "failed"
+	RunStatusCanceled = "canceled"
 )
 
 // Job describes a scheduled command execution definition.

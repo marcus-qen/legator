@@ -191,6 +191,7 @@ make release-build    # Cross-compile release binaries (incl. windows/amd64 prob
 50+ REST endpoints. Key groups:
 
 - **Fleet**: `GET /api/v1/probes`, `GET /api/v1/fleet/summary`, `POST /api/v1/probes/{id}/command`
+- **Jobs**: `GET/POST /api/v1/jobs`, `POST /api/v1/jobs/{id}/run`, `POST /api/v1/jobs/{id}/cancel`, `GET /api/v1/jobs/{id}/runs`, `POST /api/v1/jobs/{id}/runs/{runId}/cancel`, `GET /api/v1/jobs/runs`
 - **Chat**: `GET/POST /api/v1/probes/{id}/chat`, `GET /ws/chat`
 - **Fleet Chat**: `GET/POST /api/v1/fleet/chat`
 - **Policy**: `GET/POST /api/v1/policies`, `POST /api/v1/probes/{id}/apply-policy/{policyId}`

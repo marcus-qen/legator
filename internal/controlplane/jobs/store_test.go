@@ -3,6 +3,7 @@ package jobs
 import (
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -263,6 +264,137 @@ func TestStoreCompleteRunStatusTransitionsWithFanout(t *testing.T) {
 	}
 	if final.LastStatus != RunStatusSuccess {
 		t.Fatalf("expected final success, got %s", final.LastStatus)
+	}
+}
+
+func TestStorePendingRunningAndCompletionStateMachine(t *testing.T) {
+	store := newTestStore(t)
+	job := createTestJob(t, store)
+
+	run, err := store.RecordRunStart(JobRun{
+		JobID:     job.ID,
+		ProbeID:   "probe-1",
+		RequestID: "state-machine",
+		Status:    RunStatusPending,
+	})
+	if err != nil {
+		t.Fatalf("record pending run: %v", err)
+	}
+
+	if err := store.CompleteRun(run.ID, RunStatusSuccess, intPtr(0), "ok"); err == nil {
+		t.Fatal("expected pending->success to fail")
+	}
+
+	if err := store.MarkRunRunning(run.ID); err != nil {
+		t.Fatalf("mark running: %v", err)
+	}
+	if err := store.CompleteRun(run.ID, RunStatusSuccess, intPtr(0), "ok"); err != nil {
+		t.Fatalf("complete run: %v", err)
+	}
+
+	updated, err := store.GetRun(run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if updated.Status != RunStatusSuccess {
+		t.Fatalf("expected success, got %s", updated.Status)
+	}
+
+	ended, err := store.GetJob(job.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if ended.LastStatus != RunStatusSuccess {
+		t.Fatalf("expected job success, got %s", ended.LastStatus)
+	}
+}
+
+func TestStoreCancelTransitionAndTerminalImmutability(t *testing.T) {
+	store := newTestStore(t)
+	job := createTestJob(t, store)
+
+	run, err := store.RecordRunStart(JobRun{
+		JobID:     job.ID,
+		ProbeID:   "probe-1",
+		RequestID: "cancel-transition",
+		Status:    RunStatusPending,
+	})
+	if err != nil {
+		t.Fatalf("record pending run: %v", err)
+	}
+
+	if err := store.CancelRun(run.ID, "canceled for test"); err != nil {
+		t.Fatalf("cancel run: %v", err)
+	}
+
+	updated, err := store.GetRun(run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if updated.Status != RunStatusCanceled {
+		t.Fatalf("expected canceled, got %s", updated.Status)
+	}
+
+	if err := store.MarkRunRunning(run.ID); !IsInvalidRunTransition(err) {
+		t.Fatalf("expected invalid transition on canceled->running, got %v", err)
+	}
+	if err := store.CompleteRun(run.ID, RunStatusFailed, intPtr(1), "late fail"); !IsInvalidRunTransition(err) {
+		t.Fatalf("expected invalid transition on canceled->failed, got %v", err)
+	}
+}
+
+func TestStoreRaceCompleteVsCancelOnlyOneWins(t *testing.T) {
+	store := newTestStore(t)
+	job := createTestJob(t, store)
+
+	run, err := store.RecordRunStart(JobRun{
+		JobID:     job.ID,
+		ProbeID:   "probe-1",
+		RequestID: "race-complete-cancel",
+		Status:    RunStatusRunning,
+	})
+	if err != nil {
+		t.Fatalf("record run: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	results := make(chan error, 2)
+
+	go func() {
+		defer wg.Done()
+		results <- store.CompleteRun(run.ID, RunStatusSuccess, intPtr(0), "ok")
+	}()
+	go func() {
+		defer wg.Done()
+		results <- store.CancelRun(run.ID, "cancel race")
+	}()
+
+	wg.Wait()
+	close(results)
+
+	successes := 0
+	invalids := 0
+	for err := range results {
+		switch {
+		case err == nil:
+			successes++
+		case IsInvalidRunTransition(err):
+			invalids++
+		default:
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if successes != 1 || invalids != 1 {
+		t.Fatalf("expected one winner and one invalid transition, got successes=%d invalid=%d", successes, invalids)
+	}
+
+	updated, err := store.GetRun(run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if updated.Status != RunStatusSuccess && updated.Status != RunStatusCanceled {
+		t.Fatalf("unexpected terminal status: %s", updated.Status)
 	}
 }
 

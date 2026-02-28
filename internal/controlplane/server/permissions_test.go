@@ -335,6 +335,8 @@ func TestPermissionsJobsRoutes(t *testing.T) {
 	}{
 		{method: http.MethodPost, path: "/api/v1/jobs", body: createBody},
 		{method: http.MethodPost, path: "/api/v1/jobs/" + createdJob.ID + "/run"},
+		{method: http.MethodPost, path: "/api/v1/jobs/" + createdJob.ID + "/cancel"},
+		{method: http.MethodPost, path: "/api/v1/jobs/" + createdJob.ID + "/runs/nonexistent/cancel"},
 		{method: http.MethodPost, path: "/api/v1/jobs/" + createdJob.ID + "/enable"},
 		{method: http.MethodPost, path: "/api/v1/jobs/" + createdJob.ID + "/disable"},
 		{method: http.MethodPut, path: "/api/v1/jobs/" + createdJob.ID, body: createBody},

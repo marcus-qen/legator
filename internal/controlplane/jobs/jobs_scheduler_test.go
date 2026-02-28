@@ -174,8 +174,8 @@ func TestSchedulerSkipsOverlappingRunsForSameTarget(t *testing.T) {
 			if len(runs) != 1 {
 				t.Fatalf("expected one in-flight run, got %d", len(runs))
 			}
-			if runs[0].Status != RunStatusRunning {
-				t.Fatalf("expected running status while pending, got %s", runs[0].Status)
+			if runs[0].Status != RunStatusRunning && runs[0].Status != RunStatusPending {
+				t.Fatalf("expected active status while pending, got %s", runs[0].Status)
 			}
 			tracker.complete(runs[0].RequestID, &protocol.CommandResultPayload{RequestID: runs[0].RequestID, ExitCode: 0, Stdout: "ok"})
 			time.Sleep(20 * time.Millisecond)
@@ -185,6 +185,80 @@ func TestSchedulerSkipsOverlappingRunsForSameTarget(t *testing.T) {
 	}
 
 	t.Fatalf("expected at least one run to be recorded")
+}
+
+func TestSchedulerCancelJobMarksRunCanceledAndIgnoresLateResult(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	defer store.Close()
+
+	fleetMgr := fleet.NewManager(zap.NewNop())
+	fleetMgr.Register("probe-1", "probe-1", "linux", "amd64")
+	if err := fleetMgr.SetOnline("probe-1"); err != nil {
+		t.Fatalf("set online: %v", err)
+	}
+
+	tracker := newFakeTracker()
+	sender := &fakeSender{sendFn: func(probeID string, msgType protocol.MessageType, payload any) error { return nil }}
+	scheduler := NewScheduler(store, sender, fleetMgr, tracker, zap.NewNop())
+
+	job, err := store.CreateJob(Job{
+		Name:     "cancel-race",
+		Command:  "echo slow",
+		Schedule: "1h",
+		Target:   Target{Kind: TargetKindProbe, Value: "probe-1"},
+		Enabled:  true,
+	})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if err := scheduler.TriggerNow(job.ID); err != nil {
+		t.Fatalf("trigger now: %v", err)
+	}
+
+	var run JobRun
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		runs, err := store.ListRunsByJob(job.ID, 10)
+		if err != nil {
+			t.Fatalf("list runs: %v", err)
+		}
+		if len(runs) > 0 {
+			run = runs[0]
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if run.ID == "" {
+		t.Fatal("expected run to exist")
+	}
+
+	summary, err := scheduler.CancelJob(job.ID)
+	if err != nil {
+		t.Fatalf("cancel job: %v", err)
+	}
+	if summary.CanceledRuns < 1 {
+		t.Fatalf("expected canceled runs >= 1, got %+v", summary)
+	}
+
+	tracker.complete(run.RequestID, &protocol.CommandResultPayload{RequestID: run.RequestID, ExitCode: 0, Stdout: "ok"})
+
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		updated, err := store.GetRun(run.ID)
+		if err != nil {
+			t.Fatalf("get run: %v", err)
+		}
+		if updated.Status == RunStatusCanceled {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	updated, _ := store.GetRun(run.ID)
+	t.Fatalf("expected canceled status after cancel race, got %#v", updated)
 }
 
 type fakeSender struct {

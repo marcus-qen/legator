@@ -293,6 +293,72 @@ else
   fail "Global failed-run visibility missing: $FAILED_GLOBAL"
 fi
 
+# 10c. Job cancellation endpoints + canceled state
+echo ""
+echo "10c. Scheduled job cancellation (job + run)..."
+JOB_CANCEL_CREATE=$(curl -sf -X POST "$CP_URL/api/v1/jobs" \
+  -H "Content-Type: application/json" \
+  -d "{\"name\":\"e2e scheduled cancel\",\"command\":\"sleep 20\",\"schedule\":\"1h\",\"target\":{\"kind\":\"probe\",\"value\":\"$PROBE_ID\"},\"enabled\":true}")
+JOB_CANCEL_ID=$(echo "$JOB_CANCEL_CREATE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+if [[ -n "$JOB_CANCEL_ID" ]]; then
+  pass "Cancelable job created (id=$JOB_CANCEL_ID)"
+else
+  fail "Cancelable job creation failed: $JOB_CANCEL_CREATE"
+fi
+
+JOB_CANCEL_RUN=$(curl -sf -X POST "$CP_URL/api/v1/jobs/$JOB_CANCEL_ID/run")
+if echo "$JOB_CANCEL_RUN" | grep -q "dispatched"; then
+  pass "Cancelable job dispatched"
+else
+  fail "Cancelable job dispatch failed: $JOB_CANCEL_RUN"
+fi
+
+JOB_CANCEL_RUN_ID=""
+for _ in $(seq 1 20); do
+  JOB_CANCEL_RUNS=$(curl -sf "$CP_URL/api/v1/jobs/$JOB_CANCEL_ID/runs")
+  JOB_CANCEL_RUN_ID=$(echo "$JOB_CANCEL_RUNS" | python3 -c "import sys,json; runs=json.load(sys.stdin).get('runs',[]); print(runs[0].get('id','') if runs else '')" 2>/dev/null || echo "")
+  JOB_CANCEL_RUN_STATUS=$(echo "$JOB_CANCEL_RUNS" | python3 -c "import sys,json; runs=json.load(sys.stdin).get('runs',[]); print(runs[0].get('status','') if runs else '')" 2>/dev/null || echo "")
+  if [[ -n "$JOB_CANCEL_RUN_ID" ]]; then
+    break
+  fi
+  sleep 0.2
+done
+
+if [[ -n "$JOB_CANCEL_RUN_ID" ]]; then
+  RUN_CANCEL_BODY=$(mktemp)
+  RUN_CANCEL_CODE=$(curl -s -o "$RUN_CANCEL_BODY" -w "%{http_code}" -X POST "$CP_URL/api/v1/jobs/$JOB_CANCEL_ID/runs/$JOB_CANCEL_RUN_ID/cancel")
+  RUN_CANCEL_STATUS=$(python3 -c "import sys,json; d=json.load(open(sys.argv[1])); print(d.get('run',{}).get('status',''))" "$RUN_CANCEL_BODY" 2>/dev/null || echo "")
+  if [[ "$RUN_CANCEL_CODE" == "200" && "$RUN_CANCEL_STATUS" == "canceled" ]]; then
+    pass "Run cancel endpoint marks run canceled"
+  elif [[ "$RUN_CANCEL_CODE" == "409" ]]; then
+    pass "Run cancel endpoint enforces terminal immutability (409)"
+  else
+    fail "Run cancel endpoint failed: code=$RUN_CANCEL_CODE body=$(cat "$RUN_CANCEL_BODY")"
+  fi
+else
+  fail "Could not find run id for cancellation endpoint"
+fi
+
+JOB_CANCEL_BODY=$(mktemp)
+JOB_CANCEL_CODE=$(curl -s -o "$JOB_CANCEL_BODY" -w "%{http_code}" -X POST "$CP_URL/api/v1/jobs/$JOB_CANCEL_ID/cancel")
+JOB_CANCEL_COUNT=$(python3 -c "import sys,json; d=json.load(open(sys.argv[1])); print(d.get('canceled_runs',-1))" "$JOB_CANCEL_BODY" 2>/dev/null || echo "-1")
+if [[ "$JOB_CANCEL_CODE" == "200" && "$JOB_CANCEL_COUNT" -ge 0 ]]; then
+  pass "Job cancel endpoint responds with cancellation summary"
+else
+  fail "Job cancel endpoint failed: code=$JOB_CANCEL_CODE body=$(cat "$JOB_CANCEL_BODY")"
+fi
+
+CANCELED_GLOBAL=$(curl -sf "$CP_URL/api/v1/jobs/runs?status=canceled&limit=20")
+CANCELED_GLOBAL_COUNT=$(echo "$CANCELED_GLOBAL" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count',0)); print(d.get('canceled_count',-1))" 2>/dev/null || echo "0
+-1")
+CANCELED_TOTAL=$(echo "$CANCELED_GLOBAL_COUNT" | head -n1)
+CANCELED_SUMMARY=$(echo "$CANCELED_GLOBAL_COUNT" | tail -n1)
+if [[ "$CANCELED_TOTAL" -ge 0 ]] && [[ "$CANCELED_SUMMARY" -ge 0 ]]; then
+  pass "Global canceled-run query works (count=$CANCELED_TOTAL canceled=$CANCELED_SUMMARY)"
+else
+  fail "Global canceled-run visibility missing: $CANCELED_GLOBAL"
+fi
+
 # 11. Task endpoint returns 503 without LLM config
 echo ""
 echo "11. Checking task endpoint (no LLM configured)..."
