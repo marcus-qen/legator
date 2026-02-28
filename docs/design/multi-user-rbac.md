@@ -89,6 +89,7 @@ web/templates/
   - `POST /api/v1/discovery/install-token`
   - `POST|PUT|DELETE /api/v1/model-profiles` and `POST /api/v1/model-profiles/{id}/activate`
   - `POST|PUT|DELETE /api/v1/cloud/connectors` and `POST /api/v1/cloud/connectors/{id}/scan`
+  - `POST /api/v1/kubeflow/actions/refresh` (read-only routes stay `fleet:read`)
 - Tightened page-level auth checks:
   - `/approvals` requires `approval:read`
   - `/audit` requires `audit:read`

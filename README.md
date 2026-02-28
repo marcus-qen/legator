@@ -113,6 +113,7 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 ```
 
 📖 **Full guide:** [docs/getting-started.md](docs/getting-started.md)
+📖 **Kubeflow adapter:** [docs/kubeflow-adapter.md](docs/kubeflow-adapter.md)
 
 ## Features
 
@@ -133,6 +134,7 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 | K8s DaemonSet probe deployment (auto-init + multi-use tokens + K8s inventory enrichment) | ✅ |
 | Windows probe support (MVP) | ✅ |
 | Cloud connectors (AWS/GCP/Azure, agentless inventory ingestion) | ✅ |
+| Kubeflow adapter MVP (read-only status/inventory + guarded refresh action) | ✅ |
 | Auto-discovery + registration assist (network/SSH scan + guided registration) | ✅ |
 | BYOK model dock (multi-vendor key profiles + runtime model switching + usage tracking) | ✅ |
 | Tags + group commands | ✅ |
@@ -163,6 +165,12 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 | `LEGATOR_LLM_BASE_URL` | — | LLM API base URL |
 | `LEGATOR_LLM_API_KEY` | — | LLM API key |
 | `LEGATOR_LLM_MODEL` | — | LLM model name |
+| `LEGATOR_KUBEFLOW_ENABLED` | `false` | Enable Kubeflow adapter endpoints |
+| `LEGATOR_KUBEFLOW_NAMESPACE` | `kubeflow` | Namespace used for Kubeflow inventory |
+| `LEGATOR_KUBEFLOW_KUBECONFIG` | — | Optional kubeconfig path for kubectl |
+| `LEGATOR_KUBEFLOW_CONTEXT` | — | Optional kubeconfig context override |
+| `LEGATOR_KUBEFLOW_TIMEOUT` | `15s` | Timeout per kubectl call for adapter reads |
+| `LEGATOR_KUBEFLOW_ACTIONS_ENABLED` | `false` | Enable guarded action endpoint (`POST /api/v1/kubeflow/actions/refresh`) |
 | `LEGATOR_SERVER_URL` | — | Probe auto-init: control plane URL |
 | `LEGATOR_TOKEN` | — | Probe auto-init: registration token |
 | `LEGATOR_TAGS` | — | Probe auto-init: comma-separated tags |
@@ -193,6 +201,7 @@ make release-build    # Cross-compile release binaries (incl. windows/amd64 prob
 - **Auth**: `GET/POST/DELETE /api/v1/auth/keys`, `GET/POST/DELETE /api/v1/users`
 - **Model Dock**: `GET/POST /api/v1/model-profiles`, `PUT/DELETE /api/v1/model-profiles/{id}`, `POST /api/v1/model-profiles/{id}/activate`, `GET /api/v1/model-profiles/active`, `GET /api/v1/model-usage`
 - **Cloud Connectors**: `GET/POST /api/v1/cloud/connectors`, `PUT/DELETE /api/v1/cloud/connectors/{id}`, `POST /api/v1/cloud/connectors/{id}/scan`, `GET /api/v1/cloud/assets`
+- **Kubeflow**: `GET /api/v1/kubeflow/status`, `GET /api/v1/kubeflow/inventory`, `POST /api/v1/kubeflow/actions/refresh` (disabled by default)
 - **Network Devices**: `GET/POST /api/v1/network/devices`, `GET/PUT/DELETE /api/v1/network/devices/{id}`, `POST /api/v1/network/devices/{id}/test`, `POST /api/v1/network/devices/{id}/inventory`
 - **Discovery**: `POST /api/v1/discovery/scan`, `GET /api/v1/discovery/runs`, `GET /api/v1/discovery/runs/{id}`, `POST /api/v1/discovery/install-token`
 - **Metrics**: `GET /api/v1/metrics`

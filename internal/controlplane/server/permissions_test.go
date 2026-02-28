@@ -271,6 +271,29 @@ func TestPermissionsNetworkDeviceRoutes(t *testing.T) {
 	}
 }
 
+func TestPermissionsKubeflowRoutes(t *testing.T) {
+	srv := newAuthTestServer(t)
+	readToken := createAPIKey(t, srv, "fleet-read", auth.PermFleetRead)
+	writeToken := createAPIKey(t, srv, "fleet-write", auth.PermFleetWrite)
+
+	for _, path := range []string{"/api/v1/kubeflow/status", "/api/v1/kubeflow/inventory"} {
+		rr := makeRequest(t, srv, http.MethodGet, path, readToken, "")
+		if rr.Code == http.StatusUnauthorized || rr.Code == http.StatusForbidden {
+			t.Fatalf("expected fleet:read to access %s, got %d body=%s", path, rr.Code, rr.Body.String())
+		}
+	}
+
+	refreshDenied := makeRequest(t, srv, http.MethodPost, "/api/v1/kubeflow/actions/refresh", readToken, "")
+	if refreshDenied.Code != http.StatusForbidden {
+		t.Fatalf("expected fleet:read to be denied for refresh action, got %d body=%s", refreshDenied.Code, refreshDenied.Body.String())
+	}
+
+	refreshAllowed := makeRequest(t, srv, http.MethodPost, "/api/v1/kubeflow/actions/refresh", writeToken, "")
+	if refreshAllowed.Code == http.StatusUnauthorized || refreshAllowed.Code == http.StatusForbidden {
+		t.Fatalf("expected fleet:write to pass authz for refresh route, got %d body=%s", refreshAllowed.Code, refreshAllowed.Body.String())
+	}
+}
+
 func TestPermissionsJobsRoutes(t *testing.T) {
 	srv := newAuthTestServer(t)
 	readToken := createAPIKey(t, srv, "fleet-read", auth.PermFleetRead)
