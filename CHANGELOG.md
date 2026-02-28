@@ -88,6 +88,9 @@
 - **Kernel split S39 (projection adapter unsupported-surface helper seam)**
   - Added tiny shared projection-adapter helper for unsupported-surface fallback dispatch plus optional handled-flag wiring, and routed approval/command projection adapters through it without changing domain-owned fallback/envelope construction.
   - Added strict adapter-level parity tests against pre-helper inline branches to lock unchanged HTTP-first/MCP-fallback behavior and command handled-flag outcomes.
+- **Kernel split S40 (resolve-or-unsupported dispatch seam)**
+  - Added a tiny shared resolve-or-unsupported branch seam for projection adapters and reused it in approval + command dispatch/read + command invoke paths while keeping domain resolvers, policy registries, and fallback builders local.
+  - Added strict parity tests against pre-seam inline branches to lock resolve-vs-unsupported branching, HTTP-first/MCP-fallback outcomes, and command handled-flag behavior.
 - **Kernel split S12 (approval decide invoke adapter parity)**
   - Extracted a shared decide invoke adapter for approval_id/body assembly and invoke-closure wiring, then refactored HTTP and MCP decide entrypoints to consume it with behavior preserved.
 - **Kernel split S13 (approval decide render-target registry boundary)**

@@ -36,19 +36,22 @@ var defaultCommandReadPolicyRegistry = projectiondispatch.NewPolicyRegistry(map[
 // DispatchCommandErrorsForSurface emits transport-specific errors from the
 // command dispatch envelope. It returns true when an error was emitted.
 func DispatchCommandErrorsForSurface(envelope *CommandResultEnvelope, surface ProjectionDispatchSurface, writer CommandProjectionDispatchWriter) bool {
-	resolved, ok := ResolveCommandDispatchProjectionSurface(surface)
-	if !ok {
-		handled := false
-		dispatchUnsupportedCommandSurfaceAdapterFallback(surface, writer, &handled)
-		return handled
-	}
-
 	handled := false
-	projectiondispatch.DispatchForSurface(
-		defaultCommandDispatchErrorPolicyRegistry,
-		resolved,
-		envelope,
-		commandDispatchAdapterWriter{writer: writer, handled: &handled},
+	adapterWriter := commandDispatchAdapterWriter{writer: writer, handled: &handled}
+
+	projectiondispatch.DispatchResolvedOrUnsupported(
+		surface,
+		adapterWriter,
+		ResolveCommandDispatchProjectionSurface,
+		func(resolved ProjectionDispatchSurface, writer commandDispatchAdapterWriter) {
+			projectiondispatch.DispatchForSurface(
+				defaultCommandDispatchErrorPolicyRegistry,
+				resolved,
+				envelope,
+				writer,
+				dispatchUnsupportedCommandSurfaceAdapter,
+			)
+		},
 		dispatchUnsupportedCommandSurfaceAdapter,
 	)
 	return handled
@@ -57,17 +60,19 @@ func DispatchCommandErrorsForSurface(envelope *CommandResultEnvelope, surface Pr
 // DispatchCommandReadForSurface emits transport-specific command-read outputs
 // from the shared command result payload.
 func DispatchCommandReadForSurface(result *protocol.CommandResultPayload, surface ProjectionDispatchSurface, writer CommandProjectionDispatchWriter) {
-	resolved, ok := ResolveCommandReadProjectionSurface(surface)
-	if !ok {
-		dispatchUnsupportedCommandSurfaceAdapterFallback(surface, writer, nil)
-		return
-	}
-
-	projectiondispatch.DispatchForSurface(
-		defaultCommandReadPolicyRegistry,
-		resolved,
-		result,
+	projectiondispatch.DispatchResolvedOrUnsupported(
+		surface,
 		commandDispatchAdapterWriter{writer: writer, handled: nil},
+		ResolveCommandReadProjectionSurface,
+		func(resolved ProjectionDispatchSurface, writer commandDispatchAdapterWriter) {
+			projectiondispatch.DispatchForSurface(
+				defaultCommandReadPolicyRegistry,
+				resolved,
+				result,
+				writer,
+				dispatchUnsupportedCommandSurfaceAdapter,
+			)
+		},
 		dispatchUnsupportedCommandSurfaceAdapter,
 	)
 }
