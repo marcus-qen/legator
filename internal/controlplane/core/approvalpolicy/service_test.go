@@ -1,6 +1,7 @@
 package approvalpolicy
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -18,6 +19,20 @@ func newServiceForTest() (*Service, *approval.Queue, *fleet.Manager, *policy.Sto
 	fleetMgr := fleet.NewManager(zap.NewNop())
 	policies := policy.NewStore()
 	return NewService(queue, fleetMgr, policies), queue, fleetMgr, policies
+}
+
+type stubCapacitySignalProvider struct {
+	signals *CapacitySignals
+	err     error
+}
+
+func (p stubCapacitySignalProvider) CapacitySignals(context.Context) (*CapacitySignals, error) {
+	if p.signals == nil {
+		return nil, p.err
+	}
+	clone := *p.signals
+	clone.Warnings = append([]string(nil), p.signals.Warnings...)
+	return &clone, p.err
 }
 
 func TestSubmitCommandApproval_NotRequired(t *testing.T) {
@@ -58,6 +73,87 @@ func TestSubmitCommandApproval_Required(t *testing.T) {
 	}
 	if queue.PendingCount() != 1 {
 		t.Fatalf("expected 1 pending approval, got %d", queue.PendingCount())
+	}
+}
+
+func TestSubmitCommandApprovalWithContext_CapacityDenied(t *testing.T) {
+	queue := approval.NewQueue(15*time.Minute, 16)
+	fleetMgr := fleet.NewManager(zap.NewNop())
+	policies := policy.NewStore()
+	svc := NewService(queue, fleetMgr, policies, WithCapacitySignalProvider(stubCapacitySignalProvider{signals: &CapacitySignals{
+		Source:            "grafana",
+		Availability:      "degraded",
+		DashboardCoverage: 0.8,
+		QueryCoverage:     0.9,
+		DatasourceCount:   2,
+	}}))
+
+	cmd := &protocol.CommandPayload{RequestID: "req-cap-deny", Command: "ls", Level: protocol.CapObserve}
+	result, err := svc.SubmitCommandApprovalWithContext(context.Background(), "probe-a", cmd, protocol.CapObserve, "manual", "api")
+	if err != nil {
+		t.Fatalf("SubmitCommandApprovalWithContext returned error: %v", err)
+	}
+	if result.Decision.Outcome != CommandPolicyDecisionDeny {
+		t.Fatalf("expected deny decision, got %s", result.Decision.Outcome)
+	}
+	if result.Request != nil {
+		t.Fatalf("expected no queued approval request, got %+v", result.Request)
+	}
+	if queue.PendingCount() != 0 {
+		t.Fatalf("expected no pending approvals, got %d", queue.PendingCount())
+	}
+	if result.Decision.Rationale.Capacity == nil {
+		t.Fatal("expected capacity rationale payload")
+	}
+}
+
+func TestSubmitCommandApprovalWithContext_CapacityLimitedQueuesLowRisk(t *testing.T) {
+	queue := approval.NewQueue(15*time.Minute, 16)
+	fleetMgr := fleet.NewManager(zap.NewNop())
+	policies := policy.NewStore()
+	svc := NewService(queue, fleetMgr, policies, WithCapacitySignalProvider(stubCapacitySignalProvider{signals: &CapacitySignals{
+		Source:            "grafana",
+		Availability:      "limited",
+		DashboardCoverage: 0.9,
+		QueryCoverage:     0.9,
+		DatasourceCount:   2,
+	}}))
+
+	cmd := &protocol.CommandPayload{RequestID: "req-cap-queue", Command: "ls", Level: protocol.CapObserve}
+	result, err := svc.SubmitCommandApprovalWithContext(context.Background(), "probe-a", cmd, protocol.CapObserve, "manual", "api")
+	if err != nil {
+		t.Fatalf("SubmitCommandApprovalWithContext returned error: %v", err)
+	}
+	if result.Decision.Outcome != CommandPolicyDecisionQueue {
+		t.Fatalf("expected queue decision, got %s", result.Decision.Outcome)
+	}
+	if result.Request == nil {
+		t.Fatal("expected approval request for queue outcome")
+	}
+	if queue.PendingCount() != 1 {
+		t.Fatalf("expected 1 pending approval, got %d", queue.PendingCount())
+	}
+}
+
+func TestSubmitCommandApprovalWithContext_GrafanaUnavailableFallback(t *testing.T) {
+	queue := approval.NewQueue(15*time.Minute, 16)
+	fleetMgr := fleet.NewManager(zap.NewNop())
+	policies := policy.NewStore()
+	svc := NewService(queue, fleetMgr, policies, WithCapacitySignalProvider(stubCapacitySignalProvider{err: errors.New("grafana unavailable")}))
+
+	cmd := &protocol.CommandPayload{RequestID: "req-fallback", Command: "ls", Level: protocol.CapObserve}
+	result, err := svc.SubmitCommandApprovalWithContext(context.Background(), "probe-a", cmd, protocol.CapObserve, "manual", "api")
+	if err != nil {
+		t.Fatalf("SubmitCommandApprovalWithContext returned error: %v", err)
+	}
+	if result.Decision.Outcome != CommandPolicyDecisionAllow {
+		t.Fatalf("expected allow fallback decision, got %s", result.Decision.Outcome)
+	}
+	if !result.Decision.Rationale.Fallback {
+		t.Fatal("expected fallback=true when grafana signals are unavailable")
+	}
+	if queue.PendingCount() != 0 {
+		t.Fatalf("expected no pending approvals, got %d", queue.PendingCount())
 	}
 }
 

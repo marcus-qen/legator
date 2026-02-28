@@ -123,6 +123,7 @@ type Server struct {
 
 	kubeflowHandlers *kubeflow.Handler
 	grafanaHandlers  *grafana.Handler
+	grafanaClient    grafana.Client
 
 	discoveryStore    *discovery.Store
 	discoveryHandlers *discovery.Handler
@@ -551,7 +552,33 @@ func (s *Server) initApprovalCore() {
 			return nil
 		},
 	}
-	s.approvalCore = coreapprovalpolicy.NewService(s.approvalQueue, s.fleetMgr, s.policyStore, coreapprovalpolicy.WithDecisionHooks(hooks))
+
+	capacityProvider := coreapprovalpolicy.CapacitySignalProviderFunc(func(ctx context.Context) (*coreapprovalpolicy.CapacitySignals, error) {
+		if s.grafanaClient == nil {
+			return nil, nil
+		}
+		snapshot, err := s.grafanaClient.Snapshot(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return &coreapprovalpolicy.CapacitySignals{
+			Source:            "grafana",
+			Availability:      snapshot.Indicators.Availability,
+			DashboardCoverage: snapshot.Indicators.DashboardCoverage,
+			QueryCoverage:     snapshot.Indicators.QueryCoverage,
+			DatasourceCount:   snapshot.Indicators.DatasourceCount,
+			Partial:           snapshot.Partial,
+			Warnings:          append([]string(nil), snapshot.Warnings...),
+		}, nil
+	})
+
+	s.approvalCore = coreapprovalpolicy.NewService(
+		s.approvalQueue,
+		s.fleetMgr,
+		s.policyStore,
+		coreapprovalpolicy.WithDecisionHooks(hooks),
+		coreapprovalpolicy.WithCapacitySignalProvider(capacityProvider),
+	)
 }
 
 func (s *Server) initDispatchCore() {
@@ -661,6 +688,7 @@ func (s *Server) initGrafana() {
 		TLSSkipVerify:  s.cfg.Grafana.TLSSkipVerify,
 		OrgID:          s.cfg.Grafana.OrgID,
 	})
+	s.grafanaClient = client
 	s.grafanaHandlers = grafana.NewHandler(client)
 	s.logger.Info("grafana adapter enabled",
 		zap.String("base_url", strings.TrimSpace(s.cfg.Grafana.BaseURL)),
@@ -727,23 +755,31 @@ func (s *Server) initLLM() {
 	// dispatch is a closure that will be set after hub init
 	s.taskRunner = llm.NewTaskRunner(taskProvider, func(probeID string, cmd *protocol.CommandPayload) (*protocol.CommandResultPayload, error) {
 		if ps, ok := s.fleetMgr.Get(probeID); ok {
-			req, needsApproval, err := s.approvalCore.SubmitCommandApproval(probeID, cmd, ps.PolicyLevel, "LLM task command", "llm-task")
+			result, err := s.approvalCore.SubmitCommandApprovalWithContext(context.Background(), probeID, cmd, ps.PolicyLevel, "LLM task command", "llm-task")
 			if err != nil {
 				return nil, fmt.Errorf("approval queue unavailable: %w", err)
 			}
+			if result != nil {
+				switch result.Decision.Outcome {
+				case coreapprovalpolicy.CommandPolicyDecisionDeny:
+					return nil, fmt.Errorf("command denied by capacity policy: %s", result.Decision.Rationale.Summary)
+				case coreapprovalpolicy.CommandPolicyDecisionQueue:
+					req := result.Request
+					if req == nil {
+						return nil, fmt.Errorf("approval queue unavailable: missing approval request")
+					}
+					s.emitAudit(audit.EventApprovalRequest, probeID, "llm-task",
+						fmt.Sprintf("LLM command pending approval: %s (risk: %s)", cmd.Command, req.RiskLevel))
 
-			if needsApproval {
-				s.emitAudit(audit.EventApprovalRequest, probeID, "llm-task",
-					fmt.Sprintf("LLM command pending approval: %s (risk: %s)", cmd.Command, req.RiskLevel))
-
-				decided, err := s.approvalCore.WaitForDecision(req.ID, approvalWait)
-				if err != nil {
-					return nil, fmt.Errorf("approval required (id=%s): %w", req.ID, err)
-				}
-				s.emitAudit(audit.EventApprovalDecided, probeID, decided.DecidedBy,
-					fmt.Sprintf("LLM approval %s for: %s", decided.Decision, cmd.Command))
-				if decided.Decision != approval.DecisionApproved {
-					return nil, fmt.Errorf("command not approved (id=%s, decision=%s)", decided.ID, decided.Decision)
+					decided, err := s.approvalCore.WaitForDecision(req.ID, approvalWait)
+					if err != nil {
+						return nil, fmt.Errorf("approval required (id=%s): %w", req.ID, err)
+					}
+					s.emitAudit(audit.EventApprovalDecided, probeID, decided.DecidedBy,
+						fmt.Sprintf("LLM approval %s for: %s", decided.Decision, cmd.Command))
+					if decided.Decision != approval.DecisionApproved {
+						return nil, fmt.Errorf("command not approved (id=%s, decision=%s)", decided.ID, decided.Decision)
+					}
 				}
 			}
 		}

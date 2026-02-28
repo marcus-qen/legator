@@ -1,6 +1,7 @@
 package approvalpolicy
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -109,10 +110,12 @@ func (noopDecisionHooks) OnApprovedDispatch(*ApprovalDecisionResult) error { ret
 
 // Service orchestrates command approvals and policy application.
 type Service struct {
-	approvals     approvalQueue
-	fleet         fleetStore
-	policies      policyStore
-	decisionHooks DecisionHooks
+	approvals            approvalQueue
+	fleet                fleetStore
+	policies             policyStore
+	decisionHooks        DecisionHooks
+	capacitySignalSource CapacitySignalProvider
+	capacityThresholds   CapacityThresholds
 }
 
 type Option func(*Service)
@@ -125,12 +128,25 @@ func WithDecisionHooks(hooks DecisionHooks) Option {
 	}
 }
 
+func WithCapacitySignalProvider(provider CapacitySignalProvider) Option {
+	return func(s *Service) {
+		s.capacitySignalSource = provider
+	}
+}
+
+func WithCapacityThresholds(thresholds CapacityThresholds) Option {
+	return func(s *Service) {
+		s.capacityThresholds = thresholds.normalized()
+	}
+}
+
 func NewService(approvals approvalQueue, fleet fleetStore, policies policyStore, opts ...Option) *Service {
 	svc := &Service{
-		approvals:     approvals,
-		fleet:         fleet,
-		policies:      policies,
-		decisionHooks: noopDecisionHooks{},
+		approvals:          approvals,
+		fleet:              fleet,
+		policies:           policies,
+		decisionHooks:      noopDecisionHooks{},
+		capacityThresholds: DefaultCapacityThresholds(),
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -140,18 +156,35 @@ func NewService(approvals approvalQueue, fleet fleetStore, policies policyStore,
 	return svc
 }
 
+type SubmitCommandApprovalResult struct {
+	Request  *approval.Request    `json:"request,omitempty"`
+	Decision CommandPolicyDecision `json:"decision"`
+}
+
 func (s *Service) SubmitCommandApproval(probeID string, cmd *protocol.CommandPayload, probeLevel protocol.CapabilityLevel, reason, requester string) (*approval.Request, bool, error) {
-	if !approval.NeedsApproval(cmd, probeLevel) {
+	result, err := s.SubmitCommandApprovalWithContext(context.Background(), probeID, cmd, probeLevel, reason, requester)
+	if err != nil {
+		return nil, result != nil && result.Decision.Outcome == CommandPolicyDecisionQueue, err
+	}
+	if result == nil {
 		return nil, false, nil
 	}
+	return result.Request, result.Decision.Outcome == CommandPolicyDecisionQueue, nil
+}
 
-	risk := approval.ClassifyRisk(cmd)
-	req, err := s.approvals.Submit(probeID, cmd, reason, risk, requester)
-	if err != nil {
-		return nil, true, err
+func (s *Service) SubmitCommandApprovalWithContext(ctx context.Context, probeID string, cmd *protocol.CommandPayload, probeLevel protocol.CapabilityLevel, reason, requester string) (*SubmitCommandApprovalResult, error) {
+	decision := s.EvaluateCommandPolicy(ctx, cmd, probeLevel)
+	result := &SubmitCommandApprovalResult{Decision: decision}
+	if decision.Outcome != CommandPolicyDecisionQueue {
+		return result, nil
 	}
 
-	return req, true, nil
+	req, err := s.approvals.Submit(probeID, cmd, reason, decision.RiskLevel, requester)
+	if err != nil {
+		return result, err
+	}
+	result.Request = req
+	return result, nil
 }
 
 type ApprovalDecisionResult struct {

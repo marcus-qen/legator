@@ -17,6 +17,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/chat"
 	"github.com/marcus-qen/legator/internal/controlplane/config"
+	coreapprovalpolicy "github.com/marcus-qen/legator/internal/controlplane/core/approvalpolicy"
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/jobs"
@@ -43,6 +44,20 @@ func newTestServer(t *testing.T) *Server {
 	}
 	t.Cleanup(func() { srv.Close() })
 	return srv
+}
+
+type testCapacityProvider struct {
+	signals *coreapprovalpolicy.CapacitySignals
+	err     error
+}
+
+func (p testCapacityProvider) CapacitySignals(context.Context) (*coreapprovalpolicy.CapacitySignals, error) {
+	if p.signals == nil {
+		return nil, p.err
+	}
+	clone := *p.signals
+	clone.Warnings = append([]string(nil), p.signals.Warnings...)
+	return &clone, p.err
 }
 
 func connectProbeWS(t *testing.T, srv *Server, probeID string) (*websocket.Conn, func()) {
@@ -337,8 +352,98 @@ func TestHandleDispatchCommand_PendingApproval(t *testing.T) {
 	if approvalID == "" {
 		t.Fatalf("expected approval_id in response: %#v", got)
 	}
+	if got["policy_decision"] != "queue" {
+		t.Fatalf("expected policy_decision=queue, got %v", got["policy_decision"])
+	}
+	if _, ok := got["policy_rationale"].(map[string]any); !ok {
+		t.Fatalf("expected policy_rationale map, got %#v", got["policy_rationale"])
+	}
 	if srv.approvalQueue.PendingCount() != 1 {
 		t.Fatalf("expected 1 pending approval, got %d", srv.approvalQueue.PendingCount())
+	}
+}
+
+func TestHandleDispatchCommand_CapacityDenied(t *testing.T) {
+	srv := newTestServer(t)
+	srv.fleetMgr.Register("probe-capacity", "host", "linux", "amd64")
+	srv.approvalCore = coreapprovalpolicy.NewService(
+		srv.approvalQueue,
+		srv.fleetMgr,
+		srv.policyStore,
+		coreapprovalpolicy.WithCapacitySignalProvider(testCapacityProvider{signals: &coreapprovalpolicy.CapacitySignals{
+			Source:            "grafana",
+			Availability:      "degraded",
+			DashboardCoverage: 0.9,
+			QueryCoverage:     0.9,
+			DatasourceCount:   2,
+		}}),
+	)
+
+	body := map[string]any{
+		"request_id": "req-capacity-deny",
+		"command":    "ls",
+		"level":      string(protocol.CapObserve),
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/probes/probe-capacity/command", bytes.NewReader(data))
+	req.SetPathValue("id", "probe-capacity")
+	rr := httptest.NewRecorder()
+
+	srv.handleDispatchCommand(rr, req)
+
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var got map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode capacity deny response: %v", err)
+	}
+	if got["status"] != "denied" {
+		t.Fatalf("expected status=denied, got %v", got["status"])
+	}
+	if got["policy_decision"] != "deny" {
+		t.Fatalf("expected policy_decision=deny, got %v", got["policy_decision"])
+	}
+	rationale, ok := got["policy_rationale"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected policy_rationale payload, got %#v", got["policy_rationale"])
+	}
+	if rationale["fallback"] != false {
+		t.Fatalf("expected fallback=false rationale, got %v", rationale["fallback"])
+	}
+	if srv.approvalQueue.PendingCount() != 0 {
+		t.Fatalf("expected no queued approvals on deny, got %d", srv.approvalQueue.PendingCount())
+	}
+}
+
+func TestHandleDispatchCommand_GrafanaUnavailableFallbackDoesNotDeny(t *testing.T) {
+	srv := newTestServer(t)
+	srv.fleetMgr.Register("probe-fallback", "host", "linux", "amd64")
+	srv.approvalCore = coreapprovalpolicy.NewService(
+		srv.approvalQueue,
+		srv.fleetMgr,
+		srv.policyStore,
+		coreapprovalpolicy.WithCapacitySignalProvider(testCapacityProvider{err: fmt.Errorf("grafana unavailable")}),
+	)
+
+	body := map[string]any{
+		"request_id": "req-capacity-fallback",
+		"command":    "ls",
+		"level":      string(protocol.CapObserve),
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/probes/probe-fallback/command", bytes.NewReader(data))
+	req.SetPathValue("id", "probe-fallback")
+	rr := httptest.NewRecorder()
+
+	srv.handleDispatchCommand(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 dispatch attempt (fallback allow), got %d: %s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "capacity policy") {
+		t.Fatalf("expected no capacity denial in fallback mode, got %s", rr.Body.String())
 	}
 }
 

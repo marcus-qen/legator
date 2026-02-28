@@ -14,6 +14,12 @@
     - `LEGATOR_GRAFANA_ORG_ID`
   - Added docs: `docs/grafana-adapter.md` and updated configuration/reference docs.
   - Added tests for client parsing/error mapping, HTTP handlers, server permission gates, and config wiring.
+- **Stage 2.2 capacity policy integration + rationale contract**
+  - Integrated Grafana capacity indicators into command policy evaluation via `core/approvalpolicy` (`allow` / `queue` / `deny`).
+  - Added structured machine-readable rationale payloads (`policy_rationale`) with thresholds, indicators, and `drove_outcome` flags.
+  - Added additive command response fields for queued/denied outcomes: `policy_decision` and `policy_rationale`.
+  - Added safe fallback behavior when Grafana is disabled/unreachable (risk-only policy path, no crash).
+  - Added evaluator + handler coverage for capacity-deny and fallback behavior.
 - **Jobs cancellation API + lifecycle guardrails**
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.
