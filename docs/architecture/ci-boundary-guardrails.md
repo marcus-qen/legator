@@ -37,8 +37,10 @@ Default policy is **deny**. Explicit allow rules define approved edges.
 - `core-domain -> adapters-integrations`
 - `core-domain -> platform-runtime`
 - `adapters-integrations -> platform-runtime`
+- `adapters-integrations -> core-domain` (transitional; current `llm` package reads fleet/core projections)
 - `platform-runtime -> core-domain`
 - `platform-runtime -> adapters-integrations`
+- `platform-runtime -> surfaces` (transitional; discovery runtime currently reuses API registration helpers)
 - `probe-runtime -> platform-runtime`
 
 ### Key deny edges

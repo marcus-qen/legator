@@ -100,6 +100,9 @@ dependency_policy:
     - from: adapters-integrations
       to: platform-runtime
       rationale: Integrations use config, transport clients, and shared runtime utilities.
+    - from: adapters-integrations
+      to: core-domain
+      rationale: Transitional coupling: llm orchestration currently reads fleet/core projections.
 
     - from: platform-runtime
       to: core-domain
@@ -107,6 +110,9 @@ dependency_policy:
     - from: platform-runtime
       to: adapters-integrations
       rationale: Runtime wiring initializes integration adapters.
+    - from: platform-runtime
+      to: surfaces
+      rationale: Transitional coupling: discovery runtime currently imports registration API helpers.
 
     - from: probe-runtime
       to: platform-runtime
