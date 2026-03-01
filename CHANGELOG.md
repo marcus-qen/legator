@@ -20,6 +20,11 @@
   - Added additive command response fields for queued/denied outcomes: `policy_decision` and `policy_rationale`.
   - Added safe fallback behavior when Grafana is disabled/unreachable (risk-only policy path, no crash).
   - Added evaluator + handler coverage for capacity-deny and fallback behavior.
+- **Stage 2.3 operator explainability panel + release hardening**
+  - Added approvals UI explainability panel rendering `policy_decision` and `policy_rationale` with human summary, capacity badges, outcome-driving indicators, and machine-readable JSON details.
+  - Persisted Stage 2.2 rationale fields onto queued approval items so operator workflows consume the same policy payload as command dispatch responses.
+  - Added template/handler/core coverage for approval explainability wiring and updated e2e smoke checks for explainability API/UI path markers.
+  - Updated docs/release notes for Stage 2 completion and additive compatibility guarantees.
 - **Jobs cancellation API + lifecycle guardrails**
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.

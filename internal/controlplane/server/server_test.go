@@ -361,6 +361,17 @@ func TestHandleDispatchCommand_PendingApproval(t *testing.T) {
 	if srv.approvalQueue.PendingCount() != 1 {
 		t.Fatalf("expected 1 pending approval, got %d", srv.approvalQueue.PendingCount())
 	}
+
+	queued, ok := srv.approvalQueue.Get(approvalID)
+	if !ok {
+		t.Fatalf("expected queued approval %q to exist", approvalID)
+	}
+	if queued.PolicyDecision != "queue" {
+		t.Fatalf("expected queued policy_decision=queue, got %q", queued.PolicyDecision)
+	}
+	if queued.PolicyRationale == nil {
+		t.Fatal("expected queued approval policy_rationale")
+	}
 }
 
 func TestHandleDispatchCommand_CapacityDenied(t *testing.T) {
@@ -784,7 +795,15 @@ func TestHandleFleetCleanup(t *testing.T) {
 func TestHandleListApprovals(t *testing.T) {
 	srv := newTestServer(t)
 
-	_, err := srv.approvalQueue.Submit("probe-1", &protocol.CommandPayload{RequestID: "req-1", Command: "rm -rf /tmp/x"}, "reason", "critical", "api")
+	_, err := srv.approvalQueue.SubmitWithPolicyDetails(
+		"probe-1",
+		&protocol.CommandPayload{RequestID: "req-1", Command: "rm -rf /tmp/x"},
+		"reason",
+		"critical",
+		"api",
+		"queue",
+		map[string]any{"summary": "queue (high-risk command requires human approval)", "indicators": []map[string]any{{"name": "command_risk", "drove_outcome": true}}},
+	)
 	if err != nil {
 		t.Fatalf("submit approval 1: %v", err)
 	}
@@ -810,6 +829,17 @@ func TestHandleListApprovals(t *testing.T) {
 	}
 	if got.PendingCount != 2 || len(got.Approvals) != 2 {
 		t.Fatalf("unexpected approvals payload: %+v", got)
+	}
+
+	foundExplainability := false
+	for _, item := range got.Approvals {
+		if item.PolicyDecision == "queue" && item.PolicyRationale != nil {
+			foundExplainability = true
+			break
+		}
+	}
+	if !foundExplainability {
+		t.Fatalf("expected at least one approval with policy explainability fields: %+v", got.Approvals)
 	}
 }
 

@@ -138,6 +138,7 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 | Kubeflow adapter MVP (read-only status/inventory + guarded refresh action) | ✅ |
 | Grafana adapter Stage 2.1 (read-only status + capacity snapshot) | ✅ |
 | Capacity-aware policy decisions Stage 2.2 (allow/deny/queue + rationale payloads) | ✅ |
+| Operator explainability panel Stage 2.3 (approval UI rationale + capacity drivers) | ✅ |
 | Auto-discovery + registration assist (network/SSH scan + guided registration) | ✅ |
 | BYOK model dock (multi-vendor key profiles + runtime model switching + usage tracking) | ✅ |
 | Tags + group commands | ✅ |
@@ -216,6 +217,9 @@ make release-build    # Cross-compile release binaries (incl. windows/amd64 prob
 - **Fleet Chat**: `GET/POST /api/v1/fleet/chat`
 - **Policy**: `GET/POST /api/v1/policies`, `POST /api/v1/probes/{id}/apply-policy/{policyId}`
 - **Approvals**: `GET /api/v1/approvals`, `POST /api/v1/approvals/{id}/decide`
+  - Pending approvals now carry additive explainability fields when available:
+    - `policy_decision`
+    - `policy_rationale` (includes `summary`, `thresholds`, `capacity`, `indicators[]`, `drove_outcome`)
 - **Audit**: `GET /api/v1/audit`
 - **Alerts**: `GET/POST /api/v1/alerts`, `GET/PUT/DELETE /api/v1/alerts/{id}`, `GET /api/v1/alerts/{id}/history`, `GET /api/v1/alerts/active`
 - **Webhooks**: `GET/POST /api/v1/webhooks`

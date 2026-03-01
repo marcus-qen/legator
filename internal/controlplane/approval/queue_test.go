@@ -41,6 +41,34 @@ func TestSubmitAndGet(t *testing.T) {
 	}
 }
 
+func TestSubmitWithPolicyDetails(t *testing.T) {
+	q := NewQueue(5*time.Minute, 100)
+	cmd := makeCmd("systemctl restart nginx", protocol.CapRemediate)
+
+	rationale := map[string]any{
+		"summary": "queue (high-risk command requires human approval)",
+		"indicators": []map[string]any{{"name": "command_risk", "drove_outcome": true}},
+	}
+	req, err := q.SubmitWithPolicyDetails("probe-1", cmd, "manual", "high", "api", "queue", rationale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.PolicyDecision != "queue" {
+		t.Fatalf("expected policy_decision=queue, got %q", req.PolicyDecision)
+	}
+	if req.PolicyRationale == nil {
+		t.Fatal("expected policy_rationale to be stored")
+	}
+
+	stored, ok := q.Get(req.ID)
+	if !ok {
+		t.Fatal("expected request in queue")
+	}
+	if stored.PolicyDecision != "queue" {
+		t.Fatalf("expected stored policy_decision=queue, got %q", stored.PolicyDecision)
+	}
+}
+
 func TestApprove(t *testing.T) {
 	q := NewQueue(5*time.Minute, 100)
 	cmd := makeCmd("apt-get upgrade", protocol.CapRemediate)

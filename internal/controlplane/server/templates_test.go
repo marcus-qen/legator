@@ -111,6 +111,30 @@ func TestProbeDetailTemplateIncludesIncrementalSSEAnchors(t *testing.T) {
 	}
 }
 
+func TestApprovalsTemplateIncludesExplainabilityPanel(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "web", "templates", "approvals.html")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read approvals template: %v", err)
+	}
+
+	html := string(content)
+	required := []string{
+		"policy-explainability",
+		"renderPolicyExplainability",
+		"policy_rationale",
+		"policy_decision",
+		"Machine-readable rationale",
+		"drove_outcome",
+	}
+
+	for _, snippet := range required {
+		if !strings.Contains(html, snippet) {
+			t.Fatalf("approvals template missing expected snippet: %s", snippet)
+		}
+	}
+}
+
 func TestJobsTemplateIncludesRunHistoryAndTriageControls(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "web", "templates", "jobs.html")
 	content, err := os.ReadFile(path)

@@ -26,17 +26,19 @@ const (
 
 // Request is a pending approval item.
 type Request struct {
-	ID        string                   `json:"id"`
-	ProbeID   string                   `json:"probe_id"`
-	Command   *protocol.CommandPayload `json:"command"`
-	Reason    string                   `json:"reason"`     // why the action was requested
-	RiskLevel string                   `json:"risk_level"` // low/medium/high/critical
-	Requester string                   `json:"requester"`  // who/what initiated (e.g. "llm-task", "api")
-	Decision  Decision                 `json:"decision"`
-	DecidedBy string                   `json:"decided_by,omitempty"`
-	DecidedAt time.Time                `json:"decided_at,omitempty"`
-	CreatedAt time.Time                `json:"created_at"`
-	ExpiresAt time.Time                `json:"expires_at"`
+	ID             string                   `json:"id"`
+	ProbeID        string                   `json:"probe_id"`
+	Command        *protocol.CommandPayload `json:"command"`
+	Reason         string                   `json:"reason"`     // why the action was requested
+	RiskLevel      string                   `json:"risk_level"` // low/medium/high/critical
+	Requester      string                   `json:"requester"`  // who/what initiated (e.g. "llm-task", "api")
+	PolicyDecision string                   `json:"policy_decision,omitempty"`
+	PolicyRationale any                     `json:"policy_rationale,omitempty"`
+	Decision       Decision                 `json:"decision"`
+	DecidedBy      string                   `json:"decided_by,omitempty"`
+	DecidedAt      time.Time                `json:"decided_at,omitempty"`
+	CreatedAt      time.Time                `json:"created_at"`
+	ExpiresAt      time.Time                `json:"expires_at"`
 }
 
 // Queue manages pending approval requests.
@@ -58,8 +60,13 @@ func NewQueue(ttl time.Duration, maxSize int) *Queue {
 	return q
 }
 
-// Submit adds a new approval request. Returns the request ID.
+// Submit adds a new approval request without policy explainability metadata.
 func (q *Queue) Submit(probeID string, cmd *protocol.CommandPayload, reason, riskLevel, requester string) (*Request, error) {
+	return q.SubmitWithPolicyDetails(probeID, cmd, reason, riskLevel, requester, "", nil)
+}
+
+// SubmitWithPolicyDetails adds a new approval request and stores policy explainability details.
+func (q *Queue) SubmitWithPolicyDetails(probeID string, cmd *protocol.CommandPayload, reason, riskLevel, requester, policyDecision string, policyRationale any) (*Request, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -71,15 +78,17 @@ func (q *Queue) Submit(probeID string, cmd *protocol.CommandPayload, reason, ris
 	}
 
 	req := &Request{
-		ID:        uuid.New().String(),
-		ProbeID:   probeID,
-		Command:   cmd,
-		Reason:    reason,
-		RiskLevel: riskLevel,
-		Requester: requester,
-		Decision:  DecisionPending,
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(q.ttl),
+		ID:             uuid.New().String(),
+		ProbeID:        probeID,
+		Command:        cmd,
+		Reason:         reason,
+		RiskLevel:      riskLevel,
+		Requester:      requester,
+		PolicyDecision: policyDecision,
+		PolicyRationale: policyRationale,
+		Decision:       DecisionPending,
+		CreatedAt:      time.Now().UTC(),
+		ExpiresAt:      time.Now().UTC().Add(q.ttl),
 	}
 
 	q.requests[req.ID] = req
