@@ -60,6 +60,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/probes/{id}/task", s.handleTask)
 	mux.HandleFunc("DELETE /api/v1/probes/{id}", s.handleDeleteProbe)
 	mux.HandleFunc("GET /api/v1/fleet/summary", s.handleFleetSummary)
+	mux.HandleFunc("GET /api/v1/reliability/scorecard", s.handleReliabilityScorecard)
 	mux.HandleFunc("GET /api/v1/fleet/inventory", s.handleFleetInventory)
 	mux.HandleFunc("GET /api/v1/federation/inventory", s.handleFederationInventory)
 	mux.HandleFunc("GET /api/v1/federation/summary", s.handleFederationSummary)
@@ -887,11 +888,13 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(w, r, auth.PermFleetRead) {
 		return
 	}
+	scorecard := s.buildReliabilityScorecard(reliabilityDefaultWindow)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"counts":            s.fleetMgr.Count(),
 		"connected":         s.hub.Connected(),
 		"pending_approvals": s.approvalQueue.PendingCount(),
+		"reliability":       scorecard,
 	})
 }
 
@@ -1383,7 +1386,7 @@ func (s *Server) handleFleetPage(w http.ResponseWriter, r *http.Request) {
 <body>
 <h1>Legator Control Plane</h1>
 <p>Version: %s (%s)</p>
-<p><a href="/api/v1/probes">Fleet API</a> | <a href="/api/v1/fleet/summary">Summary</a> | <a href="/api/v1/approvals?status=pending">Approvals</a></p>
+<p><a href="/api/v1/probes">Fleet API</a> | <a href="/api/v1/fleet/summary">Summary</a> | <a href="/api/v1/reliability/scorecard">Reliability</a> | <a href="/api/v1/approvals?status=pending">Approvals</a></p>
 </body></html>`, Version, Commit)
 		return
 	}
@@ -1402,6 +1405,7 @@ func (s *Server) handleFleetPage(w http.ResponseWriter, r *http.Request) {
 	})
 
 	counts := s.fleetMgr.Count()
+	reliabilityScorecard := s.buildReliabilityScorecard(reliabilityDefaultWindow)
 	data := FleetPageData{
 		BasePage: BasePage{
 			CurrentUser: s.currentTemplateUser(r),
@@ -1410,10 +1414,12 @@ func (s *Server) handleFleetPage(w http.ResponseWriter, r *http.Request) {
 		},
 		Probes: probes,
 		Summary: FleetSummary{
-			Online:   counts["online"],
-			Offline:  counts["offline"],
-			Degraded: counts["degraded"],
-			Total:    len(probes),
+			Online:            counts["online"],
+			Offline:           counts["offline"],
+			Degraded:          counts["degraded"],
+			Total:             len(probes),
+			ReliabilityScore:  reliabilityScorecard.Overall.Score,
+			ReliabilityStatus: reliabilityScorecard.Overall.Status,
 		},
 		Commit: Commit,
 	}

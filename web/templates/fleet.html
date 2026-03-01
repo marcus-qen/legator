@@ -37,6 +37,7 @@
         <span><span class="dot dot-online"></span> <strong id="cnt-online">{{.Summary.Online}}</strong> online</span>
         <span><span class="dot dot-offline"></span> <strong id="cnt-offline">{{.Summary.Offline}}</strong> offline</span>
         <span><strong id="cnt-total">{{.Summary.Total}}</strong> total</span>
+        <span><strong id="reliability-score">{{.Summary.ReliabilityScore}}</strong> reliability (<span id="reliability-status">{{.Summary.ReliabilityStatus}}</span>)</span>
       </div>
     </div>
   </section>
@@ -71,6 +72,10 @@
     filterText: '',
     activeTag: null,
     activeTab: 'system',
+    reliability: {
+      score: Number(document.getElementById('reliability-score')?.textContent || 0),
+      status: String(document.getElementById('reliability-status')?.textContent || 'unknown'),
+    },
     feed: [],
     collapsed: {
       online: false,
@@ -93,6 +98,8 @@
     cntOnline: document.getElementById('cnt-online'),
     cntOffline: document.getElementById('cnt-offline'),
     cntTotal: document.getElementById('cnt-total'),
+    reliabilityScore: document.getElementById('reliability-score'),
+    reliabilityStatus: document.getElementById('reliability-status'),
     headerTotal: document.getElementById('header-total'),
     toggleTree: document.getElementById('toggle-tree'),
     toggleFeed: document.getElementById('toggle-feed'),
@@ -825,12 +832,15 @@
             <span><span class="dot dot-online"></span> <strong id="cnt-online">${refs.cntOnline.textContent}</strong> online</span>
             <span><span class="dot dot-offline"></span> <strong id="cnt-offline">${refs.cntOffline.textContent}</strong> offline</span>
             <span><strong id="cnt-total">${refs.cntTotal.textContent}</strong> total</span>
+            <span><strong id="reliability-score">${esc(state.reliability.score)}</strong> reliability (<span id="reliability-status">${esc(state.reliability.status)}</span>)</span>
           </div>
         </div>
       `;
       refs.cntOnline = document.getElementById('cnt-online');
       refs.cntOffline = document.getElementById('cnt-offline');
       refs.cntTotal = document.getElementById('cnt-total');
+      refs.reliabilityScore = document.getElementById('reliability-score');
+      refs.reliabilityStatus = document.getElementById('reliability-status');
       return;
     }
 
@@ -929,6 +939,25 @@
     renderFeed();
   }
 
+  async function refreshReliability() {
+    try {
+      const response = await fetch('/api/v1/reliability/scorecard?window=15m', { cache: 'no-store' });
+      if (!response.ok) return;
+      const payload = await response.json();
+      const overall = payload && typeof payload === 'object' ? payload.overall : null;
+      const score = Number(overall?.score);
+      const status = String(overall?.status || 'unknown');
+      if (Number.isFinite(score)) {
+        state.reliability.score = Math.max(0, Math.min(100, Math.round(score)));
+      }
+      state.reliability.status = status;
+      if (refs.reliabilityScore) refs.reliabilityScore.textContent = String(state.reliability.score);
+      if (refs.reliabilityStatus) refs.reliabilityStatus.textContent = state.reliability.status;
+    } catch {
+      // best effort
+    }
+  }
+
   function selectProbe(probeId, options = {}) {
     const probe = state.probes.find((item) => item.id === probeId);
     if (!probe) return;
@@ -968,6 +997,7 @@
 
       renderTree();
       renderDetail();
+      await refreshReliability();
 
       if (window.LegatorUI && typeof window.LegatorUI.updateBadges === 'function') {
         window.LegatorUI.updateBadges();

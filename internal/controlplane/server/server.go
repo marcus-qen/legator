@@ -41,6 +41,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/networkdevices"
 	"github.com/marcus-qen/legator/internal/controlplane/oidc"
 	"github.com/marcus-qen/legator/internal/controlplane/policy"
+	"github.com/marcus-qen/legator/internal/controlplane/reliability"
 	"github.com/marcus-qen/legator/internal/controlplane/session"
 	"github.com/marcus-qen/legator/internal/controlplane/users"
 	"github.com/marcus-qen/legator/internal/controlplane/webhook"
@@ -58,8 +59,10 @@ var (
 )
 
 const (
-	probeOfflineCheckInterval = 30 * time.Second
-	probeOfflineThreshold     = 90 * time.Second
+	probeOfflineCheckInterval  = 30 * time.Second
+	probeOfflineThreshold      = 90 * time.Second
+	reliabilityDefaultWindow   = 15 * time.Minute
+	reliabilityTelemetryMaxAge = 24 * time.Hour
 )
 
 // Server is the assembled control plane.
@@ -144,6 +147,9 @@ type Server struct {
 
 	// Templates
 	pages *pageTemplates
+
+	// Reliability telemetry
+	reliabilityTelemetry *reliability.RequestTelemetry
 
 	// HTTP
 	httpServer *http.Server
@@ -250,6 +256,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.wireChatLLM()
 	s.initAuth()
 	s.loadTemplates()
+	s.reliabilityTelemetry = reliability.NewRequestTelemetry(20000, reliabilityTelemetryMaxAge, time.Now().UTC())
 
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
@@ -272,6 +279,9 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 		})
 		authMiddleware.SetSessionAuth(s.sessionValidator, s.permissionResolver)
 		handler = authMiddleware.Wrap(handler)
+	}
+	if s.reliabilityTelemetry != nil {
+		handler = s.reliabilityTelemetry.Middleware(handler)
 	}
 
 	s.httpServer = &http.Server{

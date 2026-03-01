@@ -134,6 +134,11 @@ func TestPermissionsCommandExecCannotDeleteProbe(t *testing.T) {
 	if deleteProbe.Code != http.StatusForbidden {
 		t.Fatalf("expected delete probe to be forbidden, got %d body=%s", deleteProbe.Code, deleteProbe.Body.String())
 	}
+
+	reliability := makeRequest(t, srv, http.MethodGet, "/api/v1/reliability/scorecard", token, "")
+	if reliability.Code != http.StatusForbidden {
+		t.Fatalf("expected reliability scorecard to be forbidden for command-only key, got %d body=%s", reliability.Code, reliability.Body.String())
+	}
 }
 
 func TestPermissionsWebhookManageCanReadDeliveries(t *testing.T) {
@@ -178,6 +183,11 @@ func TestPermissionsFleetReadCanAccessFleetInventoryAndChat(t *testing.T) {
 	history := makeRequest(t, srv, http.MethodGet, "/api/v1/fleet/chat", token, "")
 	if history.Code == http.StatusUnauthorized || history.Code == http.StatusForbidden {
 		t.Fatalf("expected fleet chat read access, got %d body=%s", history.Code, history.Body.String())
+	}
+
+	reliability := makeRequest(t, srv, http.MethodGet, "/api/v1/reliability/scorecard", token, "")
+	if reliability.Code == http.StatusUnauthorized || reliability.Code == http.StatusForbidden {
+		t.Fatalf("expected reliability scorecard read access, got %d body=%s", reliability.Code, reliability.Body.String())
 	}
 }
 
