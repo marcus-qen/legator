@@ -154,7 +154,8 @@ type Server struct {
 
 	// Failure drills
 	drillRunner *reliability.DrillRunner
-	drillStore  *reliability.DrillStore
+	drillStore    *reliability.DrillStore
+	incidentStore *reliability.IncidentStore
 
 	// HTTP
 	httpServer *http.Server
@@ -224,6 +225,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initGrafana()
 	s.initDiscovery()
 	s.initDrills()
+	s.initIncidents()
 	s.initLLM()
 	s.initHub()
 	s.initJobs()
@@ -416,6 +418,9 @@ func (s *Server) Close() {
 	}
 	if s.discoveryStore != nil {
 		s.discoveryStore.Close()
+	}
+	if s.incidentStore != nil {
+		s.incidentStore.Close()
 	}
 	if s.drillStore != nil {
 		s.drillStore.Close()
