@@ -122,6 +122,7 @@ type Server struct {
 	networkDeviceHandlers *networkdevices.Handler
 
 	kubeflowHandlers *kubeflow.Handler
+	kubeflowClient   kubeflow.Client
 	grafanaHandlers  *grafana.Handler
 	grafanaClient    grafana.Client
 
@@ -214,10 +215,9 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 			s.cmdTracker,
 			s.logger,
 			func(id string, request *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error) {
-				return s.approvalCore.DecideAndDispatch(id, request.Decision, request.DecidedBy, func(probeID string, cmd protocol.CommandPayload) error {
-					return s.dispatchCore.Dispatch(probeID, cmd)
-				})
+				return s.approvalCore.DecideAndDispatch(id, request.Decision, request.DecidedBy, s.dispatchApprovedCommand)
 			},
+			mcpserver.WithKubeflowTools(s.mcpKubeflowRunStatus, s.mcpKubeflowSubmitRun, s.mcpKubeflowCancelRun),
 		)
 		s.logger.Info("mcp server enabled", zap.String("path", "/mcp"), zap.String("version", mcpserver.Version))
 	}
@@ -668,6 +668,7 @@ func (s *Server) initKubeflow() {
 		Namespace:  s.cfg.Kubeflow.Namespace,
 		Timeout:    s.cfg.Kubeflow.TimeoutDuration(),
 	})
+	s.kubeflowClient = client
 	s.kubeflowHandlers = kubeflow.NewHandler(client, kubeflow.HandlerOptions{ActionsEnabled: s.cfg.Kubeflow.ActionsEnabled})
 	s.logger.Info("kubeflow adapter enabled",
 		zap.String("namespace", s.cfg.Kubeflow.NamespaceOrDefault()),

@@ -2,8 +2,10 @@ package kubeflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -19,12 +21,16 @@ type runResult struct {
 type fakeRunner struct {
 	results map[string]runResult
 	calls   []string
+	runFn   func(command string, args ...string) (runResult, bool)
 }
 
 func (f *fakeRunner) Run(_ context.Context, command string, args ...string) ([]byte, []byte, error) {
 	key := strings.TrimSpace(command + " " + strings.Join(args, " "))
 	f.calls = append(f.calls, key)
 	res, ok := f.results[key]
+	if !ok && f.runFn != nil {
+		res, ok = f.runFn(command, args...)
+	}
 	if !ok {
 		return nil, nil, fmt.Errorf("unexpected command: %s", key)
 	}
@@ -128,5 +134,130 @@ func TestCLIClientInventoryReturnsCLIMissing(t *testing.T) {
 	}
 	if ce.Code != "cli_missing" {
 		t.Fatalf("expected cli_missing, got %q", ce.Code)
+	}
+}
+
+func TestCLIClientRunStatus(t *testing.T) {
+	runner := &fakeRunner{results: map[string]runResult{
+		"kubectl get runs.kubeflow.org run-a -n kubeflow -o json": {
+			stdout: `{"kind":"Run","metadata":{"name":"run-a","namespace":"kubeflow"},"status":{"phase":"Running","reason":"Healthy","message":"still running"}}`,
+		},
+	}}
+
+	client := NewCLIClient(ClientConfig{Runner: runner})
+	result, err := client.RunStatus(context.Background(), RunStatusRequest{Name: "run-a"})
+	if err != nil {
+		t.Fatalf("run status: %v", err)
+	}
+	if result.Name != "run-a" || result.Namespace != "kubeflow" {
+		t.Fatalf("unexpected run status identity: %+v", result)
+	}
+	if result.Status != "Running" {
+		t.Fatalf("expected Running status, got %s", result.Status)
+	}
+	if result.Reason != "Healthy" {
+		t.Fatalf("expected reason Healthy, got %s", result.Reason)
+	}
+}
+
+func TestCLIClientSubmitRunAppliesManifest(t *testing.T) {
+	var capturedManifest map[string]any
+	runner := &fakeRunner{runFn: func(command string, args ...string) (runResult, bool) {
+		joined := strings.Join(append([]string{command}, args...), " ")
+		if !strings.Contains(joined, " apply -f ") || !strings.Contains(joined, " -n kubeflow -o json") {
+			return runResult{}, false
+		}
+
+		idx := -1
+		for i := range args {
+			if args[i] == "-f" && i+1 < len(args) {
+				idx = i + 1
+				break
+			}
+		}
+		if idx == -1 {
+			t.Fatalf("expected -f arg in %v", args)
+		}
+
+		content, err := os.ReadFile(args[idx])
+		if err != nil {
+			t.Fatalf("read staged manifest: %v", err)
+		}
+		if err := json.Unmarshal(content, &capturedManifest); err != nil {
+			t.Fatalf("decode staged manifest: %v", err)
+		}
+
+		return runResult{stdout: `{"kind":"Run","metadata":{"name":"run-a","namespace":"kubeflow"},"status":{"phase":"Pending"}}`}, true
+	}}
+
+	client := NewCLIClient(ClientConfig{Runner: runner})
+	result, err := client.SubmitRun(context.Background(), SubmitRunRequest{
+		Name: "run-a",
+		Manifest: []byte(`{
+			"apiVersion":"kubeflow.org/v1",
+			"metadata":{},
+			"spec":{"dummy":true}
+		}`),
+	})
+	if err != nil {
+		t.Fatalf("submit run: %v", err)
+	}
+	if result.Run.Name != "run-a" {
+		t.Fatalf("expected run-a, got %+v", result.Run)
+	}
+	if result.Transition.Action != "submit" || result.Transition.After == "" {
+		t.Fatalf("unexpected transition: %+v", result.Transition)
+	}
+
+	metadata, ok := capturedManifest["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected metadata map in captured manifest: %+v", capturedManifest)
+	}
+	if metadata["name"] != "run-a" {
+		t.Fatalf("expected metadata.name run-a, got %+v", metadata)
+	}
+	if metadata["namespace"] != "kubeflow" {
+		t.Fatalf("expected metadata.namespace kubeflow, got %+v", metadata)
+	}
+}
+
+func TestCLIClientCancelRun(t *testing.T) {
+	runner := &fakeRunner{results: map[string]runResult{
+		"kubectl get runs.kubeflow.org run-a -n kubeflow -o json": {
+			stdout: `{"kind":"Run","metadata":{"name":"run-a","namespace":"kubeflow"},"status":{"phase":"Running"}}`,
+		},
+		"kubectl delete runs.kubeflow.org run-a -n kubeflow --ignore-not-found=true": {},
+	}}
+	client := NewCLIClient(ClientConfig{Runner: runner})
+	result, err := client.CancelRun(context.Background(), CancelRunRequest{Name: "run-a"})
+	if err != nil {
+		t.Fatalf("cancel run: %v", err)
+	}
+	if !result.Canceled {
+		t.Fatalf("expected canceled=true, got %+v", result)
+	}
+	if result.Transition.Before != "Running" || result.Transition.After != "canceled" {
+		t.Fatalf("unexpected transition: %+v", result.Transition)
+	}
+}
+
+func TestCLIClientCancelRunNotFound(t *testing.T) {
+	runner := &fakeRunner{results: map[string]runResult{
+		"kubectl get runs.kubeflow.org run-a -n kubeflow -o json": {
+			stderr: "Error from server (NotFound): runs.kubeflow.org \"run-a\" not found",
+			err:    errors.New("exit status 1"),
+		},
+		"kubectl delete runs.kubeflow.org run-a -n kubeflow --ignore-not-found=true": {},
+	}}
+	client := NewCLIClient(ClientConfig{Runner: runner})
+	result, err := client.CancelRun(context.Background(), CancelRunRequest{Name: "run-a"})
+	if err != nil {
+		t.Fatalf("cancel run not found: %v", err)
+	}
+	if result.Canceled {
+		t.Fatalf("expected canceled=false for missing run, got %+v", result)
+	}
+	if result.Transition.After != "not_found" {
+		t.Fatalf("expected not_found transition, got %+v", result.Transition)
 	}
 }

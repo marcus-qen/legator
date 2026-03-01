@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
@@ -10,6 +11,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/jobs"
+	"github.com/marcus-qen/legator/internal/controlplane/kubeflow"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.uber.org/zap"
@@ -20,16 +22,38 @@ var Version = "dev"
 
 // MCPServer exposes Legator control-plane capabilities as MCP tools/resources.
 type MCPServer struct {
-	server         *mcp.Server
-	handler        http.Handler
-	fleetStore     *fleet.Store
-	auditStore     *audit.Store
-	jobsStore      *jobs.Store
-	eventBus       *events.Bus
-	hub            *cpws.Hub
-	dispatcher     *corecommanddispatch.Service
-	decideApproval func(id string, request *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error)
-	logger         *zap.Logger
+	server            *mcp.Server
+	handler           http.Handler
+	fleetStore        *fleet.Store
+	auditStore        *audit.Store
+	jobsStore         *jobs.Store
+	eventBus          *events.Bus
+	hub               *cpws.Hub
+	dispatcher        *corecommanddispatch.Service
+	decideApproval    func(id string, request *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error)
+	kubeflowRunStatus func(context.Context, kubeflow.RunStatusRequest) (kubeflow.RunStatusResult, error)
+	kubeflowSubmitRun func(context.Context, kubeflow.SubmitRunRequest) (map[string]any, error)
+	kubeflowCancelRun func(context.Context, kubeflow.CancelRunRequest) (map[string]any, error)
+	logger            *zap.Logger
+}
+
+// Option customizes MCP server wiring.
+type Option func(*MCPServer)
+
+// WithKubeflowTools wires Kubeflow run tools when callbacks are available.
+func WithKubeflowTools(
+	runStatus func(context.Context, kubeflow.RunStatusRequest) (kubeflow.RunStatusResult, error),
+	submitRun func(context.Context, kubeflow.SubmitRunRequest) (map[string]any, error),
+	cancelRun func(context.Context, kubeflow.CancelRunRequest) (map[string]any, error),
+) Option {
+	return func(server *MCPServer) {
+		if server == nil {
+			return
+		}
+		server.kubeflowRunStatus = runStatus
+		server.kubeflowSubmitRun = submitRun
+		server.kubeflowCancelRun = cancelRun
+	}
 }
 
 // New creates and wires the MCP server surface for Legator.
@@ -42,6 +66,7 @@ func New(
 	cmdTracker *cmdtracker.Tracker,
 	logger *zap.Logger,
 	decideApproval func(id string, request *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error),
+	opts ...Option,
 ) *MCPServer {
 	if logger == nil {
 		logger = zap.NewNop()
@@ -67,6 +92,11 @@ func New(
 		dispatcher:     corecommanddispatch.NewService(hub, cmdTracker),
 		decideApproval: decideApproval,
 		logger:         logger.Named("mcp"),
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(m)
+		}
 	}
 
 	m.registerTools()

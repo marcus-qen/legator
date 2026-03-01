@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -220,6 +221,136 @@ func (c *CLIClient) Refresh(ctx context.Context) (RefreshResult, error) {
 	return RefreshResult{Status: status, Inventory: inventory}, nil
 }
 
+// RunStatus returns normalized status for a specific run-like Kubeflow resource.
+func (c *CLIClient) RunStatus(ctx context.Context, request RunStatusRequest) (RunStatusResult, error) {
+	kind, name, namespace, err := c.normalizeRunTarget(request.Kind, request.Name, request.Namespace)
+	if err != nil {
+		return RunStatusResult{}, err
+	}
+
+	args := append(c.baseArgs(), "get", kind, name, "-n", namespace, "-o", "json")
+	stdout, stderr, err := c.run(ctx, args...)
+	if err != nil {
+		return RunStatusResult{}, classifyKubectlError(err, stderr)
+	}
+	return decodeRunStatus(stdout, kind, name, namespace)
+}
+
+// SubmitRun applies a supplied run/job manifest and reports the resulting status transition.
+func (c *CLIClient) SubmitRun(ctx context.Context, request SubmitRunRequest) (SubmitRunResult, error) {
+	manifest, kind, name, namespace, err := normalizeSubmitManifest(request, c.namespace)
+	if err != nil {
+		return SubmitRunResult{}, err
+	}
+
+	payload, err := json.Marshal(manifest)
+	if err != nil {
+		return SubmitRunResult{}, &ClientError{Code: "parse_error", Message: "failed to serialize submit manifest", Detail: err.Error()}
+	}
+
+	tmp, err := os.CreateTemp("", "legator-kubeflow-submit-*.json")
+	if err != nil {
+		return SubmitRunResult{}, &ClientError{Code: "command_failed", Message: "failed to stage submit manifest", Detail: err.Error()}
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmp.Write(payload); err != nil {
+		_ = tmp.Close()
+		return SubmitRunResult{}, &ClientError{Code: "command_failed", Message: "failed to write submit manifest", Detail: err.Error()}
+	}
+	if err := tmp.Close(); err != nil {
+		return SubmitRunResult{}, &ClientError{Code: "command_failed", Message: "failed to close submit manifest", Detail: err.Error()}
+	}
+
+	args := append(c.baseArgs(), "apply", "-f", tmpPath, "-n", namespace, "-o", "json")
+	stdout, stderr, err := c.run(ctx, args...)
+	if err != nil {
+		return SubmitRunResult{}, classifyKubectlError(err, stderr)
+	}
+
+	run, err := decodeRunStatus(stdout, kind, name, namespace)
+	if err != nil {
+		return SubmitRunResult{}, err
+	}
+
+	if run.Status == "" {
+		run.Status = "submitted"
+	}
+	if run.ObservedAt.IsZero() {
+		run.ObservedAt = time.Now().UTC()
+	}
+
+	transition := StatusTransition{
+		Action:     "submit",
+		Before:     "new",
+		After:      run.Status,
+		Changed:    true,
+		ObservedAt: run.ObservedAt,
+	}
+
+	return SubmitRunResult{
+		Run:         run,
+		Transition:  transition,
+		SubmittedAt: time.Now().UTC(),
+	}, nil
+}
+
+// CancelRun attempts to cancel/delete a run-like Kubeflow resource.
+func (c *CLIClient) CancelRun(ctx context.Context, request CancelRunRequest) (CancelRunResult, error) {
+	kind, name, namespace, err := c.normalizeRunTarget(request.Kind, request.Name, request.Namespace)
+	if err != nil {
+		return CancelRunResult{}, err
+	}
+
+	beforeStatus := "unknown"
+	beforeSnapshot, beforeErr := c.RunStatus(ctx, RunStatusRequest{Kind: kind, Name: name, Namespace: namespace})
+	if beforeErr == nil {
+		beforeStatus = beforeSnapshot.Status
+	} else {
+		var ce *ClientError
+		if !errors.As(beforeErr, &ce) || ce.Code != "resource_missing" {
+			return CancelRunResult{}, beforeErr
+		}
+		beforeStatus = "not_found"
+	}
+
+	args := append(c.baseArgs(), "delete", kind, name, "-n", namespace, "--ignore-not-found=true")
+	_, stderr, err := c.run(ctx, args...)
+	if err != nil {
+		return CancelRunResult{}, classifyKubectlError(err, stderr)
+	}
+
+	observedAt := time.Now().UTC()
+	afterStatus := "canceled"
+	canceled := true
+	if beforeStatus == "not_found" {
+		afterStatus = "not_found"
+		canceled = false
+	}
+
+	result := CancelRunResult{
+		Run: RunStatusResult{
+			Kind:       kind,
+			Name:       name,
+			Namespace:  namespace,
+			Status:     afterStatus,
+			ObservedAt: observedAt,
+		},
+		Transition: StatusTransition{
+			Action:     "cancel",
+			Before:     beforeStatus,
+			After:      afterStatus,
+			Changed:    beforeStatus != afterStatus,
+			ObservedAt: observedAt,
+		},
+		Canceled:   canceled,
+		CanceledAt: observedAt,
+	}
+
+	return result, nil
+}
+
 func (c *CLIClient) clientVersion(ctx context.Context) (string, error) {
 	stdout, stderr, err := c.run(ctx, append(c.baseArgs(), "version", "--client=true", "-o", "json")...)
 	if err != nil {
@@ -337,6 +468,132 @@ func (c *CLIClient) listResource(ctx context.Context, resource trackedResource) 
 	return out, nil
 }
 
+func (c *CLIClient) normalizeRunTarget(kind, name, namespace string) (string, string, string, error) {
+	resolvedKind := strings.TrimSpace(kind)
+	if resolvedKind == "" {
+		resolvedKind = DefaultRunResource
+	}
+	resolvedName := strings.TrimSpace(name)
+	if resolvedName == "" {
+		return "", "", "", &ClientError{Code: "invalid_request", Message: "run name is required"}
+	}
+	resolvedNamespace := strings.TrimSpace(namespace)
+	if resolvedNamespace == "" {
+		resolvedNamespace = c.namespace
+	}
+	return resolvedKind, resolvedName, resolvedNamespace, nil
+}
+
+func decodeRunStatus(stdout []byte, fallbackKind, fallbackName, fallbackNamespace string) (RunStatusResult, error) {
+	var payload struct {
+		Kind     string `json:"kind"`
+		Metadata struct {
+			Name      string            `json:"name"`
+			Namespace string            `json:"namespace"`
+			Labels    map[string]string `json:"labels"`
+		} `json:"metadata"`
+		Status map[string]any `json:"status"`
+	}
+	if err := json.Unmarshal(stdout, &payload); err != nil {
+		return RunStatusResult{}, &ClientError{Code: "parse_error", Message: "failed to parse run status", Detail: err.Error()}
+	}
+
+	result := RunStatusResult{
+		Kind:       strings.TrimSpace(payload.Kind),
+		Name:       strings.TrimSpace(payload.Metadata.Name),
+		Namespace:  strings.TrimSpace(payload.Metadata.Namespace),
+		Status:     deriveStatus(payload.Status),
+		Labels:     cloneStringMap(payload.Metadata.Labels),
+		ObservedAt: time.Now().UTC(),
+	}
+	if result.Kind == "" {
+		result.Kind = fallbackKind
+	}
+	if result.Name == "" {
+		result.Name = fallbackName
+	}
+	if result.Namespace == "" {
+		result.Namespace = fallbackNamespace
+	}
+	if result.Status == "" {
+		result.Status = "unknown"
+	}
+	result.Message = statusField(payload.Status, "message")
+	result.Reason = statusField(payload.Status, "reason")
+	if result.Name == "" {
+		return RunStatusResult{}, &ClientError{Code: "parse_error", Message: "run status payload missing metadata.name"}
+	}
+	return result, nil
+}
+
+func normalizeSubmitManifest(request SubmitRunRequest, defaultNamespace string) (map[string]any, string, string, string, error) {
+	if len(request.Manifest) == 0 {
+		return nil, "", "", "", &ClientError{Code: "invalid_request", Message: "manifest is required"}
+	}
+
+	var manifest map[string]any
+	if err := json.Unmarshal(request.Manifest, &manifest); err != nil {
+		return nil, "", "", "", &ClientError{Code: "invalid_request", Message: "manifest must be a valid JSON object", Detail: err.Error()}
+	}
+	if len(manifest) == 0 {
+		return nil, "", "", "", &ClientError{Code: "invalid_request", Message: "manifest is required"}
+	}
+
+	kind := strings.TrimSpace(request.Kind)
+	if kind == "" {
+		kind = strings.TrimSpace(fmt.Sprintf("%v", manifest["kind"]))
+	}
+	if kind == "" || strings.EqualFold(kind, "<nil>") {
+		kind = DefaultRunResource
+	}
+	manifest["kind"] = kind
+
+	metadata := map[string]any{}
+	if rawMetadata, ok := manifest["metadata"]; ok {
+		existing, ok := rawMetadata.(map[string]any)
+		if !ok {
+			return nil, "", "", "", &ClientError{Code: "invalid_request", Message: "manifest.metadata must be an object"}
+		}
+		metadata = existing
+	}
+
+	name := strings.TrimSpace(request.Name)
+	if name == "" {
+		name = strings.TrimSpace(fmt.Sprintf("%v", metadata["name"]))
+	}
+	if name == "" || strings.EqualFold(name, "<nil>") {
+		return nil, "", "", "", &ClientError{Code: "invalid_request", Message: "run name is required"}
+	}
+	metadata["name"] = name
+
+	namespace := strings.TrimSpace(request.Namespace)
+	if namespace == "" {
+		namespace = strings.TrimSpace(fmt.Sprintf("%v", metadata["namespace"]))
+	}
+	if namespace == "" || strings.EqualFold(namespace, "<nil>") {
+		namespace = strings.TrimSpace(defaultNamespace)
+	}
+	metadata["namespace"] = namespace
+	manifest["metadata"] = metadata
+
+	return manifest, kind, name, namespace, nil
+}
+
+func statusField(status map[string]any, key string) string {
+	if len(status) == 0 {
+		return ""
+	}
+	value, ok := status[key]
+	if !ok {
+		return ""
+	}
+	text := strings.TrimSpace(fmt.Sprintf("%v", value))
+	if text == "" || strings.EqualFold(text, "<nil>") {
+		return ""
+	}
+	return text
+}
+
 func (c *CLIClient) run(ctx context.Context, args ...string) ([]byte, []byte, error) {
 	runCtx := ctx
 	if c.timeout > 0 {
@@ -378,6 +635,9 @@ func classifyKubectlError(err error, stderr []byte) error {
 	}
 	if strings.Contains(lower, "connection refused") || strings.Contains(lower, "no such host") || strings.Contains(lower, "unable to connect") {
 		return &ClientError{Code: "cluster_unreachable", Message: "kubernetes cluster unreachable", Detail: stderrText}
+	}
+	if strings.Contains(lower, "not found") || strings.Contains(lower, "notfound") {
+		return &ClientError{Code: "resource_missing", Message: "kubeflow resource not found", Detail: stderrText}
 	}
 
 	if stderrText == "" {

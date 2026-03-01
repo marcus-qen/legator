@@ -174,7 +174,7 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 | `LEGATOR_KUBEFLOW_KUBECONFIG` | — | Optional kubeconfig path for kubectl |
 | `LEGATOR_KUBEFLOW_CONTEXT` | — | Optional kubeconfig context override |
 | `LEGATOR_KUBEFLOW_TIMEOUT` | `15s` | Timeout per kubectl call for adapter reads |
-| `LEGATOR_KUBEFLOW_ACTIONS_ENABLED` | `false` | Enable guarded action endpoint (`POST /api/v1/kubeflow/actions/refresh`) |
+| `LEGATOR_KUBEFLOW_ACTIONS_ENABLED` | `false` | Enable guarded Kubeflow mutation endpoints (`POST /api/v1/kubeflow/actions/refresh`, `POST /api/v1/kubeflow/runs/submit`, `POST /api/v1/kubeflow/runs/{name}/cancel`) |
 | `LEGATOR_GRAFANA_ENABLED` | `false` | Enable Grafana adapter endpoints |
 | `LEGATOR_GRAFANA_BASE_URL` | — | Grafana base URL for adapter reads |
 | `LEGATOR_GRAFANA_API_TOKEN` | — | Optional Bearer token for Grafana API reads |
@@ -226,7 +226,7 @@ make release-build    # Cross-compile release binaries (incl. windows/amd64 prob
 - **Auth**: `GET/POST/DELETE /api/v1/auth/keys`, `GET/POST/DELETE /api/v1/users`
 - **Model Dock**: `GET/POST /api/v1/model-profiles`, `PUT/DELETE /api/v1/model-profiles/{id}`, `POST /api/v1/model-profiles/{id}/activate`, `GET /api/v1/model-profiles/active`, `GET /api/v1/model-usage`
 - **Cloud Connectors**: `GET/POST /api/v1/cloud/connectors`, `PUT/DELETE /api/v1/cloud/connectors/{id}`, `POST /api/v1/cloud/connectors/{id}/scan`, `GET /api/v1/cloud/assets`
-- **Kubeflow**: `GET /api/v1/kubeflow/status`, `GET /api/v1/kubeflow/inventory`, `POST /api/v1/kubeflow/actions/refresh` (disabled by default)
+- **Kubeflow**: `GET /api/v1/kubeflow/status`, `GET /api/v1/kubeflow/inventory`, `GET /api/v1/kubeflow/runs/{name}/status`, `POST /api/v1/kubeflow/actions/refresh`, `POST /api/v1/kubeflow/runs/submit`, `POST /api/v1/kubeflow/runs/{name}/cancel` (mutations disabled by default)
 - **Grafana**: `GET /api/v1/grafana/status`, `GET /api/v1/grafana/snapshot` (disabled by default)
 - **Network Devices**: `GET/POST /api/v1/network/devices`, `GET/PUT/DELETE /api/v1/network/devices/{id}`, `POST /api/v1/network/devices/{id}/test`, `POST /api/v1/network/devices/{id}/inventory`
 - **Discovery**: `POST /api/v1/discovery/scan`, `GET /api/v1/discovery/runs`, `GET /api/v1/discovery/runs/{id}`, `POST /api/v1/discovery/install-token`

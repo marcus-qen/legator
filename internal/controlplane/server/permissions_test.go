@@ -276,21 +276,23 @@ func TestPermissionsKubeflowRoutes(t *testing.T) {
 	readToken := createAPIKey(t, srv, "fleet-read", auth.PermFleetRead)
 	writeToken := createAPIKey(t, srv, "fleet-write", auth.PermFleetWrite)
 
-	for _, path := range []string{"/api/v1/kubeflow/status", "/api/v1/kubeflow/inventory"} {
+	for _, path := range []string{"/api/v1/kubeflow/status", "/api/v1/kubeflow/inventory", "/api/v1/kubeflow/runs/run-a/status"} {
 		rr := makeRequest(t, srv, http.MethodGet, path, readToken, "")
 		if rr.Code == http.StatusUnauthorized || rr.Code == http.StatusForbidden {
 			t.Fatalf("expected fleet:read to access %s, got %d body=%s", path, rr.Code, rr.Body.String())
 		}
 	}
 
-	refreshDenied := makeRequest(t, srv, http.MethodPost, "/api/v1/kubeflow/actions/refresh", readToken, "")
-	if refreshDenied.Code != http.StatusForbidden {
-		t.Fatalf("expected fleet:read to be denied for refresh action, got %d body=%s", refreshDenied.Code, refreshDenied.Body.String())
-	}
+	for _, path := range []string{"/api/v1/kubeflow/actions/refresh", "/api/v1/kubeflow/runs/submit", "/api/v1/kubeflow/runs/run-a/cancel"} {
+		denied := makeRequest(t, srv, http.MethodPost, path, readToken, "{}")
+		if denied.Code != http.StatusForbidden {
+			t.Fatalf("expected fleet:read to be denied for %s, got %d body=%s", path, denied.Code, denied.Body.String())
+		}
 
-	refreshAllowed := makeRequest(t, srv, http.MethodPost, "/api/v1/kubeflow/actions/refresh", writeToken, "")
-	if refreshAllowed.Code == http.StatusUnauthorized || refreshAllowed.Code == http.StatusForbidden {
-		t.Fatalf("expected fleet:write to pass authz for refresh route, got %d body=%s", refreshAllowed.Code, refreshAllowed.Body.String())
+		allowed := makeRequest(t, srv, http.MethodPost, path, writeToken, "{}")
+		if allowed.Code == http.StatusUnauthorized || allowed.Code == http.StatusForbidden {
+			t.Fatalf("expected fleet:write to pass authz for %s, got %d body=%s", path, allowed.Code, allowed.Body.String())
+		}
 	}
 }
 
