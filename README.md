@@ -143,7 +143,7 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 | Cloud connectors (AWS/GCP/Azure, agentless inventory ingestion) | ✅ |
 | Kubeflow adapter MVP (read-only status/inventory + guarded refresh action) | ✅ |
 | Grafana adapter Stage 2.1 (read-only status + capacity snapshot) | ✅ |
-| Federation read model Stage 3.7.2 (cross-cluster query/filter parity across API/MCP/UI) | ✅ |
+| Federation read model Stage 3.7.3 (scoped auth + tenancy boundaries across API/MCP/UI) | ✅ |
 | Capacity-aware policy decisions Stage 2.2 (allow/deny/queue + rationale payloads) | ✅ |
 | Operator explainability panel Stage 2.3 (approval UI rationale + capacity drivers) | ✅ |
 | Auto-discovery + registration assist (network/SSH scan + guided registration) | ✅ |
@@ -218,6 +218,8 @@ Compatibility/deprecation policy: `docs/api-mcp-compatibility.md`.
 
 - **Fleet**: `GET /api/v1/probes`, `GET /api/v1/fleet/summary`, `POST /api/v1/probes/{id}/command`
 - **Federation (read-only)**: `GET /api/v1/federation/inventory`, `GET /api/v1/federation/summary`
+  - Additive tenancy filters: `tenant_id` (`tenant`), `org_id` (`org`), `scope_id` (`scope`)
+  - Optional scoped auth grants on API keys/users: `tenant:<id>`, `org:<id>`, `scope:<id>` (restricts returned federation data even when no explicit tenancy query is provided)
 - **Jobs**: `GET/POST /api/v1/jobs`, `POST /api/v1/jobs/{id}/run`, `POST /api/v1/jobs/{id}/cancel`, `GET /api/v1/jobs/{id}/runs`, `POST /api/v1/jobs/{id}/runs/{runId}/cancel`, `POST /api/v1/jobs/{id}/runs/{runId}/retry`, `GET /api/v1/jobs/runs`
   - Optional per-job retry policy (additive):
     - `retry_policy.max_attempts`

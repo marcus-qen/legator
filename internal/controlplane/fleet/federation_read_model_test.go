@@ -189,6 +189,61 @@ func TestFederationStoreInventory_AppliesSourceAndInventoryFilters(t *testing.T)
 	}
 }
 
+func TestFederationStoreInventory_AppliesTenancyFiltersAndSegmentation(t *testing.T) {
+	adapterA := &stubFederationAdapter{
+		source: FederationSourceDescriptor{ID: "edge-a", Name: "Edge A", Kind: "k8s", Cluster: "eu-west", Site: "dc-9", TenantID: "tenant-a", OrgID: "org-a", ScopeID: "scope-a"},
+		result: FederationSourceResult{Inventory: FleetInventory{Probes: []ProbeInventorySummary{{ID: "probe-a", Hostname: "a-01", Status: "online", OS: "linux", Tags: []string{"prod"}}}}},
+	}
+	adapterB := &stubFederationAdapter{
+		source: FederationSourceDescriptor{ID: "edge-b", Name: "Edge B", Kind: "k8s", Cluster: "eu-east", Site: "dc-2", TenantID: "tenant-b", OrgID: "org-b", ScopeID: "scope-b"},
+		result: FederationSourceResult{Inventory: FleetInventory{Probes: []ProbeInventorySummary{{ID: "probe-b", Hostname: "b-01", Status: "online", OS: "linux", Tags: []string{"prod"}}}}},
+	}
+
+	store := NewFederationStore(adapterA, adapterB)
+
+	filtered := store.Inventory(context.Background(), FederationFilter{TenantID: "tenant-a", ScopeID: "scope-a"})
+	if filtered.Aggregates.TotalSources != 1 {
+		t.Fatalf("expected one tenant-scoped source, got %d", filtered.Aggregates.TotalSources)
+	}
+	if len(filtered.Probes) != 1 || filtered.Probes[0].Probe.ID != "probe-a" {
+		t.Fatalf("expected only tenant-a probe, got %+v", filtered.Probes)
+	}
+	if filtered.Probes[0].Source.TenantID != "tenant-a" || filtered.Probes[0].Source.OrgID != "org-a" || filtered.Probes[0].Source.ScopeID != "scope-a" {
+		t.Fatalf("expected tenant attribution on probe payload, got %+v", filtered.Probes[0].Source)
+	}
+
+	allowedOnly := store.Inventory(context.Background(), FederationFilter{AllowedTenantIDs: []string{"tenant-b"}, AllowedScopeIDs: []string{"scope-b"}})
+	if allowedOnly.Aggregates.TotalSources != 1 {
+		t.Fatalf("expected one source after allowed-scope enforcement, got %d", allowedOnly.Aggregates.TotalSources)
+	}
+	if len(allowedOnly.Probes) != 1 || allowedOnly.Probes[0].Probe.ID != "probe-b" {
+		t.Fatalf("expected only allowed-scope probe, got %+v", allowedOnly.Probes)
+	}
+	if allowedOnly.Aggregates.TenantDistribution["tenant-b"] != 1 {
+		t.Fatalf("expected tenant distribution to include tenant-b, got %+v", allowedOnly.Aggregates.TenantDistribution)
+	}
+	if allowedOnly.Aggregates.ScopeDistribution["scope-b"] != 1 {
+		t.Fatalf("expected scope distribution to include scope-b, got %+v", allowedOnly.Aggregates.ScopeDistribution)
+	}
+}
+
+func TestFederationStoreInventory_DefaultTenancyWhenUnset(t *testing.T) {
+	adapter := &stubFederationAdapter{
+		source: FederationSourceDescriptor{ID: "local", Name: "Local", Kind: "control-plane"},
+		result: FederationSourceResult{Inventory: FleetInventory{Probes: []ProbeInventorySummary{{ID: "probe-1", Hostname: "local-1", Status: "online", OS: "linux"}}}},
+	}
+
+	store := NewFederationStore(adapter)
+	inv := store.Inventory(context.Background(), FederationFilter{})
+	if len(inv.Probes) != 1 {
+		t.Fatalf("expected one probe in default tenancy inventory, got %d", len(inv.Probes))
+	}
+	source := inv.Probes[0].Source
+	if source.TenantID != "default" || source.OrgID != "default" || source.ScopeID != "default" {
+		t.Fatalf("expected default tenancy attribution, got %+v", source)
+	}
+}
+
 func TestFederationStoreSummary_MatchesInventoryRollupsForSameFilter(t *testing.T) {
 	adapter := &stubFederationAdapter{
 		source: FederationSourceDescriptor{ID: "edge-a", Name: "Edge A", Kind: "k8s", Cluster: "eu-west", Site: "dc-9"},

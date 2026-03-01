@@ -157,11 +157,22 @@ func (s *MCPServer) handleFederationInventoryResource(ctx context.Context, req *
 	if s.federationStore == nil {
 		return nil, fmt.Errorf("federation store unavailable")
 	}
+	if err := s.requirePermission(ctx, auth.PermFleetRead); err != nil {
+		return nil, err
+	}
 	uri := resourceFederationInventory
 	if req != nil && req.Params != nil && req.Params.URI != "" {
 		uri = req.Params.URI
 	}
-	inventory := s.federationStore.Inventory(ctx, federationFilterFromResourceURI(uri))
+	requested := federationFilterFromResourceURI(uri)
+	access := auth.FederationAccessScopeFromContext(ctx)
+	effective, authzErr := applyFederationAccessFilterForMCP(requested, access)
+	if authzErr != nil {
+		s.recordFederationMCPAuthorizationDenied(ctx, "resource:legator://federation/inventory", requested, effective, access, authzErr)
+		return nil, authzErr
+	}
+	inventory := s.federationStore.Inventory(ctx, effective)
+	s.recordFederationMCPReadAudit(ctx, "resource:legator://federation/inventory", requested, effective, access, len(inventory.Sources), len(inventory.Probes))
 	return buildJSONResourceResult(req, resourceFederationInventory, inventory)
 }
 
@@ -169,11 +180,22 @@ func (s *MCPServer) handleFederationSummaryResource(ctx context.Context, req *mc
 	if s.federationStore == nil {
 		return nil, fmt.Errorf("federation store unavailable")
 	}
+	if err := s.requirePermission(ctx, auth.PermFleetRead); err != nil {
+		return nil, err
+	}
 	uri := resourceFederationSummary
 	if req != nil && req.Params != nil && req.Params.URI != "" {
 		uri = req.Params.URI
 	}
-	summary := s.federationStore.Summary(ctx, federationFilterFromResourceURI(uri))
+	requested := federationFilterFromResourceURI(uri)
+	access := auth.FederationAccessScopeFromContext(ctx)
+	effective, authzErr := applyFederationAccessFilterForMCP(requested, access)
+	if authzErr != nil {
+		s.recordFederationMCPAuthorizationDenied(ctx, "resource:legator://federation/summary", requested, effective, access, authzErr)
+		return nil, authzErr
+	}
+	summary := s.federationStore.Summary(ctx, effective)
+	s.recordFederationMCPReadAudit(ctx, "resource:legator://federation/summary", requested, effective, access, len(summary.Sources), summary.Aggregates.TotalProbes)
 	return buildJSONResourceResult(req, resourceFederationSummary, summary)
 }
 
@@ -305,12 +327,15 @@ func federationFilterFromResourceURI(rawURI string) fleet.FederationFilter {
 	}
 	q := parsed.Query()
 	return fleet.FederationFilter{
-		Tag:     strings.TrimSpace(q.Get("tag")),
-		Status:  strings.TrimSpace(q.Get("status")),
-		Source:  strings.TrimSpace(q.Get("source")),
-		Cluster: strings.TrimSpace(q.Get("cluster")),
-		Site:    strings.TrimSpace(q.Get("site")),
-		Search:  strings.TrimSpace(q.Get("search")),
+		Tag:      strings.TrimSpace(q.Get("tag")),
+		Status:   strings.TrimSpace(q.Get("status")),
+		Source:   strings.TrimSpace(q.Get("source")),
+		Cluster:  strings.TrimSpace(q.Get("cluster")),
+		Site:     strings.TrimSpace(q.Get("site")),
+		Search:   strings.TrimSpace(q.Get("search")),
+		TenantID: strings.TrimSpace(firstNonEmptyFederationQueryParam(q.Get("tenant_id"), q.Get("tenant"))),
+		OrgID:    strings.TrimSpace(firstNonEmptyFederationQueryParam(q.Get("org_id"), q.Get("org"))),
+		ScopeID:  strings.TrimSpace(firstNonEmptyFederationQueryParam(q.Get("scope_id"), q.Get("scope"))),
 	}
 }
 

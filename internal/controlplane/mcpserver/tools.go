@@ -40,12 +40,15 @@ type fleetQueryInput struct {
 }
 
 type federationQueryInput struct {
-	Tag     string `json:"tag,omitempty" jsonschema:"optional tag filter"`
-	Status  string `json:"status,omitempty" jsonschema:"optional status filter (online/offline/degraded/pending)"`
-	Source  string `json:"source,omitempty" jsonschema:"optional source id/name filter"`
-	Cluster string `json:"cluster,omitempty" jsonschema:"optional cluster filter"`
-	Site    string `json:"site,omitempty" jsonschema:"optional site filter"`
-	Search  string `json:"search,omitempty" jsonschema:"optional free-text search across probe/source fields"`
+	Tag      string `json:"tag,omitempty" jsonschema:"optional tag filter"`
+	Status   string `json:"status,omitempty" jsonschema:"optional status filter (online/offline/degraded/pending)"`
+	Source   string `json:"source,omitempty" jsonschema:"optional source id/name filter"`
+	Cluster  string `json:"cluster,omitempty" jsonschema:"optional cluster filter"`
+	Site     string `json:"site,omitempty" jsonschema:"optional site filter"`
+	Search   string `json:"search,omitempty" jsonschema:"optional free-text search across probe/source fields"`
+	TenantID string `json:"tenant_id,omitempty" jsonschema:"optional tenant scope filter"`
+	OrgID    string `json:"org_id,omitempty" jsonschema:"optional organization scope filter"`
+	ScopeID  string `json:"scope_id,omitempty" jsonschema:"optional federation scope filter"`
 }
 
 type searchAuditInput struct {
@@ -209,12 +212,12 @@ func (s *MCPServer) registerTools() {
 
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "legator_federation_inventory",
-		Description: "Get federated inventory across sources with source/cluster/site/tag/status/search filters",
+		Description: "Get federated inventory across sources with source/cluster/site/tag/status/search and tenant/org/scope filters",
 	}, s.handleFederationInventory)
 
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "legator_federation_summary",
-		Description: "Get federated source health/aggregate rollups with source/cluster/site/tag/status/search filters",
+		Description: "Get federated source health/aggregate rollups with source/cluster/site/tag/status/search and tenant/org/scope filters",
 	}, s.handleFederationSummary)
 
 	mcp.AddTool(s.server, &mcp.Tool{
@@ -579,8 +582,20 @@ func (s *MCPServer) handleFederationInventory(ctx context.Context, _ *mcp.CallTo
 	if s.federationStore == nil {
 		return nil, nil, fmt.Errorf("federation store unavailable")
 	}
-	filter := federationFilterFromMCPInput(input)
-	inventory := s.federationStore.Inventory(ctx, filter)
+	if err := s.requirePermission(ctx, auth.PermFleetRead); err != nil {
+		return nil, nil, err
+	}
+
+	requested := federationFilterFromMCPInput(input)
+	access := auth.FederationAccessScopeFromContext(ctx)
+	effective, authzErr := applyFederationAccessFilterForMCP(requested, access)
+	if authzErr != nil {
+		s.recordFederationMCPAuthorizationDenied(ctx, "tool:legator_federation_inventory", requested, effective, access, authzErr)
+		return nil, nil, authzErr
+	}
+
+	inventory := s.federationStore.Inventory(ctx, effective)
+	s.recordFederationMCPReadAudit(ctx, "tool:legator_federation_inventory", requested, effective, access, len(inventory.Sources), len(inventory.Probes))
 	return jsonToolResult(inventory)
 }
 
@@ -588,8 +603,20 @@ func (s *MCPServer) handleFederationSummary(ctx context.Context, _ *mcp.CallTool
 	if s.federationStore == nil {
 		return nil, nil, fmt.Errorf("federation store unavailable")
 	}
-	filter := federationFilterFromMCPInput(input)
-	summary := s.federationStore.Summary(ctx, filter)
+	if err := s.requirePermission(ctx, auth.PermFleetRead); err != nil {
+		return nil, nil, err
+	}
+
+	requested := federationFilterFromMCPInput(input)
+	access := auth.FederationAccessScopeFromContext(ctx)
+	effective, authzErr := applyFederationAccessFilterForMCP(requested, access)
+	if authzErr != nil {
+		s.recordFederationMCPAuthorizationDenied(ctx, "tool:legator_federation_summary", requested, effective, access, authzErr)
+		return nil, nil, authzErr
+	}
+
+	summary := s.federationStore.Summary(ctx, effective)
+	s.recordFederationMCPReadAudit(ctx, "tool:legator_federation_summary", requested, effective, access, len(summary.Sources), summary.Aggregates.TotalProbes)
 	return jsonToolResult(summary)
 }
 
@@ -953,12 +980,15 @@ func (s *MCPServer) handleStreamJobEvents(ctx context.Context, _ *mcp.CallToolRe
 
 func federationFilterFromMCPInput(input federationQueryInput) fleet.FederationFilter {
 	return fleet.FederationFilter{
-		Tag:     strings.TrimSpace(input.Tag),
-		Status:  strings.TrimSpace(input.Status),
-		Source:  strings.TrimSpace(input.Source),
-		Cluster: strings.TrimSpace(input.Cluster),
-		Site:    strings.TrimSpace(input.Site),
-		Search:  strings.TrimSpace(input.Search),
+		Tag:      strings.TrimSpace(input.Tag),
+		Status:   strings.TrimSpace(input.Status),
+		Source:   strings.TrimSpace(input.Source),
+		Cluster:  strings.TrimSpace(input.Cluster),
+		Site:     strings.TrimSpace(input.Site),
+		Search:   strings.TrimSpace(input.Search),
+		TenantID: strings.TrimSpace(firstNonEmptyFederationQueryParam(input.TenantID)),
+		OrgID:    strings.TrimSpace(firstNonEmptyFederationQueryParam(input.OrgID)),
+		ScopeID:  strings.TrimSpace(firstNonEmptyFederationQueryParam(input.ScopeID)),
 	}
 }
 
