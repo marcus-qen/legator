@@ -127,6 +127,16 @@
   - Added tests for aggregation behavior, unavailable/partial source edge cases, and server handler/permission responses.
   - Added docs: `docs/federation-read-model.md` and README API/docs updates.
   - **[compat:additive]** Added read-only federation endpoints and payloads; existing write/mutation surfaces are unchanged.
+- **Stage 3.7.2 Federation: cross-cluster query + filter parity (API/MCP/UI)**
+  - Extended federation query/filter semantics with additive `search` support plus unified source/site/cluster/tag/status/search handling in the federation read model.
+  - Added federated aggregate `tag_distribution` rollups and enforced adapter-independent filter semantics in the federation aggregator.
+  - Added MCP federation parity surfaces:
+    - Tools: `legator_federation_inventory`, `legator_federation_summary`
+    - Resources: `legator://federation/inventory`, `legator://federation/summary`
+  - Added web UI federation view (`/federation`) with shared filters (`source`, `cluster`, `site`, `tag`, `status`, `search`) over federation inventory/summary APIs.
+  - Added parity/semantics test coverage for federation filters across read-model, REST, and MCP resource/tool paths.
+  - Updated docs/contracts/release notes for Stage 3.7.2.
+  - **[compat:additive]** Added MCP federation tools/resources and additive federation filter/aggregate fields without changing existing identifiers.
 - **Jobs cancellation API + lifecycle guardrails**
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.

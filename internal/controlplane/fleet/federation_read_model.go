@@ -26,6 +26,7 @@ type FederationFilter struct {
 	Source  string `json:"source,omitempty"`
 	Cluster string `json:"cluster,omitempty"`
 	Site    string `json:"site,omitempty"`
+	Search  string `json:"search,omitempty"`
 }
 
 // FederationSourceDescriptor identifies an inventory source.
@@ -142,10 +143,11 @@ type FederatedAggregates struct {
 	Online             int            `json:"online"`
 	TotalCPUs          int            `json:"total_cpus"`
 	TotalRAMBytes      uint64         `json:"total_ram_bytes"`
-	ProbesByOS         map[string]int `json:"probes_by_os"`
-	SourceDistribution map[string]int `json:"source_distribution"`
+	ProbesByOS          map[string]int `json:"probes_by_os"`
+	TagDistribution     map[string]int `json:"tag_distribution"`
+	SourceDistribution  map[string]int `json:"source_distribution"`
 	ClusterDistribution map[string]int `json:"cluster_distribution"`
-	SiteDistribution   map[string]int `json:"site_distribution"`
+	SiteDistribution    map[string]int `json:"site_distribution"`
 }
 
 // FederatedInventory is the additive API payload for federated inventory reads.
@@ -204,6 +206,7 @@ func (s *FederationStore) Inventory(ctx context.Context, filter FederationFilter
 		Sources: []FederatedSourceSummary{},
 		Aggregates: FederatedAggregates{
 			ProbesByOS:          map[string]int{},
+			TagDistribution:     map[string]int{},
 			SourceDistribution:  map[string]int{},
 			ClusterDistribution: map[string]int{},
 			SiteDistribution:    map[string]int{},
@@ -216,6 +219,7 @@ func (s *FederationStore) Inventory(ctx context.Context, filter FederationFilter
 		Tag:    strings.TrimSpace(filter.Tag),
 		Status: strings.TrimSpace(filter.Status),
 	}
+	searchNeedle := normalizeFederationSearch(filter.Search)
 
 	for _, adapter := range adapters {
 		source := normalizeFederationSourceDescriptor(adapter.Source())
@@ -223,7 +227,7 @@ func (s *FederationStore) Inventory(ctx context.Context, filter FederationFilter
 			continue
 		}
 
-		result.Aggregates.TotalSources++
+		sourceMatchesSearch := searchNeedle == "" || matchesFederationSearchInSource(source, searchNeedle)
 		sourceStatus := FederationSourceHealthy
 		summary := FederatedSourceSummary{
 			Source: FederatedSourceAttribution{
@@ -242,6 +246,11 @@ func (s *FederationStore) Inventory(ctx context.Context, filter FederationFilter
 
 		sourceResult, err := adapter.Inventory(ctx, invFilter)
 		if err != nil {
+			if searchNeedle != "" && !sourceMatchesSearch {
+				continue
+			}
+
+			result.Aggregates.TotalSources++
 			sourceStatus = FederationSourceUnavailable
 			summary.Source.Status = sourceStatus
 			summary.Error = err.Error()
@@ -254,10 +263,16 @@ func (s *FederationStore) Inventory(ctx context.Context, filter FederationFilter
 			continue
 		}
 
+		filteredProbes := filterFederatedProbes(sourceResult.Inventory.Probes, source, invFilter, searchNeedle, sourceMatchesSearch)
+		if searchNeedle != "" && len(filteredProbes) == 0 && !sourceMatchesSearch {
+			continue
+		}
+
+		result.Aggregates.TotalSources++
 		summary.Partial = sourceResult.Partial
 		summary.Warnings = dedupeAndSortStrings(sourceResult.Warnings)
 		summary.CollectedAt = sourceResult.CollectedAt.UTC()
-		summary.Aggregates = cloneFleetAggregates(sourceResult.Inventory.Aggregates)
+		summary.Aggregates = aggregateProbeSummaries(filteredProbes)
 
 		if summary.Partial || len(summary.Warnings) > 0 {
 			sourceStatus = FederationSourceDegraded
@@ -272,20 +287,23 @@ func (s *FederationStore) Inventory(ctx context.Context, filter FederationFilter
 			Warnings: append([]string(nil), summary.Warnings...),
 		})
 
-		result.Aggregates.TotalProbes += sourceResult.Inventory.Aggregates.TotalProbes
-		result.Aggregates.Online += sourceResult.Inventory.Aggregates.Online
-		result.Aggregates.TotalCPUs += sourceResult.Inventory.Aggregates.TotalCPUs
-		result.Aggregates.TotalRAMBytes += sourceResult.Inventory.Aggregates.TotalRAMBytes
+		result.Aggregates.TotalProbes += summary.Aggregates.TotalProbes
+		result.Aggregates.Online += summary.Aggregates.Online
+		result.Aggregates.TotalCPUs += summary.Aggregates.TotalCPUs
+		result.Aggregates.TotalRAMBytes += summary.Aggregates.TotalRAMBytes
 
-		for osKey, count := range sourceResult.Inventory.Aggregates.ProbesByOS {
+		for osKey, count := range summary.Aggregates.ProbesByOS {
 			result.Aggregates.ProbesByOS[osKey] += count
 		}
+		for tagKey, count := range summary.Aggregates.TagDistribution {
+			result.Aggregates.TagDistribution[tagKey] += count
+		}
 
-		result.Aggregates.SourceDistribution[source.ID] += sourceResult.Inventory.Aggregates.TotalProbes
-		result.Aggregates.ClusterDistribution[source.Cluster] += sourceResult.Inventory.Aggregates.TotalProbes
-		result.Aggregates.SiteDistribution[source.Site] += sourceResult.Inventory.Aggregates.TotalProbes
+		result.Aggregates.SourceDistribution[source.ID] += summary.Aggregates.TotalProbes
+		result.Aggregates.ClusterDistribution[source.Cluster] += summary.Aggregates.TotalProbes
+		result.Aggregates.SiteDistribution[source.Site] += summary.Aggregates.TotalProbes
 
-		for _, probe := range sourceResult.Inventory.Probes {
+		for _, probe := range filteredProbes {
 			result.Probes = append(result.Probes, FederatedProbeInventory{
 				Source: summary.Source,
 				Probe:  cloneProbeInventorySummary(probe),
@@ -399,6 +417,117 @@ func matchesFederationSourceFilter(source FederationSourceDescriptor, filter Fed
 	return true
 }
 
+func filterFederatedProbes(probes []ProbeInventorySummary, source FederationSourceDescriptor, filter InventoryFilter, searchNeedle string, sourceMatchesSearch bool) []ProbeInventorySummary {
+	if len(probes) == 0 {
+		return nil
+	}
+
+	out := make([]ProbeInventorySummary, 0, len(probes))
+	for _, probe := range probes {
+		if !matchesFederatedProbeFilter(probe, source, filter, searchNeedle, sourceMatchesSearch) {
+			continue
+		}
+		out = append(out, cloneProbeInventorySummary(probe))
+	}
+	return out
+}
+
+func matchesFederatedProbeFilter(probe ProbeInventorySummary, source FederationSourceDescriptor, filter InventoryFilter, searchNeedle string, sourceMatchesSearch bool) bool {
+	statusNeedle := strings.ToLower(strings.TrimSpace(filter.Status))
+	if statusNeedle != "" && statusNeedle != strings.ToLower(strings.TrimSpace(probe.Status)) {
+		return false
+	}
+
+	tagNeedle := strings.ToLower(strings.TrimSpace(filter.Tag))
+	if tagNeedle != "" && !hasTag(probe.Tags, tagNeedle) {
+		return false
+	}
+
+	if searchNeedle == "" {
+		return true
+	}
+	if sourceMatchesSearch {
+		return true
+	}
+	return matchesFederationSearchInProbe(probe, searchNeedle)
+}
+
+func normalizeFederationSearch(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func matchesFederationSearchInSource(source FederationSourceDescriptor, needle string) bool {
+	if needle == "" {
+		return true
+	}
+	fields := []string{source.ID, source.Name, source.Kind, source.Cluster, source.Site}
+	for _, field := range fields {
+		if strings.Contains(strings.ToLower(strings.TrimSpace(field)), needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesFederationSearchInProbe(probe ProbeInventorySummary, needle string) bool {
+	if needle == "" {
+		return true
+	}
+
+	fields := []string{
+		probe.ID,
+		probe.Hostname,
+		probe.Status,
+		probe.OS,
+		probe.Arch,
+		probe.Kernel,
+		string(probe.PolicyLevel),
+	}
+	for _, field := range fields {
+		if strings.Contains(strings.ToLower(strings.TrimSpace(field)), needle) {
+			return true
+		}
+	}
+
+	for _, tag := range probe.Tags {
+		if strings.Contains(strings.ToLower(strings.TrimSpace(tag)), needle) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func aggregateProbeSummaries(probes []ProbeInventorySummary) FleetAggregates {
+	out := FleetAggregates{
+		ProbesByOS:      map[string]int{},
+		TagDistribution: map[string]int{},
+	}
+	for _, probe := range probes {
+		out.TotalProbes++
+		if strings.EqualFold(strings.TrimSpace(probe.Status), "online") {
+			out.Online++
+		}
+		out.TotalCPUs += probe.CPUs
+		out.TotalRAMBytes += probe.RAMBytes
+
+		osKey := strings.ToLower(strings.TrimSpace(probe.OS))
+		if osKey == "" {
+			osKey = "unknown"
+		}
+		out.ProbesByOS[osKey]++
+
+		for _, tag := range probe.Tags {
+			trimmed := strings.TrimSpace(tag)
+			if trimmed == "" {
+				continue
+			}
+			out.TagDistribution[trimmed]++
+		}
+	}
+	return out
+}
+
 func normalizeFederationSourceDescriptor(source FederationSourceDescriptor) FederationSourceDescriptor {
 	source.ID = sanitizeSourceID(source.ID)
 	if source.ID == "" {
@@ -482,24 +611,6 @@ func cloneProbeInventorySummary(probe ProbeInventorySummary) ProbeInventorySumma
 		clone.Tags = append([]string(nil), probe.Tags...)
 	}
 	return clone
-}
-
-func cloneFleetAggregates(in FleetAggregates) FleetAggregates {
-	out := FleetAggregates{
-		TotalProbes:   in.TotalProbes,
-		Online:        in.Online,
-		TotalCPUs:     in.TotalCPUs,
-		TotalRAMBytes: in.TotalRAMBytes,
-		ProbesByOS:    map[string]int{},
-		TagDistribution: map[string]int{},
-	}
-	for k, v := range in.ProbesByOS {
-		out.ProbesByOS[k] = v
-	}
-	for k, v := range in.TagDistribution {
-		out.TagDistribution[k] = v
-	}
-	return out
 }
 
 type descriptorSourceAdapter struct {

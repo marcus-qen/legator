@@ -3,6 +3,7 @@ package fleet
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"testing"
 )
 
@@ -106,6 +107,9 @@ func TestFederationStoreInventory_AggregatesAndRollsHealth(t *testing.T) {
 	if got.Aggregates.TotalRAMBytes != 12*gib {
 		t.Fatalf("expected 12GiB RAM, got %d", got.Aggregates.TotalRAMBytes)
 	}
+	if got.Aggregates.TagDistribution["prod"] != 1 || got.Aggregates.TagDistribution["dev"] != 1 {
+		t.Fatalf("unexpected tag distribution: %+v", got.Aggregates.TagDistribution)
+	}
 	if got.Health.Overall != FederationSourceDegraded {
 		t.Fatalf("expected overall degraded health, got %q", got.Health.Overall)
 	}
@@ -144,17 +148,22 @@ func TestFederationStoreInventory_AggregatesAndRollsHealth(t *testing.T) {
 func TestFederationStoreInventory_AppliesSourceAndInventoryFilters(t *testing.T) {
 	adapter := &stubFederationAdapter{
 		source: FederationSourceDescriptor{ID: "edge-a", Name: "Edge A", Kind: "k8s", Cluster: "eu-west", Site: "dc-9"},
-		result: FederationSourceResult{Inventory: FleetInventory{Aggregates: FleetAggregates{ProbesByOS: map[string]int{}, TagDistribution: map[string]int{}}}},
+		result: FederationSourceResult{Inventory: FleetInventory{Probes: []ProbeInventorySummary{
+			{ID: "probe-web", Hostname: "web-01", Status: "online", OS: "linux", CPUs: 2, RAMBytes: 1024, Tags: []string{"prod", "frontend"}},
+			{ID: "probe-db", Hostname: "db-01", Status: "offline", OS: "linux", CPUs: 4, RAMBytes: 2048, Tags: []string{"prod"}},
+			{ID: "probe-dev", Hostname: "dev-01", Status: "online", OS: "linux", CPUs: 1, RAMBytes: 512, Tags: []string{"dev"}},
+		}}},
 	}
 
 	store := NewFederationStore(adapter)
 
-	_ = store.Inventory(context.Background(), FederationFilter{
+	filtered := store.Inventory(context.Background(), FederationFilter{
 		Tag:     "prod",
 		Status:  "online",
 		Source:  "edge-a",
 		Cluster: "eu-west",
 		Site:    "dc-9",
+		Search:  "web",
 	})
 	if len(adapter.filters) != 1 {
 		t.Fatalf("expected one adapter invocation, got %d", len(adapter.filters))
@@ -162,10 +171,46 @@ func TestFederationStoreInventory_AppliesSourceAndInventoryFilters(t *testing.T)
 	if adapter.filters[0].Tag != "prod" || adapter.filters[0].Status != "online" {
 		t.Fatalf("expected tag/status forwarded to source adapter, got %+v", adapter.filters[0])
 	}
+	if len(filtered.Probes) != 1 || filtered.Probes[0].Probe.ID != "probe-web" {
+		t.Fatalf("expected probe-web after filter application, got %+v", filtered.Probes)
+	}
+	if filtered.Aggregates.TotalProbes != 1 || filtered.Aggregates.Online != 1 {
+		t.Fatalf("unexpected filtered aggregate: %+v", filtered.Aggregates)
+	}
+
+	bySourceSearch := store.Inventory(context.Background(), FederationFilter{Search: "eu-west"})
+	if len(bySourceSearch.Probes) != 3 {
+		t.Fatalf("expected source-level search match to keep all probes, got %d", len(bySourceSearch.Probes))
+	}
 
 	_ = store.Inventory(context.Background(), FederationFilter{Source: "missing-source"})
-	if len(adapter.filters) != 1 {
+	if len(adapter.filters) != 2 {
 		t.Fatalf("expected non-matching source filter to skip adapter, got %d invocations", len(adapter.filters))
+	}
+}
+
+func TestFederationStoreSummary_MatchesInventoryRollupsForSameFilter(t *testing.T) {
+	adapter := &stubFederationAdapter{
+		source: FederationSourceDescriptor{ID: "edge-a", Name: "Edge A", Kind: "k8s", Cluster: "eu-west", Site: "dc-9"},
+		result: FederationSourceResult{Inventory: FleetInventory{Probes: []ProbeInventorySummary{
+			{ID: "probe-web", Hostname: "web-01", Status: "online", OS: "linux", CPUs: 2, RAMBytes: 1024, Tags: []string{"prod"}},
+			{ID: "probe-db", Hostname: "db-01", Status: "offline", OS: "linux", CPUs: 4, RAMBytes: 2048, Tags: []string{"prod"}},
+		}}},
+	}
+	store := NewFederationStore(adapter)
+
+	filter := FederationFilter{Tag: "prod", Search: "web"}
+	inv := store.Inventory(context.Background(), filter)
+	summary := store.Summary(context.Background(), filter)
+
+	if !reflect.DeepEqual(summary.Aggregates, inv.Aggregates) {
+		t.Fatalf("expected summary aggregates to match inventory aggregates, got summary=%+v inventory=%+v", summary.Aggregates, inv.Aggregates)
+	}
+	if !reflect.DeepEqual(summary.Health, inv.Health) {
+		t.Fatalf("expected summary health to match inventory health, got summary=%+v inventory=%+v", summary.Health, inv.Health)
+	}
+	if len(summary.Sources) != len(inv.Sources) {
+		t.Fatalf("expected summary source count to match inventory source count, got %d vs %d", len(summary.Sources), len(inv.Sources))
 	}
 }
 

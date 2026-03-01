@@ -1620,3 +1620,32 @@ body[data-page='jobs'] .jobs-run-row-selected {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+body[data-page='federation'] .federation-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr)) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+body[data-page='federation'] .federation-grid {
+  margin-top: 12px;
+}
+
+body[data-page='federation'] .federation-tags {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+@media (max-width: 1320px) {
+  body[data-page='federation'] .federation-filter-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  body[data-page='federation'] .federation-filter-grid .right {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+}

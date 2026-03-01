@@ -17,6 +17,10 @@
           <svg class="icon" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="2" y="14" width="20" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="6" cy="6" r="1" fill="currentColor"/><circle cx="6" cy="18" r="1" fill="currentColor"/></svg>
           Fleet <span class="badge" data-badge="probes"></span>
         </a>
+        <a href="/federation" class="nav-link{{if eq .ActiveNav "federation"}} active{{end}}">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M12 3l4 7h-8l4-7zM4 13h7v7H4zM13 13h7v7h-7z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+          Federation
+        </a>
         <a href="/fleet/chat" class="nav-link{{if eq .ActiveNav "fleet-chat"}} active{{end}}">
           <svg class="icon" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
           Fleet Chat

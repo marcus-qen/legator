@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
@@ -13,12 +14,14 @@ import (
 )
 
 const (
-	resourceFleetSummary         = "legator://fleet/summary"
-	resourceFleetInventory       = "legator://fleet/inventory"
-	resourceJobsList             = "legator://jobs/list"
-	resourceJobsActiveRuns       = "legator://jobs/active-runs"
-	resourceGrafanaStatus        = "legator://grafana/status"
-	resourceGrafanaSnapshot      = "legator://grafana/snapshot"
+	resourceFleetSummary          = "legator://fleet/summary"
+	resourceFleetInventory        = "legator://fleet/inventory"
+	resourceFederationInventory   = "legator://federation/inventory"
+	resourceFederationSummary     = "legator://federation/summary"
+	resourceJobsList              = "legator://jobs/list"
+	resourceJobsActiveRuns        = "legator://jobs/active-runs"
+	resourceGrafanaStatus         = "legator://grafana/status"
+	resourceGrafanaSnapshot       = "legator://grafana/snapshot"
 	resourceGrafanaCapacityPolicy = "legator://grafana/capacity-policy"
 )
 
@@ -36,6 +39,20 @@ func (s *MCPServer) registerResources() {
 		Description: "Aggregated fleet inventory across all probes",
 		MIMEType:    "application/json",
 	}, s.handleFleetInventoryResource)
+
+	s.server.AddResource(&mcp.Resource{
+		URI:         resourceFederationInventory,
+		Name:        "Federation Inventory",
+		Description: "Federated inventory across source adapters with query/filter support",
+		MIMEType:    "application/json",
+	}, s.handleFederationInventoryResource)
+
+	s.server.AddResource(&mcp.Resource{
+		URI:         resourceFederationSummary,
+		Name:        "Federation Summary",
+		Description: "Federated source health and aggregate rollups with query/filter support",
+		MIMEType:    "application/json",
+	}, s.handleFederationSummaryResource)
 
 	s.server.AddResource(&mcp.Resource{
 		URI:         resourceJobsList,
@@ -134,6 +151,30 @@ func (s *MCPServer) handleFleetInventoryResource(_ context.Context, req *mcp.Rea
 			Text:     string(data),
 		}},
 	}, nil
+}
+
+func (s *MCPServer) handleFederationInventoryResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	if s.federationStore == nil {
+		return nil, fmt.Errorf("federation store unavailable")
+	}
+	uri := resourceFederationInventory
+	if req != nil && req.Params != nil && req.Params.URI != "" {
+		uri = req.Params.URI
+	}
+	inventory := s.federationStore.Inventory(ctx, federationFilterFromResourceURI(uri))
+	return buildJSONResourceResult(req, resourceFederationInventory, inventory)
+}
+
+func (s *MCPServer) handleFederationSummaryResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	if s.federationStore == nil {
+		return nil, fmt.Errorf("federation store unavailable")
+	}
+	uri := resourceFederationSummary
+	if req != nil && req.Params != nil && req.Params.URI != "" {
+		uri = req.Params.URI
+	}
+	summary := s.federationStore.Summary(ctx, federationFilterFromResourceURI(uri))
+	return buildJSONResourceResult(req, resourceFederationSummary, summary)
 }
 
 func (s *MCPServer) handleJobsListResource(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
@@ -255,6 +296,22 @@ func (s *MCPServer) handleGrafanaCapacityPolicyResource(ctx context.Context, req
 		PolicyRationale: decision.Rationale,
 	}
 	return buildJSONResourceResult(req, resourceGrafanaCapacityPolicy, payload)
+}
+
+func federationFilterFromResourceURI(rawURI string) fleet.FederationFilter {
+	parsed, err := url.Parse(strings.TrimSpace(rawURI))
+	if err != nil || parsed == nil {
+		return fleet.FederationFilter{}
+	}
+	q := parsed.Query()
+	return fleet.FederationFilter{
+		Tag:     strings.TrimSpace(q.Get("tag")),
+		Status:  strings.TrimSpace(q.Get("status")),
+		Source:  strings.TrimSpace(q.Get("source")),
+		Cluster: strings.TrimSpace(q.Get("cluster")),
+		Site:    strings.TrimSpace(q.Get("site")),
+		Search:  strings.TrimSpace(q.Get("search")),
+	}
 }
 
 func buildJSONResourceResult(req *mcp.ReadResourceRequest, defaultURI string, payload any) (*mcp.ReadResourceResult, error) {

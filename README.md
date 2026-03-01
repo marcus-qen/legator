@@ -143,7 +143,7 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 | Cloud connectors (AWS/GCP/Azure, agentless inventory ingestion) | ✅ |
 | Kubeflow adapter MVP (read-only status/inventory + guarded refresh action) | ✅ |
 | Grafana adapter Stage 2.1 (read-only status + capacity snapshot) | ✅ |
-| Federation read model Stage 3.7.1 (multi-source inventory aggregation + health rollups) | ✅ |
+| Federation read model Stage 3.7.2 (cross-cluster query/filter parity across API/MCP/UI) | ✅ |
 | Capacity-aware policy decisions Stage 2.2 (allow/deny/queue + rationale payloads) | ✅ |
 | Operator explainability panel Stage 2.3 (approval UI rationale + capacity drivers) | ✅ |
 | Auto-discovery + registration assist (network/SSH scan + guided registration) | ✅ |

@@ -1,0 +1,316 @@
+{{define "title"}}Federation — Legator{{end}}
+
+{{define "header"}}
+<div>
+  <h1 class="page-title">Federation</h1>
+  <span class="page-meta">Cross-cluster inventory with source attribution</span>
+</div>
+{{end}}
+
+{{define "content"}}
+<div class="panel federation-filters">
+  <form id="federation-filter-form" class="federation-filter-grid">
+    <input class="input" id="filter-source" name="source" placeholder="source (id/name)" autocomplete="off">
+    <input class="input" id="filter-cluster" name="cluster" placeholder="cluster" autocomplete="off">
+    <input class="input" id="filter-site" name="site" placeholder="site" autocomplete="off">
+    <input class="input" id="filter-tag" name="tag" placeholder="tag" autocomplete="off">
+    <select class="input" id="filter-status" name="status">
+      <option value="">status: any</option>
+      <option value="online">online</option>
+      <option value="offline">offline</option>
+      <option value="degraded">degraded</option>
+      <option value="pending">pending</option>
+    </select>
+    <input class="input" id="filter-search" name="search" placeholder="search hostname/tag/source" autocomplete="off">
+    <div class="right">
+      <button type="submit" class="btn btn-primary">Apply</button>
+      <button type="button" class="btn" id="filter-reset">Reset</button>
+    </div>
+  </form>
+</div>
+
+<div class="panel" id="federation-summary-panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Summary</h2>
+    <span class="panel-sub" id="federation-last-updated">—</span>
+  </div>
+  <div class="stat-row" id="federation-summary-stats"></div>
+  <div class="federation-tags muted" id="federation-tags">No tags</div>
+</div>
+
+<div class="grid-two federation-grid">
+  <section class="panel">
+    <div class="panel-header">
+      <h2 class="panel-title">Sources</h2>
+      <span class="panel-sub" id="federation-source-count">0</span>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table" id="federation-sources-table">
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th>Cluster</th>
+            <th>Site</th>
+            <th>Status</th>
+            <th>Probes</th>
+            <th>Warnings</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <h2 class="panel-title">Probes</h2>
+      <span class="panel-sub" id="federation-probe-count">0</span>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table" id="federation-probes-table">
+        <thead>
+          <tr>
+            <th>Hostname</th>
+            <th>Status</th>
+            <th>Source</th>
+            <th>Cluster</th>
+            <th>OS</th>
+            <th>Tags</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+(() => {
+  const state = {
+    filters: {
+      source: '',
+      cluster: '',
+      site: '',
+      tag: '',
+      status: '',
+      search: '',
+    },
+  };
+
+  const refs = {
+    form: document.getElementById('federation-filter-form'),
+    reset: document.getElementById('filter-reset'),
+    source: document.getElementById('filter-source'),
+    cluster: document.getElementById('filter-cluster'),
+    site: document.getElementById('filter-site'),
+    tag: document.getElementById('filter-tag'),
+    status: document.getElementById('filter-status'),
+    search: document.getElementById('filter-search'),
+    summaryStats: document.getElementById('federation-summary-stats'),
+    summaryTags: document.getElementById('federation-tags'),
+    sourceCount: document.getElementById('federation-source-count'),
+    probeCount: document.getElementById('federation-probe-count'),
+    sourceBody: document.querySelector('#federation-sources-table tbody'),
+    probeBody: document.querySelector('#federation-probes-table tbody'),
+    lastUpdated: document.getElementById('federation-last-updated'),
+  };
+
+  function esc(value) {
+    return String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  function statusClass(status) {
+    const normalized = String(status || '').toLowerCase();
+    if (normalized === 'online' || normalized === 'healthy') return 'online';
+    if (normalized === 'offline' || normalized === 'unavailable') return 'offline';
+    if (normalized === 'degraded') return 'degraded';
+    return 'pending';
+  }
+
+  function statusLabel(status) {
+    return String(status || 'unknown').toUpperCase();
+  }
+
+  function buildQuery(filters) {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      const trimmed = String(value || '').trim();
+      if (!trimmed) return;
+      query.set(key, trimmed);
+    });
+    return query.toString();
+  }
+
+  function readFilters() {
+    state.filters = {
+      source: refs.source.value,
+      cluster: refs.cluster.value,
+      site: refs.site.value,
+      tag: refs.tag.value,
+      status: refs.status.value,
+      search: refs.search.value,
+    };
+  }
+
+  function applyFiltersToForm(filters) {
+    refs.source.value = filters.source || '';
+    refs.cluster.value = filters.cluster || '';
+    refs.site.value = filters.site || '';
+    refs.tag.value = filters.tag || '';
+    refs.status.value = filters.status || '';
+    refs.search.value = filters.search || '';
+  }
+
+  function summarizeTags(tags) {
+    const entries = Object.entries(tags || {}).sort((a, b) => a[0].localeCompare(b[0]));
+    if (!entries.length) {
+      refs.summaryTags.textContent = 'No tags';
+      return;
+    }
+
+    refs.summaryTags.innerHTML = entries
+      .map(([tag, count]) => `<span class="tag">${esc(tag)} <strong>${esc(count)}</strong></span>`)
+      .join(' ');
+  }
+
+  function renderSummary(inventory, summary) {
+    const agg = inventory?.aggregates || {};
+    const health = summary?.health || inventory?.health || {};
+
+    refs.summaryStats.innerHTML = `
+      <span><strong>${esc(agg.total_sources || 0)}</strong> sources</span>
+      <span><strong>${esc(agg.healthy_sources || 0)}</strong> healthy</span>
+      <span><strong>${esc(agg.degraded_sources || 0)}</strong> degraded</span>
+      <span><strong>${esc(agg.unavailable_sources || 0)}</strong> unavailable</span>
+      <span><strong>${esc(agg.total_probes || 0)}</strong> probes</span>
+      <span><strong>${esc(agg.online || 0)}</strong> online</span>
+      <span class="tag tag-${statusClass(health.overall)}">${esc(statusLabel(health.overall))}</span>
+    `;
+
+    summarizeTags(agg.tag_distribution || {});
+    refs.lastUpdated.textContent = `filters: ${buildQuery(state.filters) || 'none'}`;
+  }
+
+  function renderSources(inventory) {
+    const sources = Array.isArray(inventory?.sources) ? inventory.sources : [];
+    refs.sourceCount.textContent = String(sources.length);
+    refs.sourceBody.innerHTML = '';
+
+    if (!sources.length) {
+      refs.sourceBody.innerHTML = '<tr><td colspan="6" class="empty-state">No federation sources match the current filters.</td></tr>';
+      return;
+    }
+
+    sources.forEach((entry) => {
+      const source = entry?.source || {};
+      const warnings = Array.isArray(entry?.warnings) ? entry.warnings : [];
+      const error = String(entry?.error || '').trim();
+      const warningText = error || warnings.join('; ') || '—';
+      const totalProbes = Number(entry?.aggregates?.total_probes || 0);
+
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td>
+          <div>${esc(source.name || source.id || 'source')}</div>
+          <div class="id-text">${esc(source.id || '—')}</div>
+        </td>
+        <td>${esc(source.cluster || 'unknown')}</td>
+        <td>${esc(source.site || 'unknown')}</td>
+        <td><span class="tag tag-${statusClass(source.status)}">${esc(statusLabel(source.status))}</span></td>
+        <td>${esc(totalProbes)}</td>
+        <td class="muted">${esc(warningText)}</td>
+      `;
+      refs.sourceBody.appendChild(row);
+    });
+  }
+
+  function renderProbes(inventory) {
+    const probes = Array.isArray(inventory?.probes) ? inventory.probes : [];
+    refs.probeCount.textContent = String(probes.length);
+    refs.probeBody.innerHTML = '';
+
+    if (!probes.length) {
+      refs.probeBody.innerHTML = '<tr><td colspan="6" class="empty-state">No federated probes match the current filters.</td></tr>';
+      return;
+    }
+
+    probes.forEach((entry) => {
+      const probe = entry?.probe || {};
+      const source = entry?.source || {};
+      const tags = Array.isArray(probe.tags) ? probe.tags : [];
+
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td>
+          <div>${esc(probe.hostname || probe.id || 'probe')}</div>
+          <div class="id-text">${esc(probe.id || '—')}</div>
+        </td>
+        <td><span class="tag tag-${statusClass(probe.status)}">${esc(statusLabel(probe.status))}</span></td>
+        <td>${esc(source.id || '—')}</td>
+        <td>${esc(source.cluster || 'unknown')}</td>
+        <td>${esc(probe.os || 'unknown')}</td>
+        <td>${tags.length ? tags.map((tag) => `<span class="tag">${esc(tag)}</span>`).join(' ') : '<span class="muted">—</span>'}</td>
+      `;
+      refs.probeBody.appendChild(row);
+    });
+  }
+
+  async function refresh() {
+    readFilters();
+    const query = buildQuery(state.filters);
+    const suffix = query ? `?${query}` : '';
+
+    const [inventoryResp, summaryResp] = await Promise.all([
+      fetch(`/api/v1/federation/inventory${suffix}`, { cache: 'no-store' }),
+      fetch(`/api/v1/federation/summary${suffix}`, { cache: 'no-store' }),
+    ]);
+
+    if (!inventoryResp.ok) {
+      throw new Error(`inventory request failed: ${inventoryResp.status}`);
+    }
+    if (!summaryResp.ok) {
+      throw new Error(`summary request failed: ${summaryResp.status}`);
+    }
+
+    const inventory = await inventoryResp.json();
+    const summary = await summaryResp.json();
+
+    renderSummary(inventory, summary);
+    renderSources(inventory);
+    renderProbes(inventory);
+  }
+
+  refs.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    refresh().catch((err) => {
+      if (window.LegatorUI?.showToast) {
+        window.LegatorUI.showToast(err.message || 'Failed to load federation data', 'error');
+      }
+    });
+  });
+
+  refs.reset.addEventListener('click', () => {
+    state.filters = { source: '', cluster: '', site: '', tag: '', status: '', search: '' };
+    applyFiltersToForm(state.filters);
+    refresh().catch((err) => {
+      if (window.LegatorUI?.showToast) {
+        window.LegatorUI.showToast(err.message || 'Failed to load federation data', 'error');
+      }
+    });
+  });
+
+  refresh().catch((err) => {
+    if (window.LegatorUI?.showToast) {
+      window.LegatorUI.showToast(err.message || 'Failed to load federation data', 'error');
+    }
+  });
+})();
+</script>
+{{end}}
