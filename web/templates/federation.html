@@ -52,6 +52,7 @@
             <th>Cluster</th>
             <th>Site</th>
             <th>Status</th>
+            <th>Consistency</th>
             <th>Probes</th>
             <th>Warnings</th>
           </tr>
@@ -138,6 +139,14 @@
     return String(status || 'unknown').toUpperCase();
   }
 
+  function consistencyTagClass(value) {
+    const normalized = String(value || '').toLowerCase();
+    if (normalized === 'fresh' || normalized === 'complete') return 'online';
+    if (normalized === 'stale' || normalized === 'partial') return 'degraded';
+    if (normalized === 'unavailable') return 'offline';
+    return 'pending';
+  }
+
   function buildQuery(filters) {
     const query = new URLSearchParams();
     Object.entries(filters).forEach(([key, value]) => {
@@ -183,6 +192,7 @@
   function renderSummary(inventory, summary) {
     const agg = inventory?.aggregates || {};
     const health = summary?.health || inventory?.health || {};
+    const consistency = summary?.consistency || inventory?.consistency || {};
 
     refs.summaryStats.innerHTML = `
       <span><strong>${esc(agg.total_sources || 0)}</strong> sources</span>
@@ -192,6 +202,10 @@
       <span><strong>${esc(agg.total_probes || 0)}</strong> probes</span>
       <span><strong>${esc(agg.online || 0)}</strong> online</span>
       <span class="tag tag-${statusClass(health.overall)}">${esc(statusLabel(health.overall))}</span>
+      <span class="tag tag-${consistencyTagClass(consistency.freshness)}">freshness: ${esc(String(consistency.freshness || 'unknown').toUpperCase())}</span>
+      <span class="tag tag-${consistencyTagClass(consistency.completeness)}">completeness: ${esc(String(consistency.completeness || 'unknown').toUpperCase())}</span>
+      ${consistency.failover_active ? '<span class="tag tag-degraded">FAILOVER ACTIVE</span>' : ''}
+      ${consistency.partial_results ? '<span class="tag tag-degraded">PARTIAL RESULTS</span>' : ''}
     `;
 
     summarizeTags(agg.tag_distribution || {});
@@ -204,7 +218,7 @@
     refs.sourceBody.innerHTML = '';
 
     if (!sources.length) {
-      refs.sourceBody.innerHTML = '<tr><td colspan="6" class="empty-state">No federation sources match the current filters.</td></tr>';
+      refs.sourceBody.innerHTML = '<tr><td colspan="7" class="empty-state">No federation sources match the current filters.</td></tr>';
       return;
     }
 
@@ -214,6 +228,14 @@
       const error = String(entry?.error || '').trim();
       const warningText = error || warnings.join('; ') || '—';
       const totalProbes = Number(entry?.aggregates?.total_probes || 0);
+      const consistency = entry?.consistency || {};
+      const consistencyBits = [
+        `<span class="tag tag-${consistencyTagClass(consistency.freshness)}">${esc(String(consistency.freshness || 'unknown').toUpperCase())}</span>`,
+        `<span class="tag tag-${consistencyTagClass(consistency.completeness)}">${esc(String(consistency.completeness || 'unknown').toUpperCase())}</span>`,
+      ];
+      if (String(consistency.failover_mode || '').toLowerCase() === 'cached_snapshot') {
+        consistencyBits.push('<span class="tag tag-degraded">FAILOVER</span>');
+      }
 
       const row = document.createElement('tr');
       row.innerHTML = `
@@ -224,6 +246,7 @@
         <td>${esc(source.cluster || 'unknown')}</td>
         <td>${esc(source.site || 'unknown')}</td>
         <td><span class="tag tag-${statusClass(source.status)}">${esc(statusLabel(source.status))}</span></td>
+        <td>${consistencyBits.join(' ')}</td>
         <td>${esc(totalProbes)}</td>
         <td class="muted">${esc(warningText)}</td>
       `;

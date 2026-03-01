@@ -61,10 +61,10 @@ func (p testCapacityProvider) CapacitySignals(context.Context) (*coreapprovalpol
 }
 
 type fakeFederationSourceAdapter struct {
-	source   fleet.FederationSourceDescriptor
-	result   fleet.FederationSourceResult
-	err      error
-	filters  []fleet.InventoryFilter
+	source  fleet.FederationSourceDescriptor
+	result  fleet.FederationSourceResult
+	err     error
+	filters []fleet.InventoryFilter
 }
 
 func (f *fakeFederationSourceAdapter) Source() fleet.FederationSourceDescriptor {
@@ -1439,6 +1439,15 @@ func TestHandleFederationInventory_WithFilters(t *testing.T) {
 	if payload.Aggregates.TagDistribution["prod"] != 1 {
 		t.Fatalf("expected aggregated prod tag count of 1, got %+v", payload.Aggregates.TagDistribution)
 	}
+	if payload.Consistency.Freshness != fleet.FederationFreshnessFresh || payload.Consistency.Completeness != fleet.FederationCompletenessComplete {
+		t.Fatalf("expected fresh/complete federation consistency, got %+v", payload.Consistency)
+	}
+	if len(payload.Sources) != 1 {
+		t.Fatalf("expected one source in payload, got %+v", payload.Sources)
+	}
+	if payload.Sources[0].Consistency.Completeness != fleet.FederationCompletenessComplete || payload.Sources[0].Consistency.FailoverMode != fleet.FederationFailoverNone {
+		t.Fatalf("expected source consistency without failover, got %+v", payload.Sources[0].Consistency)
+	}
 }
 
 func TestFederationFilterFromRequest_ParsesSearch(t *testing.T) {
@@ -1484,8 +1493,67 @@ func TestHandleFederationSummary_UnavailableSourceRollup(t *testing.T) {
 	if len(payload.Sources) != 1 || payload.Sources[0].Error == "" {
 		t.Fatalf("expected source error in summary payload: %#v", payload.Sources)
 	}
+	if payload.Sources[0].Consistency.Completeness != fleet.FederationCompletenessUnavailable || payload.Sources[0].Consistency.FailoverMode != fleet.FederationFailoverUnavailable {
+		t.Fatalf("expected unavailable consistency semantics, got %+v", payload.Sources[0].Consistency)
+	}
+	if payload.Consistency.Completeness != fleet.FederationCompletenessUnavailable || !payload.Consistency.PartialResults {
+		t.Fatalf("expected unavailable summary consistency rollup, got %+v", payload.Consistency)
+	}
 	if len(unavailable.filters) != 1 {
 		t.Fatalf("expected adapter to receive one query, got %d", len(unavailable.filters))
+	}
+}
+
+func TestHandleFederationInventory_ConsistencyFailoverFromCachedSnapshot(t *testing.T) {
+	srv := newTestServer(t)
+
+	now := time.Date(2026, time.March, 1, 13, 0, 0, 0, time.UTC)
+	adapter := &fakeFederationSourceAdapter{
+		source: fleet.FederationSourceDescriptor{ID: "remote-failover", Name: "Remote Failover", Kind: "cluster", Cluster: "eu-west", Site: "dc-2"},
+		result: fleet.FederationSourceResult{
+			CollectedAt: now,
+			Inventory: fleet.FleetInventory{Probes: []fleet.ProbeInventorySummary{{
+				ID:       "probe-a",
+				Hostname: "a-1",
+				Status:   "online",
+				OS:       "linux",
+			}}},
+		},
+	}
+	srv.federationStore.RegisterSource(adapter)
+	srv.federationStore.Inventory(context.Background(), fleet.FederationFilter{Source: "remote-failover"})
+
+	adapter.err = fmt.Errorf("source offline")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/federation/inventory?source=remote-failover", nil)
+	rr := httptest.NewRecorder()
+	srv.handleFederationInventory(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var payload fleet.FederatedInventory
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Probes) != 1 {
+		t.Fatalf("expected cached probe during failover, got %+v", payload.Probes)
+	}
+	if payload.Health.Overall != fleet.FederationSourceDegraded {
+		t.Fatalf("expected degraded rollup with failover, got %+v", payload.Health)
+	}
+	if payload.Consistency.FailoverSources != 1 || !payload.Consistency.FailoverActive {
+		t.Fatalf("expected failover rollup markers, got %+v", payload.Consistency)
+	}
+	if len(payload.Sources) != 1 {
+		t.Fatalf("expected one source payload entry, got %+v", payload.Sources)
+	}
+	source := payload.Sources[0]
+	if source.Consistency.FailoverMode != fleet.FederationFailoverCachedSnapshot || source.Consistency.Completeness != fleet.FederationCompletenessPartial {
+		t.Fatalf("expected cached snapshot failover semantics, got %+v", source.Consistency)
+	}
+	if source.Error == "" {
+		t.Fatalf("expected source error context retained in failover payload, got %+v", source)
 	}
 }
 

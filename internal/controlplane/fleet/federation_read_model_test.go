@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 )
 
 type stubFederationAdapter struct {
@@ -113,13 +115,24 @@ func TestFederationStoreInventory_AggregatesAndRollsHealth(t *testing.T) {
 	if got.Health.Overall != FederationSourceDegraded {
 		t.Fatalf("expected overall degraded health, got %q", got.Health.Overall)
 	}
+	if got.Consistency.Completeness != FederationCompletenessPartial {
+		t.Fatalf("expected partial consistency completeness, got %+v", got.Consistency)
+	}
+	if !got.Consistency.PartialResults {
+		t.Fatalf("expected partial_results=true, got %+v", got.Consistency)
+	}
+	if got.Consistency.UnavailableSources != 1 || got.Consistency.PartialSources != 1 {
+		t.Fatalf("unexpected consistency source counters: %+v", got.Consistency)
+	}
 	if len(got.Probes) != 2 {
 		t.Fatalf("expected 2 federated probes, got %d", len(got.Probes))
 	}
 
 	statuses := map[string]FederationSourceStatus{}
+	consistency := map[string]FederatedSourceConsistency{}
 	for _, source := range got.Sources {
 		statuses[source.Source.ID] = source.Source.Status
+		consistency[source.Source.ID] = source.Consistency
 	}
 	if statuses["cluster-a"] != FederationSourceHealthy {
 		t.Fatalf("expected cluster-a healthy, got %q", statuses["cluster-a"])
@@ -129,6 +142,12 @@ func TestFederationStoreInventory_AggregatesAndRollsHealth(t *testing.T) {
 	}
 	if statuses["cluster-c"] != FederationSourceUnavailable {
 		t.Fatalf("expected cluster-c unavailable, got %q", statuses["cluster-c"])
+	}
+	if consistency["cluster-b"].Completeness != FederationCompletenessPartial || consistency["cluster-b"].FailoverMode != FederationFailoverNone {
+		t.Fatalf("expected cluster-b partial/no-failover consistency, got %+v", consistency["cluster-b"])
+	}
+	if consistency["cluster-c"].Completeness != FederationCompletenessUnavailable || consistency["cluster-c"].FailoverMode != FederationFailoverUnavailable {
+		t.Fatalf("expected cluster-c unavailable consistency, got %+v", consistency["cluster-c"])
 	}
 
 	seenAttribution := false
@@ -142,6 +161,111 @@ func TestFederationStoreInventory_AggregatesAndRollsHealth(t *testing.T) {
 	}
 	if !seenAttribution {
 		t.Fatal("expected probe-a attribution entry")
+	}
+}
+
+func TestFederationStoreInventory_FailoverUsesCachedSnapshotOnSourceOutage(t *testing.T) {
+	now := time.Date(2026, time.March, 1, 12, 0, 0, 0, time.UTC)
+	adapter := &stubFederationAdapter{
+		source: FederationSourceDescriptor{ID: "edge-a", Name: "Edge A", Kind: "k8s", Cluster: "eu-west", Site: "dc-9"},
+		result: FederationSourceResult{
+			CollectedAt: now,
+			Inventory: FleetInventory{Probes: []ProbeInventorySummary{{
+				ID:       "probe-web",
+				Hostname: "web-01",
+				Status:   "online",
+				OS:       "linux",
+				Tags:     []string{"prod"},
+			}}},
+		},
+	}
+	store := NewFederationStore(adapter)
+	store.now = func() time.Time { return now.Add(30 * time.Second) }
+	store.staleAfter = 5 * time.Minute
+
+	first := store.Inventory(context.Background(), FederationFilter{})
+	if first.Health.Overall != FederationSourceHealthy {
+		t.Fatalf("expected first read healthy, got %+v", first.Health)
+	}
+
+	adapter.err = fmt.Errorf("source timed out")
+	failover := store.Inventory(context.Background(), FederationFilter{})
+
+	if failover.Aggregates.TotalSources != 1 {
+		t.Fatalf("expected one source in failover response, got %d", failover.Aggregates.TotalSources)
+	}
+	if len(failover.Probes) != 1 || failover.Probes[0].Probe.ID != "probe-web" {
+		t.Fatalf("expected cached probe to be returned during failover, got %+v", failover.Probes)
+	}
+	source := failover.Sources[0]
+	if source.Source.Status != FederationSourceDegraded {
+		t.Fatalf("expected failover source to be degraded, got %+v", source)
+	}
+	if source.Error == "" || !strings.Contains(source.Error, "timed out") {
+		t.Fatalf("expected source outage error context on failover, got %+v", source)
+	}
+	if source.Consistency.FailoverMode != FederationFailoverCachedSnapshot {
+		t.Fatalf("expected cached_snapshot failover mode, got %+v", source.Consistency)
+	}
+	if source.Consistency.Completeness != FederationCompletenessPartial {
+		t.Fatalf("expected partial completeness under failover, got %+v", source.Consistency)
+	}
+	if !source.Partial {
+		t.Fatalf("expected partial=true under failover, got %+v", source)
+	}
+	if failover.Consistency.FailoverSources != 1 || !failover.Consistency.FailoverActive {
+		t.Fatalf("expected active failover rollup, got %+v", failover.Consistency)
+	}
+	if failover.Health.Overall != FederationSourceDegraded {
+		t.Fatalf("expected degraded overall health during failover, got %+v", failover.Health)
+	}
+}
+
+func TestFederationStoreInventory_StaleSnapshotMarkedDegraded(t *testing.T) {
+	now := time.Date(2026, time.March, 1, 12, 10, 0, 0, time.UTC)
+	staleCollectedAt := now.Add(-10 * time.Minute)
+	adapter := &stubFederationAdapter{
+		source: FederationSourceDescriptor{ID: "edge-stale", Name: "Edge Stale", Kind: "k8s", Cluster: "eu-west", Site: "dc-9"},
+		result: FederationSourceResult{
+			CollectedAt: staleCollectedAt,
+			Inventory: FleetInventory{Probes: []ProbeInventorySummary{{
+				ID:       "probe-1",
+				Hostname: "stale-01",
+				Status:   "online",
+				OS:       "linux",
+			}}},
+		},
+	}
+	store := NewFederationStore(adapter)
+	store.now = func() time.Time { return now }
+	store.staleAfter = 5 * time.Minute
+
+	inv := store.Inventory(context.Background(), FederationFilter{})
+	if len(inv.Sources) != 1 {
+		t.Fatalf("expected one source, got %+v", inv.Sources)
+	}
+	source := inv.Sources[0]
+	if source.Source.Status != FederationSourceDegraded {
+		t.Fatalf("expected stale source to be degraded, got %+v", source)
+	}
+	if source.Consistency.Freshness != FederationFreshnessStale {
+		t.Fatalf("expected stale freshness indicator, got %+v", source.Consistency)
+	}
+	if source.Consistency.Completeness != FederationCompletenessPartial {
+		t.Fatalf("expected stale snapshot to be partial completeness, got %+v", source.Consistency)
+	}
+	if !source.Partial {
+		t.Fatalf("expected stale source partial flag to be true, got %+v", source)
+	}
+	warningBlob := strings.Join(source.Warnings, " | ")
+	if !strings.Contains(warningBlob, "snapshot stale") {
+		t.Fatalf("expected stale warning marker, got warnings=%v", source.Warnings)
+	}
+	if inv.Consistency.Freshness != FederationFreshnessStale {
+		t.Fatalf("expected rollup freshness=stale, got %+v", inv.Consistency)
+	}
+	if inv.Consistency.StaleSources != 1 || !inv.Consistency.PartialResults {
+		t.Fatalf("expected stale source rollup counters, got %+v", inv.Consistency)
 	}
 }
 
@@ -264,6 +388,9 @@ func TestFederationStoreSummary_MatchesInventoryRollupsForSameFilter(t *testing.
 	if !reflect.DeepEqual(summary.Health, inv.Health) {
 		t.Fatalf("expected summary health to match inventory health, got summary=%+v inventory=%+v", summary.Health, inv.Health)
 	}
+	if !reflect.DeepEqual(summary.Consistency, inv.Consistency) {
+		t.Fatalf("expected summary consistency to match inventory consistency, got summary=%+v inventory=%+v", summary.Consistency, inv.Consistency)
+	}
 	if len(summary.Sources) != len(inv.Sources) {
 		t.Fatalf("expected summary source count to match inventory source count, got %d vs %d", len(summary.Sources), len(inv.Sources))
 	}
@@ -278,6 +405,9 @@ func TestFederationStoreSummary_NoSourcesReturnsUnknown(t *testing.T) {
 	}
 	if summary.Health.Overall != FederationSourceUnknown {
 		t.Fatalf("expected unknown overall health, got %q", summary.Health.Overall)
+	}
+	if summary.Consistency.Freshness != FederationFreshnessUnknown || summary.Consistency.Completeness != FederationCompletenessUnknown {
+		t.Fatalf("expected unknown consistency rollup for empty summary, got %+v", summary.Consistency)
 	}
 	if len(summary.Sources) != 0 {
 		t.Fatalf("expected no sources, got %d", len(summary.Sources))
