@@ -19,7 +19,7 @@ func TestValidateDefinitionAcceptsValidSchema(t *testing.T) {
 func TestValidateDefinitionRejectsMissingMetadataAndOutcomes(t *testing.T) {
 	def := Definition{
 		Metadata: Metadata{},
-		Steps: []Step{{ID: "s1", Action: "run_command"}},
+		Steps:    []Step{{ID: "s1", Action: "run_command"}},
 	}
 
 	err := ValidateDefinition(&def)
@@ -69,6 +69,23 @@ func TestValidateDefinitionRejectsDuplicateStepIDAndUnknownOutcomeStep(t *testin
 	validationErr := err.(*ValidationError)
 	if len(validationErr.Issues) < 2 {
 		t.Fatalf("expected duplicate-id and unknown-step issues, got %+v", validationErr.Issues)
+	}
+}
+
+func TestValidateDefinitionRejectsInvalidExecutionFields(t *testing.T) {
+	def := validDefinitionFixture()
+	def.Steps[0].TimeoutSeconds = -1
+	def.Steps[0].MaxRetries = -1
+	def.Steps[0].Rollback = &RollbackHook{Action: "", TimeoutSeconds: -5}
+
+	err := ValidateDefinition(&def)
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+
+	validationErr := err.(*ValidationError)
+	if len(validationErr.Issues) < 3 {
+		t.Fatalf("expected execution-field validation issues, got %+v", validationErr.Issues)
 	}
 }
 

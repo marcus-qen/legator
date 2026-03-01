@@ -1,8 +1,14 @@
-# Automation Packs (Stage 3.8.2)
+# Automation Packs (Stage 3.8.3)
 
 Automation packs are machine-readable workflow definitions for repeatable operations.
 
-Stage 3.8.2 adds a **non-mutating dry-run planner** with per-step/workflow policy simulation (`allow|queue|deny`) before any future execution stage.
+Stage 3.8.3 adds a **guarded execution runtime** on top of Stage 3.8.2 dry-run planning:
+
+- execution from stored definitions
+- ordered step lifecycle/status tracking
+- policy + approval guardrails before mutating steps
+- per-step timeout and bounded retry controls
+- optional rollback callbacks/hooks executed in reverse order on failure
 
 ## Schema
 
@@ -40,6 +46,9 @@ Top-level definition object:
       "id": "prepare",
       "name": "Prepare backup",
       "action": "run_command",
+      "mutating": false,
+      "timeout_seconds": 30,
+      "max_retries": 1,
       "parameters": {
         "command": "pg_dump --schema-only"
       }
@@ -47,8 +56,17 @@ Top-level definition object:
     {
       "id": "archive",
       "action": "upload_artifact",
+      "timeout_seconds": 60,
+      "max_retries": 2,
       "parameters": {
         "bucket": "legator-backups"
+      },
+      "rollback": {
+        "action": "delete_artifact",
+        "parameters": {
+          "bucket": "legator-backups"
+        },
+        "timeout_seconds": 30
       },
       "approval": {
         "required": true,
@@ -89,6 +107,8 @@ Definition/schema validation:
 - Input constraints are type-checked (for example, `min_length` only applies to `string`).
 - Input `default` values and enum values must match the declared input type.
 - Approval constraints enforce non-negative `minimum_approvers` and valid role-count bounds.
+- Step execution controls enforce non-negative `timeout_seconds` and `max_retries` values.
+- Rollback hooks require `rollback.action` when provided, and `rollback.timeout_seconds` cannot be negative.
 - At least one expected outcome is required (workflow-level or step-level).
 - `expected_outcomes[].step_id`, when provided, must reference an existing step ID.
 
@@ -208,6 +228,86 @@ Errors:
 - `400 invalid_schema` when the submitted definition is invalid
 - `400 invalid_inputs` when runtime inputs fail declared contracts
 
+### Start execution from stored definition
+
+`POST /api/v1/automation-packs/{id}/executions`
+
+Request body (all fields optional except path id):
+
+```json
+{
+  "version": "1.0.0",
+  "inputs": {
+    "environment": "prod"
+  },
+  "approval_context": {
+    "workflow": {
+      "approved": true,
+      "approver_count": 1,
+      "approved_by": ["operator@example.com"]
+    },
+    "steps": {
+      "archive": {
+        "approved": true,
+        "approver_count": 1,
+        "approved_by": ["ops@example.com"]
+      }
+    }
+  }
+}
+```
+
+Response (`201 Created`):
+
+```json
+{
+  "execution": {
+    "id": "apexec-1740843291984000000-1",
+    "metadata": { "id": "ops.backup-db", "name": "Ops DB Backup", "version": "1.0.0" },
+    "status": "succeeded",
+    "started_at": "2026-03-01T13:34:51Z",
+    "finished_at": "2026-03-01T13:34:53Z",
+    "resolved_inputs": { "environment": "prod" },
+    "steps": [
+      {
+        "order": 1,
+        "id": "prepare",
+        "action": "run_command",
+        "mutating": false,
+        "status": "succeeded",
+        "attempts": 1,
+        "timeout_seconds": 30,
+        "max_retries": 1
+      }
+    ],
+    "rollback_status": "not_required"
+  }
+}
+```
+
+Execution status values:
+
+- workflow: `pending`, `running`, `succeeded`, `failed`, `blocked`
+- step: `pending`, `running`, `succeeded`, `failed`, `timed_out`, `blocked`, `skipped`
+- rollback status: `not_required`, `completed`, `partial`
+
+Guardrail behaviour:
+
+- Policy gate (`allow|queue|deny`) is enforced before mutating steps.
+- Required workflow/step approvals are enforced before mutating steps.
+- `queue`/`deny` policy outcomes block execution before step action dispatch.
+- Step timeout + bounded retries are enforced using `timeout_seconds` and `max_retries`.
+- Failed executions trigger rollback hooks (`rollback`) in reverse order for already-succeeded steps.
+
+### Get execution status
+
+`GET /api/v1/automation-packs/executions/{executionID}`
+
+Response:
+
+- `200 OK` with `{ "execution": { ... } }`
+- `404 not_found` when execution id is unknown
+
 ## Dry-run and Policy Simulation Guarantees
 
 - Dry-run never executes commands, dispatches jobs, or mutates automation-pack storage.
@@ -217,4 +317,4 @@ Errors:
 
 ## Compatibility
 
-All Stage 3.8.2 additions are additive and backward-compatible.
+All Stage 3.8.3 additions are additive and backward-compatible.

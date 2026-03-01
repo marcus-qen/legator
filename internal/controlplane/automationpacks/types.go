@@ -59,8 +59,19 @@ type Step struct {
 	Description      string               `json:"description,omitempty"`
 	Action           string               `json:"action"`
 	Parameters       map[string]any       `json:"parameters,omitempty"`
+	Mutating         *bool                `json:"mutating,omitempty"`
+	TimeoutSeconds   int                  `json:"timeout_seconds,omitempty"`
+	MaxRetries       int                  `json:"max_retries,omitempty"`
+	Rollback         *RollbackHook        `json:"rollback,omitempty"`
 	Approval         *ApprovalRequirement `json:"approval,omitempty"`
 	ExpectedOutcomes []ExpectedOutcome    `json:"expected_outcomes,omitempty"`
+}
+
+// RollbackHook defines an optional rollback callback/action for a step.
+type RollbackHook struct {
+	Action         string         `json:"action"`
+	Parameters     map[string]any `json:"parameters,omitempty"`
+	TimeoutSeconds int            `json:"timeout_seconds,omitempty"`
 }
 
 // ApprovalRequirement captures workflow or step approval requirements.
@@ -83,9 +94,9 @@ type ExpectedOutcome struct {
 
 // DefinitionSummary is the listing shape for automation packs.
 type DefinitionSummary struct {
-	Metadata  Metadata  `json:"metadata"`
-	InputCount int      `json:"input_count"`
-	StepCount  int      `json:"step_count"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Metadata   Metadata  `json:"metadata"`
+	InputCount int       `json:"input_count"`
+	StepCount  int       `json:"step_count"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }

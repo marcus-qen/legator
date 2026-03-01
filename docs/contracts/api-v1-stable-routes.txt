@@ -24,6 +24,7 @@ GET /api/v1/audit
 GET /api/v1/audit/export
 GET /api/v1/audit/export/csv
 GET /api/v1/automation-packs
+GET /api/v1/automation-packs/executions/{executionID}
 GET /api/v1/automation-packs/{id}
 GET /api/v1/auth/keys
 GET /api/v1/cloud/assets
@@ -74,6 +75,7 @@ POST /api/v1/alerts
 POST /api/v1/approvals/{id}/decide
 POST /api/v1/automation-packs
 POST /api/v1/automation-packs/dry-run
+POST /api/v1/automation-packs/{id}/executions
 POST /api/v1/auth/keys
 POST /api/v1/cloud/connectors
 POST /api/v1/cloud/connectors/{id}/scan
