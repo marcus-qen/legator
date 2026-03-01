@@ -200,3 +200,66 @@ func TestIsCredentialKey(t *testing.T) {
 		}
 	}
 }
+
+func TestSanitize_LegatorAPIKey(t *testing.T) {
+	// lgk_ prefix followed by exactly 64 lowercase hex characters
+	key := "lgk_" + "a1b2c3d4e5f6abcd" + "0123456789abcdef" + "fedcba9876543210" + "aabbccddeeff0011"
+	input := "Generated API key: " + key + " for probe registration"
+	result := Sanitize(input)
+	if strings.Contains(result, key) {
+		t.Errorf("Legator API key not sanitized: %s", result)
+	}
+	if !strings.Contains(result, "[REDACTED]") {
+		t.Errorf("expected [REDACTED] in output: %s", result)
+	}
+}
+
+func TestSanitize_BearerTokenInHTTPHeader(t *testing.T) {
+	input := "Authorization: Bearer sk-secret-token-12345678901234567890"
+	result := Sanitize(input)
+	if strings.Contains(result, "sk-secret-token") {
+		t.Errorf("Bearer token in HTTP header not sanitized: %s", result)
+	}
+	if !strings.Contains(result, "[REDACTED]") {
+		t.Errorf("expected [REDACTED] in output: %s", result)
+	}
+}
+
+func TestSanitize_PasswordInURL(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"postgres URL", "postgres://admin:s3cr3t_p@ssw0rd@db.example.com:5432/mydb"},
+		{"redis URL", "redis://:hunter2@cache.example.com:6379/0"},
+		{"mysql URL", "mysql://root:MyStr0ngPass!@mysql.example.com/db"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := Sanitize(tt.input)
+			// The scheme://user part should be preserved; the password should be redacted
+			if strings.Contains(result, "s3cr3t_p@ssw0rd") ||
+				strings.Contains(result, "hunter2") ||
+				strings.Contains(result, "MyStr0ngPass!") {
+				t.Errorf("password in URL not sanitized for %s: %s", tt.name, result)
+			}
+			if !strings.Contains(result, "[REDACTED]") {
+				t.Errorf("expected [REDACTED] in output for %s: %s", tt.name, result)
+			}
+		})
+	}
+}
+
+func TestContainsSecret_LegatorAPIKey(t *testing.T) {
+	key := "lgk_" + "a1b2c3d4e5f6abcd" + "0123456789abcdef" + "fedcba9876543210" + "aabbccddeeff0011"
+	if !ContainsSecret(key) {
+		t.Errorf("expected ContainsSecret to detect Legator API key")
+	}
+}
+
+func TestContainsSecret_URLPassword(t *testing.T) {
+	if !ContainsSecret("postgres://admin:secret@db.example.com/db") {
+		t.Errorf("expected ContainsSecret to detect password in postgres URL")
+	}
+}

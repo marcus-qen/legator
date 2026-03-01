@@ -45,6 +45,10 @@ var sensitivePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?s)-----BEGIN[A-Z ]*PRIVATE KEY-----.*?-----END[A-Z ]*PRIVATE KEY-----`),
 	// kubeconfig client-certificate-data / client-key-data
 	regexp.MustCompile(`(?i)(client-(?:certificate|key)-data:\s*)[a-zA-Z0-9+/=\n]{40,}`),
+	// Legator API keys (lgk_ prefix + 64 lowercase hex chars)
+	regexp.MustCompile(`lgk_[a-f0-9]{64}`),
+	// Passwords embedded in connection URLs (e.g. postgres://user:pass@host, redis://:pass@host)
+	regexp.MustCompile(`(?i)(://[^:@\s/]*:)[^@\s]+(@)`),
 }
 
 // Sanitize scrubs sensitive data from text. It matches common secret
