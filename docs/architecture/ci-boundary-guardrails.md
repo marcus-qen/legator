@@ -1,11 +1,12 @@
-# CI Architecture Guardrails Contract (Stage 3.6.3)
+# CI Architecture Guardrails Contract (Stage 3.6.4)
 
-This document defines the architecture boundary contract used to drive CI guardrails.
+This document defines the architecture boundary contract used to drive CI and local fast-fail guardrails.
 
-Machine-readable source of truth:
+Machine-readable sources of truth:
 
 - `docs/contracts/architecture-boundaries.yaml`
 - `docs/contracts/architecture-cross-boundary-imports.txt` (Stage 3.6.3 baseline lock)
+- `docs/contracts/architecture-boundary-exceptions.yaml` (Stage 3.6.4 exception registry)
 
 ## Scope
 
@@ -15,6 +16,7 @@ The contract defines:
 2. Allow/deny dependency policy between zones.
 3. Ownership assignments for each boundary.
 4. Enforcement model for CI architecture guardrails.
+5. Exception declaration + escalation process for intentional transitional edges.
 
 ## Boundary zones
 
@@ -33,15 +35,15 @@ Default policy is **deny**. Explicit allow rules define approved edges.
 ### Key allow edges
 
 - `surfaces -> core-domain`
-- `surfaces -> adapters-integrations` (transitional; existing handlers still wire adapters directly)
+- `surfaces -> adapters-integrations` (transitional; tracked in exception registry)
 - `surfaces -> platform-runtime`
 - `core-domain -> adapters-integrations`
 - `core-domain -> platform-runtime`
 - `adapters-integrations -> platform-runtime`
-- `adapters-integrations -> core-domain` (transitional; current `llm` package reads fleet/core projections)
+- `adapters-integrations -> core-domain` (transitional; tracked in exception registry)
 - `platform-runtime -> core-domain`
 - `platform-runtime -> adapters-integrations`
-- `platform-runtime -> surfaces` (transitional; discovery runtime currently reuses API registration helpers)
+- `platform-runtime -> surfaces` (transitional; tracked in exception registry)
 - `probe-runtime -> platform-runtime`
 
 ### Key deny edges
@@ -63,38 +65,137 @@ Default policy is **deny**. Explicit allow rules define approved edges.
 
 Ownership details and key module patterns are stored in the YAML contract.
 
-## CI model
+## Fast-fail workflow (local + CI)
 
-### Stage 3.6.1
+### Local preflight (recommended before push)
 
-- Validate contract integrity in CI:
-  - required boundary IDs exist
-  - dependency rules are internally consistent
-  - ownership assignments are complete and valid
-  - package patterns resolve to existing paths
+```bash
+# Fast-fail architecture checks only
+make architecture-guard GO=go
 
-### Stage 3.6.2
+# Contributor preflight: architecture checks first, then full test suite
+make preflight GO=go
+```
 
-- Parse `go list` package imports for repository packages.
-- Classify packages into boundaries using `package_patterns` in the contract.
-- Enforce cross-boundary edges:
-  - fail on any explicit `dependency_policy.deny` edge
-  - fail on undeclared cross-boundary edges (default deny)
-- Emit deterministic, actionable violation messages containing:
-  - source package + boundary
-  - imported package + boundary
-  - edge (`from->to`)
-  - rule reference (`dependency_policy.deny[...]` or default-deny reference)
+What this runs:
 
-### Stage 3.6.3 (implemented)
+- Contract integrity + dependency policy consistency
+- Ownership assignment validation
+- Import-graph deny/default-deny enforcement
+- Cross-boundary baseline lock drift check
+- Exception registry validation (required metadata + expiry + transitional edge coverage)
 
-- Lock the observed package-level cross-boundary imports to:
-  - `docs/contracts/architecture-cross-boundary-imports.txt`
-- CI fails when:
-  - a new cross-boundary package import appears and is not in the baseline, or
-  - a baseline entry becomes stale (import removed but baseline not updated)
-- Drift output is deterministic and actionable, including explicit lists of
-  new vs stale entries and an update command.
+### CI fast-fail
+
+CI runs a dedicated **preflight guardrails** job first (`make architecture-guard GO=go`).
+All other jobs (`test`, `build`, `lint`, `e2e`) depend on this gate. If guardrails fail, the workflow stops early before expensive build/e2e work.
+
+## Common violations and fixes
+
+### 1) Deny-edge import violation
+
+Example:
+
+```text
+[DENY] package=... (core-domain) imports=... (surfaces) edge=core-domain->surfaces
+```
+
+Fix:
+
+- Remove the forbidden import.
+- Move transport/UI logic out of core package.
+- Introduce an interface/projection seam in core and wire it from surfaces/runtime.
+
+### 2) Undeclared cross-boundary edge (default deny)
+
+Example:
+
+```text
+[UNDECLARED] ... edge=surfaces->probe-runtime rule=dependency_policy.default_effect
+```
+
+Fix:
+
+- Prefer refactor to stay within existing allowed edges.
+- If the edge is truly required, add an explicit `dependency_policy.allow` rule with rationale and follow the exception process below.
+
+### 3) Baseline drift
+
+Example:
+
+```text
+architecture import baseline drift detected ...
+- new cross-boundary imports ...
+- stale baseline entries ...
+```
+
+Fix:
+
+- If drift is unintentional: revert/fix imports.
+- If intentional and reviewed: refresh baseline, then commit contract + baseline + changelog/release rationale together.
+
+```bash
+LEGATOR_UPDATE_ARCH_IMPORT_BASELINE=1 go test ./internal/controlplane/compat -run TestBoundaryContract_ImportGraphBaselineLock -count=1
+```
+
+### 4) Missing/expired exception metadata
+
+Example:
+
+```text
+missing exception registry entries for transitional allow edges ...
+```
+
+or
+
+```text
+... is expired as of YYYY-MM-DD; remove the exception or extend with fresh reviewer sign-off
+```
+
+Fix:
+
+- Add/update entry in `docs/contracts/architecture-boundary-exceptions.yaml`.
+- Include fresh reviewer sign-off, rationale, tracking issue, and new expiry.
+- If edge is no longer needed, remove allow rule + exception entry in the same PR.
+
+## Exception + escalation process (intentional boundary exceptions)
+
+Use this process when a boundary exception is intentional and time-bounded.
+
+1. **Declare the edge in contract allow policy**
+   - Update `docs/contracts/architecture-boundaries.yaml` (`dependency_policy.allow`).
+   - Rationale must explicitly explain why refactor is deferred.
+
+2. **Declare the exception in registry**
+   - Add an entry to `docs/contracts/architecture-boundary-exceptions.yaml`.
+   - Required fields:
+     - `id`
+     - `from_boundary` / `to_boundary`
+     - `scope`
+     - `rationale`
+     - `reviewer_signoff`
+     - `tracking_issue`
+     - `approved_on`
+     - `expires_on`
+     - `removal_expectations`
+
+3. **Reviewer sign-off is mandatory**
+   - PR must include architecture-owner approval.
+   - `reviewer_signoff` must reference that approval context.
+
+4. **Set expiry and removal expectation**
+   - Exceptions are temporary.
+   - `expires_on` must be after `approved_on` and not already expired.
+   - Removal should happen in the refactor PR that eliminates the edge.
+
+5. **Update release notes/changelog**
+   - Document why the exception exists and expected removal window.
+
+6. **Run fast-fail checks before push**
+
+```bash
+make preflight GO=go
+```
 
 ## Validation entrypoints
 
@@ -102,17 +203,9 @@ Ownership details and key module patterns are stored in the YAML contract.
 # Direct compatibility + boundary guard checks
 go test ./internal/controlplane/compat -count=1
 
-# Convenience make target for local lint gate
-make architecture-guard
+# Fast-fail architecture gate (local and CI preflight)
+make architecture-guard GO=go
+
+# Contributor preflight (guardrails then full tests)
+make preflight GO=go
 ```
-
-To intentionally refresh the Stage 3.6.3 baseline after reviewed architecture changes:
-
-```bash
-LEGATOR_UPDATE_ARCH_IMPORT_BASELINE=1 go test ./internal/controlplane/compat -run TestBoundaryContract_ImportGraphBaselineLock -count=1
-```
-
-CI wiring:
-
-- Test job: `go test ./internal/controlplane/compat -count=1`
-- Lint job gate: `make architecture-guard GO=go`

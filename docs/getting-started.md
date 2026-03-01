@@ -13,7 +13,7 @@ This gets you from zero to a working control plane with connected probes in ~15 
 ```bash
 git clone https://github.com/marcus-qen/legator.git
 cd legator
-make all
+make build
 ```
 
 Binaries in `bin/`:

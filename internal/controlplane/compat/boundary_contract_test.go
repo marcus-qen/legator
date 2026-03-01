@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -20,6 +22,7 @@ type boundaryContractFile struct {
 	Stage              string                      `yaml:"stage"`
 	Summary            string                      `yaml:"summary"`
 	ModuleRoot         string                      `yaml:"module_root"`
+	ExceptionRegistry  string                      `yaml:"exception_registry"`
 	RequiredBoundaries []string                    `yaml:"required_boundaries"`
 	Boundaries         []boundaryDefinition        `yaml:"boundaries"`
 	DependencyPolicy   boundaryDependencyPolicy    `yaml:"dependency_policy"`
@@ -35,9 +38,9 @@ type boundaryDefinition struct {
 }
 
 type boundaryDependencyPolicy struct {
-	DefaultEffect string                 `yaml:"default_effect"`
-	Allow         []boundaryDependency   `yaml:"allow"`
-	Deny          []boundaryDependency   `yaml:"deny"`
+	DefaultEffect string               `yaml:"default_effect"`
+	Allow         []boundaryDependency `yaml:"allow"`
+	Deny          []boundaryDependency `yaml:"deny"`
 }
 
 type boundaryDependency struct {
@@ -67,7 +70,28 @@ type boundaryEnforcementModel struct {
 	Stage361     string   `yaml:"stage_3_6_1"`
 	Stage362     string   `yaml:"stage_3_6_2"`
 	Stage363     string   `yaml:"stage_3_6_3"`
+	Stage364     string   `yaml:"stage_3_6_4"`
 	RolloutNotes []string `yaml:"rollout_notes"`
+}
+
+type boundaryExceptionRegistryFile struct {
+	Version    string              `yaml:"version"`
+	ContractID string              `yaml:"contract_id"`
+	Summary    string              `yaml:"summary"`
+	Exceptions []boundaryException `yaml:"exceptions"`
+}
+
+type boundaryException struct {
+	ID                  string `yaml:"id"`
+	FromBoundary        string `yaml:"from_boundary"`
+	ToBoundary          string `yaml:"to_boundary"`
+	Scope               string `yaml:"scope"`
+	Rationale           string `yaml:"rationale"`
+	ReviewerSignoff     string `yaml:"reviewer_signoff"`
+	TrackingIssue       string `yaml:"tracking_issue"`
+	ApprovedOn          string `yaml:"approved_on"`
+	ExpiresOn           string `yaml:"expires_on"`
+	RemovalExpectations string `yaml:"removal_expectations"`
 }
 
 func TestBoundaryContract_FileIntegrity(t *testing.T) {
@@ -88,6 +112,12 @@ func TestBoundaryContract_FileIntegrity(t *testing.T) {
 	}
 	if strings.TrimSpace(contract.ModuleRoot) == "" {
 		t.Fatalf("boundary contract missing module_root")
+	}
+	if strings.TrimSpace(contract.ExceptionRegistry) == "" {
+		t.Fatalf("boundary contract missing exception_registry")
+	}
+	if _, err := os.Stat(filepath.Join(repoRoot, filepath.FromSlash(contract.ExceptionRegistry))); err != nil {
+		t.Fatalf("boundary contract exception_registry %q not found: %v", contract.ExceptionRegistry, err)
 	}
 
 	if len(contract.Boundaries) == 0 {
@@ -292,6 +322,124 @@ func TestBoundaryContract_OwnershipAssignments(t *testing.T) {
 	if strings.TrimSpace(contract.EnforcementModel.Stage363) == "" {
 		t.Fatalf("enforcement_model.stage_3_6_3 must be documented")
 	}
+	if strings.TrimSpace(contract.EnforcementModel.Stage364) == "" {
+		t.Fatalf("enforcement_model.stage_3_6_4 must be documented")
+	}
+}
+
+func TestBoundaryContract_ExceptionRegistry(t *testing.T) {
+	repoRoot := mustRepoRoot(t)
+	contract := mustReadBoundaryContract(t, filepath.Join(repoRoot, boundaryContractFilePath))
+	registryPath := filepath.Join(repoRoot, filepath.FromSlash(contract.ExceptionRegistry))
+	registry := mustReadBoundaryExceptionRegistry(t, registryPath)
+
+	if strings.TrimSpace(registry.Version) == "" {
+		t.Fatalf("boundary exception registry missing version")
+	}
+	if strings.TrimSpace(registry.ContractID) == "" {
+		t.Fatalf("boundary exception registry missing contract_id")
+	}
+	if strings.TrimSpace(registry.Summary) == "" {
+		t.Fatalf("boundary exception registry missing summary")
+	}
+
+	boundaryIDs := map[string]struct{}{}
+	for _, boundary := range contract.Boundaries {
+		boundaryIDs[strings.TrimSpace(boundary.ID)] = struct{}{}
+	}
+
+	allowEdges := map[string]struct{}{}
+	transitionalAllowEdges := map[string]struct{}{}
+	for _, rule := range contract.DependencyPolicy.Allow {
+		edge := strings.TrimSpace(rule.From) + "->" + strings.TrimSpace(rule.To)
+		allowEdges[edge] = struct{}{}
+		if strings.Contains(strings.ToLower(rule.Rationale), "transitional") {
+			transitionalAllowEdges[edge] = struct{}{}
+		}
+	}
+
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	seenIDs := map[string]struct{}{}
+	coveredTransitionalEdges := map[string]struct{}{}
+	seenExceptionEdges := map[string]string{}
+
+	for i, exception := range registry.Exceptions {
+		entryRef := "exceptions[" + strconv.Itoa(i) + "]"
+
+		id := strings.TrimSpace(exception.ID)
+		if id == "" {
+			t.Fatalf("%s missing id", entryRef)
+		}
+		if _, exists := seenIDs[id]; exists {
+			t.Fatalf("duplicate exception id %q", id)
+		}
+		seenIDs[id] = struct{}{}
+
+		from := strings.TrimSpace(exception.FromBoundary)
+		to := strings.TrimSpace(exception.ToBoundary)
+		if from == "" || to == "" {
+			t.Fatalf("%s (%s) missing from_boundary/to_boundary", entryRef, id)
+		}
+		if _, ok := boundaryIDs[from]; !ok {
+			t.Fatalf("%s (%s) references unknown from_boundary %q", entryRef, id, from)
+		}
+		if _, ok := boundaryIDs[to]; !ok {
+			t.Fatalf("%s (%s) references unknown to_boundary %q", entryRef, id, to)
+		}
+
+		edge := from + "->" + to
+		if _, ok := allowEdges[edge]; !ok {
+			t.Fatalf("%s (%s) edge %s is not declared in dependency_policy.allow; add/justify allow rule first", entryRef, id, edge)
+		}
+		if existing, exists := seenExceptionEdges[edge]; exists {
+			t.Fatalf("edge %s has multiple active exceptions (%s, %s)", edge, existing, id)
+		}
+		seenExceptionEdges[edge] = id
+
+		if strings.TrimSpace(exception.Scope) == "" {
+			t.Fatalf("%s (%s) missing scope", entryRef, id)
+		}
+		if strings.TrimSpace(exception.Rationale) == "" {
+			t.Fatalf("%s (%s) missing rationale", entryRef, id)
+		}
+		if strings.TrimSpace(exception.ReviewerSignoff) == "" {
+			t.Fatalf("%s (%s) missing reviewer_signoff", entryRef, id)
+		}
+		if strings.TrimSpace(exception.TrackingIssue) == "" {
+			t.Fatalf("%s (%s) missing tracking_issue", entryRef, id)
+		}
+		if strings.TrimSpace(exception.RemovalExpectations) == "" {
+			t.Fatalf("%s (%s) missing removal_expectations", entryRef, id)
+		}
+
+		approvedOn := mustParseISODate(t, exception.ApprovedOn, entryRef, "approved_on")
+		expiresOn := mustParseISODate(t, exception.ExpiresOn, entryRef, "expires_on")
+		if !expiresOn.After(approvedOn) {
+			t.Fatalf("%s (%s) expires_on (%s) must be after approved_on (%s)", entryRef, id, exception.ExpiresOn, exception.ApprovedOn)
+		}
+		if expiresOn.Before(today) {
+			t.Fatalf("%s (%s) is expired as of %s; remove the exception or extend with fresh reviewer sign-off", entryRef, id, exception.ExpiresOn)
+		}
+
+		if _, isTransitional := transitionalAllowEdges[edge]; isTransitional {
+			coveredTransitionalEdges[edge] = struct{}{}
+		}
+	}
+
+	if len(transitionalAllowEdges) == 0 {
+		t.Fatalf("dependency_policy.allow must contain at least one transitional rule to validate exception process")
+	}
+
+	missing := make([]string, 0)
+	for edge := range transitionalAllowEdges {
+		if _, ok := coveredTransitionalEdges[edge]; !ok {
+			missing = append(missing, edge)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		t.Fatalf("missing exception registry entries for transitional allow edges: %s", strings.Join(missing, ", "))
+	}
 }
 
 func mustReadBoundaryContract(t *testing.T, path string) boundaryContractFile {
@@ -317,6 +465,44 @@ func mustReadBoundaryContract(t *testing.T, path string) boundaryContractFile {
 	}
 
 	return contract
+}
+
+func mustReadBoundaryExceptionRegistry(t *testing.T, path string) boundaryExceptionRegistryFile {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read boundary exception registry %s: %v", path, err)
+	}
+
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+
+	var registry boundaryExceptionRegistryFile
+	if err := dec.Decode(&registry); err != nil {
+		t.Fatalf("decode boundary exception registry %s: %v", path, err)
+	}
+
+	if err := dec.Decode(&struct{}{}); err == nil {
+		t.Fatalf("boundary exception registry %s contains multiple YAML documents", path)
+	} else if err != io.EOF {
+		t.Fatalf("boundary exception registry %s trailing YAML decode error: %v", path, err)
+	}
+
+	return registry
+}
+
+func mustParseISODate(t *testing.T, value, entryRef, field string) time.Time {
+	t.Helper()
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		t.Fatalf("%s missing %s", entryRef, field)
+	}
+	parsed, err := time.Parse("2006-01-02", trimmed)
+	if err != nil {
+		t.Fatalf("%s has invalid %s %q (expected YYYY-MM-DD): %v", entryRef, field, value, err)
+	}
+	return parsed.UTC().Truncate(24 * time.Hour)
 }
 
 func patternBasePath(pattern string) string {

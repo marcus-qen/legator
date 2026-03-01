@@ -107,6 +107,13 @@
   - Added baseline artifact `docs/contracts/architecture-cross-boundary-imports.txt` and explicit refresh command (`LEGATOR_UPDATE_ARCH_IMPORT_BASELINE=1 ...`).
   - Extended `make architecture-guard` to include baseline lock enforcement so CI/lint fail on unreviewed import drift.
   - Updated architecture contract/docs for Stage 3.6.3 rollout and baseline-lock workflow.
+- **Stage 3.6.4 CI guardrails: contributor docs + fast-fail workflow**
+  - Added contributor workflow doc (`CONTRIBUTING.md`) with architecture check entrypoints and baseline refresh guidance.
+  - Expanded guardrail guide (`docs/architecture/ci-boundary-guardrails.md`) with local preflight flow, CI fast-fail behavior, and common violation remediation examples.
+  - Added dedicated CI preflight guardrail job so test/build/lint/e2e jobs are gated by `make architecture-guard`.
+  - Added exception registry (`docs/contracts/architecture-boundary-exceptions.yaml`) and Stage 3.6.4 contract metadata for intentional transitional boundary exceptions.
+  - Added `TestBoundaryContract_ExceptionRegistry` to enforce exception rationale/reviewer sign-off, tracking issue, expiry validity, and coverage for transitional allow edges.
+  - Added `make preflight` target for local guardrail-first checks (`architecture-guard` then `go test ./...`).
 - **Jobs cancellation API + lifecycle guardrails**
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.

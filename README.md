@@ -46,6 +46,8 @@ See [docs/architecture.md](docs/architecture.md) for full internals.
 
 Architecture boundary/ownership CI contract: [docs/contracts/architecture-boundaries.yaml](docs/contracts/architecture-boundaries.yaml) (guide: [docs/architecture/ci-boundary-guardrails.md](docs/architecture/ci-boundary-guardrails.md)).
 Stage 3.6.3 baseline lock artifact: [docs/contracts/architecture-cross-boundary-imports.txt](docs/contracts/architecture-cross-boundary-imports.txt).
+Stage 3.6.4 exception registry: [docs/contracts/architecture-boundary-exceptions.yaml](docs/contracts/architecture-boundary-exceptions.yaml).
+Contributor workflow: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Quick Start
 
@@ -54,7 +56,7 @@ Stage 3.6.3 baseline lock artifact: [docs/contracts/architecture-cross-boundary-
 ```bash
 git clone https://github.com/marcus-qen/legator.git
 cd legator
-make all
+make build
 ```
 
 ### 2. Start the control plane
@@ -197,9 +199,10 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 ## Building
 
 ```bash
-make all              # Build control-plane, probe, legatorctl
+make build            # Build control-plane, probe, legatorctl
+make architecture-guard # Fast-fail architecture guardrails only
+make preflight        # architecture-guard + go test ./...
 make test             # Run unit tests
-make architecture-guard # Run architecture boundary import-graph guardrails
 make e2e              # Full end-to-end flow (29+ checks)
 make lint             # golangci-lint
 make release-build    # Cross-compile release binaries (incl. windows/amd64 probe)

@@ -1,11 +1,12 @@
 version: "1"
 contract_id: legator.architecture.boundaries
-stage: "3.6.3"
+stage: "3.6.4"
 summary: >-
   Canonical boundary and ownership contract for CI architecture guardrails.
-  Stage 3.6.3 enforces import-graph dependency edges and locks a deterministic
-  cross-boundary import baseline in CI.
+  Stage 3.6.4 keeps import-graph dependency + baseline lock enforcement and
+  adds a mandatory exception registry for transitional boundary edges.
 module_root: .
+exception_registry: docs/contracts/architecture-boundary-exceptions.yaml
 required_boundaries:
   - core-domain
   - adapters-integrations
@@ -86,7 +87,7 @@ dependency_policy:
       rationale: Surfaces translate requests/responses and call core orchestration.
     - from: surfaces
       to: adapters-integrations
-      rationale: Existing surfaces still include direct adapter handlers during migration.
+      rationale: "Transitional coupling: existing surfaces still include direct adapter handlers during migration."
     - from: surfaces
       to: platform-runtime
       rationale: Surfaces depend on auth/session/config and transport plumbing.
@@ -206,7 +207,12 @@ enforcement_model:
     Lock cross-boundary package-level import drift against
     docs/contracts/architecture-cross-boundary-imports.txt and require explicit
     baseline updates for intentional changes.
+  stage_3_6_4: >-
+    Require time-bounded exception declarations for every transitional allow
+    edge via docs/contracts/architecture-boundary-exceptions.yaml and fail fast
+    in CI/local preflight when exception metadata is missing, stale, or expired.
   rollout_notes:
     - Contract integrity checks run in internal/controlplane/compat.
     - Import-graph guardrails are fail-on-violation in CI and local make architecture-guard.
     - Baseline lock test emits actionable drift output and update command.
+    - Transitional edge exceptions must include reviewer sign-off, tracking issue, and expiry date.
