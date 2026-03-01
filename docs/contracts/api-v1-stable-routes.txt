@@ -71,6 +71,8 @@ GET /api/v1/probes
 GET /api/v1/probes/{id}
 GET /api/v1/probes/{id}/chat
 GET /api/v1/probes/{id}/health
+GET /api/v1/reliability/drills
+GET /api/v1/reliability/drills/history
 GET /api/v1/reliability/scorecard
 GET /api/v1/tokens
 GET /api/v1/users
@@ -119,6 +121,7 @@ POST /api/v1/probes/{id}/rotate-key
 POST /api/v1/probes/{id}/task
 POST /api/v1/probes/{id}/update
 POST /api/v1/register
+POST /api/v1/reliability/drills/{name}/run
 POST /api/v1/tokens
 POST /api/v1/users
 POST /api/v1/webhooks

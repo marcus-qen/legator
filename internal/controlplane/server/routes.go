@@ -61,6 +61,17 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/probes/{id}", s.handleDeleteProbe)
 	mux.HandleFunc("GET /api/v1/fleet/summary", s.handleFleetSummary)
 	mux.HandleFunc("GET /api/v1/reliability/scorecard", s.handleReliabilityScorecard)
+
+	// Failure drills
+	if s.drillRunner != nil {
+		mux.HandleFunc("GET /api/v1/reliability/drills", s.withPermission(auth.PermFleetRead, s.handleListDrills))
+		mux.HandleFunc("POST /api/v1/reliability/drills/{name}/run", s.withPermission(auth.PermFleetWrite, s.handleRunDrill))
+		mux.HandleFunc("GET /api/v1/reliability/drills/history", s.withPermission(auth.PermFleetRead, s.handleListDrillHistory))
+	} else {
+		mux.HandleFunc("GET /api/v1/reliability/drills", s.withPermission(auth.PermFleetRead, s.handleDrillsUnavailable))
+		mux.HandleFunc("POST /api/v1/reliability/drills/{name}/run", s.withPermission(auth.PermFleetWrite, s.handleDrillsUnavailable))
+		mux.HandleFunc("GET /api/v1/reliability/drills/history", s.withPermission(auth.PermFleetRead, s.handleDrillsUnavailable))
+	}
 	mux.HandleFunc("GET /api/v1/fleet/inventory", s.handleFleetInventory)
 	mux.HandleFunc("GET /api/v1/federation/inventory", s.handleFederationInventory)
 	mux.HandleFunc("GET /api/v1/federation/summary", s.handleFederationSummary)

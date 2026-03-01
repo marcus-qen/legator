@@ -152,6 +152,10 @@ type Server struct {
 	// Reliability telemetry
 	reliabilityTelemetry *reliability.RequestTelemetry
 
+	// Failure drills
+	drillRunner *reliability.DrillRunner
+	drillStore  *reliability.DrillStore
+
 	// HTTP
 	httpServer *http.Server
 }
@@ -219,6 +223,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initKubeflow()
 	s.initGrafana()
 	s.initDiscovery()
+	s.initDrills()
 	s.initLLM()
 	s.initHub()
 	s.initJobs()
@@ -411,6 +416,9 @@ func (s *Server) Close() {
 	}
 	if s.discoveryStore != nil {
 		s.discoveryStore.Close()
+	}
+	if s.drillStore != nil {
+		s.drillStore.Close()
 	}
 	if s.userStore != nil {
 		s.userStore.Close()
