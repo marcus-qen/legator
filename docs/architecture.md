@@ -10,6 +10,7 @@
 - The LLM never touches target servers directly
 
 Architecture guardrails contract: `docs/contracts/architecture-boundaries.yaml` (overview: `docs/architecture/ci-boundary-guardrails.md`).
+Stage 3.6.3 baseline lock artifact: `docs/contracts/architecture-cross-boundary-imports.txt`.
 
 ## Components
 

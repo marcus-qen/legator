@@ -1,0 +1,3 @@
+# Stage 3.6.3 architecture cross-boundary import baseline
+# Regenerate intentionally via:
+#   LEGATOR_UPDATE_ARCH_IMPORT_BASELINE=1 go test ./internal/controlplane/compat -run TestBoundaryContract_ImportGraphBaselineLock -count=1

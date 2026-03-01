@@ -52,7 +52,7 @@ test:
 	$(GO) test ./... -count=1
 
 architecture-guard:
-	$(GO) test ./internal/controlplane/compat -run 'TestBoundaryContract_(FileIntegrity|DependencyPolicyConsistency|OwnershipAssignments|ImportGraphEnforcement)' -count=1
+	$(GO) test ./internal/controlplane/compat -run 'TestBoundaryContract_(FileIntegrity|DependencyPolicyConsistency|OwnershipAssignments|ImportGraphEnforcement|ImportGraphBaselineLock)' -count=1
 
 lint:
 	$(GOLANGCI_LINT) run ./...

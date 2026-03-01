@@ -45,6 +45,7 @@ The LLM never touches your servers directly. The probe never reasons independent
 See [docs/architecture.md](docs/architecture.md) for full internals.
 
 Architecture boundary/ownership CI contract: [docs/contracts/architecture-boundaries.yaml](docs/contracts/architecture-boundaries.yaml) (guide: [docs/architecture/ci-boundary-guardrails.md](docs/architecture/ci-boundary-guardrails.md)).
+Stage 3.6.3 baseline lock artifact: [docs/contracts/architecture-cross-boundary-imports.txt](docs/contracts/architecture-cross-boundary-imports.txt).
 
 ## Quick Start
 
