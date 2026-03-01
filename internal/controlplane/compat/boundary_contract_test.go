@@ -64,9 +64,10 @@ type boundaryAssignment struct {
 }
 
 type boundaryEnforcementModel struct {
-	Stage361    string   `yaml:"stage_3_6_1"`
-	Stage362    string   `yaml:"stage_3_6_2"`
-	RolloutNote []string `yaml:"rollout_notes"`
+	Stage361     string   `yaml:"stage_3_6_1"`
+	Stage362     string   `yaml:"stage_3_6_2"`
+	Stage363     string   `yaml:"stage_3_6_3"`
+	RolloutNotes []string `yaml:"rollout_notes"`
 }
 
 func TestBoundaryContract_FileIntegrity(t *testing.T) {
@@ -287,6 +288,9 @@ func TestBoundaryContract_OwnershipAssignments(t *testing.T) {
 	}
 	if strings.TrimSpace(contract.EnforcementModel.Stage362) == "" {
 		t.Fatalf("enforcement_model.stage_3_6_2 must be documented")
+	}
+	if strings.TrimSpace(contract.EnforcementModel.Stage363) == "" {
+		t.Fatalf("enforcement_model.stage_3_6_3 must be documented")
 	}
 }
 

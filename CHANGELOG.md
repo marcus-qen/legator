@@ -101,6 +101,12 @@
   - Violation output is deterministic and actionable, including package, boundary edge, and rule reference (`dependency_policy.deny[...]` or default-deny).
   - Added local lint gate target `make architecture-guard` and wired it into CI lint workflow.
   - Updated boundary-guardrail documentation and release notes for Stage 3.6.2 enforcement status.
+- **Stage 3.6.3 CI guardrails: violation remediation + baseline lock**
+  - Verified architecture guardrails are clean (no active deny-edge or undeclared-edge violations) before locking baseline.
+  - Added deterministic cross-boundary import baseline lock test (`internal/controlplane/compat/boundary_import_baseline_test.go`) with actionable drift output.
+  - Added baseline artifact `docs/contracts/architecture-cross-boundary-imports.txt` and explicit refresh command (`LEGATOR_UPDATE_ARCH_IMPORT_BASELINE=1 ...`).
+  - Extended `make architecture-guard` to include baseline lock enforcement so CI/lint fail on unreviewed import drift.
+  - Updated architecture contract/docs for Stage 3.6.3 rollout and baseline-lock workflow.
 - **Jobs cancellation API + lifecycle guardrails**
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.

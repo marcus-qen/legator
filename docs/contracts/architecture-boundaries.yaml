@@ -1,9 +1,10 @@
 version: "1"
 contract_id: legator.architecture.boundaries
-stage: "3.6.2"
+stage: "3.6.3"
 summary: >-
   Canonical boundary and ownership contract for CI architecture guardrails.
-  Stage 3.6.2 enforces import-graph dependency edges in CI.
+  Stage 3.6.3 enforces import-graph dependency edges and locks a deterministic
+  cross-boundary import baseline in CI.
 module_root: .
 required_boundaries:
   - core-domain
@@ -201,6 +202,11 @@ enforcement_model:
     Load this contract to map packages to boundaries, compute Go import edges,
     and fail CI on deny-edge imports or undeclared cross-boundary edges
     (default deny).
+  stage_3_6_3: >-
+    Lock cross-boundary package-level import drift against
+    docs/contracts/architecture-cross-boundary-imports.txt and require explicit
+    baseline updates for intentional changes.
   rollout_notes:
     - Contract integrity checks run in internal/controlplane/compat.
     - Import-graph guardrails are fail-on-violation in CI and local make architecture-guard.
+    - Baseline lock test emits actionable drift output and update command.

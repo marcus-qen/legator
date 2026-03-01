@@ -1,10 +1,11 @@
-# CI Architecture Guardrails Contract (Stage 3.6.2)
+# CI Architecture Guardrails Contract (Stage 3.6.3)
 
 This document defines the architecture boundary contract used to drive CI guardrails.
 
 Machine-readable source of truth:
 
 - `docs/contracts/architecture-boundaries.yaml`
+- `docs/contracts/architecture-cross-boundary-imports.txt` (Stage 3.6.3 baseline lock)
 
 ## Scope
 
@@ -72,7 +73,7 @@ Ownership details and key module patterns are stored in the YAML contract.
   - ownership assignments are complete and valid
   - package patterns resolve to existing paths
 
-### Stage 3.6.2 (implemented)
+### Stage 3.6.2
 
 - Parse `go list` package imports for repository packages.
 - Classify packages into boundaries using `package_patterns` in the contract.
@@ -85,6 +86,16 @@ Ownership details and key module patterns are stored in the YAML contract.
   - edge (`from->to`)
   - rule reference (`dependency_policy.deny[...]` or default-deny reference)
 
+### Stage 3.6.3 (implemented)
+
+- Lock the observed package-level cross-boundary imports to:
+  - `docs/contracts/architecture-cross-boundary-imports.txt`
+- CI fails when:
+  - a new cross-boundary package import appears and is not in the baseline, or
+  - a baseline entry becomes stale (import removed but baseline not updated)
+- Drift output is deterministic and actionable, including explicit lists of
+  new vs stale entries and an update command.
+
 ## Validation entrypoints
 
 ```bash
@@ -93,6 +104,12 @@ go test ./internal/controlplane/compat -count=1
 
 # Convenience make target for local lint gate
 make architecture-guard
+```
+
+To intentionally refresh the Stage 3.6.3 baseline after reviewed architecture changes:
+
+```bash
+LEGATOR_UPDATE_ARCH_IMPORT_BASELINE=1 go test ./internal/controlplane/compat -run TestBoundaryContract_ImportGraphBaselineLock -count=1
 ```
 
 CI wiring:
