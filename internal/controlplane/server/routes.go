@@ -247,10 +247,12 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/v1/automation-packs", s.withPermission(auth.PermFleetRead, s.automationPackHandlers.HandleListDefinitions))
 		mux.HandleFunc("POST /api/v1/automation-packs", s.withPermission(auth.PermFleetWrite, s.automationPackHandlers.HandleCreateDefinition))
 		mux.HandleFunc("GET /api/v1/automation-packs/{id}", s.withPermission(auth.PermFleetRead, s.automationPackHandlers.HandleGetDefinition))
+		mux.HandleFunc("POST /api/v1/automation-packs/dry-run", s.withPermission(auth.PermFleetWrite, s.automationPackHandlers.HandleDryRunDefinition))
 	} else {
 		mux.HandleFunc("GET /api/v1/automation-packs", s.withPermission(auth.PermFleetRead, s.handleAutomationPacksUnavailable))
 		mux.HandleFunc("POST /api/v1/automation-packs", s.withPermission(auth.PermFleetWrite, s.handleAutomationPacksUnavailable))
 		mux.HandleFunc("GET /api/v1/automation-packs/{id}", s.withPermission(auth.PermFleetRead, s.handleAutomationPacksUnavailable))
+		mux.HandleFunc("POST /api/v1/automation-packs/dry-run", s.withPermission(auth.PermFleetWrite, s.handleAutomationPacksUnavailable))
 	}
 
 	// Kubeflow API (read endpoints + guarded mutations)

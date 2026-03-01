@@ -9,11 +9,33 @@ import (
 
 // Handler serves automation pack definition APIs.
 type Handler struct {
-	store *Store
+	store           *Store
+	policySimulator PolicySimulator
 }
 
-func NewHandler(store *Store) *Handler {
-	return &Handler{store: store}
+// HandlerOption configures automation-pack handlers.
+type HandlerOption func(*Handler)
+
+// WithPolicySimulator injects policy what-if simulation for dry-run planning.
+func WithPolicySimulator(simulator PolicySimulator) HandlerOption {
+	return func(h *Handler) {
+		if simulator != nil {
+			h.policySimulator = simulator
+		}
+	}
+}
+
+func NewHandler(store *Store, opts ...HandlerOption) *Handler {
+	h := &Handler{
+		store:           store,
+		policySimulator: noopPolicySimulator{},
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(h)
+		}
+	}
+	return h
 }
 
 func (h *Handler) HandleCreateDefinition(w http.ResponseWriter, r *http.Request) {
@@ -71,8 +93,38 @@ func (h *Handler) HandleGetDefinition(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"automation_pack": definition})
 }
 
+func (h *Handler) HandleDryRunDefinition(w http.ResponseWriter, r *http.Request) {
+	var req DryRunRequest
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+
+	result, err := runDryRun(r.Context(), req, h.policySimulator)
+	if err != nil {
+		switch {
+		case errorsAsValidation(err):
+			writeError(w, http.StatusBadRequest, "invalid_schema", err.Error())
+		case errorsAsInputValidation(err):
+			writeError(w, http.StatusBadRequest, "invalid_inputs", err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", "failed to dry-run automation pack definition")
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"dry_run": result})
+}
+
 func errorsAsValidation(err error) bool {
 	var validationErr *ValidationError
+	return errors.As(err, &validationErr)
+}
+
+func errorsAsInputValidation(err error) bool {
+	var validationErr *InputValidationError
 	return errors.As(err, &validationErr)
 }
 

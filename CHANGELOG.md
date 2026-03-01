@@ -167,6 +167,15 @@
   - Added tests for schema validation, automation-pack store behavior, API handlers, and server permission gates.
   - Added documentation: `docs/automation-packs.md`, README API/docs updates, and release notes for Stage 3.8.1.
   - **[compat:additive]** Added automation-pack definition routes and payloads without removing or renaming existing REST/MCP identifiers.
+- **Stage 3.8.2 Automation packs: dry-run planning + policy simulation**
+  - Added non-mutating dry-run planning API: `POST /api/v1/automation-packs/dry-run` accepting inline definition + runtime inputs.
+  - Added dry-run runtime input validation against declared schema contracts (required/default handling, type checks, constraints, enum checks, unknown-input rejection).
+  - Added resolved step-plan simulation (template input interpolation into step parameters) without dispatching any command execution.
+  - Integrated per-step/workflow policy what-if evaluation using existing command policy logic, returning additive `allow|queue|deny` predictions and rationale.
+  - Added explicit non-mutation dry-run contract in API payloads (`non_mutating: true`) and tests proving dry-run does not persist definitions.
+  - Added coverage for dry-run validation failures, policy simulation outcomes, route permission gates, and non-mutation guarantees.
+  - Updated automation-pack docs, README API reference, and Stage 3.8.2 release notes.
+  - **[compat:additive]** Added dry-run route/payload fields without removing or renaming existing REST/MCP identifiers.
 - **Jobs cancellation API + lifecycle guardrails**
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.

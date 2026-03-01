@@ -73,6 +73,7 @@ GET /version
 POST /api/v1/alerts
 POST /api/v1/approvals/{id}/decide
 POST /api/v1/automation-packs
+POST /api/v1/automation-packs/dry-run
 POST /api/v1/auth/keys
 POST /api/v1/cloud/connectors
 POST /api/v1/cloud/connectors/{id}/scan
