@@ -1410,7 +1410,7 @@ func TestHandleFederationInventory_WithFilters(t *testing.T) {
 	_ = srv.fleetMgr.UpdateInventory("probe-1", &protocol.InventoryPayload{CPUs: 4, MemTotal: 8 * 1024 * 1024 * 1024, OS: "linux"})
 	_ = srv.fleetMgr.UpdateInventory("probe-2", &protocol.InventoryPayload{CPUs: 2, MemTotal: 4 * 1024 * 1024 * 1024, OS: "linux"})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/federation/inventory?tag=prod&status=online&source=local", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/federation/inventory?tag=prod&status=online&source=local&cluster=primary&site=local&search=web", nil)
 	rr := httptest.NewRecorder()
 
 	srv.handleFederationInventory(rr, req)
@@ -1435,6 +1435,18 @@ func TestHandleFederationInventory_WithFilters(t *testing.T) {
 	}
 	if payload.Health.Overall != fleet.FederationSourceHealthy {
 		t.Fatalf("expected healthy overall rollup, got %q", payload.Health.Overall)
+	}
+	if payload.Aggregates.TagDistribution["prod"] != 1 {
+		t.Fatalf("expected aggregated prod tag count of 1, got %+v", payload.Aggregates.TagDistribution)
+	}
+}
+
+func TestFederationFilterFromRequest_ParsesSearch(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/federation/inventory?tag=prod&status=online&source=local&cluster=primary&site=local&search=web", nil)
+	filter := federationFilterFromRequest(req)
+
+	if filter.Tag != "prod" || filter.Status != "online" || filter.Source != "local" || filter.Cluster != "primary" || filter.Site != "local" || filter.Search != "web" {
+		t.Fatalf("unexpected parsed federation filter: %+v", filter)
 	}
 }
 
@@ -1544,6 +1556,26 @@ func TestHandleJobsPage_RendersTemplate(t *testing.T) {
 	body := rr.Body.String()
 	if !strings.Contains(body, "Jobs") {
 		t.Fatalf("expected jobs page content, got: %s", body)
+	}
+}
+
+func TestHandleFederationPage_RendersTemplate(t *testing.T) {
+	srv := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/federation", nil)
+	rr := httptest.NewRecorder()
+
+	srv.handleFederationPage(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "Federation") {
+		t.Fatalf("expected federation page content, got: %s", body)
+	}
+	if !strings.Contains(body, "/api/v1/federation/inventory") || !strings.Contains(body, "/api/v1/federation/summary") {
+		t.Fatalf("expected federation API bindings in page output, got: %s", body)
 	}
 }
 

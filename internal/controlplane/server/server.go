@@ -226,6 +226,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 			},
 			mcpserver.WithKubeflowTools(s.mcpKubeflowRunStatus, s.mcpKubeflowSubmitRun, s.mcpKubeflowCancelRun),
 			mcpserver.WithGrafanaClient(s.grafanaClient),
+			mcpserver.WithFederationStore(s.federationStore),
 			mcpserver.WithPermissionChecker(func(ctx context.Context, perm auth.Permission) error {
 				if s.authStore == nil && s.sessionValidator == nil {
 					return nil
@@ -1045,7 +1046,7 @@ func (s *Server) loadTemplates() {
 	tmplDir := filepath.Join("web", "templates")
 	pt := &pageTemplates{templates: make(map[string]pageTemplate)}
 
-	pages := []string{"fleet", "probe-detail", "chat", "fleet-chat", "approvals", "audit", "alerts", "model-dock", "cloud-connectors", "network-devices", "discovery", "jobs"}
+	pages := []string{"fleet", "federation", "probe-detail", "chat", "fleet-chat", "approvals", "audit", "alerts", "model-dock", "cloud-connectors", "network-devices", "discovery", "jobs"}
 	for _, page := range pages {
 		t, err := template.New("").Funcs(templateFuncs()).ParseFiles(
 			filepath.Join(tmplDir, "_base.html"),

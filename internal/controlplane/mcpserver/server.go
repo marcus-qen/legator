@@ -27,6 +27,7 @@ type MCPServer struct {
 	server            *mcp.Server
 	handler           http.Handler
 	fleetStore        *fleet.Store
+	federationStore   *fleet.FederationStore
 	auditStore        *audit.Store
 	jobsStore         *jobs.Store
 	eventBus          *events.Bus
@@ -70,6 +71,16 @@ func WithGrafanaClient(client grafana.Client) Option {
 	}
 }
 
+// WithFederationStore wires a preconfigured federation read model for MCP federation tools/resources.
+func WithFederationStore(store *fleet.FederationStore) Option {
+	return func(server *MCPServer) {
+		if server == nil || store == nil {
+			return
+		}
+		server.federationStore = store
+	}
+}
+
 // WithPermissionChecker enforces permission checks for MCP handlers that opt in.
 func WithPermissionChecker(checker func(context.Context, auth.Permission) error) Option {
 	return func(server *MCPServer) {
@@ -106,16 +117,28 @@ func New(
 		Version: implVersion,
 	}, nil)
 
+	federationStore := fleet.NewFederationStore()
+	if fleetStore != nil {
+		federationStore.RegisterSource(fleet.NewFleetSourceAdapter(fleetStore, fleet.FederationSourceDescriptor{
+			ID:      "local",
+			Name:    "Local Fleet",
+			Kind:    "control-plane",
+			Cluster: "primary",
+			Site:    "local",
+		}))
+	}
+
 	m := &MCPServer{
-		server:         srv,
-		fleetStore:     fleetStore,
-		auditStore:     auditStore,
-		jobsStore:      jobsStore,
-		eventBus:       eventBus,
-		hub:            hub,
-		dispatcher:     corecommanddispatch.NewService(hub, cmdTracker),
-		decideApproval: decideApproval,
-		logger:         logger.Named("mcp"),
+		server:          srv,
+		fleetStore:      fleetStore,
+		federationStore: federationStore,
+		auditStore:      auditStore,
+		jobsStore:       jobsStore,
+		eventBus:        eventBus,
+		hub:             hub,
+		dispatcher:      corecommanddispatch.NewService(hub, cmdTracker),
+		decideApproval:  decideApproval,
+		logger:          logger.Named("mcp"),
 	}
 	for _, opt := range opts {
 		if opt != nil {

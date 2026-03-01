@@ -37,6 +37,8 @@ func TestToolsRegistered(t *testing.T) {
 
 	expected := []string{
 		"legator_decide_approval",
+		"legator_federation_inventory",
+		"legator_federation_summary",
 		"legator_fleet_query",
 		"legator_get_inventory",
 		"legator_get_job_run",

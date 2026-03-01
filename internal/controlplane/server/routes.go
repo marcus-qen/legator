@@ -299,6 +299,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Web UI pages
 	mux.HandleFunc("GET /", s.handleFleetPage)
+	mux.HandleFunc("GET /federation", s.handleFederationPage)
 	mux.HandleFunc("GET /fleet/chat", s.handleFleetChatPage)
 	mux.HandleFunc("GET /probe/{id}", s.handleProbeDetailPage)
 	mux.HandleFunc("GET /probe/{id}/chat", s.handleChatPage)
@@ -834,6 +835,7 @@ func federationFilterFromRequest(r *http.Request) fleet.FederationFilter {
 		Source:  q.Get("source"),
 		Cluster: q.Get("cluster"),
 		Site:    q.Get("site"),
+		Search:  q.Get("search"),
 	}
 }
 
@@ -1375,6 +1377,28 @@ func (s *Server) handleFleetPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.pages.Render(w, "fleet", data); err != nil {
 		s.logger.Error("failed to render fleet page", zap.Error(err))
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "internal error")
+	}
+}
+
+func (s *Server) handleFederationPage(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
+	if s.pages == nil {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, "<h1>Federation</h1><p>Template not loaded</p>")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data := BasePage{
+		CurrentUser: s.currentTemplateUser(r),
+		Version:     Version,
+		ActiveNav:   "federation",
+	}
+	if err := s.pages.Render(w, "federation", data); err != nil {
+		s.logger.Error("failed to render federation page", zap.Error(err))
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "internal error")
 	}
 }
