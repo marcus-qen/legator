@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+const defaultFederationSnapshotStaleAfter = 5 * time.Minute
+
 // FederationSourceStatus represents source health in the federated read model.
 type FederationSourceStatus string
 
@@ -17,6 +19,35 @@ const (
 	FederationSourceDegraded    FederationSourceStatus = "degraded"
 	FederationSourceUnavailable FederationSourceStatus = "unavailable"
 	FederationSourceUnknown     FederationSourceStatus = "unknown"
+)
+
+// FederationConsistencyFreshness describes snapshot freshness across source and rollup views.
+type FederationConsistencyFreshness string
+
+const (
+	FederationFreshnessFresh   FederationConsistencyFreshness = "fresh"
+	FederationFreshnessMixed   FederationConsistencyFreshness = "mixed"
+	FederationFreshnessStale   FederationConsistencyFreshness = "stale"
+	FederationFreshnessUnknown FederationConsistencyFreshness = "unknown"
+)
+
+// FederationConsistencyCompleteness describes completeness guarantees for source and rollup views.
+type FederationConsistencyCompleteness string
+
+const (
+	FederationCompletenessComplete    FederationConsistencyCompleteness = "complete"
+	FederationCompletenessPartial     FederationConsistencyCompleteness = "partial"
+	FederationCompletenessUnavailable FederationConsistencyCompleteness = "unavailable"
+	FederationCompletenessUnknown     FederationConsistencyCompleteness = "unknown"
+)
+
+// FederationFailoverMode communicates source failover behavior used for a response.
+type FederationFailoverMode string
+
+const (
+	FederationFailoverNone           FederationFailoverMode = "none"
+	FederationFailoverCachedSnapshot FederationFailoverMode = "cached_snapshot"
+	FederationFailoverUnavailable    FederationFailoverMode = "unavailable"
 )
 
 // FederationFilter limits federated inventory queries.
@@ -120,6 +151,15 @@ type FederatedProbeInventory struct {
 	Probe  ProbeInventorySummary      `json:"probe"`
 }
 
+// FederatedSourceConsistency communicates freshness/completeness/failover semantics for a source snapshot.
+type FederatedSourceConsistency struct {
+	Freshness          FederationConsistencyFreshness    `json:"freshness"`
+	Completeness       FederationConsistencyCompleteness `json:"completeness"`
+	Degraded           bool                              `json:"degraded"`
+	FailoverMode       FederationFailoverMode            `json:"failover_mode"`
+	SnapshotAgeSeconds int64                             `json:"snapshot_age_seconds,omitempty"`
+}
+
 // FederatedSourceSummary reports per-source inventory + health state.
 type FederatedSourceSummary struct {
 	Source      FederatedSourceAttribution `json:"source"`
@@ -128,37 +168,52 @@ type FederatedSourceSummary struct {
 	Warnings    []string                   `json:"warnings,omitempty"`
 	Error       string                     `json:"error,omitempty"`
 	CollectedAt time.Time                  `json:"collected_at,omitempty"`
+	Consistency FederatedSourceConsistency `json:"consistency"`
 }
 
 // FederatedSourceHealth represents per-source health rollup entries.
 type FederatedSourceHealth struct {
-	Source   FederatedSourceAttribution `json:"source"`
-	Partial  bool                       `json:"partial"`
-	Warnings []string                   `json:"warnings,omitempty"`
-	Error    string                     `json:"error,omitempty"`
+	Source      FederatedSourceAttribution `json:"source"`
+	Partial     bool                       `json:"partial"`
+	Warnings    []string                   `json:"warnings,omitempty"`
+	Error       string                     `json:"error,omitempty"`
+	Consistency FederatedSourceConsistency `json:"consistency"`
 }
 
 // FederationHealthRollup summarizes overall and per-source source health.
 type FederationHealthRollup struct {
-	Overall     FederationSourceStatus `json:"overall"`
-	Healthy     int                    `json:"healthy"`
-	Degraded    int                    `json:"degraded"`
-	Unavailable int                    `json:"unavailable"`
-	Unknown     int                    `json:"unknown"`
+	Overall     FederationSourceStatus  `json:"overall"`
+	Healthy     int                     `json:"healthy"`
+	Degraded    int                     `json:"degraded"`
+	Unavailable int                     `json:"unavailable"`
+	Unknown     int                     `json:"unknown"`
 	Sources     []FederatedSourceHealth `json:"sources"`
+}
+
+// FederationConsistency summarizes consistency guard behavior for the full federated response.
+type FederationConsistency struct {
+	Freshness          FederationConsistencyFreshness    `json:"freshness"`
+	Completeness       FederationConsistencyCompleteness `json:"completeness"`
+	Degraded           bool                              `json:"degraded"`
+	PartialResults     bool                              `json:"partial_results"`
+	FailoverActive     bool                              `json:"failover_active"`
+	StaleSources       int                               `json:"stale_sources"`
+	PartialSources     int                               `json:"partial_sources"`
+	UnavailableSources int                               `json:"unavailable_sources"`
+	FailoverSources    int                               `json:"failover_sources"`
 }
 
 // FederatedAggregates summarizes fleet totals across sources.
 type FederatedAggregates struct {
-	TotalSources       int            `json:"total_sources"`
-	HealthySources     int            `json:"healthy_sources"`
-	DegradedSources    int            `json:"degraded_sources"`
-	UnavailableSources int            `json:"unavailable_sources"`
-	UnknownSources     int            `json:"unknown_sources"`
-	TotalProbes        int            `json:"total_probes"`
-	Online             int            `json:"online"`
-	TotalCPUs          int            `json:"total_cpus"`
-	TotalRAMBytes      uint64         `json:"total_ram_bytes"`
+	TotalSources        int            `json:"total_sources"`
+	HealthySources      int            `json:"healthy_sources"`
+	DegradedSources     int            `json:"degraded_sources"`
+	UnavailableSources  int            `json:"unavailable_sources"`
+	UnknownSources      int            `json:"unknown_sources"`
+	TotalProbes         int            `json:"total_probes"`
+	Online              int            `json:"online"`
+	TotalCPUs           int            `json:"total_cpus"`
+	TotalRAMBytes       uint64         `json:"total_ram_bytes"`
 	ProbesByOS          map[string]int `json:"probes_by_os"`
 	TagDistribution     map[string]int `json:"tag_distribution"`
 	SourceDistribution  map[string]int `json:"source_distribution"`
@@ -171,28 +226,38 @@ type FederatedAggregates struct {
 
 // FederatedInventory is the additive API payload for federated inventory reads.
 type FederatedInventory struct {
-	Probes     []FederatedProbeInventory `json:"probes"`
-	Sources    []FederatedSourceSummary  `json:"sources"`
-	Aggregates FederatedAggregates       `json:"aggregates"`
-	Health     FederationHealthRollup    `json:"health"`
+	Probes      []FederatedProbeInventory `json:"probes"`
+	Sources     []FederatedSourceSummary  `json:"sources"`
+	Aggregates  FederatedAggregates       `json:"aggregates"`
+	Health      FederationHealthRollup    `json:"health"`
+	Consistency FederationConsistency     `json:"consistency"`
 }
 
 // FederatedInventorySummary is the additive API payload for federation summaries.
 type FederatedInventorySummary struct {
-	Sources    []FederatedSourceSummary `json:"sources"`
-	Aggregates FederatedAggregates      `json:"aggregates"`
-	Health     FederationHealthRollup   `json:"health"`
+	Sources     []FederatedSourceSummary `json:"sources"`
+	Aggregates  FederatedAggregates      `json:"aggregates"`
+	Health      FederationHealthRollup   `json:"health"`
+	Consistency FederationConsistency    `json:"consistency"`
 }
 
 // FederationStore aggregates read-only inventory snapshots from multiple sources.
 type FederationStore struct {
-	mu      sync.RWMutex
-	adapters map[string]FederationSourceAdapter
+	mu         sync.RWMutex
+	adapters   map[string]FederationSourceAdapter
+	snapshots  map[string]FederationSourceResult
+	now        func() time.Time
+	staleAfter time.Duration
 }
 
 // NewFederationStore creates a federation read-model store over source adapters.
 func NewFederationStore(adapters ...FederationSourceAdapter) *FederationStore {
-	store := &FederationStore{adapters: make(map[string]FederationSourceAdapter, len(adapters))}
+	store := &FederationStore{
+		adapters:   make(map[string]FederationSourceAdapter, len(adapters)),
+		snapshots:  map[string]FederationSourceResult{},
+		now:        time.Now,
+		staleAfter: defaultFederationSnapshotStaleAfter,
+	}
 	for _, adapter := range adapters {
 		store.RegisterSource(adapter)
 	}
@@ -234,14 +299,19 @@ func (s *FederationStore) Inventory(ctx context.Context, filter FederationFilter
 			ScopeDistribution:   map[string]int{},
 		},
 		Health: FederationHealthRollup{Sources: []FederatedSourceHealth{}},
+		Consistency: FederationConsistency{
+			Freshness:    FederationFreshnessUnknown,
+			Completeness: FederationCompletenessUnknown,
+		},
 	}
 
 	adapters := s.adaptersSnapshot()
-	invFilter := InventoryFilter{
-		Tag:    strings.TrimSpace(filter.Tag),
-		Status: strings.TrimSpace(filter.Status),
-	}
+	invFilter := normalizeFederationInventoryFilter(InventoryFilter{
+		Tag:    filter.Tag,
+		Status: filter.Status,
+	})
 	searchNeedle := normalizeFederationSearch(filter.Search)
+	observedAt := s.now().UTC()
 
 	for _, adapter := range adapters {
 		source := normalizeFederationSourceDescriptor(adapter.Source())
@@ -250,7 +320,6 @@ func (s *FederationStore) Inventory(ctx context.Context, filter FederationFilter
 		}
 
 		sourceMatchesSearch := searchNeedle == "" || matchesFederationSearchInSource(source, searchNeedle)
-		sourceStatus := FederationSourceHealthy
 		summary := FederatedSourceSummary{
 			Source: FederatedSourceAttribution{
 				ID:       source.ID,
@@ -267,25 +336,46 @@ func (s *FederationStore) Inventory(ctx context.Context, filter FederationFilter
 				ProbesByOS:      map[string]int{},
 				TagDistribution: map[string]int{},
 			},
+			Consistency: FederatedSourceConsistency{
+				Freshness:    FederationFreshnessUnknown,
+				Completeness: FederationCompletenessUnknown,
+				FailoverMode: FederationFailoverNone,
+			},
 		}
 
-		sourceResult, err := adapter.Inventory(ctx, invFilter)
-		if err != nil {
-			if searchNeedle != "" && !sourceMatchesSearch {
+		cacheKey := federationSnapshotCacheKey(source.ID, invFilter)
+		sourceResult, sourceErr := adapter.Inventory(ctx, invFilter)
+		failoverUsed := false
+		if sourceErr == nil {
+			s.storeSnapshot(cacheKey, sourceResult)
+		} else {
+			cached, ok := s.cachedSnapshot(cacheKey)
+			if !ok {
+				if searchNeedle != "" && !sourceMatchesSearch {
+					continue
+				}
+
+				result.Aggregates.TotalSources++
+				summary.Source.Status = FederationSourceUnavailable
+				summary.Error = sourceErr.Error()
+				summary.Consistency = FederatedSourceConsistency{
+					Freshness:    FederationFreshnessUnknown,
+					Completeness: FederationCompletenessUnavailable,
+					Degraded:     true,
+					FailoverMode: FederationFailoverUnavailable,
+				}
+				result.Sources = append(result.Sources, summary)
+				result.Health.Sources = append(result.Health.Sources, FederatedSourceHealth{
+					Source:      summary.Source,
+					Error:       summary.Error,
+					Consistency: summary.Consistency,
+				})
+				result.bumpHealthCounters(FederationSourceUnavailable)
 				continue
 			}
 
-			result.Aggregates.TotalSources++
-			sourceStatus = FederationSourceUnavailable
-			summary.Source.Status = sourceStatus
-			summary.Error = err.Error()
-			result.Sources = append(result.Sources, summary)
-			result.Health.Sources = append(result.Health.Sources, FederatedSourceHealth{
-				Source: summary.Source,
-				Error:  summary.Error,
-			})
-			result.bumpHealthCounters(sourceStatus)
-			continue
+			sourceResult = cached
+			failoverUsed = true
 		}
 
 		filteredProbes := filterFederatedProbes(sourceResult.Inventory.Probes, source, invFilter, searchNeedle, sourceMatchesSearch)
@@ -293,23 +383,34 @@ func (s *FederationStore) Inventory(ctx context.Context, filter FederationFilter
 			continue
 		}
 
-		result.Aggregates.TotalSources++
-		summary.Partial = sourceResult.Partial
 		summary.Warnings = dedupeAndSortStrings(sourceResult.Warnings)
 		summary.CollectedAt = sourceResult.CollectedAt.UTC()
 		summary.Aggregates = aggregateProbeSummaries(filteredProbes)
-
-		if summary.Partial || len(summary.Warnings) > 0 {
-			sourceStatus = FederationSourceDegraded
+		summary.Partial = sourceResult.Partial || failoverUsed
+		if sourceErr != nil {
+			summary.Error = strings.TrimSpace(sourceErr.Error())
 		}
+
+		sourceConsistency, sourceStatus, extraWarnings := classifyFederationSourceConsistency(sourceResult, observedAt, s.staleAfter, sourceErr, failoverUsed)
+		summary.Consistency = sourceConsistency
 		summary.Source.Status = sourceStatus
-		result.bumpHealthCounters(sourceStatus)
+		if summary.Consistency.Completeness == FederationCompletenessPartial {
+			summary.Partial = true
+		}
+		if len(extraWarnings) > 0 {
+			summary.Warnings = dedupeAndSortStrings(append(summary.Warnings, extraWarnings...))
+		}
+
+		result.Aggregates.TotalSources++
+		result.bumpHealthCounters(summary.Source.Status)
 
 		result.Sources = append(result.Sources, summary)
 		result.Health.Sources = append(result.Health.Sources, FederatedSourceHealth{
-			Source:   summary.Source,
-			Partial:  summary.Partial,
-			Warnings: append([]string(nil), summary.Warnings...),
+			Source:      summary.Source,
+			Partial:     summary.Partial,
+			Warnings:    append([]string(nil), summary.Warnings...),
+			Error:       summary.Error,
+			Consistency: summary.Consistency,
 		})
 
 		result.Aggregates.TotalProbes += summary.Aggregates.TotalProbes
@@ -340,6 +441,7 @@ func (s *FederationStore) Inventory(ctx context.Context, filter FederationFilter
 	}
 
 	result.Health.Overall = computeOverallFederationHealth(result.Health)
+	result.Consistency = computeFederationConsistency(result.Sources, result.Health)
 	sort.Slice(result.Sources, func(i, j int) bool {
 		return result.Sources[i].Source.ID < result.Sources[j].Source.ID
 	})
@@ -368,9 +470,10 @@ func (s *FederationStore) Inventory(ctx context.Context, filter FederationFilter
 func (s *FederationStore) Summary(ctx context.Context, filter FederationFilter) FederatedInventorySummary {
 	inventory := s.Inventory(ctx, filter)
 	return FederatedInventorySummary{
-		Sources:    inventory.Sources,
-		Aggregates: inventory.Aggregates,
-		Health:     inventory.Health,
+		Sources:     inventory.Sources,
+		Aggregates:  inventory.Aggregates,
+		Health:      inventory.Health,
+		Consistency: inventory.Consistency,
 	}
 }
 
@@ -386,6 +489,22 @@ func (s *FederationStore) adaptersSnapshot() []FederationSourceAdapter {
 		return adapters[i].Source().ID < adapters[j].Source().ID
 	})
 	return adapters
+}
+
+func (s *FederationStore) storeSnapshot(key string, result FederationSourceResult) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshots[key] = cloneFederationSourceResult(result)
+}
+
+func (s *FederationStore) cachedSnapshot(key string) (FederationSourceResult, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result, ok := s.snapshots[key]
+	if !ok {
+		return FederationSourceResult{}, false
+	}
+	return cloneFederationSourceResult(result), true
 }
 
 func (r *FederatedInventory) bumpHealthCounters(status FederationSourceStatus) {
@@ -405,6 +524,123 @@ func (r *FederatedInventory) bumpHealthCounters(status FederationSourceStatus) {
 	}
 }
 
+func classifyFederationSourceConsistency(result FederationSourceResult, observedAt time.Time, staleAfter time.Duration, sourceErr error, failoverUsed bool) (FederatedSourceConsistency, FederationSourceStatus, []string) {
+	consistency := FederatedSourceConsistency{
+		Freshness:    FederationFreshnessUnknown,
+		Completeness: FederationCompletenessComplete,
+		FailoverMode: FederationFailoverNone,
+	}
+	extraWarnings := []string{}
+
+	if sourceErr != nil && !failoverUsed {
+		consistency.Completeness = FederationCompletenessUnavailable
+		consistency.Degraded = true
+		consistency.FailoverMode = FederationFailoverUnavailable
+		return consistency, FederationSourceUnavailable, extraWarnings
+	}
+
+	if failoverUsed {
+		consistency.FailoverMode = FederationFailoverCachedSnapshot
+		extraWarnings = append(extraWarnings, "source unavailable; serving cached snapshot")
+	}
+
+	if !result.CollectedAt.IsZero() {
+		age := observedAt.Sub(result.CollectedAt.UTC())
+		if age < 0 {
+			age = 0
+		}
+		consistency.SnapshotAgeSeconds = int64(age / time.Second)
+		if staleAfter > 0 && age > staleAfter {
+			consistency.Freshness = FederationFreshnessStale
+			extraWarnings = append(extraWarnings, fmt.Sprintf("snapshot stale (%ds old)", consistency.SnapshotAgeSeconds))
+		} else {
+			consistency.Freshness = FederationFreshnessFresh
+		}
+	}
+
+	warningCount := len(dedupeAndSortStrings(result.Warnings))
+	isStale := consistency.Freshness == FederationFreshnessStale
+	if result.Partial || failoverUsed || isStale {
+		consistency.Completeness = FederationCompletenessPartial
+	}
+
+	consistency.Degraded = result.Partial || warningCount > 0 || failoverUsed || isStale
+	if consistency.Degraded {
+		return consistency, FederationSourceDegraded, extraWarnings
+	}
+	return consistency, FederationSourceHealthy, extraWarnings
+}
+
+func computeFederationConsistency(sources []FederatedSourceSummary, health FederationHealthRollup) FederationConsistency {
+	consistency := FederationConsistency{
+		Freshness:    FederationFreshnessUnknown,
+		Completeness: FederationCompletenessUnknown,
+	}
+	if len(sources) == 0 {
+		return consistency
+	}
+
+	freshSources := 0
+	staleSources := 0
+	completeSources := 0
+
+	for _, source := range sources {
+		sourceConsistency := source.Consistency
+		switch sourceConsistency.Freshness {
+		case FederationFreshnessFresh:
+			freshSources++
+		case FederationFreshnessStale:
+			staleSources++
+			consistency.StaleSources++
+			consistency.PartialResults = true
+		}
+
+		switch sourceConsistency.Completeness {
+		case FederationCompletenessComplete:
+			completeSources++
+		case FederationCompletenessPartial:
+			consistency.PartialSources++
+			consistency.PartialResults = true
+		case FederationCompletenessUnavailable:
+			consistency.UnavailableSources++
+			consistency.PartialResults = true
+		}
+
+		if sourceConsistency.FailoverMode == FederationFailoverCachedSnapshot {
+			consistency.FailoverSources++
+			consistency.FailoverActive = true
+			consistency.PartialResults = true
+		}
+		if sourceConsistency.Degraded {
+			consistency.Degraded = true
+		}
+	}
+
+	if staleSources > 0 && freshSources > 0 {
+		consistency.Freshness = FederationFreshnessMixed
+	} else if staleSources > 0 {
+		consistency.Freshness = FederationFreshnessStale
+	} else if freshSources > 0 {
+		consistency.Freshness = FederationFreshnessFresh
+	}
+
+	total := len(sources)
+	switch {
+	case completeSources == total:
+		consistency.Completeness = FederationCompletenessComplete
+	case consistency.UnavailableSources == total:
+		consistency.Completeness = FederationCompletenessUnavailable
+	default:
+		consistency.Completeness = FederationCompletenessPartial
+	}
+
+	if health.Overall == FederationSourceDegraded || health.Overall == FederationSourceUnavailable {
+		consistency.Degraded = true
+	}
+
+	return consistency
+}
+
 func computeOverallFederationHealth(health FederationHealthRollup) FederationSourceStatus {
 	total := health.Healthy + health.Degraded + health.Unavailable + health.Unknown
 	if total == 0 {
@@ -420,6 +656,16 @@ func computeOverallFederationHealth(health FederationHealthRollup) FederationSou
 		return FederationSourceHealthy
 	}
 	return FederationSourceUnknown
+}
+
+func normalizeFederationInventoryFilter(filter InventoryFilter) InventoryFilter {
+	filter.Tag = strings.TrimSpace(filter.Tag)
+	filter.Status = strings.TrimSpace(filter.Status)
+	return filter
+}
+
+func federationSnapshotCacheKey(sourceID string, filter InventoryFilter) string {
+	return fmt.Sprintf("%s|tag=%s|status=%s", strings.ToLower(strings.TrimSpace(sourceID)), strings.ToLower(strings.TrimSpace(filter.Tag)), strings.ToLower(strings.TrimSpace(filter.Status)))
 }
 
 func matchesFederationSourceFilter(source FederationSourceDescriptor, filter FederationFilter) bool {
@@ -689,6 +935,37 @@ func cloneProbeInventorySummary(probe ProbeInventorySummary) ProbeInventorySumma
 		clone.Tags = append([]string(nil), probe.Tags...)
 	}
 	return clone
+}
+
+func cloneFederationSourceResult(result FederationSourceResult) FederationSourceResult {
+	clone := result
+	clone.Warnings = append([]string(nil), result.Warnings...)
+	clone.Inventory = cloneFleetInventory(result.Inventory)
+	return clone
+}
+
+func cloneFleetInventory(inventory FleetInventory) FleetInventory {
+	clone := FleetInventory{
+		Probes:     make([]ProbeInventorySummary, 0, len(inventory.Probes)),
+		Aggregates: inventory.Aggregates,
+	}
+	for _, probe := range inventory.Probes {
+		clone.Probes = append(clone.Probes, cloneProbeInventorySummary(probe))
+	}
+	clone.Aggregates.ProbesByOS = cloneStringIntMap(inventory.Aggregates.ProbesByOS)
+	clone.Aggregates.TagDistribution = cloneStringIntMap(inventory.Aggregates.TagDistribution)
+	return clone
+}
+
+func cloneStringIntMap(in map[string]int) map[string]int {
+	if len(in) == 0 {
+		return map[string]int{}
+	}
+	out := make(map[string]int, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 type descriptorSourceAdapter struct {

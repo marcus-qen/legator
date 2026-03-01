@@ -148,6 +148,15 @@
   - Added tests for tenancy segmentation, scope authorization coverage, MCP permission gates, and audit attribution fields.
   - Updated federation docs/release notes for Stage 3.7.3.
   - **[compat:additive]** Added additive tenancy fields/filter params/audit metadata without removing or renaming existing API/MCP identifiers.
+- **Stage 3.7.4 Federation: failover semantics + consistency guards**
+  - Added explicit source failover behavior with cached-snapshot fallback when a source becomes unavailable for a query.
+  - Added stale snapshot guard semantics (default stale threshold 5m) with degraded status markers and explicit warnings.
+  - Added additive source-level consistency indicators (`consistency.freshness`, `consistency.completeness`, `consistency.degraded`, `consistency.failover_mode`, `consistency.snapshot_age_seconds`).
+  - Added additive rollup consistency indicators on federation inventory/summary payloads (`consistency.freshness`, `consistency.completeness`, `partial_results`, `failover_active`, and consistency source counters).
+  - Propagated consistency/failover markers coherently across REST, MCP tools/resources, and the `/federation` UI.
+  - Added tests for outage failover, stale snapshots, partial-result semantics, and API/MCP consistency exposure.
+  - Updated federation docs/release notes for Stage 3.7.4.
+  - **[compat:additive]** Added additive federation consistency/failover fields and guard behavior without removing or renaming existing API/MCP identifiers.
 - **Jobs cancellation API + lifecycle guardrails**
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.

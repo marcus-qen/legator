@@ -220,6 +220,9 @@ Compatibility/deprecation policy: `docs/api-mcp-compatibility.md`.
 - **Federation (read-only)**: `GET /api/v1/federation/inventory`, `GET /api/v1/federation/summary`
   - Additive tenancy filters: `tenant_id` (`tenant`), `org_id` (`org`), `scope_id` (`scope`)
   - Optional scoped auth grants on API keys/users: `tenant:<id>`, `org:<id>`, `scope:<id>` (restricts returned federation data even when no explicit tenancy query is provided)
+  - Additive consistency/failover indicators on source + rollup payloads:
+    - source `consistency`: `freshness`, `completeness`, `degraded`, `failover_mode`, `snapshot_age_seconds`
+    - top-level `consistency`: `freshness`, `completeness`, `partial_results`, `failover_active`, source consistency counters
 - **Jobs**: `GET/POST /api/v1/jobs`, `POST /api/v1/jobs/{id}/run`, `POST /api/v1/jobs/{id}/cancel`, `GET /api/v1/jobs/{id}/runs`, `POST /api/v1/jobs/{id}/runs/{runId}/cancel`, `POST /api/v1/jobs/{id}/runs/{runId}/retry`, `GET /api/v1/jobs/runs`
   - Optional per-job retry policy (additive):
     - `retry_policy.max_attempts`

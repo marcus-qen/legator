@@ -20,7 +20,7 @@ import (
 type mcpStubFederationAdapter struct {
 	source fleet.FederationSourceDescriptor
 	result fleet.FederationSourceResult
-	err   error
+	err    error
 }
 
 func (a *mcpStubFederationAdapter) Source() fleet.FederationSourceDescriptor {
@@ -77,6 +77,9 @@ func TestFederationToolsAndResourcesParityWithFilters(t *testing.T) {
 	normalizeFederatedInventoryForCompare(&expectedInv)
 	if !reflect.DeepEqual(invPayload, expectedInv) {
 		t.Fatalf("inventory parity mismatch:\nmcp=%+v\nexpected=%+v", invPayload, expectedInv)
+	}
+	if invPayload.Consistency.Freshness != fleet.FederationFreshnessFresh || invPayload.Consistency.Completeness != fleet.FederationCompletenessComplete {
+		t.Fatalf("expected MCP inventory consistency markers, got %+v", invPayload.Consistency)
 	}
 
 	summaryResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "legator_federation_summary", Arguments: args})
@@ -261,12 +264,63 @@ func TestFederationMCPScopedAuthorizationAndAuditAttribution(t *testing.T) {
 	}
 }
 
+func TestFederationMCPFailoverConsistencyIndicators(t *testing.T) {
+	srv, _, _, _ := newTestMCPServer(t)
+	now := time.Date(2026, time.March, 1, 13, 0, 0, 0, time.UTC)
+	adapter := &mcpStubFederationAdapter{
+		source: fleet.FederationSourceDescriptor{ID: "remote-failover", Name: "Remote Failover", Kind: "cluster", Cluster: "eu-west", Site: "dc-2"},
+		result: fleet.FederationSourceResult{
+			CollectedAt: now,
+			Inventory: fleet.FleetInventory{Probes: []fleet.ProbeInventorySummary{{
+				ID:       "probe-a",
+				Hostname: "a-1",
+				Status:   "online",
+				OS:       "linux",
+			}}},
+		},
+	}
+	srv.federationStore.RegisterSource(adapter)
+	ctx := context.Background()
+	if _, _, err := srv.handleFederationInventory(ctx, nil, federationQueryInput{Source: "remote-failover"}); err != nil {
+		t.Fatalf("prime cached snapshot: %v", err)
+	}
+
+	adapter.err = errors.New("source offline")
+	result, _, err := srv.handleFederationSummary(ctx, nil, federationQueryInput{Source: "remote-failover"})
+	if err != nil {
+		t.Fatalf("summary during failover: %v", err)
+	}
+	var payload fleet.FederatedInventorySummary
+	decodeToolJSON(t, result, &payload)
+
+	if payload.Health.Overall != fleet.FederationSourceDegraded {
+		t.Fatalf("expected degraded health during failover, got %+v", payload.Health)
+	}
+	if payload.Consistency.FailoverSources != 1 || !payload.Consistency.FailoverActive {
+		t.Fatalf("expected failover consistency rollup, got %+v", payload.Consistency)
+	}
+	if len(payload.Sources) != 1 {
+		t.Fatalf("expected one source in payload, got %+v", payload.Sources)
+	}
+	source := payload.Sources[0]
+	if source.Consistency.FailoverMode != fleet.FederationFailoverCachedSnapshot || source.Consistency.Completeness != fleet.FederationCompletenessPartial {
+		t.Fatalf("expected source failover semantics, got %+v", source.Consistency)
+	}
+	if source.Error == "" {
+		t.Fatalf("expected source outage detail in failover payload, got %+v", source)
+	}
+}
+
 func normalizeFederatedInventoryForCompare(inventory *fleet.FederatedInventory) {
 	if inventory == nil {
 		return
 	}
 	for i := range inventory.Sources {
 		inventory.Sources[i].CollectedAt = time.Time{}
+		inventory.Sources[i].Consistency.SnapshotAgeSeconds = 0
+	}
+	for i := range inventory.Health.Sources {
+		inventory.Health.Sources[i].Consistency.SnapshotAgeSeconds = 0
 	}
 }
 
@@ -276,5 +330,9 @@ func normalizeFederatedSummaryForCompare(summary *fleet.FederatedInventorySummar
 	}
 	for i := range summary.Sources {
 		summary.Sources[i].CollectedAt = time.Time{}
+		summary.Sources[i].Consistency.SnapshotAgeSeconds = 0
+	}
+	for i := range summary.Health.Sources {
+		summary.Health.Sources[i].Consistency.SnapshotAgeSeconds = 0
 	}
 }

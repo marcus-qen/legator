@@ -1,4 +1,4 @@
-# Federation Read Model (Stage 3.7.3)
+# Federation Read Model (Stage 3.7.4)
 
 Legator exposes a **read-only federation inventory layer** that aggregates inventory snapshots across multiple sources (clusters/sites) with explicit source attribution, health rollups, and filter parity across API/MCP/UI surfaces.
 
@@ -14,6 +14,10 @@ Compatibility/deprecation policy for API + MCP identifiers: `docs/api-mcp-compat
 - Health rollups:
   - overall federation health (`healthy` / `degraded` / `unavailable` / `unknown`)
   - per-source status and warnings/errors
+- Explicit failover + consistency guard semantics:
+  - cached snapshot failover when a source is temporarily unavailable
+  - stale snapshot degradation markers
+  - partial-result completeness indicators at source and rollup levels
 - **No write/mutation operations**
 
 ## API endpoints
@@ -72,12 +76,22 @@ Returns:
 
 - `probes[]` with `source` attribution and probe summary payload
 - `sources[]` with per-source aggregates and source-level health context
+  - each source now includes additive `consistency` metadata:
+    - `freshness` (`fresh` / `stale` / `unknown`)
+    - `completeness` (`complete` / `partial` / `unavailable`)
+    - `degraded` (boolean)
+    - `failover_mode` (`none` / `cached_snapshot` / `unavailable`)
+    - `snapshot_age_seconds` (when snapshot timestamp is available)
 - `aggregates` with cross-source totals and distributions (including `tag_distribution`, `tenant_distribution`, `org_distribution`, `scope_distribution`)
 - `health` with overall + per-source status rollups
+- additive top-level `consistency` rollup:
+  - `freshness` (`fresh` / `mixed` / `stale` / `unknown`)
+  - `completeness` (`complete` / `partial` / `unavailable` / `unknown`)
+  - `partial_results`, `failover_active`, and source counters (`stale_sources`, `partial_sources`, `unavailable_sources`, `failover_sources`)
 
 ### `/api/v1/federation/summary`
 
-Returns the same source/aggregate/health rollups without the full `probes[]` list.
+Returns the same source/aggregate/health/consistency rollups without the full `probes[]` list.
 
 ## Scoped authorization model
 
@@ -95,12 +109,23 @@ Equivalent prefixed grants (`federation:tenant:*`, `federation:org:*`, `federati
 
 When no tenant/org/scope grants are configured, behavior remains backward-compatible and effectively single-tenant (`default` tenancy IDs when unset).
 
-## Source status semantics
+## Source status + failover semantics
 
-- `healthy`: source read succeeded without partial flags/warnings
-- `degraded`: source read succeeded but reported partial data and/or warnings
-- `unavailable`: source read failed
-- `unknown`: no sources matched the query filters
+- `healthy`: source read succeeded, snapshot is fresh, and no partial/warning guards are active.
+- `degraded`:
+  - source read succeeded but reported partial data and/or warnings, **or**
+  - source snapshot is stale, **or**
+  - source read failed but Legator served a cached snapshot (`failover_mode: cached_snapshot`).
+- `unavailable`: source read failed and no cached snapshot is available for the requested filter set (`failover_mode: unavailable`).
+- `unknown`: no sources matched the query filters.
+
+## Consistency guard behavior
+
+- A successful source read updates the snapshot cache used for outage failover.
+- During source outage, Legator attempts cached-snapshot failover for the same source + (`tag`, `status`) filter tuple.
+- Cached failover responses remain read-only and explicitly marked as degraded/partial with `failover_mode: cached_snapshot` and source error context.
+- Snapshot freshness is guarded by a stale threshold (default: 5 minutes). Stale snapshots are marked degraded with `freshness: stale` and a warning.
+- Rollup consistency signals (`partial_results`, `failover_active`, freshness/completeness enums) are propagated consistently across REST + MCP + UI surfaces.
 
 ## Current wiring
 
