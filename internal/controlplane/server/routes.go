@@ -240,15 +240,21 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/v1/cloud/assets", s.withPermission(auth.PermFleetRead, s.handleCloudConnectorsUnavailable))
 	}
 
-	// Kubeflow API (MVP read-only + guarded refresh action)
+	// Kubeflow API (read endpoints + guarded mutations)
 	if s.kubeflowHandlers != nil {
 		mux.HandleFunc("GET /api/v1/kubeflow/status", s.withPermission(auth.PermFleetRead, s.kubeflowHandlers.HandleStatus))
 		mux.HandleFunc("GET /api/v1/kubeflow/inventory", s.withPermission(auth.PermFleetRead, s.kubeflowHandlers.HandleInventory))
+		mux.HandleFunc("GET /api/v1/kubeflow/runs/{name}/status", s.withPermission(auth.PermFleetRead, s.handleKubeflowRunStatus))
 		mux.HandleFunc("POST /api/v1/kubeflow/actions/refresh", s.withPermission(auth.PermFleetWrite, s.kubeflowHandlers.HandleRefresh))
+		mux.HandleFunc("POST /api/v1/kubeflow/runs/submit", s.withPermission(auth.PermFleetWrite, s.handleKubeflowSubmitRun))
+		mux.HandleFunc("POST /api/v1/kubeflow/runs/{name}/cancel", s.withPermission(auth.PermFleetWrite, s.handleKubeflowCancelRun))
 	} else {
 		mux.HandleFunc("GET /api/v1/kubeflow/status", s.withPermission(auth.PermFleetRead, s.handleKubeflowUnavailable))
 		mux.HandleFunc("GET /api/v1/kubeflow/inventory", s.withPermission(auth.PermFleetRead, s.handleKubeflowUnavailable))
+		mux.HandleFunc("GET /api/v1/kubeflow/runs/{name}/status", s.withPermission(auth.PermFleetRead, s.handleKubeflowUnavailable))
 		mux.HandleFunc("POST /api/v1/kubeflow/actions/refresh", s.withPermission(auth.PermFleetWrite, s.handleKubeflowUnavailable))
+		mux.HandleFunc("POST /api/v1/kubeflow/runs/submit", s.withPermission(auth.PermFleetWrite, s.handleKubeflowUnavailable))
+		mux.HandleFunc("POST /api/v1/kubeflow/runs/{name}/cancel", s.withPermission(auth.PermFleetWrite, s.handleKubeflowUnavailable))
 	}
 
 	// Grafana API (read-only capacity snapshot)
@@ -546,11 +552,11 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusTooManyRequests)
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"status":          "denied",
-				"policy_decision": policyResult.Decision.Outcome,
-				"risk_level":      policyResult.Decision.RiskLevel,
+				"status":           "denied",
+				"policy_decision":  policyResult.Decision.Outcome,
+				"risk_level":       policyResult.Decision.RiskLevel,
 				"policy_rationale": policyResult.Decision.Rationale,
-				"message":         "Command denied by capacity policy.",
+				"message":          "Command denied by capacity policy.",
 			})
 			return
 		case coreapprovalpolicy.CommandPolicyDecisionQueue:
@@ -911,9 +917,7 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	projection := orchestrateDecideApprovalHTTP(r.Body, func(body *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error) {
-		return s.approvalCore.DecideAndDispatch(id, body.Decision, body.DecidedBy, func(probeID string, cmd protocol.CommandPayload) error {
-			return s.dispatchCore.Dispatch(probeID, cmd)
-		})
+		return s.approvalCore.DecideAndDispatch(id, body.Decision, body.DecidedBy, s.dispatchApprovedCommand)
 	})
 	renderDecideApprovalHTTP(w, projection)
 }

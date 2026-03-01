@@ -25,6 +25,23 @@
   - Persisted Stage 2.2 rationale fields onto queued approval items so operator workflows consume the same policy payload as command dispatch responses.
   - Added template/handler/core coverage for approval explainability wiring and updated e2e smoke checks for explainability API/UI path markers.
   - Updated docs/release notes for Stage 2 completion and additive compatibility guarantees.
+- **Stage 3.1 Kubeflow guarded mutations + MCP parity**
+  - Extended `internal/controlplane/kubeflow` client/handler boundary with additive run lifecycle mutations:
+    - `SubmitRun` (manifest apply)
+    - `CancelRun` (run cancellation/delete)
+    - `RunStatus` (single run status lookup)
+  - Added API routes:
+    - `GET /api/v1/kubeflow/runs/{name}/status`
+    - `POST /api/v1/kubeflow/runs/submit`
+    - `POST /api/v1/kubeflow/runs/{name}/cancel`
+  - Routed submit/cancel through existing approval policy decisions (`allow`/`queue`/`deny`) with rationale payload parity and approval queue integration.
+  - Added approval-dispatch support for queued Kubeflow mutations so `POST /api/v1/approvals/{id}/decide` can execute approved submit/cancel requests.
+  - Added audit/event emission parity for mutation attempts, policy outcomes, and execution outcomes.
+  - Added MCP tool parity (when wired by control plane):
+    - `legator_kubeflow_run_status`
+    - `legator_kubeflow_submit_run`
+    - `legator_kubeflow_cancel_run`
+  - Added tests across Kubeflow client/handlers, server policy flow, approval dispatch, permission gates, and MCP tool registration.
 - **Jobs cancellation API + lifecycle guardrails**
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.

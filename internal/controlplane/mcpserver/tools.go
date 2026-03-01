@@ -14,6 +14,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/jobs"
+	"github.com/marcus-qen/legator/internal/controlplane/kubeflow"
 	"github.com/marcus-qen/legator/internal/protocol"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -47,6 +48,25 @@ type decideApprovalInput struct {
 	ApprovalID string `json:"approval_id" jsonschema:"approval request identifier"`
 	Decision   string `json:"decision" jsonschema:"approval decision: approved or denied"`
 	DecidedBy  string `json:"decided_by" jsonschema:"operator identity recording the decision"`
+}
+
+type kubeflowRunStatusInput struct {
+	Name      string `json:"name" jsonschema:"run name"`
+	Kind      string `json:"kind,omitempty" jsonschema:"optional kubernetes resource kind (default runs.kubeflow.org)"`
+	Namespace string `json:"namespace,omitempty" jsonschema:"optional namespace override"`
+}
+
+type kubeflowSubmitRunInput struct {
+	Name      string          `json:"name,omitempty" jsonschema:"optional run name override"`
+	Kind      string          `json:"kind,omitempty" jsonschema:"optional kubernetes resource kind"`
+	Namespace string          `json:"namespace,omitempty" jsonschema:"optional namespace override"`
+	Manifest  json.RawMessage `json:"manifest" jsonschema:"JSON manifest for run submission"`
+}
+
+type kubeflowCancelRunInput struct {
+	Name      string `json:"name" jsonschema:"run name"`
+	Kind      string `json:"kind,omitempty" jsonschema:"optional kubernetes resource kind (default runs.kubeflow.org)"`
+	Namespace string `json:"namespace,omitempty" jsonschema:"optional namespace override"`
 }
 
 type listJobRunsInput struct {
@@ -208,6 +228,25 @@ func (s *MCPServer) registerTools() {
 		Name:        "legator_stream_job_events",
 		Description: "Stream or poll job lifecycle events using audit/event bus infrastructure",
 	}, s.handleStreamJobEvents)
+
+	if s.kubeflowRunStatus != nil {
+		mcp.AddTool(s.server, &mcp.Tool{
+			Name:        "legator_kubeflow_run_status",
+			Description: "Get Kubeflow run/job status from the control-plane adapter",
+		}, s.handleKubeflowRunStatus)
+	}
+	if s.kubeflowSubmitRun != nil {
+		mcp.AddTool(s.server, &mcp.Tool{
+			Name:        "legator_kubeflow_submit_run",
+			Description: "Submit a Kubeflow run/job manifest through policy gates",
+		}, s.handleKubeflowSubmitRun)
+	}
+	if s.kubeflowCancelRun != nil {
+		mcp.AddTool(s.server, &mcp.Tool{
+			Name:        "legator_kubeflow_cancel_run",
+			Description: "Cancel a Kubeflow run/job through policy gates",
+		}, s.handleKubeflowCancelRun)
+	}
 }
 
 func (s *MCPServer) handleListProbes(_ context.Context, _ *mcp.CallToolRequest, input listProbesInput) (*mcp.CallToolResult, any, error) {
@@ -308,6 +347,52 @@ func (s *MCPServer) handleDecideApproval(_ context.Context, _ *mcp.CallToolReque
 
 	projection := coreapprovalpolicy.InvokeDecideApproval(invokeInput, s.decideApproval, coreapprovalpolicy.DecideApprovalRenderSurfaceMCP)
 	return renderDecideApprovalMCP(projection)
+}
+
+func (s *MCPServer) handleKubeflowRunStatus(ctx context.Context, _ *mcp.CallToolRequest, input kubeflowRunStatusInput) (*mcp.CallToolResult, any, error) {
+	if s.kubeflowRunStatus == nil {
+		return nil, nil, fmt.Errorf("kubeflow adapter unavailable")
+	}
+	result, err := s.kubeflowRunStatus(ctx, kubeflow.RunStatusRequest{
+		Name:      strings.TrimSpace(input.Name),
+		Kind:      strings.TrimSpace(input.Kind),
+		Namespace: strings.TrimSpace(input.Namespace),
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return jsonToolResult(map[string]any{"run": result})
+}
+
+func (s *MCPServer) handleKubeflowSubmitRun(ctx context.Context, _ *mcp.CallToolRequest, input kubeflowSubmitRunInput) (*mcp.CallToolResult, any, error) {
+	if s.kubeflowSubmitRun == nil {
+		return nil, nil, fmt.Errorf("kubeflow adapter unavailable")
+	}
+	result, err := s.kubeflowSubmitRun(ctx, kubeflow.SubmitRunRequest{
+		Name:      strings.TrimSpace(input.Name),
+		Kind:      strings.TrimSpace(input.Kind),
+		Namespace: strings.TrimSpace(input.Namespace),
+		Manifest:  input.Manifest,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return jsonToolResult(result)
+}
+
+func (s *MCPServer) handleKubeflowCancelRun(ctx context.Context, _ *mcp.CallToolRequest, input kubeflowCancelRunInput) (*mcp.CallToolResult, any, error) {
+	if s.kubeflowCancelRun == nil {
+		return nil, nil, fmt.Errorf("kubeflow adapter unavailable")
+	}
+	result, err := s.kubeflowCancelRun(ctx, kubeflow.CancelRunRequest{
+		Name:      strings.TrimSpace(input.Name),
+		Kind:      strings.TrimSpace(input.Kind),
+		Namespace: strings.TrimSpace(input.Namespace),
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return jsonToolResult(result)
 }
 
 func (s *MCPServer) handleGetInventory(_ context.Context, _ *mcp.CallToolRequest, input probeInfoInput) (*mcp.CallToolResult, any, error) {

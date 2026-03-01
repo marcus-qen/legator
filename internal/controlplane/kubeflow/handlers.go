@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 )
 
 // Handler exposes Kubeflow read-only APIs and optional guarded actions.
@@ -52,6 +53,69 @@ func (h *Handler) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"refresh": result})
 }
 
+func (h *Handler) HandleRunStatus(w http.ResponseWriter, r *http.Request) {
+	request := RunStatusRequest{
+		Kind:      strings.TrimSpace(r.URL.Query().Get("kind")),
+		Name:      strings.TrimSpace(r.PathValue("name")),
+		Namespace: strings.TrimSpace(r.URL.Query().Get("namespace")),
+	}
+
+	result, err := h.client.RunStatus(r.Context(), request)
+	if err != nil {
+		writeClientError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"run": result})
+}
+
+func (h *Handler) HandleSubmitRun(w http.ResponseWriter, r *http.Request) {
+	if !h.actionsEnabled {
+		writeError(w, http.StatusForbidden, "action_disabled", "kubeflow actions are disabled by policy")
+		return
+	}
+
+	var request SubmitRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid submit payload")
+		return
+	}
+	if request.Name == "" {
+		request.Name = strings.TrimSpace(r.URL.Query().Get("name"))
+	}
+	if request.Kind == "" {
+		request.Kind = strings.TrimSpace(r.URL.Query().Get("kind"))
+	}
+	if request.Namespace == "" {
+		request.Namespace = strings.TrimSpace(r.URL.Query().Get("namespace"))
+	}
+
+	result, err := h.client.SubmitRun(r.Context(), request)
+	if err != nil {
+		writeClientError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"submit": result})
+}
+
+func (h *Handler) HandleCancelRun(w http.ResponseWriter, r *http.Request) {
+	if !h.actionsEnabled {
+		writeError(w, http.StatusForbidden, "action_disabled", "kubeflow actions are disabled by policy")
+		return
+	}
+
+	request := CancelRunRequest{
+		Kind:      strings.TrimSpace(r.URL.Query().Get("kind")),
+		Name:      strings.TrimSpace(r.PathValue("name")),
+		Namespace: strings.TrimSpace(r.URL.Query().Get("namespace")),
+	}
+	result, err := h.client.CancelRun(r.Context(), request)
+	if err != nil {
+		writeClientError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"cancel": result})
+}
+
 func writeClientError(w http.ResponseWriter, err error) {
 	if err == nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "unexpected kubeflow error")
@@ -67,8 +131,10 @@ func writeClientError(w http.ResponseWriter, err error) {
 	switch clientErr.Code {
 	case "cli_missing":
 		writeError(w, http.StatusServiceUnavailable, clientErr.Code, clientErr.Message)
-	case "namespace_missing":
+	case "namespace_missing", "resource_missing":
 		writeError(w, http.StatusNotFound, clientErr.Code, clientErr.Message)
+	case "invalid_request":
+		writeError(w, http.StatusBadRequest, clientErr.Code, clientErr.Error())
 	case "auth_failed", "cluster_unreachable", "timeout", "inventory_unavailable", "command_failed", "parse_error":
 		writeError(w, http.StatusBadGateway, clientErr.Code, clientErr.Error())
 	default:

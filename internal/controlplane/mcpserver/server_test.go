@@ -14,6 +14,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/jobs"
+	"github.com/marcus-qen/legator/internal/controlplane/kubeflow"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.uber.org/zap"
@@ -58,6 +59,53 @@ func TestToolsRegistered(t *testing.T) {
 		if names[i] != expected[i] {
 			t.Fatalf("unexpected tool list: got %v want %v", names, expected)
 		}
+	}
+}
+
+func TestKubeflowToolsRegisteredWithOptions(t *testing.T) {
+	srv, _, _, _ := newTestMCPServerWithOptions(t, WithKubeflowTools(
+		func(_ context.Context, req kubeflow.RunStatusRequest) (kubeflow.RunStatusResult, error) {
+			return kubeflow.RunStatusResult{Name: req.Name, Kind: kubeflow.DefaultRunResource, Namespace: "kubeflow", Status: "Running"}, nil
+		},
+		func(_ context.Context, _ kubeflow.SubmitRunRequest) (map[string]any, error) {
+			return map[string]any{"status": "pending_approval"}, nil
+		},
+		func(_ context.Context, req kubeflow.CancelRunRequest) (map[string]any, error) {
+			return map[string]any{"status": "cancel_executed", "name": req.Name}, nil
+		},
+	))
+	session := connectClient(t, srv)
+
+	result, err := session.ListTools(context.Background(), &mcp.ListToolsParams{})
+	if err != nil {
+		t.Fatalf("list tools: %v", err)
+	}
+
+	names := make([]string, 0, len(result.Tools))
+	for _, tool := range result.Tools {
+		names = append(names, tool.Name)
+	}
+	sort.Strings(names)
+
+	for _, expected := range []string{"legator_kubeflow_cancel_run", "legator_kubeflow_run_status", "legator_kubeflow_submit_run"} {
+		if !containsString(names, expected) {
+			t.Fatalf("expected tool %s in %v", expected, names)
+		}
+	}
+
+	statusCall, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "legator_kubeflow_run_status",
+		Arguments: map[string]any{
+			"name": "run-a",
+		},
+	})
+	if err != nil {
+		t.Fatalf("call run status tool: %v", err)
+	}
+	var statusPayload map[string]any
+	decodeToolJSON(t, statusCall, &statusPayload)
+	if _, ok := statusPayload["run"]; !ok {
+		t.Fatalf("expected run payload, got %#v", statusPayload)
 	}
 }
 
@@ -152,6 +200,11 @@ func TestSearchAuditTool(t *testing.T) {
 
 func newTestMCPServer(t *testing.T) (*MCPServer, *fleet.Store, *audit.Store, *jobs.Store) {
 	t.Helper()
+	return newTestMCPServerWithOptions(t)
+}
+
+func newTestMCPServerWithOptions(t *testing.T, opts ...Option) (*MCPServer, *fleet.Store, *audit.Store, *jobs.Store) {
+	t.Helper()
 	dir := t.TempDir()
 
 	fleetStore, err := fleet.NewStore(filepath.Join(dir, "fleet.db"), zap.NewNop())
@@ -173,7 +226,7 @@ func newTestMCPServer(t *testing.T) (*MCPServer, *fleet.Store, *audit.Store, *jo
 	eventBus := events.NewBus(64)
 	hub := cpws.NewHub(zap.NewNop(), nil)
 	tracker := cmdtracker.New(time.Minute)
-	srv := New(fleetStore, auditStore, jobsStore, eventBus, hub, tracker, zap.NewNop(), nil)
+	srv := New(fleetStore, auditStore, jobsStore, eventBus, hub, tracker, zap.NewNop(), nil, opts...)
 
 	t.Cleanup(func() {
 		_ = fleetStore.Close()
@@ -215,6 +268,15 @@ func connectClient(t *testing.T, srv *MCPServer) *mcp.ClientSession {
 	})
 
 	return session
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func decodeToolJSON(t *testing.T, result *mcp.CallToolResult, out any) {

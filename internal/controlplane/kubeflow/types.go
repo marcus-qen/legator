@@ -2,7 +2,13 @@ package kubeflow
 
 import (
 	"context"
+	"encoding/json"
 	"time"
+)
+
+const (
+	// DefaultRunResource is the Kubernetes resource used when no kind is supplied.
+	DefaultRunResource = "runs.kubeflow.org"
 )
 
 // Client defines the Kubeflow integration boundary used by control-plane surfaces.
@@ -10,6 +16,9 @@ type Client interface {
 	Status(ctx context.Context) (Status, error)
 	Inventory(ctx context.Context) (Inventory, error)
 	Refresh(ctx context.Context) (RefreshResult, error)
+	RunStatus(ctx context.Context, request RunStatusRequest) (RunStatusResult, error)
+	SubmitRun(ctx context.Context, request SubmitRunRequest) (SubmitRunResult, error)
+	CancelRun(ctx context.Context, request CancelRunRequest) (CancelRunResult, error)
 }
 
 // Status provides a lightweight health and connectivity snapshot.
@@ -57,6 +66,64 @@ type ResourceSnapshot struct {
 type RefreshResult struct {
 	Status    Status    `json:"status"`
 	Inventory Inventory `json:"inventory"`
+}
+
+// RunStatusRequest identifies a Kubeflow run-like resource.
+type RunStatusRequest struct {
+	Kind      string `json:"kind,omitempty"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+}
+
+// SubmitRunRequest accepts a manifest for a run/job submission.
+type SubmitRunRequest struct {
+	Kind      string          `json:"kind,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Namespace string          `json:"namespace,omitempty"`
+	Manifest  json.RawMessage `json:"manifest"`
+}
+
+// CancelRunRequest identifies a run-like resource to cancel.
+type CancelRunRequest struct {
+	Kind      string `json:"kind,omitempty"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+}
+
+// RunStatusResult is a normalized run status snapshot.
+type RunStatusResult struct {
+	Kind       string            `json:"kind"`
+	Name       string            `json:"name"`
+	Namespace  string            `json:"namespace"`
+	Status     string            `json:"status"`
+	Message    string            `json:"message,omitempty"`
+	Reason     string            `json:"reason,omitempty"`
+	Labels     map[string]string `json:"labels,omitempty"`
+	ObservedAt time.Time         `json:"observed_at"`
+}
+
+// StatusTransition captures before/after status movement for a mutation.
+type StatusTransition struct {
+	Action     string    `json:"action"`
+	Before     string    `json:"before,omitempty"`
+	After      string    `json:"after"`
+	Changed    bool      `json:"changed"`
+	ObservedAt time.Time `json:"observed_at"`
+}
+
+// SubmitRunResult represents the outcome for a submit mutation.
+type SubmitRunResult struct {
+	Run         RunStatusResult  `json:"run"`
+	Transition  StatusTransition `json:"transition"`
+	SubmittedAt time.Time        `json:"submitted_at"`
+}
+
+// CancelRunResult represents the outcome for a cancel mutation.
+type CancelRunResult struct {
+	Run        RunStatusResult  `json:"run"`
+	Transition StatusTransition `json:"transition"`
+	Canceled   bool             `json:"canceled"`
+	CanceledAt time.Time        `json:"canceled_at"`
 }
 
 // ClientError exposes categorized adapter failures for API mapping.

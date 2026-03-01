@@ -66,7 +66,7 @@ Environment variables override config file values. All vars are prefixed with `L
 | `LEGATOR_KUBEFLOW_CONTEXT` | `kubeflow.context` | — | Optional kubeconfig context override |
 | `LEGATOR_KUBEFLOW_CLI_PATH` | `kubeflow.cli_path` | `kubectl` | kubectl binary path/name |
 | `LEGATOR_KUBEFLOW_TIMEOUT` | `kubeflow.timeout` | `15s` | Timeout per kubectl command |
-| `LEGATOR_KUBEFLOW_ACTIONS_ENABLED` | `kubeflow.actions_enabled` | `false` | Enable guarded Kubeflow action endpoint (`POST /api/v1/kubeflow/actions/refresh`) |
+| `LEGATOR_KUBEFLOW_ACTIONS_ENABLED` | `kubeflow.actions_enabled` | `false` | Enable guarded Kubeflow mutation endpoints (`POST /api/v1/kubeflow/actions/refresh`, `POST /api/v1/kubeflow/runs/submit`, `POST /api/v1/kubeflow/runs/{name}/cancel`) |
 | `LEGATOR_GRAFANA_ENABLED` | `grafana.enabled` | `false` | Enable Grafana adapter routes |
 | `LEGATOR_GRAFANA_BASE_URL` | `grafana.base_url` | — | Grafana base URL for read-only adapter calls |
 | `LEGATOR_GRAFANA_API_TOKEN` | `grafana.api_token` | — | Optional Bearer token for Grafana API |
