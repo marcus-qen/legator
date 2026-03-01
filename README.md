@@ -15,6 +15,12 @@ Legator is a single control-plane application that:
 - **Lets you talk to probes** in persistent two-way chat ("restart nginx on web-03")
 - **Enforces guardrails** — read-only by default, graduated autonomy, human approval for risky changes
 - **Audits every action** with before/after state and who approved what
+- **Reliability** — SLO scorecards, failure drills, and incident management built in
+- **Federation** — read-only multi-source inventory and summary with tenant/org/scope filtering
+- **Automation Packs** — composable, version-pinned runbooks with dry-run and artifact capture
+- **Security hardening** — HMAC-signed commands, policy enforcement at probe + control plane, credential sanitisation
+- **MCP server** — Claude and other AI assistants can drive your fleet via Model Context Protocol
+- **Migration tooling** — alpha-to-beta upgrade path with state migration support
 
 The LLM never touches your servers directly. The probe never reasons independently. **Brain and hands stay separate.**
 
@@ -264,6 +270,25 @@ Compatibility/deprecation policy: `docs/api-mcp-compatibility.md`.
     - `job.run.queued`, `job.run.started`, `job.run.retry_scheduled`
     - `job.run.succeeded`, `job.run.failed`, `job.run.canceled`, `job.run.denied`
   - Job run events carry correlation metadata where available: `job_id`, `run_id`, `execution_id`, `probe_id`, `attempt`, `max_attempts`, `request_id`, `admission_decision`, `admission_reason`, `admission_rationale`.
+
+## Documentation
+
+| Document | Description |
+|---|---|
+| [docs/getting-started.md](docs/getting-started.md) | Installation, first token, first probe |
+| [docs/api-reference.md](docs/api-reference.md) | Complete REST API reference (all ~80 endpoints) |
+| [docs/deployment.md](docs/deployment.md) | Production deployment: bare metal, K8s DaemonSet, TLS, OIDC, LLM |
+| [docs/security.md](docs/security.md) | Security model: auth, permissions, signing, policy engine, sanitisation |
+| [docs/mcp-tools.md](docs/mcp-tools.md) | MCP tool and resource reference for AI assistant integration |
+| [docs/architecture.md](docs/architecture.md) | Internal architecture, subsystems, and boundaries |
+| [docs/configuration.md](docs/configuration.md) | Full configuration reference |
+| [docs/alert-routing.md](docs/alert-routing.md) | Alert rules, routing policies, and escalation |
+| [docs/automation-packs.md](docs/automation-packs.md) | Automation pack authoring and execution |
+| [docs/reliability-scorecards.md](docs/reliability-scorecards.md) | SLO scorecards and drill framework |
+| [docs/federation-read-model.md](docs/federation-read-model.md) | Federation read model and multi-tenancy |
+| [docs/grafana-adapter.md](docs/grafana-adapter.md) | Grafana adapter (capacity signals) |
+| [docs/kubeflow-adapter.md](docs/kubeflow-adapter.md) | Kubeflow adapter (pipeline management) |
+| [CHANGELOG.md](CHANGELOG.md) | Release history (35 alpha releases to beta.1) |
 
 ## Status
 
