@@ -16,7 +16,39 @@ import (
 	"go.uber.org/zap"
 )
 
-const defaultCommandTimeout = 60 * time.Second
+const (
+	defaultCommandTimeout       = 60 * time.Second
+	defaultAdmissionRetryDelay  = 30 * time.Second
+)
+
+type JobAdmissionOutcome string
+
+const (
+	AdmissionOutcomeAllow JobAdmissionOutcome = "allow"
+	AdmissionOutcomeQueue JobAdmissionOutcome = "queue"
+	AdmissionOutcomeDeny  JobAdmissionOutcome = "deny"
+)
+
+// JobAdmissionDecision captures an admission decision for scheduled-job execution.
+type JobAdmissionDecision struct {
+	Outcome    JobAdmissionOutcome `json:"outcome"`
+	Reason     string              `json:"reason,omitempty"`
+	Rationale  any                 `json:"rationale,omitempty"`
+	RetryAfter time.Duration       `json:"-"`
+}
+
+type JobAdmissionEvaluator interface {
+	EvaluateJobAdmission(ctx context.Context, job Job, probeID string) JobAdmissionDecision
+}
+
+type JobAdmissionEvaluatorFunc func(ctx context.Context, job Job, probeID string) JobAdmissionDecision
+
+func (fn JobAdmissionEvaluatorFunc) EvaluateJobAdmission(ctx context.Context, job Job, probeID string) JobAdmissionDecision {
+	if fn == nil {
+		return JobAdmissionDecision{Outcome: AdmissionOutcomeAllow}
+	}
+	return fn(ctx, job, probeID)
+}
 
 type trackable interface {
 	Track(requestID, probeID, command string, level protocol.CapabilityLevel) *cmdtracker.PendingCommand
@@ -48,6 +80,26 @@ func WithLifecycleObserver(observer LifecycleObserver) SchedulerOption {
 	}
 }
 
+// WithAdmissionEvaluator wires capacity-aware admission checks into scheduler dispatch.
+func WithAdmissionEvaluator(evaluator JobAdmissionEvaluator) SchedulerOption {
+	return func(s *Scheduler) {
+		if evaluator == nil {
+			s.admissionEvaluator = JobAdmissionEvaluatorFunc(nil)
+			return
+		}
+		s.admissionEvaluator = evaluator
+	}
+}
+
+// WithAdmissionRetryDelay overrides the default queue re-evaluation delay.
+func WithAdmissionRetryDelay(delay time.Duration) SchedulerOption {
+	return func(s *Scheduler) {
+		if delay > 0 {
+			s.admissionRetryDelay = delay
+		}
+	}
+}
+
 // Scheduler dispatches due jobs and records run history.
 type Scheduler struct {
 	store   *Store
@@ -63,9 +115,11 @@ type Scheduler struct {
 	runRequest         map[string]string // run_id -> request_id
 	requestTarget      map[string]string // request_id -> jobID::probeID
 	activeTargets      map[string]struct{}
-	pendingRetryCancel map[string]context.CancelFunc // jobID::probeID -> retry cancel
+	pendingRetryCancel map[string]context.CancelFunc // jobID::probeID -> retry/admission retry cancel
 	defaultRetryPolicy RetryPolicy
 	lifecycleObserver  LifecycleObserver
+	admissionEvaluator JobAdmissionEvaluator
+	admissionRetryDelay time.Duration
 	wg                 sync.WaitGroup
 }
 
@@ -87,6 +141,8 @@ func NewScheduler(store *Store, hub sender, fleetMgr fleet.Fleet, tracker tracka
 		pendingRetryCancel: make(map[string]context.CancelFunc),
 		defaultRetryPolicy: RetryPolicy{},
 		lifecycleObserver:  noopLifecycleObserver{},
+		admissionEvaluator: JobAdmissionEvaluatorFunc(nil),
+		admissionRetryDelay: defaultAdmissionRetryDelay,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -296,27 +352,35 @@ func (s *Scheduler) dispatchJob(job Job, now time.Time) error {
 		}
 
 		executionID := fmt.Sprintf("jobexec-%s-%s-%d", job.ID, probeID, now.UnixNano())
-		s.dispatchAttempt(job, probeID, targetKey, executionID, 1, policy, now)
+		s.dispatchAttempt(job, probeID, targetKey, executionID, 1, policy, now, "")
 	}
 
 	return nil
 }
 
-func (s *Scheduler) dispatchAttempt(job Job, probeID, targetKey, executionID string, attempt int, policy resolvedRetryPolicy, now time.Time) {
-	requestID := fmt.Sprintf("job-%s-%s-attempt-%d-%d", job.ID, probeID, attempt, now.UnixNano())
-	run, err := s.store.RecordRunStart(JobRun{
-		JobID:       job.ID,
-		ProbeID:     probeID,
-		RequestID:   requestID,
-		ExecutionID: executionID,
-		Attempt:     attempt,
-		MaxAttempts: policy.MaxAttempts,
-		StartedAt:   now,
-		Status:      RunStatusPending,
-	})
+func (s *Scheduler) dispatchAttempt(job Job, probeID, targetKey, executionID string, attempt int, policy resolvedRetryPolicy, now time.Time, queuedRunID string) {
+	decision := s.evaluateAdmission(job, probeID)
+	if decision.Outcome == "" {
+		decision.Outcome = AdmissionOutcomeAllow
+	}
+
+	switch decision.Outcome {
+	case AdmissionOutcomeQueue:
+		s.handleQueuedAdmission(job, probeID, targetKey, executionID, attempt, policy, now, queuedRunID, decision)
+		return
+	case AdmissionOutcomeDeny:
+		s.handleDeniedAdmission(job, probeID, targetKey, executionID, attempt, policy, now, queuedRunID, decision)
+		return
+	}
+
+	s.handleAllowedAdmission(job, probeID, targetKey, executionID, attempt, policy, now, queuedRunID, decision)
+}
+
+func (s *Scheduler) handleAllowedAdmission(job Job, probeID, targetKey, executionID string, attempt int, policy resolvedRetryPolicy, now time.Time, queuedRunID string, decision JobAdmissionDecision) {
+	run, err := s.ensurePendingRun(job, probeID, executionID, attempt, policy, now, queuedRunID, decision)
 	if err != nil {
 		s.releaseTarget(targetKey)
-		s.logger.Warn("record run start failed",
+		s.logger.Warn("prepare pending run failed",
 			zap.String("job_id", job.ID),
 			zap.String("probe_id", probeID),
 			zap.Int("attempt", attempt),
@@ -326,16 +390,34 @@ func (s *Scheduler) dispatchAttempt(job Job, probeID, targetKey, executionID str
 	}
 
 	s.emitLifecycleEvent(LifecycleEvent{
-		Type:        EventJobRunQueued,
-		Actor:       "scheduler",
-		Timestamp:   run.StartedAt,
-		JobID:       run.JobID,
-		RunID:       run.ID,
-		ExecutionID: run.ExecutionID,
-		ProbeID:     run.ProbeID,
-		Attempt:     run.Attempt,
-		MaxAttempts: run.MaxAttempts,
-		RequestID:   run.RequestID,
+		Type:              EventJobRunAdmissionAllowed,
+		Actor:             "scheduler",
+		JobID:             run.JobID,
+		RunID:             run.ID,
+		ExecutionID:       run.ExecutionID,
+		ProbeID:           run.ProbeID,
+		Attempt:           run.Attempt,
+		MaxAttempts:       run.MaxAttempts,
+		RequestID:         run.RequestID,
+		AdmissionDecision: string(AdmissionOutcomeAllow),
+		AdmissionReason:   strings.TrimSpace(decision.Reason),
+		AdmissionRationale: decision.Rationale,
+	})
+
+	s.emitLifecycleEvent(LifecycleEvent{
+		Type:              EventJobRunQueued,
+		Actor:             "scheduler",
+		Timestamp:         run.StartedAt,
+		JobID:             run.JobID,
+		RunID:             run.ID,
+		ExecutionID:       run.ExecutionID,
+		ProbeID:           run.ProbeID,
+		Attempt:           run.Attempt,
+		MaxAttempts:       run.MaxAttempts,
+		RequestID:         run.RequestID,
+		AdmissionDecision: run.AdmissionDecision,
+		AdmissionReason:   run.AdmissionReason,
+		AdmissionRationale: run.admissionRationaleValue(),
 	})
 
 	if err := s.store.MarkRunRunning(run.ID); err != nil {
@@ -347,17 +429,21 @@ func (s *Scheduler) dispatchAttempt(job Job, probeID, targetKey, executionID str
 	}
 
 	s.emitLifecycleEvent(LifecycleEvent{
-		Type:        EventJobRunStarted,
-		Actor:       "scheduler",
-		JobID:       run.JobID,
-		RunID:       run.ID,
-		ExecutionID: run.ExecutionID,
-		ProbeID:     run.ProbeID,
-		Attempt:     run.Attempt,
-		MaxAttempts: run.MaxAttempts,
-		RequestID:   run.RequestID,
+		Type:              EventJobRunStarted,
+		Actor:             "scheduler",
+		JobID:             run.JobID,
+		RunID:             run.ID,
+		ExecutionID:       run.ExecutionID,
+		ProbeID:           run.ProbeID,
+		Attempt:           run.Attempt,
+		MaxAttempts:       run.MaxAttempts,
+		RequestID:         run.RequestID,
+		AdmissionDecision: run.AdmissionDecision,
+		AdmissionReason:   run.AdmissionReason,
+		AdmissionRationale: run.admissionRationaleValue(),
 	})
 
+	requestID := run.RequestID
 	if !s.probeOnline(probeID) {
 		s.finishAttempt(*run, job, policy, targetKey, requestID, false, RunStatusFailed, nil, "probe offline")
 		return
@@ -392,6 +478,258 @@ func (s *Scheduler) dispatchAttempt(job Job, probeID, targetKey, executionID str
 
 	s.wg.Add(1)
 	go s.awaitRunResult(*run, requestID, pending, job, policy, targetKey)
+}
+
+func (s *Scheduler) handleQueuedAdmission(job Job, probeID, targetKey, executionID string, attempt int, policy resolvedRetryPolicy, now time.Time, queuedRunID string, decision JobAdmissionDecision) {
+	delay := s.admissionRetryDelay
+	if decision.RetryAfter > 0 {
+		delay = decision.RetryAfter
+	}
+	if delay <= 0 {
+		delay = defaultAdmissionRetryDelay
+	}
+	scheduledAt := now.UTC().Add(delay)
+
+	run, err := s.ensureQueuedRun(job, probeID, executionID, attempt, policy, now, queuedRunID, decision, &scheduledAt)
+	if err != nil {
+		s.releaseTarget(targetKey)
+		s.logger.Warn("record queued admission failed",
+			zap.String("job_id", job.ID),
+			zap.String("probe_id", probeID),
+			zap.Int("attempt", attempt),
+			zap.Error(err),
+		)
+		return
+	}
+
+	s.emitLifecycleEvent(LifecycleEvent{
+		Type:              EventJobRunAdmissionQueued,
+		Actor:             "scheduler",
+		Timestamp:         now.UTC(),
+		JobID:             run.JobID,
+		RunID:             run.ID,
+		ExecutionID:       run.ExecutionID,
+		ProbeID:           run.ProbeID,
+		Attempt:           run.Attempt,
+		MaxAttempts:       run.MaxAttempts,
+		RequestID:         run.RequestID,
+		AdmissionDecision: string(AdmissionOutcomeQueue),
+		AdmissionReason:   strings.TrimSpace(decision.Reason),
+		AdmissionRationale: decision.Rationale,
+		DeferredUntil:     &scheduledAt,
+	})
+
+	s.scheduleAdmissionRetry(job, probeID, targetKey, executionID, attempt, policy, scheduledAt, run.ID)
+}
+
+func (s *Scheduler) handleDeniedAdmission(job Job, probeID, targetKey, executionID string, attempt int, policy resolvedRetryPolicy, now time.Time, queuedRunID string, decision JobAdmissionDecision) {
+	reason := strings.TrimSpace(decision.Reason)
+	if reason == "" {
+		reason = "admission denied by policy"
+	}
+
+	run, err := s.ensureDeniedRun(job, probeID, executionID, attempt, policy, now, queuedRunID, reason, decision.Rationale)
+	if err != nil {
+		s.releaseTarget(targetKey)
+		s.logger.Warn("record denied admission failed",
+			zap.String("job_id", job.ID),
+			zap.String("probe_id", probeID),
+			zap.Int("attempt", attempt),
+			zap.Error(err),
+		)
+		return
+	}
+
+	s.emitLifecycleEvent(LifecycleEvent{
+		Type:              EventJobRunAdmissionDenied,
+		Actor:             "scheduler",
+		Timestamp:         now.UTC(),
+		JobID:             run.JobID,
+		RunID:             run.ID,
+		ExecutionID:       run.ExecutionID,
+		ProbeID:           run.ProbeID,
+		Attempt:           run.Attempt,
+		MaxAttempts:       run.MaxAttempts,
+		RequestID:         run.RequestID,
+		AdmissionDecision: string(AdmissionOutcomeDeny),
+		AdmissionReason:   reason,
+		AdmissionRationale: decision.Rationale,
+	})
+
+	s.emitLifecycleEvent(LifecycleEvent{
+		Type:              EventJobRunDenied,
+		Actor:             "scheduler",
+		Timestamp:         now.UTC(),
+		JobID:             run.JobID,
+		RunID:             run.ID,
+		ExecutionID:       run.ExecutionID,
+		ProbeID:           run.ProbeID,
+		Attempt:           run.Attempt,
+		MaxAttempts:       run.MaxAttempts,
+		RequestID:         run.RequestID,
+		AdmissionDecision: run.AdmissionDecision,
+		AdmissionReason:   run.AdmissionReason,
+		AdmissionRationale: run.admissionRationaleValue(),
+	})
+
+	s.releaseTarget(targetKey)
+}
+
+func (s *Scheduler) ensurePendingRun(job Job, probeID, executionID string, attempt int, policy resolvedRetryPolicy, now time.Time, queuedRunID string, decision JobAdmissionDecision) (*JobRun, error) {
+	if queuedID := strings.TrimSpace(queuedRunID); queuedID != "" {
+		if _, err := s.store.UpdateQueuedRunAdmission(queuedID, string(AdmissionOutcomeAllow), strings.TrimSpace(decision.Reason), decision.Rationale, nil); err != nil {
+			return nil, err
+		}
+		if err := s.store.MarkRunPending(queuedID); err != nil {
+			return nil, err
+		}
+		return s.store.GetRun(queuedID)
+	}
+
+	rationaleRaw, err := mustMarshalAdmissionRationale(decision.Rationale)
+	if err != nil {
+		return nil, err
+	}
+	requestID := fmt.Sprintf("job-%s-%s-attempt-%d-%d", job.ID, probeID, attempt, now.UnixNano())
+	run, err := s.store.RecordRunStart(JobRun{
+		JobID:             job.ID,
+		ProbeID:           probeID,
+		RequestID:         requestID,
+		ExecutionID:       executionID,
+		Attempt:           attempt,
+		MaxAttempts:       policy.MaxAttempts,
+		StartedAt:         now,
+		Status:            RunStatusPending,
+		AdmissionDecision: string(AdmissionOutcomeAllow),
+		AdmissionReason:   strings.TrimSpace(decision.Reason),
+		AdmissionRationale: rationaleRaw,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return run, nil
+}
+
+func (s *Scheduler) ensureQueuedRun(job Job, probeID, executionID string, attempt int, policy resolvedRetryPolicy, now time.Time, queuedRunID string, decision JobAdmissionDecision, retryScheduledAt *time.Time) (*JobRun, error) {
+	if queuedID := strings.TrimSpace(queuedRunID); queuedID != "" {
+		return s.store.UpdateQueuedRunAdmission(queuedID, string(AdmissionOutcomeQueue), strings.TrimSpace(decision.Reason), decision.Rationale, retryScheduledAt)
+	}
+
+	rationaleRaw, err := mustMarshalAdmissionRationale(decision.Rationale)
+	if err != nil {
+		return nil, err
+	}
+	requestID := fmt.Sprintf("job-%s-%s-attempt-%d-%d", job.ID, probeID, attempt, now.UnixNano())
+	run, err := s.store.RecordRunStart(JobRun{
+		JobID:             job.ID,
+		ProbeID:           probeID,
+		RequestID:         requestID,
+		ExecutionID:       executionID,
+		Attempt:           attempt,
+		MaxAttempts:       policy.MaxAttempts,
+		StartedAt:         now,
+		Status:            RunStatusQueued,
+		RetryScheduledAt:  retryScheduledAt,
+		AdmissionDecision: string(AdmissionOutcomeQueue),
+		AdmissionReason:   strings.TrimSpace(decision.Reason),
+		AdmissionRationale: rationaleRaw,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return run, nil
+}
+
+func (s *Scheduler) ensureDeniedRun(job Job, probeID, executionID string, attempt int, policy resolvedRetryPolicy, now time.Time, queuedRunID, reason string, rationale any) (*JobRun, error) {
+	if queuedID := strings.TrimSpace(queuedRunID); queuedID != "" {
+		if err := s.store.MarkRunDenied(queuedID, reason, rationale); err != nil {
+			return nil, err
+		}
+		return s.store.GetRun(queuedID)
+	}
+
+	rationaleRaw, err := mustMarshalAdmissionRationale(rationale)
+	if err != nil {
+		return nil, err
+	}
+	endedAt := now.UTC()
+	requestID := fmt.Sprintf("job-%s-%s-attempt-%d-%d", job.ID, probeID, attempt, now.UnixNano())
+	run, err := s.store.RecordRunStart(JobRun{
+		JobID:             job.ID,
+		ProbeID:           probeID,
+		RequestID:         requestID,
+		ExecutionID:       executionID,
+		Attempt:           attempt,
+		MaxAttempts:       policy.MaxAttempts,
+		StartedAt:         now,
+		EndedAt:           &endedAt,
+		Status:            RunStatusDenied,
+		AdmissionDecision: string(AdmissionOutcomeDeny),
+		AdmissionReason:   strings.TrimSpace(reason),
+		AdmissionRationale: rationaleRaw,
+		Output:            strings.TrimSpace(reason),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return run, nil
+}
+
+func (s *Scheduler) evaluateAdmission(job Job, probeID string) JobAdmissionDecision {
+	if s == nil || s.admissionEvaluator == nil {
+		return JobAdmissionDecision{Outcome: AdmissionOutcomeAllow}
+	}
+	decision := s.admissionEvaluator.EvaluateJobAdmission(context.Background(), job, probeID)
+	if decision.Outcome == "" {
+		decision.Outcome = AdmissionOutcomeAllow
+	}
+	decision.Reason = strings.TrimSpace(decision.Reason)
+	return decision
+}
+
+func (s *Scheduler) scheduleAdmissionRetry(job Job, probeID, targetKey, executionID string, attempt int, policy resolvedRetryPolicy, scheduledAt time.Time, queuedRunID string) {
+	delay := time.Until(scheduledAt)
+	if delay < 0 {
+		delay = 0
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s.mu.Lock()
+	if existing := s.pendingRetryCancel[targetKey]; existing != nil {
+		existing()
+	}
+	s.pendingRetryCancel[targetKey] = cancel
+	s.mu.Unlock()
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+
+		s.mu.Lock()
+		delete(s.pendingRetryCancel, targetKey)
+		s.mu.Unlock()
+
+		latest, err := s.store.GetJob(job.ID)
+		if err != nil || !latest.Enabled {
+			s.releaseTarget(targetKey)
+			return
+		}
+		run, err := s.store.GetRun(queuedRunID)
+		if err != nil || run.Status != RunStatusQueued {
+			s.releaseTarget(targetKey)
+			return
+		}
+
+		s.dispatchAttempt(*latest, probeID, targetKey, executionID, attempt, policy, time.Now().UTC(), queuedRunID)
+	}()
 }
 
 func (s *Scheduler) awaitRunResult(run JobRun, requestID string, pending *cmdtracker.PendingCommand, job Job, policy resolvedRetryPolicy, targetKey string) {
@@ -544,7 +882,7 @@ func (s *Scheduler) scheduleRetry(job Job, probeID, targetKey, executionID strin
 			return
 		}
 
-		s.dispatchAttempt(*latest, probeID, targetKey, executionID, attempt, policy, time.Now().UTC())
+		s.dispatchAttempt(*latest, probeID, targetKey, executionID, attempt, policy, time.Now().UTC(), "")
 	}()
 }
 

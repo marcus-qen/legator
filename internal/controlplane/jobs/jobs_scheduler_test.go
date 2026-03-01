@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -119,6 +120,9 @@ func TestSchedulerTriggerNowRecordsRun(t *testing.T) {
 		if len(runs) == 1 && runs[0].Status == RunStatusSuccess {
 			if runs[0].ExitCode == nil || *runs[0].ExitCode != 0 {
 				t.Fatalf("expected exit code 0, got %#v", runs[0].ExitCode)
+			}
+			if runs[0].AdmissionDecision != string(AdmissionOutcomeAllow) {
+				t.Fatalf("expected admission decision allow, got %q", runs[0].AdmissionDecision)
 			}
 			return
 		}
@@ -694,6 +698,160 @@ func TestSchedulerRetriesOnDispatchFailure(t *testing.T) {
 	t.Fatalf("expected success after dispatch retries, got %#v", runs)
 }
 
+func TestSchedulerAdmissionDenyRecordsDeniedRun(t *testing.T) {
+	store := newTestStore(t)
+	fleetMgr := fleet.NewManager(zap.NewNop())
+	fleetMgr.Register("probe-1", "probe-1", "linux", "amd64")
+	if err := fleetMgr.SetOnline("probe-1"); err != nil {
+		t.Fatalf("set online: %v", err)
+	}
+
+	tracker := newFakeTracker()
+	var sent int
+	sender := &fakeSender{sendFn: func(probeID string, msgType protocol.MessageType, payload any) error {
+		sent++
+		return nil
+	}}
+
+	scheduler := NewScheduler(
+		store,
+		sender,
+		fleetMgr,
+		tracker,
+		zap.NewNop(),
+		WithAdmissionEvaluator(JobAdmissionEvaluatorFunc(func(ctx context.Context, job Job, probeID string) JobAdmissionDecision {
+			return JobAdmissionDecision{
+				Outcome:   AdmissionOutcomeDeny,
+				Reason:    "capacity degraded",
+				Rationale: map[string]any{"policy": "capacity-policy-v1", "availability": "degraded"},
+			}
+		})),
+	)
+
+	job, err := store.CreateJob(Job{Name: "admission-deny", Command: "echo no", Schedule: "1h", Target: Target{Kind: TargetKindProbe, Value: "probe-1"}, Enabled: true})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if err := scheduler.TriggerNow(job.ID); err != nil {
+		t.Fatalf("trigger now: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		runs, err := store.ListRunsByJob(job.ID, 5)
+		if err != nil {
+			t.Fatalf("list runs: %v", err)
+		}
+		if len(runs) == 1 {
+			run := runs[0]
+			if run.Status != RunStatusDenied {
+				t.Fatalf("expected denied status, got %s", run.Status)
+			}
+			if run.AdmissionDecision != string(AdmissionOutcomeDeny) {
+				t.Fatalf("expected deny admission decision, got %q", run.AdmissionDecision)
+			}
+			if run.AdmissionReason == "" || run.Output == "" {
+				t.Fatalf("expected denial rationale/output, got %+v", run)
+			}
+			if sent != 0 {
+				t.Fatalf("expected no dispatches on denied run, got %d", sent)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	runs, _ := store.ListRunsByJob(job.ID, 5)
+	t.Fatalf("expected denied run to be recorded, got %#v", runs)
+}
+
+func TestSchedulerAdmissionQueueReevaluatesAndDispatches(t *testing.T) {
+	store := newTestStore(t)
+	fleetMgr := fleet.NewManager(zap.NewNop())
+	fleetMgr.Register("probe-1", "probe-1", "linux", "amd64")
+	if err := fleetMgr.SetOnline("probe-1"); err != nil {
+		t.Fatalf("set online: %v", err)
+	}
+
+	tracker := newFakeTracker()
+	sender := &fakeSender{sendFn: func(probeID string, msgType protocol.MessageType, payload any) error {
+		cmd, ok := payload.(protocol.CommandPayload)
+		if !ok {
+			return fmt.Errorf("unexpected payload type %T", payload)
+		}
+		go tracker.complete(cmd.RequestID, &protocol.CommandResultPayload{RequestID: cmd.RequestID, ExitCode: 0, Stdout: "ok"})
+		return nil
+	}}
+
+	var (
+		admissionChecks int
+		admissionMu     sync.Mutex
+	)
+	scheduler := NewScheduler(
+		store,
+		sender,
+		fleetMgr,
+		tracker,
+		zap.NewNop(),
+		WithAdmissionRetryDelay(15*time.Millisecond),
+		WithAdmissionEvaluator(JobAdmissionEvaluatorFunc(func(ctx context.Context, job Job, probeID string) JobAdmissionDecision {
+			admissionMu.Lock()
+			admissionChecks++
+			check := admissionChecks
+			admissionMu.Unlock()
+			if check == 1 {
+				return JobAdmissionDecision{
+					Outcome:   AdmissionOutcomeQueue,
+					Reason:    "capacity limited",
+					RetryAfter: 15 * time.Millisecond,
+					Rationale: map[string]any{"availability": "limited"},
+				}
+			}
+			return JobAdmissionDecision{
+				Outcome:   AdmissionOutcomeAllow,
+				Reason:    "capacity recovered",
+				Rationale: map[string]any{"availability": "normal"},
+			}
+		})),
+	)
+
+	job, err := store.CreateJob(Job{Name: "admission-queue", Command: "echo ok", Schedule: "1h", Target: Target{Kind: TargetKindProbe, Value: "probe-1"}, Enabled: true})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if err := scheduler.TriggerNow(job.ID); err != nil {
+		t.Fatalf("trigger now: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		runs, err := store.ListRunsByJob(job.ID, 5)
+		if err != nil {
+			t.Fatalf("list runs: %v", err)
+		}
+		if len(runs) == 1 && runs[0].Status == RunStatusSuccess {
+			run := runs[0]
+			if run.Attempt != 1 {
+				t.Fatalf("expected one attempt after deferred admission, got %d", run.Attempt)
+			}
+			if run.AdmissionDecision != string(AdmissionOutcomeAllow) {
+				t.Fatalf("expected final admission decision allow, got %q", run.AdmissionDecision)
+			}
+			admissionMu.Lock()
+			checks := admissionChecks
+			admissionMu.Unlock()
+			if checks < 2 {
+				t.Fatalf("expected queued admission to re-evaluate, checks=%d", checks)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	runs, _ := store.ListRunsByJob(job.ID, 5)
+	t.Fatalf("expected queued admission to drain to success, got %#v", runs)
+}
+
 func waitForRuns(t *testing.T, store *Store, jobID string, want int, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -705,7 +863,7 @@ func waitForRuns(t *testing.T, store *Store, jobID string, want int, timeout tim
 		if len(runs) == want {
 			allTerminal := true
 			for _, run := range runs {
-				if run.Status == RunStatusPending || run.Status == RunStatusRunning {
+				if run.Status == RunStatusQueued || run.Status == RunStatusPending || run.Status == RunStatusRunning {
 					allTerminal = false
 					break
 				}

@@ -213,6 +213,8 @@ make release-build    # Cross-compile release binaries (incl. windows/amd64 prob
     - `retry_policy.multiplier` (exponential factor, e.g. `2`)
     - `retry_policy.max_backoff` (optional cap duration)
   - Run history now includes correlation metadata: `execution_id`, `attempt`, `max_attempts`, `retry_scheduled_at`.
+  - Capacity-aware admission outcomes are additive in run payloads: `admission_decision`, `admission_reason`, `admission_rationale`.
+  - Run status filters include: `queued`, `pending`, `running`, `success`, `failed`, `canceled`, `denied`.
 - **Chat**: `GET/POST /api/v1/probes/{id}/chat`, `GET /ws/chat`
 - **Fleet Chat**: `GET/POST /api/v1/fleet/chat`
 - **Policy**: `GET/POST /api/v1/policies`, `POST /api/v1/probes/{id}/apply-policy/{policyId}`
@@ -234,9 +236,10 @@ make release-build    # Cross-compile release binaries (incl. windows/amd64 prob
 - **Events**: `GET /api/v1/events` (SSE stream)
   - Job lifecycle events are emitted to both audit and SSE/event bus surfaces:
     - `job.created`, `job.updated`, `job.deleted`
+    - `job.run.admission_allowed`, `job.run.admission_queued`, `job.run.admission_denied`
     - `job.run.queued`, `job.run.started`, `job.run.retry_scheduled`
-    - `job.run.succeeded`, `job.run.failed`, `job.run.canceled`
-  - Job run events carry correlation metadata where available: `job_id`, `run_id`, `execution_id`, `probe_id`, `attempt`, `max_attempts`, `request_id`.
+    - `job.run.succeeded`, `job.run.failed`, `job.run.canceled`, `job.run.denied`
+  - Job run events carry correlation metadata where available: `job_id`, `run_id`, `execution_id`, `probe_id`, `attempt`, `max_attempts`, `request_id`, `admission_decision`, `admission_reason`, `admission_rationale`.
 
 ## Status
 

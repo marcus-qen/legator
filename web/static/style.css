@@ -1528,6 +1528,12 @@ body[data-page='jobs'] .jobs-run-row-selected {
   background: rgba(96, 165, 250, 0.09);
 }
 
+.job-status-queued {
+  border-color: rgba(139, 92, 246, 0.5);
+  color: #c4b5fd;
+  background: rgba(139, 92, 246, 0.12);
+}
+
 .job-status-failed {
   border-color: rgba(248, 113, 113, 0.5);
   color: var(--red);
@@ -1544,6 +1550,12 @@ body[data-page='jobs'] .jobs-run-row-selected {
   border-color: rgba(148, 163, 184, 0.5);
   color: #cbd5e1;
   background: rgba(148, 163, 184, 0.08);
+}
+
+.job-status-denied {
+  border-color: rgba(244, 114, 182, 0.5);
+  color: #f9a8d4;
+  background: rgba(244, 114, 182, 0.12);
 }
 
 @media (max-width: 980px) {

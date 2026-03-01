@@ -1,17 +1,22 @@
 package jobs
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 const (
 	TargetKindProbe = "probe"
 	TargetKindTag   = "tag"
 	TargetKindAll   = "all"
 
+	RunStatusQueued   = "queued"
 	RunStatusPending  = "pending"
 	RunStatusRunning  = "running"
 	RunStatusSuccess  = "success"
 	RunStatusFailed   = "failed"
 	RunStatusCanceled = "canceled"
+	RunStatusDenied   = "denied"
 )
 
 // Job describes a scheduled command execution definition.
@@ -46,17 +51,31 @@ type Target struct {
 
 // JobRun captures one execution attempt of a job on a single probe.
 type JobRun struct {
-	ID               string     `json:"id"`
-	JobID            string     `json:"job_id"`
-	ProbeID          string     `json:"probe_id"`
-	RequestID        string     `json:"request_id"`
-	ExecutionID      string     `json:"execution_id,omitempty"`
-	Attempt          int        `json:"attempt"`
-	MaxAttempts      int        `json:"max_attempts"`
-	RetryScheduledAt *time.Time `json:"retry_scheduled_at,omitempty"`
-	StartedAt        time.Time  `json:"started_at"`
-	EndedAt          *time.Time `json:"ended_at,omitempty"`
-	Status           string     `json:"status"`
-	ExitCode         *int       `json:"exit_code,omitempty"`
-	Output           string     `json:"output,omitempty"`
+	ID                string          `json:"id"`
+	JobID             string          `json:"job_id"`
+	ProbeID           string          `json:"probe_id"`
+	RequestID         string          `json:"request_id"`
+	ExecutionID       string          `json:"execution_id,omitempty"`
+	Attempt           int             `json:"attempt"`
+	MaxAttempts       int             `json:"max_attempts"`
+	RetryScheduledAt  *time.Time      `json:"retry_scheduled_at,omitempty"`
+	StartedAt         time.Time       `json:"started_at"`
+	EndedAt           *time.Time      `json:"ended_at,omitempty"`
+	Status            string          `json:"status"`
+	AdmissionDecision string          `json:"admission_decision,omitempty"`
+	AdmissionReason   string          `json:"admission_reason,omitempty"`
+	AdmissionRationale json.RawMessage `json:"admission_rationale,omitempty"`
+	ExitCode          *int            `json:"exit_code,omitempty"`
+	Output            string          `json:"output,omitempty"`
+}
+
+func (r JobRun) admissionRationaleValue() any {
+	if len(r.AdmissionRationale) == 0 {
+		return nil
+	}
+	var value any
+	if err := json.Unmarshal(r.AdmissionRationale, &value); err != nil {
+		return string(r.AdmissionRationale)
+	}
+	return value
 }

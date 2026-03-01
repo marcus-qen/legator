@@ -325,8 +325,8 @@ func (h *Handler) HandleRetryRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if run.Status != RunStatusFailed && run.Status != RunStatusCanceled {
-		writeError(w, http.StatusConflict, "invalid_transition", "only failed or canceled runs can be retried")
+	if run.Status != RunStatusFailed && run.Status != RunStatusCanceled && run.Status != RunStatusDenied {
+		writeError(w, http.StatusConflict, "invalid_transition", "only failed, canceled, or denied runs can be retried")
 		return
 	}
 
@@ -379,7 +379,9 @@ func (h *Handler) HandleListRuns(w http.ResponseWriter, r *http.Request) {
 		"success_count":  summary.Success,
 		"running_count":  summary.Running,
 		"pending_count":  summary.Pending,
+		"queued_count":   summary.Queued,
 		"canceled_count": summary.Canceled,
+		"denied_count":   summary.Denied,
 	})
 }
 
@@ -415,7 +417,9 @@ func (h *Handler) HandleListAllRuns(w http.ResponseWriter, r *http.Request) {
 		"success_count":  summary.Success,
 		"running_count":  summary.Running,
 		"pending_count":  summary.Pending,
+		"queued_count":   summary.Queued,
 		"canceled_count": summary.Canceled,
+		"denied_count":   summary.Denied,
 	})
 }
 
@@ -449,17 +453,21 @@ func handleToggleJob(w http.ResponseWriter, r *http.Request, handler *Handler, e
 }
 
 type runSummary struct {
+	Queued   int
 	Pending  int
 	Running  int
 	Success  int
 	Failed   int
 	Canceled int
+	Denied   int
 }
 
 func summarizeRuns(runs []JobRun) runSummary {
 	summary := runSummary{}
 	for _, run := range runs {
 		switch run.Status {
+		case RunStatusQueued:
+			summary.Queued++
 		case RunStatusPending:
 			summary.Pending++
 		case RunStatusRunning:
@@ -470,6 +478,8 @@ func summarizeRuns(runs []JobRun) runSummary {
 			summary.Failed++
 		case RunStatusCanceled:
 			summary.Canceled++
+		case RunStatusDenied:
+			summary.Denied++
 		}
 	}
 	return summary
@@ -490,10 +500,10 @@ func parseRunQuery(r *http.Request) (RunQuery, error) {
 
 	if status := strings.TrimSpace(r.URL.Query().Get("status")); status != "" {
 		switch status {
-		case RunStatusPending, RunStatusRunning, RunStatusSuccess, RunStatusFailed, RunStatusCanceled:
+		case RunStatusQueued, RunStatusPending, RunStatusRunning, RunStatusSuccess, RunStatusFailed, RunStatusCanceled, RunStatusDenied:
 			query.Status = status
 		default:
-			return RunQuery{}, fmt.Errorf("status must be one of: pending, running, success, failed, canceled")
+			return RunQuery{}, fmt.Errorf("status must be one of: queued, pending, running, success, failed, canceled, denied")
 		}
 	}
 
