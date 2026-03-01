@@ -2,6 +2,8 @@
 
 Legator exposes a Kubeflow integration boundary with **read APIs plus guarded mutations**.
 
+Compatibility/deprecation policy for API + MCP identifiers: `docs/api-mcp-compatibility.md`.
+
 ## Scope
 
 - Read-only cluster status endpoint

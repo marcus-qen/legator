@@ -164,7 +164,7 @@ Primary next reuse target: research infrastructure workflows (Kubeflow jobs + Gr
    - E2E path tests for each major capability
 
 4. **Backward compatibility**
-   - API + MCP contract versioning policy
+   - API + MCP contract versioning policy (see `docs/api-mcp-compatibility.md`)
    - Deprecation notes in changelog/docs
 
 ---

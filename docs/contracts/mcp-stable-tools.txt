@@ -1,0 +1,24 @@
+# Stable MCP tools
+# Append-only list. Do not remove entries; use docs/contracts/deprecations.json with status="removed".
+# New stable entries must be reflected in CHANGELOG.md and docs/releases/README.md annotations.
+
+legator_decide_approval
+legator_fleet_query
+legator_get_inventory
+legator_get_job_run
+legator_grafana_capacity_policy
+legator_grafana_snapshot
+legator_grafana_status
+legator_kubeflow_cancel_run
+legator_kubeflow_run_status
+legator_kubeflow_submit_run
+legator_list_job_runs
+legator_list_jobs
+legator_list_probes
+legator_poll_job_active
+legator_probe_health
+legator_probe_info
+legator_run_command
+legator_search_audit
+legator_stream_job_events
+legator_stream_job_run_output
