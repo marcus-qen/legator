@@ -117,16 +117,25 @@ func (m *Manager) Get(id string) (*ProbeState, bool) {
 	return ps, ok
 }
 
-// FindByHostname returns the first probe matching hostname.
+// FindByHostname returns the best matching probe for a hostname.
+// Preference order: online/degraded probes first, then most recently seen.
 func (m *Manager) FindByHostname(hostname string) (*ProbeState, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	for _, ps := range m.probes {
-		if ps.Hostname == hostname {
-			return ps, true
+
+	var best *ProbeState
+	for _, candidate := range m.probes {
+		if candidate.Hostname != hostname {
+			continue
+		}
+		if best == nil || betterHostnameCandidate(candidate, best) {
+			best = candidate
 		}
 	}
-	return nil, false
+	if best == nil {
+		return nil, false
+	}
+	return best, true
 }
 
 // List returns all probes.
@@ -178,10 +187,12 @@ func (m *Manager) MarkOffline(threshold time.Duration) {
 
 	cutoff := time.Now().UTC().Add(-threshold)
 	for _, ps := range m.probes {
-		if ps.Status == "online" && ps.LastSeen.Before(cutoff) {
+		if ps.Status != "offline" && ps.LastSeen.Before(cutoff) {
+			previousStatus := ps.Status
 			ps.Status = "offline"
 			m.logger.Warn("probe marked offline",
 				zap.String("id", ps.ID),
+				zap.String("previous_status", previousStatus),
 				zap.Time("last_seen", ps.LastSeen),
 			)
 		}
@@ -261,6 +272,36 @@ func (m *Manager) TagCounts() map[string]int {
 		}
 	}
 	return counts
+}
+
+func betterHostnameCandidate(candidate, current *ProbeState) bool {
+	candidateRank := hostnameStatusRank(candidate.Status)
+	currentRank := hostnameStatusRank(current.Status)
+	if candidateRank != currentRank {
+		return candidateRank > currentRank
+	}
+	if !candidate.LastSeen.Equal(current.LastSeen) {
+		return candidate.LastSeen.After(current.LastSeen)
+	}
+	if !candidate.Registered.Equal(current.Registered) {
+		return candidate.Registered.After(current.Registered)
+	}
+	return candidate.ID < current.ID
+}
+
+func hostnameStatusRank(status string) int {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "online":
+		return 4
+	case "degraded":
+		return 3
+	case "pending":
+		return 2
+	case "offline":
+		return 1
+	default:
+		return 0
+	}
 }
 
 func normalizeTags(tags []string) []string {

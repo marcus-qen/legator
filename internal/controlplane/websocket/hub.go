@@ -148,15 +148,27 @@ func (h *Hub) HandleProbeWS(w http.ResponseWriter, r *http.Request) {
 
 	defer func() {
 		conn.Close()
+
+		removed := false
 		h.mu.Lock()
 		if h.probes[probeID] == pc {
 			delete(h.probes, probeID)
+			removed = true
 		}
 		h.mu.Unlock()
-		h.logger.Info("probe disconnected", zap.String("probe_id", probeID))
-		if h.onDisconnect != nil {
-			h.onDisconnect(probeID)
+
+		if removed {
+			h.logger.Info("probe disconnected", zap.String("probe_id", probeID))
+			if h.onDisconnect != nil {
+				h.onDisconnect(probeID)
+			}
+			return
 		}
+
+		h.logger.Debug("stale probe connection closed",
+			zap.String("probe_id", probeID),
+			zap.Time("connected_at", pc.Connected),
+		)
 	}()
 
 	// Set up ping/pong keepalive

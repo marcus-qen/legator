@@ -210,6 +210,77 @@ func TestRegisterHandler_DeduplicatesByHostname(t *testing.T) {
 	}
 }
 
+func TestRegisterHandler_DeduplicatesAndPrunesOfflineHostnameDuplicates(t *testing.T) {
+	ts := newTestTokenStore(t)
+	fm := fleet.NewManager(testLogger())
+
+	fm.Register("probe-stale", "dup-host", "linux", "amd64")
+	time.Sleep(2 * time.Millisecond)
+	fm.Register("probe-active", "dup-host", "linux", "amd64")
+	time.Sleep(2 * time.Millisecond)
+	fm.MarkOffline(time.Nanosecond)
+	if err := fm.SetOnline("probe-active"); err != nil {
+		t.Fatalf("set active probe online: %v", err)
+	}
+
+	if stale, ok := fm.Get("probe-stale"); !ok || stale.Status != "offline" {
+		t.Fatalf("expected probe-stale to be offline fixture, got %#v", stale)
+	}
+
+	handler := HandleRegister(ts, fm, testLogger())
+	body, _ := json.Marshal(RegisterRequest{
+		Token:    ts.Generate().Value,
+		Hostname: "dup-host",
+		OS:       "linux",
+		Arch:     "arm64",
+		Tags:     []string{"canary"},
+	})
+	req := httptest.NewRequest("POST", "/api/v1/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp RegisterResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.ProbeID != "probe-active" {
+		t.Fatalf("expected active probe id to be reused, got %s", resp.ProbeID)
+	}
+	if _, ok := fm.Get("probe-stale"); ok {
+		t.Fatal("expected stale duplicate probe to be removed")
+	}
+	if got := len(fm.List()); got != 1 {
+		t.Fatalf("expected exactly one deduplicated probe, got %d", got)
+	}
+}
+
+func TestShouldPruneDuplicateProbe(t *testing.T) {
+	now := time.Now().UTC()
+	tests := []struct {
+		name string
+		ps   *fleet.ProbeState
+		want bool
+	}{
+		{name: "offline always pruned", ps: &fleet.ProbeState{Status: "offline", LastSeen: now}, want: true},
+		{name: "online never pruned", ps: &fleet.ProbeState{Status: "online", LastSeen: now.Add(-24 * time.Hour)}, want: false},
+		{name: "degraded stale pruned", ps: &fleet.ProbeState{Status: "degraded", LastSeen: now.Add(-31 * time.Minute)}, want: true},
+		{name: "degraded fresh kept", ps: &fleet.ProbeState{Status: "degraded", LastSeen: now.Add(-5 * time.Minute)}, want: false},
+		{name: "unknown zero last seen pruned", ps: &fleet.ProbeState{Status: "pending"}, want: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldPruneDuplicateProbe(tc.ps, now); got != tc.want {
+				t.Fatalf("shouldPruneDuplicateProbe()=%v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRegisterHandler_DifferentHostnameGetsDifferentProbeID(t *testing.T) {
 	ts := newTestTokenStore(t)
 	fm := fleet.NewManager(testLogger())

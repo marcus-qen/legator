@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -129,6 +130,50 @@ func TestHandleProbeWS_ConnectAndDisconnectProbe(t *testing.T) {
 	waitFor(t, time.Second, func() bool {
 		return len(hub.Connected()) == 0
 	})
+}
+
+func TestHandleProbeWS_StaleReplacementDoesNotEmitDisconnectHook(t *testing.T) {
+	hub := NewHub(zap.NewNop(), nil)
+	var connected atomic.Int32
+	var disconnected atomic.Int32
+	hub.SetLifecycleHooks(func(string) {
+		connected.Add(1)
+	}, func(string) {
+		disconnected.Add(1)
+	})
+
+	ts := httptest.NewServer(http.HandlerFunc(hub.HandleProbeWS))
+	defer ts.Close()
+
+	conn1 := dialProbeWS(t, ts.URL, "probe-replace")
+	defer conn1.Close()
+	waitFor(t, time.Second, func() bool {
+		return containsProbe(hub.Connected(), "probe-replace")
+	})
+
+	conn2 := dialProbeWS(t, ts.URL, "probe-replace")
+	defer conn2.Close()
+	waitFor(t, time.Second, func() bool {
+		return len(hub.Connected()) == 1 && containsProbe(hub.Connected(), "probe-replace")
+	})
+
+	// Closing the stale connection should not invoke lifecycle disconnect.
+	_ = conn1.Close()
+	time.Sleep(30 * time.Millisecond)
+	if got := disconnected.Load(); got != 0 {
+		t.Fatalf("disconnect hook should ignore stale replacement close, got %d", got)
+	}
+
+	if err := conn2.Close(); err != nil {
+		t.Fatalf("close replacement websocket: %v", err)
+	}
+	waitFor(t, time.Second, func() bool {
+		return disconnected.Load() == 1
+	})
+
+	if got := connected.Load(); got != 2 {
+		t.Fatalf("expected 2 connect hooks (initial + replacement), got %d", got)
+	}
 }
 
 func TestHandleProbeWS_DispatchesIncomingMessages(t *testing.T) {

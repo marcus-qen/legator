@@ -61,6 +61,9 @@ func TestClientTimingConstants(t *testing.T) {
 	if maxReconnectDelay != 5*time.Minute {
 		t.Fatalf("expected maxReconnectDelay %s, got %s", 5*time.Minute, maxReconnectDelay)
 	}
+	if authReconnectDelay != 30*time.Second {
+		t.Fatalf("expected authReconnectDelay %s, got %s", 30*time.Second, authReconnectDelay)
+	}
 	if writeTimeout != 10*time.Second {
 		t.Fatalf("expected writeTimeout %s, got %s", 10*time.Second, writeTimeout)
 	}
@@ -246,6 +249,75 @@ func TestConnectAndServeMarksDisconnectedAfterDrop(t *testing.T) {
 	}
 	if c.Connected() {
 		t.Fatal("expected Connected() to be false after connection drop")
+	}
+}
+
+func TestConnectAndServeReturnsAuthHandshakeError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"invalid credentials"}`, http.StatusForbidden)
+	}))
+	defer ts.Close()
+
+	c := NewClient(wsURL(ts.URL), "probe-auth", "bad-key", zap.NewNop())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	wasConnected, err := c.connectAndServe(ctx)
+	if err == nil {
+		t.Fatal("expected auth handshake error")
+	}
+	if wasConnected {
+		t.Fatal("auth rejection should not report wasConnected=true")
+	}
+
+	var authErr *authHandshakeError
+	if !errors.As(err, &authErr) {
+		t.Fatalf("expected authHandshakeError, got %T (%v)", err, err)
+	}
+	if authErr.StatusCode != http.StatusForbidden {
+		t.Fatalf("status code = %d, want %d", authErr.StatusCode, http.StatusForbidden)
+	}
+}
+
+func TestRunUsesExtendedBackoffForAuthErrors(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"invalid credentials"}`, http.StatusForbidden)
+	}))
+	defer ts.Close()
+
+	core, logs := observer.New(zap.WarnLevel)
+	c := NewClient(wsURL(ts.URL), "probe-auth", "bad-key", zap.New(core))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- c.Run(ctx)
+	}()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if logs.FilterMessage("control plane rejected probe credentials; retrying with extended backoff").Len() > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	entries := logs.FilterMessage("control plane rejected probe credentials; retrying with extended backoff").All()
+	if len(entries) == 0 {
+		cancel()
+		<-done
+		t.Fatal("expected auth backoff warning log")
+	}
+	if got, ok := entries[0].ContextMap()["backoff"].(time.Duration); !ok || got != authReconnectDelay {
+		t.Fatalf("expected backoff %s, got %#v", authReconnectDelay, entries[0].ContextMap()["backoff"])
+	}
+	if got, ok := entries[0].ContextMap()["status_code"].(int64); !ok || int(got) != http.StatusForbidden {
+		t.Fatalf("expected status_code %d, got %#v", http.StatusForbidden, entries[0].ContextMap()["status_code"])
+	}
+
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
 	}
 }
 
