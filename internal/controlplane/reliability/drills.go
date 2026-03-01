@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
+	"github.com/marcus-qen/legator/internal/controlplane/migration"
 )
 
 // ---------------------------------------------------------------------------
@@ -649,6 +650,10 @@ func NewDrillStore(dbPath string) (*DrillStore, error) {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_drill_results_ran_at ON drill_results(ran_at DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_drill_results_scenario ON drill_results(scenario)`)
 
+	if err := migration.EnsureVersion(db, 1); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("ensure schema version: %w", err)
+	}
 	return &DrillStore{db: db}, nil
 }
 

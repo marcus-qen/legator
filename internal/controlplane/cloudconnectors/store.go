@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
+	"github.com/marcus-qen/legator/internal/controlplane/migration"
 )
 
 // Store persists cloud connectors and normalized assets.
@@ -75,6 +76,10 @@ func NewStore(dbPath string) (*Store, error) {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_cloud_assets_provider ON cloud_assets(provider)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_cloud_assets_discovered ON cloud_assets(discovered_at DESC)`)
 
+	if err := migration.EnsureVersion(db, 1); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("ensure schema version: %w", err)
+	}
 	return &Store{db: db}, nil
 }
 

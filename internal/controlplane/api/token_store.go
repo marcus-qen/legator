@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
+	"github.com/marcus-qen/legator/internal/controlplane/migration"
 )
 
 // Token represents a registration token.
@@ -82,6 +83,10 @@ func NewTokenStore(dbPath string) (*TokenStore, error) {
 		return nil, fmt.Errorf("load tokens: %w", err)
 	}
 
+	if err := migration.EnsureVersion(db, 1); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("ensure schema version: %w", err)
+	}
 	return ts, nil
 }
 

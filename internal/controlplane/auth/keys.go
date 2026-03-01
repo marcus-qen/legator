@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 	"golang.org/x/crypto/bcrypt"
+	"github.com/marcus-qen/legator/internal/controlplane/migration"
 )
 
 // Permission defines what an API key can do.
@@ -80,6 +81,10 @@ func NewKeyStore(dbPath string) (*KeyStore, error) {
 
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_keys_prefix ON api_keys(key_prefix)`)
 
+	if err := migration.EnsureVersion(db, 1); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("ensure schema version: %w", err)
+	}
 	return &KeyStore{db: db}, nil
 }
 

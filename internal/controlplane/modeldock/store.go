@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
+	"github.com/marcus-qen/legator/internal/controlplane/migration"
 )
 
 // Store persists model profiles and token usage.
@@ -64,6 +65,10 @@ func NewStore(dbPath string) (*Store, error) {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_model_usage_ts ON model_usage(ts)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_model_usage_profile_feature ON model_usage(profile_id, feature)`)
 
+	if err := migration.EnsureVersion(db, 1); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("ensure schema version: %w", err)
+	}
 	return &Store{db: db}, nil
 }
 

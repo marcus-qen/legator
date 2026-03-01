@@ -8,6 +8,7 @@ import (
 
 	"github.com/marcus-qen/legator/internal/protocol"
 	_ "modernc.org/sqlite"
+	"github.com/marcus-qen/legator/internal/controlplane/migration"
 )
 
 // PersistentStore wraps Store with SQLite persistence.
@@ -55,6 +56,10 @@ func NewPersistentStore(dbPath string) (*PersistentStore, error) {
 		return nil, err
 	}
 
+	if err := migration.EnsureVersion(db, 1); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("ensure schema version: %w", err)
+	}
 	return ps, nil
 }
 

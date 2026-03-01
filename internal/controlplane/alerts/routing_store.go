@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
+	"github.com/marcus-qen/legator/internal/controlplane/migration"
 )
 
 // RoutingStore persists routing and escalation policies in SQLite.
@@ -64,6 +65,10 @@ func NewRoutingStore(dbPath string) (*RoutingStore, error) {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_routing_policies_priority ON routing_policies(priority DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_routing_policies_updated_at ON routing_policies(updated_at)`)
 
+	if err := migration.EnsureVersion(db, 1); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("ensure schema version: %w", err)
+	}
 	return &RoutingStore{db: db}, nil
 }
 

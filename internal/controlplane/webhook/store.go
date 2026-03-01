@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	_ "modernc.org/sqlite"
+	"github.com/marcus-qen/legator/internal/controlplane/migration"
 )
 
 // Store provides persistent webhook storage backed by SQLite.
@@ -48,6 +49,10 @@ func NewStore(dbPath string) (*Store, error) {
 		return nil, err
 	}
 
+	if err := migration.EnsureVersion(db, 1); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("ensure schema version: %w", err)
+	}
 	return s, nil
 }
 

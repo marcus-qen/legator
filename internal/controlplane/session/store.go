@@ -9,6 +9,7 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+	"github.com/marcus-qen/legator/internal/controlplane/migration"
 )
 
 const DefaultSessionLifetime = 24 * time.Hour
@@ -67,6 +68,10 @@ func NewStore(dbPath string, sessionLifetime time.Duration) (*Store, error) {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at)`)
 
+	if err := migration.EnsureVersion(db, 1); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("ensure schema version: %w", err)
+	}
 	return &Store{db: db, lifetime: sessionLifetime}, nil
 }
 

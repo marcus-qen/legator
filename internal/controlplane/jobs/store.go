@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
+	"github.com/marcus-qen/legator/internal/controlplane/migration"
 )
 
 const (
@@ -127,6 +128,10 @@ func NewStore(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("prune job runs: %w", err)
 	}
 
+	if err := migration.EnsureVersion(db, 1); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("ensure schema version: %w", err)
+	}
 	return s, nil
 }
 

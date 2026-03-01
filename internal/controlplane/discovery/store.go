@@ -9,6 +9,7 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+	"github.com/marcus-qen/legator/internal/controlplane/migration"
 )
 
 // Store persists discovery scan runs and candidates.
@@ -63,6 +64,10 @@ func NewStore(dbPath string) (*Store, error) {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_discovery_runs_started ON discovery_runs(started_at DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_discovery_candidates_run ON discovery_candidates(run_id)`)
 
+	if err := migration.EnsureVersion(db, 1); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("ensure schema version: %w", err)
+	}
 	return &Store{db: db}, nil
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
+	"github.com/marcus-qen/legator/internal/controlplane/migration"
 )
 
 // Store persists alert rules and alert history in SQLite.
@@ -65,6 +66,10 @@ func NewStore(dbPath string) (*Store, error) {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_alert_events_status ON alert_events(status)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_alert_events_fired_at ON alert_events(fired_at)`)
 
+	if err := migration.EnsureVersion(db, 1); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("ensure schema version: %w", err)
+	}
 	return &Store{db: db}, nil
 }
 
