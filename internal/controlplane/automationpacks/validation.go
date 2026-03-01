@@ -104,6 +104,20 @@ func ValidateDefinition(def *Definition) error {
 		if err := validateApproval(prefix+".approval", step.Approval); err != "" {
 			issues = append(issues, err)
 		}
+		if step.TimeoutSeconds < 0 {
+			issues = append(issues, prefix+".timeout_seconds cannot be negative")
+		}
+		if step.MaxRetries < 0 {
+			issues = append(issues, prefix+".max_retries cannot be negative")
+		}
+		if step.Rollback != nil {
+			if step.Rollback.Action == "" {
+				issues = append(issues, prefix+".rollback.action is required when rollback is configured")
+			}
+			if step.Rollback.TimeoutSeconds < 0 {
+				issues = append(issues, prefix+".rollback.timeout_seconds cannot be negative")
+			}
+		}
 
 		totalOutcomes += len(step.ExpectedOutcomes)
 	}
@@ -152,6 +166,9 @@ func normalizeDefinition(def *Definition) {
 		def.Steps[idx].Name = strings.TrimSpace(def.Steps[idx].Name)
 		def.Steps[idx].Description = strings.TrimSpace(def.Steps[idx].Description)
 		def.Steps[idx].Action = strings.TrimSpace(def.Steps[idx].Action)
+		if def.Steps[idx].Rollback != nil {
+			def.Steps[idx].Rollback.Action = strings.TrimSpace(def.Steps[idx].Rollback.Action)
+		}
 		normalizeApproval(def.Steps[idx].Approval)
 		for outcomeIdx := range def.Steps[idx].ExpectedOutcomes {
 			normalizeOutcome(&def.Steps[idx].ExpectedOutcomes[outcomeIdx])

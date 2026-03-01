@@ -242,6 +242,60 @@ func TestHandlerDryRunDoesNotMutateStore(t *testing.T) {
 	}
 }
 
+func TestHandlerStartAndGetExecution(t *testing.T) {
+	h, store := newTestHandlerWithStore(
+		t,
+		WithActionRunner(ActionRunnerFunc(func(_ context.Context, _ ActionRequest) (*ActionResult, error) {
+			return &ActionResult{Output: map[string]any{"ok": true}}, nil
+		})),
+		WithPolicySimulator(PolicySimulatorFunc(func(_ context.Context, _ PolicySimulationRequest) PolicySimulation {
+			return PolicySimulation{Outcome: PolicyOutcomeAllow, RiskLevel: "low", Summary: "allowed"}
+		})),
+	)
+
+	def := executionDefinitionFixture("ops.handler.exec", []Step{{ID: "prepare", Action: "run_command", Parameters: map[string]any{"command": "echo hi"}}})
+	if _, err := store.CreateDefinition(def); err != nil {
+		t.Fatalf("seed definition: %v", err)
+	}
+
+	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/automation-packs/ops.handler.exec/executions", bytes.NewBufferString(`{"version":"1.0.0"}`))
+	startReq.SetPathValue("id", def.Metadata.ID)
+	startRR := httptest.NewRecorder()
+	h.HandleStartExecution(startRR, startReq)
+	if startRR.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", startRR.Code, startRR.Body.String())
+	}
+
+	var startPayload struct {
+		Execution Execution `json:"execution"`
+	}
+	if err := json.NewDecoder(startRR.Body).Decode(&startPayload); err != nil {
+		t.Fatalf("decode start payload: %v", err)
+	}
+	if startPayload.Execution.ID == "" {
+		t.Fatalf("expected execution id, payload=%+v", startPayload)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/automation-packs/executions/"+startPayload.Execution.ID, nil)
+	getReq.SetPathValue("executionID", startPayload.Execution.ID)
+	getRR := httptest.NewRecorder()
+	h.HandleGetExecution(getRR, getReq)
+	if getRR.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", getRR.Code, getRR.Body.String())
+	}
+}
+
+func TestHandlerStartExecutionDefinitionNotFound(t *testing.T) {
+	h := newTestHandler(t)
+	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/automation-packs/missing/executions", bytes.NewBufferString(`{"version":"1.0.0"}`))
+	startReq.SetPathValue("id", "missing")
+	startRR := httptest.NewRecorder()
+	h.HandleStartExecution(startRR, startReq)
+	if startRR.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", startRR.Code, startRR.Body.String())
+	}
+}
+
 type stubPolicySimulator struct {
 	decisions map[string]PolicySimulation
 	commands  map[string]string

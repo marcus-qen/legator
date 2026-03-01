@@ -176,6 +176,17 @@
   - Added coverage for dry-run validation failures, policy simulation outcomes, route permission gates, and non-mutation guarantees.
   - Updated automation-pack docs, README API reference, and Stage 3.8.2 release notes.
   - **[compat:additive]** Added dry-run route/payload fields without removing or renaming existing REST/MCP identifiers.
+- **Stage 3.8.3 Automation packs: guarded execution + rollback hooks**
+  - Added stored-definition execution runtime with ordered step execution and additive workflow/step status tracking.
+  - Added additive execution APIs:
+    - `POST /api/v1/automation-packs/{id}/executions`
+    - `GET /api/v1/automation-packs/executions/{executionID}`
+  - Enforced guardrails before mutating steps: existing policy outcome gates (`allow|queue|deny`) and explicit workflow/step approval requirements.
+  - Added per-step timeout + bounded retry controls via additive schema fields (`timeout_seconds`, `max_retries`) and attempt history/status capture.
+  - Added optional step rollback hooks (`rollback.action`, `rollback.parameters`, `rollback.timeout_seconds`) with reverse-order rollback chain execution and recorded outcomes.
+  - Added tests covering successful flow, timeout/retry behaviour, rollback-on-failure, and policy/approval blocking semantics.
+  - Updated automation-pack docs, API route contract baseline, README references, and Stage 3.8.3 release notes.
+  - **[compat:additive]** Added execution routes and additive execution/rollback schema fields without removing or renaming existing REST/MCP identifiers.
 - **Jobs cancellation API + lifecycle guardrails**
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.

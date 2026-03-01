@@ -282,6 +282,7 @@ func TestPermissionsFleetReadCannotMutateModelDockCloudOrDiscovery(t *testing.T)
 		{name: "cloud connector create", method: http.MethodPost, path: "/api/v1/cloud/connectors", body: `{"name":"blocked","provider":"aws","auth_mode":"cli","is_enabled":true}`},
 		{name: "automation pack create", method: http.MethodPost, path: "/api/v1/automation-packs", body: `{"metadata":{"id":"blocked.pack","name":"blocked","version":"1.0.0"},"steps":[{"id":"s1","action":"noop","expected_outcomes":[{"description":"ok","success_criteria":"ok"}]}],"expected_outcomes":[{"description":"done","success_criteria":"done"}]}`},
 		{name: "automation pack dry-run", method: http.MethodPost, path: "/api/v1/automation-packs/dry-run", body: `{"definition":{"metadata":{"id":"blocked.pack","name":"blocked","version":"1.0.0"},"steps":[{"id":"s1","action":"ls","expected_outcomes":[{"description":"ok","success_criteria":"ok"}]}],"expected_outcomes":[{"description":"done","success_criteria":"done"}]}}`},
+		{name: "automation pack execute", method: http.MethodPost, path: "/api/v1/automation-packs/blocked.pack/executions", body: `{}`},
 		{name: "discovery scan", method: http.MethodPost, path: "/api/v1/discovery/scan", body: `{"cidr":"127.0.0.0/24"}`},
 		{name: "discovery install token", method: http.MethodPost, path: "/api/v1/discovery/install-token"},
 	}
@@ -420,6 +421,26 @@ func TestPermissionsAutomationPackRoutes(t *testing.T) {
 		t.Fatalf("expected fleet:write to access dry-run route, got %d body=%s", dryRunWrite.Code, dryRunWrite.Body.String())
 	}
 
+	runWrite := makeRequest(t, srv, http.MethodPost, "/api/v1/automation-packs/"+packID+"/executions", writeToken, `{"inputs":{"environment":"prod"}}`)
+	if runWrite.Code == http.StatusUnauthorized || runWrite.Code == http.StatusForbidden {
+		t.Fatalf("expected fleet:write to access execution route, got %d body=%s", runWrite.Code, runWrite.Body.String())
+	}
+
+	var runPayload struct {
+		Execution struct {
+			ID string `json:"id"`
+		} `json:"execution"`
+	}
+	if err := json.Unmarshal(runWrite.Body.Bytes(), &runPayload); err != nil {
+		t.Fatalf("decode execution payload: %v body=%s", err, runWrite.Body.String())
+	}
+	if runPayload.Execution.ID != "" {
+		getExecutionRead := makeRequest(t, srv, http.MethodGet, "/api/v1/automation-packs/executions/"+runPayload.Execution.ID, readToken, "")
+		if getExecutionRead.Code == http.StatusUnauthorized || getExecutionRead.Code == http.StatusForbidden {
+			t.Fatalf("expected fleet:read to get execution status, got %d body=%s", getExecutionRead.Code, getExecutionRead.Body.String())
+		}
+	}
+
 	createDenied := makeRequest(t, srv, http.MethodPost, "/api/v1/automation-packs", readToken, createBody)
 	if createDenied.Code != http.StatusForbidden {
 		t.Fatalf("expected fleet:read token to be denied for create, got %d body=%s", createDenied.Code, createDenied.Body.String())
@@ -428,6 +449,21 @@ func TestPermissionsAutomationPackRoutes(t *testing.T) {
 	dryRunDenied := makeRequest(t, srv, http.MethodPost, "/api/v1/automation-packs/dry-run", readToken, dryRunBody)
 	if dryRunDenied.Code != http.StatusForbidden {
 		t.Fatalf("expected fleet:read token to be denied for dry-run, got %d body=%s", dryRunDenied.Code, dryRunDenied.Body.String())
+	}
+
+	runDenied := makeRequest(t, srv, http.MethodPost, "/api/v1/automation-packs/"+packID+"/executions", readToken, `{}`)
+	if runDenied.Code != http.StatusForbidden {
+		t.Fatalf("expected fleet:read token to be denied for execution start, got %d body=%s", runDenied.Code, runDenied.Body.String())
+	}
+
+	getExecutionRead := makeRequest(t, srv, http.MethodGet, "/api/v1/automation-packs/executions/does-not-exist", readToken, "")
+	if getExecutionRead.Code == http.StatusUnauthorized || getExecutionRead.Code == http.StatusForbidden {
+		t.Fatalf("expected fleet:read to access execution read route, got %d body=%s", getExecutionRead.Code, getExecutionRead.Body.String())
+	}
+
+	getExecutionWrite := makeRequest(t, srv, http.MethodGet, "/api/v1/automation-packs/executions/does-not-exist", writeToken, "")
+	if getExecutionWrite.Code != http.StatusForbidden {
+		t.Fatalf("expected fleet:write-only token to be denied on execution read route, got %d body=%s", getExecutionWrite.Code, getExecutionWrite.Body.String())
 	}
 }
 

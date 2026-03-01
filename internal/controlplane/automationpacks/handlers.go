@@ -3,14 +3,17 @@ package automationpacks
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 )
 
 // Handler serves automation pack definition APIs.
 type Handler struct {
-	store           *Store
-	policySimulator PolicySimulator
+	store            *Store
+	policySimulator  PolicySimulator
+	executionRuntime *ExecutionRuntime
+	actionRunner     ActionRunner
 }
 
 // HandlerOption configures automation-pack handlers.
@@ -25,15 +28,37 @@ func WithPolicySimulator(simulator PolicySimulator) HandlerOption {
 	}
 }
 
+// WithActionRunner injects execution backing for automation-pack step actions.
+func WithActionRunner(runner ActionRunner) HandlerOption {
+	return func(h *Handler) {
+		if runner != nil {
+			h.actionRunner = runner
+		}
+	}
+}
+
+// WithExecutionRuntime overrides the default execution runtime.
+func WithExecutionRuntime(runtime *ExecutionRuntime) HandlerOption {
+	return func(h *Handler) {
+		if runtime != nil {
+			h.executionRuntime = runtime
+		}
+	}
+}
+
 func NewHandler(store *Store, opts ...HandlerOption) *Handler {
 	h := &Handler{
 		store:           store,
 		policySimulator: noopPolicySimulator{},
+		actionRunner:    noopActionRunner{},
 	}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(h)
 		}
+	}
+	if h.executionRuntime == nil {
+		h.executionRuntime = NewExecutionRuntime(store, h.policySimulator, h.actionRunner)
 	}
 	return h
 }
@@ -116,6 +141,72 @@ func (h *Handler) HandleDryRunDefinition(w http.ResponseWriter, r *http.Request)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"dry_run": result})
+}
+
+func (h *Handler) HandleStartExecution(w http.ResponseWriter, r *http.Request) {
+	if h.executionRuntime == nil {
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "automation pack execution unavailable")
+		return
+	}
+
+	definitionID := strings.TrimSpace(r.PathValue("id"))
+	if definitionID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "automation pack id is required")
+		return
+	}
+
+	var req StartExecutionRequest
+	if r.Body != nil {
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+			return
+		}
+	}
+	req.DefinitionID = definitionID
+
+	execution, err := h.executionRuntime.Start(r.Context(), req)
+	if err != nil {
+		switch {
+		case IsNotFound(err):
+			writeError(w, http.StatusNotFound, "not_found", "automation pack definition not found")
+		case errorsAsValidation(err):
+			writeError(w, http.StatusBadRequest, "invalid_schema", err.Error())
+		case errorsAsInputValidation(err):
+			writeError(w, http.StatusBadRequest, "invalid_inputs", err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", "failed to execute automation pack")
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{"execution": execution})
+}
+
+func (h *Handler) HandleGetExecution(w http.ResponseWriter, r *http.Request) {
+	if h.executionRuntime == nil {
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "automation pack execution unavailable")
+		return
+	}
+
+	executionID := strings.TrimSpace(r.PathValue("executionID"))
+	if executionID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "execution id is required")
+		return
+	}
+
+	execution, err := h.executionRuntime.Get(executionID)
+	if err != nil {
+		if errors.Is(err, ErrExecutionNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "automation pack execution not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to load automation pack execution")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"execution": execution})
 }
 
 func errorsAsValidation(err error) bool {
