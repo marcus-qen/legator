@@ -19,6 +19,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/alerts"
 	"github.com/marcus-qen/legator/internal/controlplane/api"
 	"github.com/marcus-qen/legator/internal/controlplane/approval"
+	"github.com/marcus-qen/legator/internal/controlplane/automationpacks"
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
 	"github.com/marcus-qen/legator/internal/controlplane/chat"
@@ -124,6 +125,9 @@ type Server struct {
 	cloudConnectorStore    *cloudconnectors.Store
 	cloudConnectorHandlers *cloudconnectors.Handler
 
+	automationPackStore    *automationpacks.Store
+	automationPackHandlers *automationpacks.Handler
+
 	networkDeviceStore    *networkdevices.Store
 	networkDeviceHandlers *networkdevices.Handler
 
@@ -203,6 +207,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initApprovalCore()
 	s.initModelDock()
 	s.initCloudConnectors()
+	s.initAutomationPacks()
 	s.initNetworkDevices()
 	s.initKubeflow()
 	s.initGrafana()
@@ -383,6 +388,9 @@ func (s *Server) Close() {
 	}
 	if s.cloudConnectorStore != nil {
 		s.cloudConnectorStore.Close()
+	}
+	if s.automationPackStore != nil {
+		s.automationPackStore.Close()
 	}
 	if s.networkDeviceStore != nil {
 		s.networkDeviceStore.Close()
@@ -668,6 +676,26 @@ func (s *Server) initCloudConnectors() {
 	s.cloudConnectorStore = store
 	s.cloudConnectorHandlers = cloudconnectors.NewHandler(store, cloudconnectors.NewCLIAdapter())
 	s.logger.Info("cloud connector store opened", zap.String("path", cloudDBPath))
+}
+
+func (s *Server) initAutomationPacks() {
+	automationDBPath := filepath.Join(s.cfg.DataDir, "automationpacks.db")
+	if err := os.MkdirAll(s.cfg.DataDir, 0750); err != nil {
+		s.logger.Warn("cannot create data dir, automation packs disabled",
+			zap.String("dir", s.cfg.DataDir), zap.Error(err))
+		return
+	}
+
+	store, err := automationpacks.NewStore(automationDBPath)
+	if err != nil {
+		s.logger.Warn("cannot open automation packs database, automation packs disabled",
+			zap.String("path", automationDBPath), zap.Error(err))
+		return
+	}
+
+	s.automationPackStore = store
+	s.automationPackHandlers = automationpacks.NewHandler(store)
+	s.logger.Info("automation pack store opened", zap.String("path", automationDBPath))
 }
 
 func (s *Server) initNetworkDevices() {

@@ -242,6 +242,17 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/v1/cloud/assets", s.withPermission(auth.PermFleetRead, s.handleCloudConnectorsUnavailable))
 	}
 
+	// Automation Packs API
+	if s.automationPackHandlers != nil {
+		mux.HandleFunc("GET /api/v1/automation-packs", s.withPermission(auth.PermFleetRead, s.automationPackHandlers.HandleListDefinitions))
+		mux.HandleFunc("POST /api/v1/automation-packs", s.withPermission(auth.PermFleetWrite, s.automationPackHandlers.HandleCreateDefinition))
+		mux.HandleFunc("GET /api/v1/automation-packs/{id}", s.withPermission(auth.PermFleetRead, s.automationPackHandlers.HandleGetDefinition))
+	} else {
+		mux.HandleFunc("GET /api/v1/automation-packs", s.withPermission(auth.PermFleetRead, s.handleAutomationPacksUnavailable))
+		mux.HandleFunc("POST /api/v1/automation-packs", s.withPermission(auth.PermFleetWrite, s.handleAutomationPacksUnavailable))
+		mux.HandleFunc("GET /api/v1/automation-packs/{id}", s.withPermission(auth.PermFleetRead, s.handleAutomationPacksUnavailable))
+	}
+
 	// Kubeflow API (read endpoints + guarded mutations)
 	if s.kubeflowHandlers != nil {
 		mux.HandleFunc("GET /api/v1/kubeflow/status", s.withPermission(auth.PermFleetRead, s.kubeflowHandlers.HandleStatus))
@@ -1779,6 +1790,10 @@ func (s *Server) handleModelDockUnavailable(w http.ResponseWriter, r *http.Reque
 
 func (s *Server) handleCloudConnectorsUnavailable(w http.ResponseWriter, r *http.Request) {
 	writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "cloud connectors unavailable")
+}
+
+func (s *Server) handleAutomationPacksUnavailable(w http.ResponseWriter, r *http.Request) {
+	writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "automation packs unavailable")
 }
 
 func (s *Server) handleKubeflowUnavailable(w http.ResponseWriter, r *http.Request) {

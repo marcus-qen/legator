@@ -280,6 +280,7 @@ func TestPermissionsFleetReadCannotMutateModelDockCloudOrDiscovery(t *testing.T)
 	}{
 		{name: "model dock create", method: http.MethodPost, path: "/api/v1/model-profiles", body: `{"name":"blocked","provider":"openai","base_url":"https://api.example.com/v1","model":"gpt-4o-mini","api_key":"secret"}`},
 		{name: "cloud connector create", method: http.MethodPost, path: "/api/v1/cloud/connectors", body: `{"name":"blocked","provider":"aws","auth_mode":"cli","is_enabled":true}`},
+		{name: "automation pack create", method: http.MethodPost, path: "/api/v1/automation-packs", body: `{"metadata":{"id":"blocked.pack","name":"blocked","version":"1.0.0"},"steps":[{"id":"s1","action":"noop","expected_outcomes":[{"description":"ok","success_criteria":"ok"}]}],"expected_outcomes":[{"description":"done","success_criteria":"done"}]}`},
 		{name: "discovery scan", method: http.MethodPost, path: "/api/v1/discovery/scan", body: `{"cidr":"127.0.0.0/24"}`},
 		{name: "discovery install token", method: http.MethodPost, path: "/api/v1/discovery/install-token"},
 	}
@@ -366,6 +367,55 @@ func TestPermissionsNetworkDeviceRoutes(t *testing.T) {
 	deleteWrite := makeRequest(t, srv, http.MethodDelete, "/api/v1/network/devices/"+deviceID, writeToken, "")
 	if deleteWrite.Code == http.StatusUnauthorized || deleteWrite.Code == http.StatusForbidden {
 		t.Fatalf("expected fleet:write delete access, got %d body=%s", deleteWrite.Code, deleteWrite.Body.String())
+	}
+}
+
+func TestPermissionsAutomationPackRoutes(t *testing.T) {
+	srv := newAuthTestServer(t)
+	readToken := createAPIKey(t, srv, "fleet-read", auth.PermFleetRead)
+	writeToken := createAPIKey(t, srv, "fleet-write", auth.PermFleetWrite)
+
+	createBody := `{"metadata":{"id":"ops.backup","name":"Ops Backup","version":"1.0.0"},"steps":[{"id":"prepare","action":"run_command","expected_outcomes":[{"description":"prepare done","success_criteria":"exit_code == 0"}]}],"expected_outcomes":[{"description":"workflow complete","success_criteria":"all required outcomes met"}]}`
+
+	created := makeRequest(t, srv, http.MethodPost, "/api/v1/automation-packs", writeToken, createBody)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("expected 201 create with fleet:write, got %d body=%s", created.Code, created.Body.String())
+	}
+
+	listRead := makeRequest(t, srv, http.MethodGet, "/api/v1/automation-packs", readToken, "")
+	if listRead.Code == http.StatusUnauthorized || listRead.Code == http.StatusForbidden {
+		t.Fatalf("expected fleet:read to list automation packs, got %d body=%s", listRead.Code, listRead.Body.String())
+	}
+
+	var listPayload struct {
+		AutomationPacks []struct {
+			Metadata struct {
+				ID      string `json:"id"`
+				Version string `json:"version"`
+			} `json:"metadata"`
+		} `json:"automation_packs"`
+	}
+	if err := json.Unmarshal(listRead.Body.Bytes(), &listPayload); err != nil {
+		t.Fatalf("decode automation pack list payload: %v", err)
+	}
+	if len(listPayload.AutomationPacks) == 0 {
+		t.Fatalf("expected at least one automation pack in list: %s", listRead.Body.String())
+	}
+	packID := listPayload.AutomationPacks[0].Metadata.ID
+
+	getRead := makeRequest(t, srv, http.MethodGet, "/api/v1/automation-packs/"+packID, readToken, "")
+	if getRead.Code == http.StatusUnauthorized || getRead.Code == http.StatusForbidden {
+		t.Fatalf("expected fleet:read to get automation pack, got %d body=%s", getRead.Code, getRead.Body.String())
+	}
+
+	listWrite := makeRequest(t, srv, http.MethodGet, "/api/v1/automation-packs", writeToken, "")
+	if listWrite.Code != http.StatusForbidden {
+		t.Fatalf("expected fleet:write-only token to be denied on read route, got %d body=%s", listWrite.Code, listWrite.Body.String())
+	}
+
+	createDenied := makeRequest(t, srv, http.MethodPost, "/api/v1/automation-packs", readToken, createBody)
+	if createDenied.Code != http.StatusForbidden {
+		t.Fatalf("expected fleet:read token to be denied for create, got %d body=%s", createDenied.Code, createDenied.Body.String())
 	}
 }
 
