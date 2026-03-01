@@ -95,6 +95,12 @@
   - Added ownership map for each boundary zone (owners + key module patterns).
   - Added CI integrity tests (`internal/controlplane/compat/boundary_contract_test.go`) to validate boundary IDs, dependency-rule consistency, ownership assignments, and path-pattern validity.
   - Added human guide for enforcement rollout (`docs/architecture/ci-boundary-guardrails.md`) and linked architecture docs to the contract.
+- **Stage 3.6.2 CI guardrails: automated architecture import-graph checks + lint gate**
+  - Added import-graph architecture enforcement test (`internal/controlplane/compat/boundary_import_graph_test.go`) that parses `go list` package imports and classifies packages via `docs/contracts/architecture-boundaries.yaml`.
+  - CI now fails when explicit deny edges are imported (for example `core-domain -> surfaces`) or when undeclared cross-boundary imports appear under default-deny policy.
+  - Violation output is deterministic and actionable, including package, boundary edge, and rule reference (`dependency_policy.deny[...]` or default-deny).
+  - Added local lint gate target `make architecture-guard` and wired it into CI lint workflow.
+  - Updated boundary-guardrail documentation and release notes for Stage 3.6.2 enforcement status.
 - **Jobs cancellation API + lifecycle guardrails**
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.

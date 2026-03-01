@@ -198,6 +198,7 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 ```bash
 make all              # Build control-plane, probe, legatorctl
 make test             # Run unit tests
+make architecture-guard # Run architecture boundary import-graph guardrails
 make e2e              # Full end-to-end flow (29+ checks)
 make lint             # golangci-lint
 make release-build    # Cross-compile release binaries (incl. windows/amd64 probe)

@@ -1,4 +1,4 @@
-# CI Architecture Guardrails Contract (Stage 3.6.1)
+# CI Architecture Guardrails Contract (Stage 3.6.2)
 
 This document defines the architecture boundary contract used to drive CI guardrails.
 
@@ -13,7 +13,7 @@ The contract defines:
 1. Boundary zones and package coverage.
 2. Allow/deny dependency policy between zones.
 3. Ownership assignments for each boundary.
-4. Intended rollout model for automated CI enforcement.
+4. Enforcement model for CI architecture guardrails.
 
 ## Boundary zones
 
@@ -37,8 +37,10 @@ Default policy is **deny**. Explicit allow rules define approved edges.
 - `core-domain -> adapters-integrations`
 - `core-domain -> platform-runtime`
 - `adapters-integrations -> platform-runtime`
+- `adapters-integrations -> core-domain` (transitional; current `llm` package reads fleet/core projections)
 - `platform-runtime -> core-domain`
 - `platform-runtime -> adapters-integrations`
+- `platform-runtime -> surfaces` (transitional; discovery runtime currently reuses API registration helpers)
 - `probe-runtime -> platform-runtime`
 
 ### Key deny edges
@@ -62,7 +64,7 @@ Ownership details and key module patterns are stored in the YAML contract.
 
 ## CI model
 
-### Stage 3.6.1 (this change)
+### Stage 3.6.1
 
 - Validate contract integrity in CI:
   - required boundary IDs exist
@@ -70,15 +72,30 @@ Ownership details and key module patterns are stored in the YAML contract.
   - ownership assignments are complete and valid
   - package patterns resolve to existing paths
 
-### Stage 3.6.2 (next)
+### Stage 3.6.2 (implemented)
 
-- Use the contract to compute/import boundary edges from the Go import graph.
-- Enforce `allow`/`deny` edges in CI (initially report-only, then fail-on-violation).
+- Parse `go list` package imports for repository packages.
+- Classify packages into boundaries using `package_patterns` in the contract.
+- Enforce cross-boundary edges:
+  - fail on any explicit `dependency_policy.deny` edge
+  - fail on undeclared cross-boundary edges (default deny)
+- Emit deterministic, actionable violation messages containing:
+  - source package + boundary
+  - imported package + boundary
+  - edge (`from->to`)
+  - rule reference (`dependency_policy.deny[...]` or default-deny reference)
 
-## Validation entrypoint
+## Validation entrypoints
 
 ```bash
+# Direct compatibility + boundary guard checks
 go test ./internal/controlplane/compat -count=1
+
+# Convenience make target for local lint gate
+make architecture-guard
 ```
 
-The boundary contract tests live with compatibility-contract checks so the same CI lane verifies API/MCP compatibility and architecture-boundary contract integrity.
+CI wiring:
+
+- Test job: `go test ./internal/controlplane/compat -count=1`
+- Lint job gate: `make architecture-guard GO=go`

@@ -1,9 +1,9 @@
 version: "1"
 contract_id: legator.architecture.boundaries
-stage: "3.6.1"
+stage: "3.6.2"
 summary: >-
   Canonical boundary and ownership contract for CI architecture guardrails.
-  Stage 3.6.1 defines the contract and validates integrity only.
+  Stage 3.6.2 enforces import-graph dependency edges in CI.
 module_root: .
 required_boundaries:
   - core-domain
@@ -100,6 +100,9 @@ dependency_policy:
     - from: adapters-integrations
       to: platform-runtime
       rationale: Integrations use config, transport clients, and shared runtime utilities.
+    - from: adapters-integrations
+      to: core-domain
+      rationale: "Transitional coupling: llm orchestration currently reads fleet/core projections."
 
     - from: platform-runtime
       to: core-domain
@@ -107,6 +110,9 @@ dependency_policy:
     - from: platform-runtime
       to: adapters-integrations
       rationale: Runtime wiring initializes integration adapters.
+    - from: platform-runtime
+      to: surfaces
+      rationale: "Transitional coupling: discovery runtime currently imports registration API helpers."
 
     - from: probe-runtime
       to: platform-runtime
@@ -190,11 +196,11 @@ ownership:
 
 enforcement_model:
   stage_3_6_1: >-
-    Validate contract file schema/basic consistency in CI. No import-graph enforcement
-    yet.
+    Validate contract file schema/basic consistency in CI.
   stage_3_6_2: >-
     Load this contract to map packages to boundaries, compute Go import edges,
-    and enforce allow/deny rules in CI.
+    and fail CI on deny-edge imports or undeclared cross-boundary edges
+    (default deny).
   rollout_notes:
-    - Start Stage 3.6.2 in report-only mode to enumerate violations.
-    - Promote to fail-on-violation after targeted boundary cleanup.
+    - Contract integrity checks run in internal/controlplane/compat.
+    - Import-graph guardrails are fail-on-violation in CI and local make architecture-guard.

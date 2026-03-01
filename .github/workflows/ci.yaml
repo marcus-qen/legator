@@ -17,7 +17,7 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
-      - name: Compatibility contract checks
+      - name: Compatibility + architecture contract checks
         run: go test ./internal/controlplane/compat -count=1
 
       - name: Run tests
@@ -70,6 +70,9 @@ jobs:
           go-version: "1.24"
           cache: true
           cache-dependency-path: go.sum
+
+      - name: Run architecture guardrail lint gate
+        run: make architecture-guard GO=go
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84
