@@ -694,7 +694,21 @@ func (s *Server) initAutomationPacks() {
 	}
 
 	s.automationPackStore = store
-	s.automationPackHandlers = automationpacks.NewHandler(store)
+	s.automationPackHandlers = automationpacks.NewHandler(
+		store,
+		automationpacks.WithPolicySimulator(automationpacks.PolicySimulatorFunc(func(ctx context.Context, req automationpacks.PolicySimulationRequest) automationpacks.PolicySimulation {
+			if s.approvalCore == nil {
+				return automationpacks.PolicySimulation{Outcome: automationpacks.PolicyOutcomeAllow, Summary: "approval policy engine unavailable; default allow"}
+			}
+			decision := s.approvalCore.EvaluateCommandPolicy(ctx, &req.Command, protocol.CapObserve)
+			return automationpacks.PolicySimulation{
+				Outcome:   string(decision.Outcome),
+				RiskLevel: decision.RiskLevel,
+				Summary:   strings.TrimSpace(decision.Rationale.Summary),
+				Rationale: decision.Rationale,
+			}
+		})),
+	)
 	s.logger.Info("automation pack store opened", zap.String("path", automationDBPath))
 }
 

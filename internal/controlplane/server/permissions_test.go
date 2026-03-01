@@ -281,6 +281,7 @@ func TestPermissionsFleetReadCannotMutateModelDockCloudOrDiscovery(t *testing.T)
 		{name: "model dock create", method: http.MethodPost, path: "/api/v1/model-profiles", body: `{"name":"blocked","provider":"openai","base_url":"https://api.example.com/v1","model":"gpt-4o-mini","api_key":"secret"}`},
 		{name: "cloud connector create", method: http.MethodPost, path: "/api/v1/cloud/connectors", body: `{"name":"blocked","provider":"aws","auth_mode":"cli","is_enabled":true}`},
 		{name: "automation pack create", method: http.MethodPost, path: "/api/v1/automation-packs", body: `{"metadata":{"id":"blocked.pack","name":"blocked","version":"1.0.0"},"steps":[{"id":"s1","action":"noop","expected_outcomes":[{"description":"ok","success_criteria":"ok"}]}],"expected_outcomes":[{"description":"done","success_criteria":"done"}]}`},
+		{name: "automation pack dry-run", method: http.MethodPost, path: "/api/v1/automation-packs/dry-run", body: `{"definition":{"metadata":{"id":"blocked.pack","name":"blocked","version":"1.0.0"},"steps":[{"id":"s1","action":"ls","expected_outcomes":[{"description":"ok","success_criteria":"ok"}]}],"expected_outcomes":[{"description":"done","success_criteria":"done"}]}}`},
 		{name: "discovery scan", method: http.MethodPost, path: "/api/v1/discovery/scan", body: `{"cidr":"127.0.0.0/24"}`},
 		{name: "discovery install token", method: http.MethodPost, path: "/api/v1/discovery/install-token"},
 	}
@@ -413,9 +414,20 @@ func TestPermissionsAutomationPackRoutes(t *testing.T) {
 		t.Fatalf("expected fleet:write-only token to be denied on read route, got %d body=%s", listWrite.Code, listWrite.Body.String())
 	}
 
+	dryRunBody := `{"definition":{"metadata":{"id":"ops.backup","name":"Ops Backup","version":"1.0.0"},"inputs":[{"name":"environment","type":"string","required":true}],"steps":[{"id":"prepare","action":"systemctl restart nginx","expected_outcomes":[{"description":"prepare done","success_criteria":"exit_code == 0"}]}],"expected_outcomes":[{"description":"workflow complete","success_criteria":"all required outcomes met"}]},"inputs":{"environment":"prod"}}`
+	dryRunWrite := makeRequest(t, srv, http.MethodPost, "/api/v1/automation-packs/dry-run", writeToken, dryRunBody)
+	if dryRunWrite.Code == http.StatusUnauthorized || dryRunWrite.Code == http.StatusForbidden {
+		t.Fatalf("expected fleet:write to access dry-run route, got %d body=%s", dryRunWrite.Code, dryRunWrite.Body.String())
+	}
+
 	createDenied := makeRequest(t, srv, http.MethodPost, "/api/v1/automation-packs", readToken, createBody)
 	if createDenied.Code != http.StatusForbidden {
 		t.Fatalf("expected fleet:read token to be denied for create, got %d body=%s", createDenied.Code, createDenied.Body.String())
+	}
+
+	dryRunDenied := makeRequest(t, srv, http.MethodPost, "/api/v1/automation-packs/dry-run", readToken, dryRunBody)
+	if dryRunDenied.Code != http.StatusForbidden {
+		t.Fatalf("expected fleet:read token to be denied for dry-run, got %d body=%s", dryRunDenied.Code, dryRunDenied.Body.String())
 	}
 }
 

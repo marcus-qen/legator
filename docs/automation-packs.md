@@ -1,12 +1,12 @@
-# Automation Packs (Stage 3.8.1)
+# Automation Packs (Stage 3.8.2)
 
 Automation packs are machine-readable workflow definitions for repeatable operations.
 
-This stage introduces **definition storage + validation only** (no runtime execution yet).
+Stage 3.8.2 adds a **non-mutating dry-run planner** with per-step/workflow policy simulation (`allow|queue|deny`) before any future execution stage.
 
 ## Schema
 
-Top-level object:
+Top-level definition object:
 
 ```json
 {
@@ -77,6 +77,8 @@ Top-level object:
 
 ## Validation Rules (Server-Side)
 
+Definition/schema validation:
+
 - `metadata.id`, `metadata.name`, `metadata.version` are required.
 - `metadata.id` must match `^[a-z0-9][a-z0-9._-]{1,127}$`.
 - `metadata.version` must be semantic version format (`x.y.z`, optional suffix).
@@ -89,6 +91,13 @@ Top-level object:
 - Approval constraints enforce non-negative `minimum_approvers` and valid role-count bounds.
 - At least one expected outcome is required (workflow-level or step-level).
 - `expected_outcomes[].step_id`, when provided, must reference an existing step ID.
+
+Dry-run input validation:
+
+- Required inputs must be supplied or have defaults.
+- Provided input values must match declared types and constraints.
+- Enum constraints are enforced on runtime input values.
+- Unknown input keys are rejected.
 
 ## API
 
@@ -140,6 +149,72 @@ Response:
 - `200 OK` with `{ "automation_pack": { ...definition... } }`
 - `404 not_found` when no definition exists
 
+### Dry-run definition + inputs (non-mutating)
+
+`POST /api/v1/automation-packs/dry-run`
+
+Request body:
+
+```json
+{
+  "definition": { "metadata": { "id": "ops.backup-db", "name": "Ops DB Backup", "version": "1.0.0" }, "steps": [ ... ], "expected_outcomes": [ ... ] },
+  "inputs": {
+    "environment": "prod"
+  }
+}
+```
+
+Response (`200 OK`):
+
+```json
+{
+  "dry_run": {
+    "non_mutating": true,
+    "metadata": { "id": "ops.backup-db", "name": "Ops DB Backup", "version": "1.0.0" },
+    "resolved_inputs": { "environment": "prod" },
+    "steps": [
+      {
+        "order": 1,
+        "id": "prepare",
+        "action": "run_command",
+        "resolved_parameters": { "command": "journalctl -u app --since prod" },
+        "predicted_risk": "medium",
+        "approval_required": false,
+        "policy_simulation": {
+          "outcome": "allow",
+          "risk_level": "medium",
+          "summary": "command allowed by policy",
+          "rationale": { "policy": "capacity-policy-v1" }
+        }
+      }
+    ],
+    "workflow_policy_simulation": {
+      "outcome": "queue",
+      "summary": "workflow requires manual approval"
+    },
+    "risk_summary": {
+      "allow_count": 1,
+      "queue_count": 1,
+      "deny_count": 0,
+      "highest": "queue"
+    }
+  }
+}
+```
+
+Errors:
+
+- `400 invalid_request` for malformed JSON
+- `400 invalid_schema` when the submitted definition is invalid
+- `400 invalid_inputs` when runtime inputs fail declared contracts
+
+## Dry-run and Policy Simulation Guarantees
+
+- Dry-run never executes commands, dispatches jobs, or mutates automation-pack storage.
+- Policy simulation reuses existing command policy evaluation in simulation mode.
+- Step/workflow predictions expose additive `allow|queue|deny` outcomes with rationale.
+- Approval requirements in definition schema are reflected in dry-run queue predictions.
+
 ## Compatibility
 
-All Stage 3.8.1 route and payload additions are additive and backward-compatible.
+All Stage 3.8.2 additions are additive and backward-compatible.

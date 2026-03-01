@@ -2,16 +2,24 @@ package automationpacks
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
-func newTestHandler(t *testing.T) *Handler {
+func newTestHandler(t *testing.T, opts ...HandlerOption) *Handler {
 	t.Helper()
 	store := newTestStore(t)
-	return NewHandler(store)
+	return NewHandler(store, opts...)
+}
+
+func newTestHandlerWithStore(t *testing.T, opts ...HandlerOption) (*Handler, *Store) {
+	t.Helper()
+	store := newTestStore(t)
+	return NewHandler(store, opts...), store
 }
 
 func TestHandlerCreateListAndGetDefinition(t *testing.T) {
@@ -86,4 +94,166 @@ func TestHandlerGetDefinitionNotFound(t *testing.T) {
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d body=%s", rr.Code, rr.Body.String())
 	}
+}
+
+func TestHandlerDryRunSimulatesPolicyAndResolvesStepPlan(t *testing.T) {
+	simulator := &stubPolicySimulator{
+		decisions: map[string]PolicySimulation{
+			"prepare": {Outcome: PolicyOutcomeAllow, RiskLevel: "medium", Summary: "safe read-only command"},
+			"archive": {Outcome: PolicyOutcomeAllow, RiskLevel: "high", Summary: "requires guardrail review"},
+			"cleanup": {Outcome: PolicyOutcomeDeny, RiskLevel: "critical", Summary: "destructive action denied"},
+		},
+	}
+	h := newTestHandler(t, WithPolicySimulator(simulator))
+
+	def := validDefinitionFixture()
+	def.Inputs[0].Default = nil
+	def.Steps[0].Parameters["command"] = "journalctl -u app --since {{inputs.environment}}"
+	def.Steps[1].Parameters["command"] = "systemctl restart api"
+	def.Steps = append(def.Steps, Step{
+		ID:     "cleanup",
+		Action: "run_command",
+		Parameters: map[string]any{
+			"command": "rm -rf /srv/{{inputs.environment}}",
+		},
+		ExpectedOutcomes: []ExpectedOutcome{{Description: "cleanup done", SuccessCriteria: "exit_code == 0", Required: true}},
+	})
+
+	requestBody, _ := json.Marshal(DryRunRequest{Definition: def, Inputs: map[string]any{"environment": "prod"}})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/automation-packs/dry-run", bytes.NewReader(requestBody))
+	rr := httptest.NewRecorder()
+
+	h.HandleDryRunDefinition(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		DryRun DryRunResult `json:"dry_run"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode dry-run payload: %v", err)
+	}
+
+	if !payload.DryRun.NonMutating {
+		t.Fatal("expected dry-run to be non-mutating")
+	}
+	if got, _ := payload.DryRun.ResolvedInputs["environment"].(string); got != "prod" {
+		t.Fatalf("expected resolved input environment=prod, got %#v", payload.DryRun.ResolvedInputs["environment"])
+	}
+	if len(payload.DryRun.Steps) != 3 {
+		t.Fatalf("expected 3 planned steps, got %d", len(payload.DryRun.Steps))
+	}
+	if !strings.Contains(simulator.commands["prepare"], "journalctl -u app --since prod") {
+		t.Fatalf("expected prepare command to include resolved input, got %q", simulator.commands["prepare"])
+	}
+
+	if payload.DryRun.Steps[1].PolicySimulation.Outcome != PolicyOutcomeQueue {
+		t.Fatalf("expected step-level approval requirement to queue archive step, got %q", payload.DryRun.Steps[1].PolicySimulation.Outcome)
+	}
+	if payload.DryRun.Steps[2].PolicySimulation.Outcome != PolicyOutcomeDeny {
+		t.Fatalf("expected cleanup step deny, got %q", payload.DryRun.Steps[2].PolicySimulation.Outcome)
+	}
+
+	if payload.DryRun.WorkflowPolicy.Outcome != PolicyOutcomeDeny {
+		t.Fatalf("expected workflow deny roll-up, got %q", payload.DryRun.WorkflowPolicy.Outcome)
+	}
+	if payload.DryRun.RiskSummary.AllowCount != 1 || payload.DryRun.RiskSummary.QueueCount != 1 || payload.DryRun.RiskSummary.DenyCount != 1 {
+		t.Fatalf("unexpected risk summary counts: %+v", payload.DryRun.RiskSummary)
+	}
+}
+
+func TestHandlerDryRunRejectsInvalidSchema(t *testing.T) {
+	h := newTestHandler(t)
+	invalid := DryRunRequest{Definition: Definition{Metadata: Metadata{ID: "bad"}}}
+	requestBody, _ := json.Marshal(invalid)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/automation-packs/dry-run", bytes.NewReader(requestBody))
+	rr := httptest.NewRecorder()
+
+	h.HandleDryRunDefinition(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if code, _ := payload["code"].(string); code != "invalid_schema" {
+		t.Fatalf("expected invalid_schema code, got %+v", payload)
+	}
+}
+
+func TestHandlerDryRunRejectsInvalidInputs(t *testing.T) {
+	h := newTestHandler(t)
+	def := validDefinitionFixture()
+	def.Inputs[0].Default = nil
+
+	requestBody, _ := json.Marshal(DryRunRequest{Definition: def, Inputs: map[string]any{"environment": 42}})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/automation-packs/dry-run", bytes.NewReader(requestBody))
+	rr := httptest.NewRecorder()
+
+	h.HandleDryRunDefinition(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if code, _ := payload["code"].(string); code != "invalid_inputs" {
+		t.Fatalf("expected invalid_inputs code, got %+v", payload)
+	}
+}
+
+func TestHandlerDryRunDoesNotMutateStore(t *testing.T) {
+	h, store := newTestHandlerWithStore(t)
+	persisted := validDefinitionFixture()
+	if _, err := store.CreateDefinition(persisted); err != nil {
+		t.Fatalf("seed definition: %v", err)
+	}
+
+	listsBefore, err := store.ListDefinitions()
+	if err != nil {
+		t.Fatalf("list before: %v", err)
+	}
+
+	dryRunDef := validDefinitionFixture()
+	dryRunDef.Metadata.ID = "ops.temp-dry-run"
+	dryRunDef.Metadata.Version = "2.0.0"
+	requestBody, _ := json.Marshal(DryRunRequest{Definition: dryRunDef, Inputs: map[string]any{"environment": "prod"}})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/automation-packs/dry-run", bytes.NewReader(requestBody))
+	rr := httptest.NewRecorder()
+	h.HandleDryRunDefinition(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	listsAfter, err := store.ListDefinitions()
+	if err != nil {
+		t.Fatalf("list after: %v", err)
+	}
+	if len(listsAfter) != len(listsBefore) {
+		t.Fatalf("dry-run should not persist definitions: before=%d after=%d", len(listsBefore), len(listsAfter))
+	}
+	if _, err := store.GetDefinition(dryRunDef.Metadata.ID, dryRunDef.Metadata.Version); !IsNotFound(err) {
+		t.Fatalf("expected dry-run definition to remain absent, got err=%v", err)
+	}
+}
+
+type stubPolicySimulator struct {
+	decisions map[string]PolicySimulation
+	commands  map[string]string
+}
+
+func (s *stubPolicySimulator) Simulate(_ context.Context, req PolicySimulationRequest) PolicySimulation {
+	if s.commands == nil {
+		s.commands = make(map[string]string)
+	}
+	s.commands[req.Step.ID] = req.Command.Command
+	if decision, ok := s.decisions[req.Step.ID]; ok {
+		return decision
+	}
+	return PolicySimulation{Outcome: PolicyOutcomeAllow, RiskLevel: "low", Summary: "default allow"}
 }
