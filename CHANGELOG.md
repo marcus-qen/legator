@@ -78,6 +78,16 @@
   - Tuned control-plane offline transition guard from 60s to 90s and expanded stale transition handling to mark degraded/pending stale probes offline.
   - Added probe-side invalid-credential backoff/remediation path (explicit 401/403 classification, clearer warning logs, and fixed extended retry cadence).
   - Added targeted tests for reconnect replacement hooks, hostname duplicate selection/cleanup, degraded→offline transition, and auth-failure backoff behaviour.
+- **Stage 3.5 API/MCP compatibility policy + deprecation contract**
+  - Added a formal compatibility policy doc (`docs/api-mcp-compatibility.md`) defining additive vs breaking changes, versioning rules, deprecation windows, and required changelog/release annotations.
+  - Added append-only contract baselines for stable surfaces:
+    - `docs/contracts/api-v1-stable-routes.txt`
+    - `docs/contracts/mcp-stable-tools.txt`
+    - `docs/contracts/mcp-stable-resources.txt`
+    - `docs/contracts/deprecations.json`
+  - Added CI-enforced contract tests (`internal/controlplane/compat/contracts_test.go`) that fail on untracked route/tool/resource additions and on undeclared removals/renames.
+  - Added release-note guidance (`docs/releases/README.md`) and linked API/MCP docs to the compatibility contract.
+  - **[compat:additive]** Contract enforcement is additive and backward-compatible; no existing REST/MCP identifiers changed.
 - **Jobs cancellation API + lifecycle guardrails**
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.

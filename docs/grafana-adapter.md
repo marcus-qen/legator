@@ -2,6 +2,8 @@
 
 Legator exposes a **read-only Grafana capacity adapter** for policy-safe availability snapshots.
 
+Compatibility/deprecation policy for API + MCP identifiers: `docs/api-mcp-compatibility.md`.
+
 ## Scope
 
 - Read-only Grafana status endpoint

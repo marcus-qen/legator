@@ -1,0 +1,11 @@
+# Stable MCP resources
+# Append-only list. Do not remove entries; use docs/contracts/deprecations.json with status="removed".
+# New stable entries must be reflected in CHANGELOG.md and docs/releases/README.md annotations.
+
+legator://fleet/inventory
+legator://fleet/summary
+legator://grafana/capacity-policy
+legator://grafana/snapshot
+legator://grafana/status
+legator://jobs/active-runs
+legator://jobs/list

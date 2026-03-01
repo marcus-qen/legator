@@ -203,6 +203,8 @@ make release-build    # Cross-compile release binaries (incl. windows/amd64 prob
 
 ## API
 
+Compatibility/deprecation policy: `docs/api-mcp-compatibility.md`.
+
 50+ REST endpoints. Key groups:
 
 - **Fleet**: `GET /api/v1/probes`, `GET /api/v1/fleet/summary`, `POST /api/v1/probes/{id}/command`

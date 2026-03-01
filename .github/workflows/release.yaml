@@ -26,6 +26,9 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
+      - name: Compatibility contract checks
+        run: go test ./internal/controlplane/compat -count=1
+
       - name: Run tests
         run: go test ./...
 
