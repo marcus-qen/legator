@@ -439,6 +439,16 @@ func TestPermissionsAutomationPackRoutes(t *testing.T) {
 		if getExecutionRead.Code == http.StatusUnauthorized || getExecutionRead.Code == http.StatusForbidden {
 			t.Fatalf("expected fleet:read to get execution status, got %d body=%s", getExecutionRead.Code, getExecutionRead.Body.String())
 		}
+
+		getTimelineRead := makeRequest(t, srv, http.MethodGet, "/api/v1/automation-packs/executions/"+runPayload.Execution.ID+"/timeline", readToken, "")
+		if getTimelineRead.Code == http.StatusUnauthorized || getTimelineRead.Code == http.StatusForbidden {
+			t.Fatalf("expected fleet:read to get execution timeline, got %d body=%s", getTimelineRead.Code, getTimelineRead.Body.String())
+		}
+
+		getArtifactsRead := makeRequest(t, srv, http.MethodGet, "/api/v1/automation-packs/executions/"+runPayload.Execution.ID+"/artifacts", readToken, "")
+		if getArtifactsRead.Code == http.StatusUnauthorized || getArtifactsRead.Code == http.StatusForbidden {
+			t.Fatalf("expected fleet:read to get execution artifacts, got %d body=%s", getArtifactsRead.Code, getArtifactsRead.Body.String())
+		}
 	}
 
 	createDenied := makeRequest(t, srv, http.MethodPost, "/api/v1/automation-packs", readToken, createBody)
@@ -464,6 +474,16 @@ func TestPermissionsAutomationPackRoutes(t *testing.T) {
 	getExecutionWrite := makeRequest(t, srv, http.MethodGet, "/api/v1/automation-packs/executions/does-not-exist", writeToken, "")
 	if getExecutionWrite.Code != http.StatusForbidden {
 		t.Fatalf("expected fleet:write-only token to be denied on execution read route, got %d body=%s", getExecutionWrite.Code, getExecutionWrite.Body.String())
+	}
+
+	getTimelineWrite := makeRequest(t, srv, http.MethodGet, "/api/v1/automation-packs/executions/does-not-exist/timeline", writeToken, "")
+	if getTimelineWrite.Code != http.StatusForbidden {
+		t.Fatalf("expected fleet:write-only token to be denied on timeline read route, got %d body=%s", getTimelineWrite.Code, getTimelineWrite.Body.String())
+	}
+
+	getArtifactsWrite := makeRequest(t, srv, http.MethodGet, "/api/v1/automation-packs/executions/does-not-exist/artifacts", writeToken, "")
+	if getArtifactsWrite.Code != http.StatusForbidden {
+		t.Fatalf("expected fleet:write-only token to be denied on artifacts read route, got %d body=%s", getArtifactsWrite.Code, getArtifactsWrite.Body.String())
 	}
 }
 

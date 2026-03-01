@@ -145,7 +145,7 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 | Kubeflow adapter MVP (read-only status/inventory + guarded refresh action) | ✅ |
 | Grafana adapter Stage 2.1 (read-only status + capacity snapshot) | ✅ |
 | Federation read model Stage 3.7.3 (scoped auth + tenancy boundaries across API/MCP/UI) | ✅ |
-| Automation packs Stage 3.8.3 (declarative schema + dry-run planning + guarded execution + rollback hooks) | ✅ |
+| Automation packs Stage 3.8.4 (declarative schema + dry-run planning + guarded execution + rollback hooks + audit timeline/replay artifacts) | ✅ |
 | Capacity-aware policy decisions Stage 2.2 (allow/deny/queue + rationale payloads) | ✅ |
 | Operator explainability panel Stage 2.3 (approval UI rationale + capacity drivers) | ✅ |
 | Auto-discovery + registration assist (network/SSH scan + guided registration) | ✅ |
@@ -247,7 +247,7 @@ Compatibility/deprecation policy: `docs/api-mcp-compatibility.md`.
 - **Auth**: `GET/POST/DELETE /api/v1/auth/keys`, `GET/POST/DELETE /api/v1/users`
 - **Model Dock**: `GET/POST /api/v1/model-profiles`, `PUT/DELETE /api/v1/model-profiles/{id}`, `POST /api/v1/model-profiles/{id}/activate`, `GET /api/v1/model-profiles/active`, `GET /api/v1/model-usage`
 - **Cloud Connectors**: `GET/POST /api/v1/cloud/connectors`, `PUT/DELETE /api/v1/cloud/connectors/{id}`, `POST /api/v1/cloud/connectors/{id}/scan`, `GET /api/v1/cloud/assets`
-- **Automation Packs**: `GET/POST /api/v1/automation-packs`, `GET /api/v1/automation-packs/{id}` (`?version=x.y.z` optional), `POST /api/v1/automation-packs/dry-run`, `POST /api/v1/automation-packs/{id}/executions`, `GET /api/v1/automation-packs/executions/{executionID}`
+- **Automation Packs**: `GET/POST /api/v1/automation-packs`, `GET /api/v1/automation-packs/{id}` (`?version=x.y.z` optional), `POST /api/v1/automation-packs/dry-run`, `POST /api/v1/automation-packs/{id}/executions`, `GET /api/v1/automation-packs/executions/{executionID}`, `GET /api/v1/automation-packs/executions/{executionID}/timeline`, `GET /api/v1/automation-packs/executions/{executionID}/artifacts`
 - **Kubeflow**: `GET /api/v1/kubeflow/status`, `GET /api/v1/kubeflow/inventory`, `GET /api/v1/kubeflow/runs/{name}/status`, `POST /api/v1/kubeflow/actions/refresh`, `POST /api/v1/kubeflow/runs/submit`, `POST /api/v1/kubeflow/runs/{name}/cancel` (mutations disabled by default)
 - **Grafana**: `GET /api/v1/grafana/status`, `GET /api/v1/grafana/snapshot` (disabled by default)
 - **Network Devices**: `GET/POST /api/v1/network/devices`, `GET/PUT/DELETE /api/v1/network/devices/{id}`, `POST /api/v1/network/devices/{id}/test`, `POST /api/v1/network/devices/{id}/inventory`

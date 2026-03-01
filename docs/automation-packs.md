@@ -1,14 +1,16 @@
-# Automation Packs (Stage 3.8.3)
+# Automation Packs (Stage 3.8.4)
 
 Automation packs are machine-readable workflow definitions for repeatable operations.
 
-Stage 3.8.3 adds a **guarded execution runtime** on top of Stage 3.8.2 dry-run planning:
+Stage 3.8.4 extends Stage 3.8.3 guarded execution with **audit timeline + replay artifacts**:
 
 - execution from stored definitions
 - ordered step lifecycle/status tracking
 - policy + approval guardrails before mutating steps
 - per-step timeout and bounded retry controls
 - optional rollback callbacks/hooks executed in reverse order on failure
+- deterministic execution timeline events (event IDs + timestamps)
+- persisted approval checkpoints/decisions and replay/debug artifacts
 
 ## Schema
 
@@ -308,6 +310,83 @@ Response:
 - `200 OK` with `{ "execution": { ... } }`
 - `404 not_found` when execution id is unknown
 
+Execution payload now includes additive audit/replay fields:
+
+- `timeline[]` (ordered lifecycle events)
+- `artifacts[]` (policy snapshots, approval checkpoints, stdout/stderr snippets, error context)
+
+### Get execution timeline (deterministic replay order)
+
+`GET /api/v1/automation-packs/executions/{executionID}/timeline`
+
+Optional query params:
+
+- `step_id=<stepID>` (filter events for one step)
+- `type=<eventType>` (filter by event type)
+
+Response (`200 OK`):
+
+```json
+{
+  "execution_id": "apexec-1740843291984000000-1",
+  "timeline": [
+    {
+      "id": "apexec-1740843291984000000-1-evt-000001",
+      "sequence": 1,
+      "timestamp": "2026-03-01T13:34:51Z",
+      "type": "execution.started",
+      "status": "running"
+    }
+  ],
+  "replay": {
+    "execution_id": "apexec-1740843291984000000-1",
+    "deterministic_order": true,
+    "event_count": 12,
+    "artifact_count": 5,
+    "ordered_event_ids": [
+      "apexec-1740843291984000000-1-evt-000001"
+    ],
+    "first_timestamp": "2026-03-01T13:34:51Z",
+    "last_timestamp": "2026-03-01T13:34:53Z"
+  }
+}
+```
+
+### Get execution artifacts
+
+`GET /api/v1/automation-packs/executions/{executionID}/artifacts`
+
+Optional query params:
+
+- `step_id=<stepID>` (filter artifacts for one step)
+- `type=<artifactType>` (for example `stdout_snippet`, `error_context`, `policy_rationale`)
+
+Response (`200 OK`):
+
+```json
+{
+  "execution_id": "apexec-1740843291984000000-1",
+  "artifacts": [
+    {
+      "id": "apexec-1740843291984000000-1-art-000001",
+      "event_id": "apexec-1740843291984000000-1-evt-000004",
+      "step_id": "prepare",
+      "attempt": 1,
+      "type": "stdout_snippet",
+      "timestamp": "2026-03-01T13:34:52Z",
+      "data": {
+        "snippet": "..."
+      }
+    }
+  ]
+}
+```
+
+Errors for both timeline/artifact routes:
+
+- `400 invalid_request` when `executionID` is missing
+- `404 not_found` when execution id is unknown
+
 ## Dry-run and Policy Simulation Guarantees
 
 - Dry-run never executes commands, dispatches jobs, or mutates automation-pack storage.
@@ -317,4 +396,4 @@ Response:
 
 ## Compatibility
 
-All Stage 3.8.3 additions are additive and backward-compatible.
+All Stage 3.8.4 additions are additive and backward-compatible.

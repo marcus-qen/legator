@@ -187,6 +187,16 @@
   - Added tests covering successful flow, timeout/retry behaviour, rollback-on-failure, and policy/approval blocking semantics.
   - Updated automation-pack docs, API route contract baseline, README references, and Stage 3.8.3 release notes.
   - **[compat:additive]** Added execution routes and additive execution/rollback schema fields without removing or renaming existing REST/MCP identifiers.
+- **Stage 3.8.4 Automation packs: audit timeline + replay artifacts**
+  - Extended execution persistence with deterministic per-step timeline events (ordered sequence, event IDs, timestamps) including policy checks, approval checkpoints/decisions, attempt-level results, rollback lifecycle, and execution completion markers.
+  - Added persisted replay/debug/forensics artifacts for policy rationale snapshots, approval checkpoints, stdout/stderr snippets, action payloads/messages, and step/rollback error context.
+  - Added additive execution retrieval APIs:
+    - `GET /api/v1/automation-packs/executions/{executionID}/timeline`
+    - `GET /api/v1/automation-packs/executions/{executionID}/artifacts`
+  - Added replay metadata payload (`deterministic_order`, ordered event IDs, event/artifact counts, first/last timestamp) and optional route filters (`step_id`, `type`).
+  - Added tests for deterministic timeline ordering, artifact persistence, retrieval API filtering/edge cases, and approval-block checkpoint persistence.
+  - Updated automation-pack docs, README API references, stable route contract baseline, changelog, and Stage 3.8.4 release notes.
+  - **[compat:additive]** Added timeline/artifact routes and additive execution audit payload fields without removing or renaming existing REST/MCP identifiers.
 - **Jobs cancellation API + lifecycle guardrails**
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.
