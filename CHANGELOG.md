@@ -1,6 +1,17 @@
 ## [Unreleased]
 
 ### Added
+- **Stage 3.9.1 Reliability: SLO definitions + service health scorecards**
+  - Added additive reliability scorecard model (`internal/controlplane/reliability`) for core surfaces:
+    - control-plane availability / p95 latency / error-rate
+    - probe connectivity / command success
+  - Added in-memory control-plane request telemetry sampling middleware for scorecard SLI inputs.
+  - Added additive route `GET /api/v1/reliability/scorecard` (`window` duration query supported; defaults to `15m`).
+  - Extended `GET /api/v1/fleet/summary` with additive `reliability` payload.
+  - Added operator explainability metadata per indicator (`target`, `warning`, `critical`, `comparator`, `window`, sample size, rationale text).
+  - Added coverage for scorecard computation, telemetry sampling, API responses, and permission gates.
+  - Updated docs/contracts/UI for reliability scorecards.
+  - **[compat:additive]** Added reliability route and additive summary fields without removing or renaming existing REST/MCP identifiers.
 - **Stage 2.1 Grafana adapter (read-only capacity snapshot connector)**
   - Added `internal/controlplane/grafana` adapter/client boundary with read-only HTTP retrieval from Grafana APIs (`/api/health`, `/api/datasources`, `/api/search`, `/api/dashboards/uid/:uid`).
   - Added API routes: `GET /api/v1/grafana/status`, `GET /api/v1/grafana/snapshot`.

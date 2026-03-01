@@ -218,7 +218,11 @@ Compatibility/deprecation policy: `docs/api-mcp-compatibility.md`.
 
 50+ REST endpoints. Key groups:
 
-- **Fleet**: `GET /api/v1/probes`, `GET /api/v1/fleet/summary`, `POST /api/v1/probes/{id}/command`
+- **Fleet**: `GET /api/v1/probes`, `GET /api/v1/fleet/summary`, `GET /api/v1/reliability/scorecard`, `POST /api/v1/probes/{id}/command`
+  - Reliability scorecards are additive and explainable:
+    - `overall` + per-surface scores/status (`control_plane`, `probe_fleet`)
+    - SLO objective metadata (`target`, `warning`, `critical`, `comparator`, `window`)
+    - SLI sample context (`value`, `unit`, `sample_size`, rationale text)
 - **Federation (read-only)**: `GET /api/v1/federation/inventory`, `GET /api/v1/federation/summary`
   - Additive tenancy filters: `tenant_id` (`tenant`), `org_id` (`org`), `scope_id` (`scope`)
   - Optional scoped auth grants on API keys/users: `tenant:<id>`, `org:<id>`, `scope:<id>` (restricts returned federation data even when no explicit tenancy query is provided)

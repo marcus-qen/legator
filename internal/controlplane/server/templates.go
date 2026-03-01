@@ -15,10 +15,12 @@ import (
 
 // FleetSummary holds the status counts for the fleet overview.
 type FleetSummary struct {
-	Online   int
-	Offline  int
-	Degraded int
-	Total    int
+	Online            int
+	Offline           int
+	Degraded          int
+	Total             int
+	ReliabilityScore  int
+	ReliabilityStatus string
 }
 
 // TemplateUser describes the logged-in user shown in page chrome.

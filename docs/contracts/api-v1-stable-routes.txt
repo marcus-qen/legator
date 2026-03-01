@@ -65,6 +65,7 @@ GET /api/v1/probes
 GET /api/v1/probes/{id}
 GET /api/v1/probes/{id}/chat
 GET /api/v1/probes/{id}/health
+GET /api/v1/reliability/scorecard
 GET /api/v1/tokens
 GET /api/v1/users
 GET /api/v1/webhooks

@@ -22,6 +22,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/jobs"
 	"github.com/marcus-qen/legator/internal/controlplane/policy"
+	"github.com/marcus-qen/legator/internal/controlplane/reliability"
 	"github.com/marcus-qen/legator/internal/protocol"
 	"go.uber.org/zap"
 )
@@ -733,6 +734,77 @@ func TestHandleFleetSummary(t *testing.T) {
 	}
 	if got["pending_approvals"] != float64(0) {
 		t.Fatalf("unexpected pending approvals: %#v", got)
+	}
+	reliabilityPayload, ok := got["reliability"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected reliability payload in fleet summary: %#v", got)
+	}
+	if _, ok := reliabilityPayload["overall"].(map[string]any); !ok {
+		t.Fatalf("expected reliability.overall payload, got %#v", reliabilityPayload)
+	}
+}
+
+func TestHandleReliabilityScorecard(t *testing.T) {
+	srv := newTestServer(t)
+	srv.fleetMgr.Register("probe-online", "host-1", "linux", "amd64")
+	srv.fleetMgr.Register("probe-offline", "host-2", "linux", "amd64")
+	ps, _ := srv.fleetMgr.Get("probe-offline")
+	ps.Status = "offline"
+
+	srv.recordAudit(audit.Event{Type: audit.EventCommandResult, ProbeID: "probe-online", Detail: map[string]any{"exit_code": 0}})
+	srv.recordAudit(audit.Event{Type: audit.EventCommandResult, ProbeID: "probe-online", Detail: map[string]any{"exit_code": 1}})
+
+	healthReq := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	healthRR := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(healthRR, healthReq)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/reliability/scorecard?window=15m", nil)
+	rr := httptest.NewRecorder()
+	srv.handleReliabilityScorecard(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var payload reliability.Scorecard
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode reliability scorecard: %v", err)
+	}
+	if payload.Window.Duration != "15m0s" {
+		t.Fatalf("expected 15m window metadata, got %q", payload.Window.Duration)
+	}
+	if len(payload.Surfaces) != 2 {
+		t.Fatalf("expected 2 surfaces, got %d", len(payload.Surfaces))
+	}
+
+	var foundCommandIndicator bool
+	for _, surface := range payload.Surfaces {
+		for _, indicator := range surface.Indicators {
+			if indicator.ID != "probe_fleet.command_success" {
+				continue
+			}
+			foundCommandIndicator = true
+			if indicator.Objective.Comparator != "gte" {
+				t.Fatalf("expected comparator metadata for command success, got %+v", indicator.Objective)
+			}
+			if indicator.Metric.SampleSize != 2 {
+				t.Fatalf("expected command sample size=2, got %d", indicator.Metric.SampleSize)
+			}
+		}
+	}
+	if !foundCommandIndicator {
+		t.Fatal("expected probe_fleet.command_success indicator in scorecard")
+	}
+}
+
+func TestHandleReliabilityScorecard_InvalidWindow(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/reliability/scorecard?window=not-a-duration", nil)
+	rr := httptest.NewRecorder()
+	srv.handleReliabilityScorecard(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid window, got %d", rr.Code)
 	}
 }
 
