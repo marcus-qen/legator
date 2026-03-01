@@ -7,8 +7,6 @@ ARG DATE=unknown
 
 WORKDIR /src
 
-RUN apk add --no-cache ca-certificates
-
 COPY go.mod go.sum ./
 RUN go mod download
 
@@ -16,18 +14,16 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
-    -o /probe ./cmd/probe
+    -o /legatorctl ./cmd/legatorctl
 
 # Stage 2: Runtime — minimal, nonroot, distroless
-# distroless/static-debian12:nonroot includes ca-certificates and a nonroot user (uid 65532)
 FROM gcr.io/distroless/static-debian12:nonroot
 
-LABEL org.opencontainers.image.title="Legator Probe" \
-      org.opencontainers.image.description="Lightweight probe agent for Legator" \
+LABEL org.opencontainers.image.title="legatorctl" \
+      org.opencontainers.image.description="CLI tool for managing Legator" \
       org.opencontainers.image.source="https://github.com/marcus-qen/legator" \
       org.opencontainers.image.licenses="Apache-2.0"
 
-COPY --from=builder /probe /usr/local/bin/probe
+COPY --from=builder /legatorctl /usr/local/bin/legatorctl
 
-ENTRYPOINT ["/usr/local/bin/probe"]
-CMD ["run", "--config-dir", "/etc/legator"]
+ENTRYPOINT ["legatorctl"]

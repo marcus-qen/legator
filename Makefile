@@ -5,12 +5,15 @@ BIN_DIR ?= bin
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-REGISTRY ?= harbor.lab.k-dev.uk/legator
+REGISTRY ?= ghcr.io/marcus-qen
 IMAGE_TAG ?= $(VERSION)
 
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-.PHONY: build build-cp build-probe build-ctl build-all build-cp-all build-probe-all build-ctl-all release-build test architecture-guard preflight lint e2e docker-probe docker-push-probe clean
+.PHONY: build build-cp build-probe build-ctl build-all build-cp-all build-probe-all build-ctl-all release-build test architecture-guard preflight lint e2e \
+	docker-cp docker-probe docker-ctl docker-all \
+	docker-push-cp docker-push-probe docker-push-ctl docker-push-all \
+	clean
 
 build: build-cp build-probe build-ctl
 
@@ -63,15 +66,41 @@ lint:
 e2e:
 	bash hack/e2e-test.sh
 
-docker-probe:
-	docker build -f Dockerfile.probe \
-		-t $(REGISTRY)/probe:$(IMAGE_TAG) \
+# ─── Container image targets ──────────────────────────────────────────────────
+
+docker-cp:
+	docker build -f Dockerfile.control-plane \
+		-t $(REGISTRY)/legator-control-plane:$(IMAGE_TAG) \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg COMMIT=$(COMMIT) \
 		--build-arg DATE=$(DATE) .
 
+docker-probe:
+	docker build -f Dockerfile.probe \
+		-t $(REGISTRY)/legator-probe:$(IMAGE_TAG) \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg COMMIT=$(COMMIT) \
+		--build-arg DATE=$(DATE) .
+
+docker-ctl:
+	docker build -f Dockerfile.legatorctl \
+		-t $(REGISTRY)/legatorctl:$(IMAGE_TAG) \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg COMMIT=$(COMMIT) \
+		--build-arg DATE=$(DATE) .
+
+docker-all: docker-cp docker-probe docker-ctl
+
+docker-push-cp:
+	docker push $(REGISTRY)/legator-control-plane:$(IMAGE_TAG)
+
 docker-push-probe:
-	docker push $(REGISTRY)/probe:$(IMAGE_TAG)
+	docker push $(REGISTRY)/legator-probe:$(IMAGE_TAG)
+
+docker-push-ctl:
+	docker push $(REGISTRY)/legatorctl:$(IMAGE_TAG)
+
+docker-push-all: docker-push-cp docker-push-probe docker-push-ctl
 
 clean:
 	rm -rf $(BIN_DIR)

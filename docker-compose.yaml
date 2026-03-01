@@ -1,0 +1,25 @@
+services:
+  control-plane:
+    build:
+      context: .
+      dockerfile: Dockerfile.control-plane
+    ports:
+      - "9080:9080"
+    volumes:
+      - legator-data:/var/lib/legator
+    environment:
+      - LEGATOR_LISTEN_ADDR=:9080
+    restart: unless-stopped
+
+  probe:
+    build:
+      context: .
+      dockerfile: Dockerfile.probe
+    environment:
+      - LEGATOR_SERVER=http://control-plane:9080
+    depends_on:
+      - control-plane
+    restart: unless-stopped
+
+volumes:
+  legator-data:
