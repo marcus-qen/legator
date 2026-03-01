@@ -30,7 +30,7 @@
       <strong class="jobs-summary-value" id="jobs-summary-disabled">0</strong>
     </article>
     <article class="jobs-summary-card">
-      <span class="jobs-summary-label">Running/Pending runs</span>
+      <span class="jobs-summary-label">Queued/Pending/Running runs</span>
       <strong class="jobs-summary-value" id="jobs-summary-active-runs">0</strong>
     </article>
     <article class="jobs-summary-card">
@@ -83,10 +83,12 @@
         <select class="input" id="jobs-filter-status">
           <option value="failed" selected>failed</option>
           <option value="">all</option>
+          <option value="queued">queued</option>
           <option value="pending">pending</option>
           <option value="running">running</option>
           <option value="success">success</option>
           <option value="canceled">canceled</option>
+          <option value="denied">denied</option>
         </select>
       </label>
       <label>
@@ -168,11 +170,13 @@
     activeRunsByJob: {},
     runHealth: {
       count: 0,
+      queued_count: 0,
       running_count: 0,
       pending_count: 0,
       failed_count: 0,
       success_count: 0,
       canceled_count: 0,
+      denied_count: 0,
     },
     selectedRunId: '',
     canWrite: false,
@@ -311,7 +315,7 @@
     const enabled = state.jobs.filter((job) => job.enabled).length;
     const disabled = state.jobs.length - enabled;
     const failedJobs = state.jobs.filter((job) => String(job.last_status || '').toLowerCase() === 'failed').length;
-    const activeRuns = Number(state.runHealth.running_count || 0) + Number(state.runHealth.pending_count || 0);
+    const activeRuns = Number(state.runHealth.queued_count || 0) + Number(state.runHealth.running_count || 0) + Number(state.runHealth.pending_count || 0);
 
     document.getElementById('jobs-summary-total').textContent = String(state.jobs.length);
     document.getElementById('jobs-summary-enabled').textContent = String(enabled);
@@ -388,10 +392,10 @@
       const status = String(run.status || '').toLowerCase();
 
       const actions = [];
-      if (state.canWrite && (status === 'pending' || status === 'running')) {
+      if (state.canWrite && (status === 'queued' || status === 'pending' || status === 'running')) {
         actions.push(`<button class="btn btn-small" type="button" data-run-action="cancel" data-job-id="${esc(run.job_id)}" data-run-id="${esc(run.id)}">Cancel</button>`);
       }
-      if (state.canWrite && (status === 'failed' || status === 'canceled')) {
+      if (state.canWrite && (status === 'failed' || status === 'canceled' || status === 'denied')) {
         actions.push(`<button class="btn btn-small" type="button" data-run-action="retry" data-job-id="${esc(run.job_id)}" data-run-id="${esc(run.id)}">Retry trigger</button>`);
       }
 
@@ -441,6 +445,8 @@
       ['Attempt', `${run.attempt || 1}/${run.max_attempts || 1}`],
       ['Exit code', run.exit_code === null || run.exit_code === undefined ? '—' : String(run.exit_code)],
       ['Retry scheduled', retryAt],
+      ['Admission decision', run.admission_decision || '—'],
+      ['Admission reason', run.admission_reason || '—'],
       ['Request ID', run.request_id || '—'],
       ['Execution ID', run.execution_id || '—'],
     ].map(([key, value]) => `<dt>${esc(key)}</dt><dd>${esc(value)}</dd>`).join('');
@@ -457,11 +463,11 @@
       `<button class="btn btn-small" type="button" data-triage-action="cancel-job" data-job-id="${esc(run.job_id)}">Cancel active job runs</button>`,
     ];
 
-    if (status === 'pending' || status === 'running') {
+    if (status === 'queued' || status === 'pending' || status === 'running') {
       actions.push(`<button class="btn btn-small" type="button" data-triage-action="cancel-run" data-job-id="${esc(run.job_id)}" data-run-id="${esc(run.id)}">Cancel this run</button>`);
     }
 
-    if (status === 'failed' || status === 'canceled') {
+    if (status === 'failed' || status === 'canceled' || status === 'denied') {
       actions.push(`<button class="btn btn-small" type="button" data-triage-action="retry" data-job-id="${esc(run.job_id)}" data-run-id="${esc(run.id)}">Retry trigger</button>`);
     }
 
@@ -497,18 +503,20 @@
 
     state.runHealth = {
       count: payload?.count || 0,
+      queued_count: payload?.queued_count || 0,
       running_count: payload?.running_count || 0,
       pending_count: payload?.pending_count || 0,
       failed_count: payload?.failed_count || 0,
       success_count: payload?.success_count || 0,
       canceled_count: payload?.canceled_count || 0,
+      denied_count: payload?.denied_count || 0,
     };
 
     const allRuns = Array.isArray(payload?.runs) ? payload.runs : [];
     const activeByJob = {};
     for (const run of allRuns) {
       const status = String(run.status || '').toLowerCase();
-      if (status !== 'pending' && status !== 'running') continue;
+      if (status !== 'queued' && status !== 'pending' && status !== 'running') continue;
       activeByJob[run.job_id] = (activeByJob[run.job_id] || 0) + 1;
     }
     state.activeRunsByJob = activeByJob;
@@ -682,10 +690,15 @@
         'job.created': refreshData,
         'job.updated': refreshData,
         'job.deleted': refreshData,
+        'job.run.admission_allowed': refreshData,
+        'job.run.admission_queued': refreshData,
+        'job.run.admission_denied': refreshData,
+        'job.run.queued': refreshData,
         'job.run.started': refreshData,
         'job.run.succeeded': refreshData,
         'job.run.failed': refreshData,
         'job.run.canceled': refreshData,
+        'job.run.denied': refreshData,
       });
     }
 

@@ -82,7 +82,7 @@ type grafanaCapacityPolicyPayload struct {
 type listJobRunsInput struct {
 	JobID         string `json:"job_id,omitempty" jsonschema:"optional job identifier filter"`
 	ProbeID       string `json:"probe_id,omitempty" jsonschema:"optional probe identifier filter"`
-	Status        string `json:"status,omitempty" jsonschema:"optional status filter: pending, running, success, failed, canceled"`
+	Status        string `json:"status,omitempty" jsonschema:"optional status filter: queued, pending, running, success, failed, canceled, denied"`
 	StartedAfter  string `json:"started_after,omitempty" jsonschema:"optional RFC3339 lower timestamp bound"`
 	StartedBefore string `json:"started_before,omitempty" jsonschema:"optional RFC3339 upper timestamp bound"`
 	Limit         int    `json:"limit,omitempty" jsonschema:"optional max results (default 50, max 500)"`
@@ -124,15 +124,19 @@ type jobRunsSummaryPayload struct {
 	SuccessCount  int           `json:"success_count"`
 	RunningCount  int           `json:"running_count"`
 	PendingCount  int           `json:"pending_count"`
+	QueuedCount   int           `json:"queued_count"`
 	CanceledCount int           `json:"canceled_count"`
+	DeniedCount   int           `json:"denied_count"`
 }
 
 type mcpRunSummary struct {
+	Queued   int
 	Pending  int
 	Running  int
 	Success  int
 	Failed   int
 	Canceled int
+	Denied   int
 }
 
 type pollActiveJobStatusPayload struct {
@@ -642,7 +646,9 @@ func (s *MCPServer) handleListJobRuns(_ context.Context, _ *mcp.CallToolRequest,
 		SuccessCount:  summary.Success,
 		RunningCount:  summary.Running,
 		PendingCount:  summary.Pending,
+		QueuedCount:   summary.Queued,
 		CanceledCount: summary.Canceled,
+		DeniedCount:   summary.Denied,
 	}
 	return jsonToolResult(payload)
 }
@@ -661,7 +667,7 @@ func (s *MCPServer) handleGetJobRun(_ context.Context, _ *mcp.CallToolRequest, i
 		return nil, nil, fmt.Errorf("run not found: %s", runID)
 	}
 
-	active := run.Status == jobs.RunStatusPending || run.Status == jobs.RunStatusRunning
+	active := run.Status == jobs.RunStatusQueued || run.Status == jobs.RunStatusPending || run.Status == jobs.RunStatusRunning
 	payload := map[string]any{
 		"run":      run,
 		"active":   active,
@@ -921,10 +927,10 @@ func parseMCPJobRunQuery(input listJobRunsInput) (jobs.RunQuery, error) {
 	status := strings.TrimSpace(input.Status)
 	if status != "" {
 		switch status {
-		case jobs.RunStatusPending, jobs.RunStatusRunning, jobs.RunStatusSuccess, jobs.RunStatusFailed, jobs.RunStatusCanceled:
+		case jobs.RunStatusQueued, jobs.RunStatusPending, jobs.RunStatusRunning, jobs.RunStatusSuccess, jobs.RunStatusFailed, jobs.RunStatusCanceled, jobs.RunStatusDenied:
 			query.Status = status
 		default:
-			return jobs.RunQuery{}, fmt.Errorf("status must be one of: pending, running, success, failed, canceled")
+			return jobs.RunQuery{}, fmt.Errorf("status must be one of: queued, pending, running, success, failed, canceled, denied")
 		}
 	}
 
@@ -964,6 +970,8 @@ func summarizeMCPRuns(runs []jobs.JobRun) mcpRunSummary {
 	summary := mcpRunSummary{}
 	for _, run := range runs {
 		switch run.Status {
+		case jobs.RunStatusQueued:
+			summary.Queued++
 		case jobs.RunStatusPending:
 			summary.Pending++
 		case jobs.RunStatusRunning:
@@ -974,6 +982,8 @@ func summarizeMCPRuns(runs []jobs.JobRun) mcpRunSummary {
 			summary.Failed++
 		case jobs.RunStatusCanceled:
 			summary.Canceled++
+		case jobs.RunStatusDenied:
+			summary.Denied++
 		}
 	}
 	return summary
@@ -981,7 +991,7 @@ func summarizeMCPRuns(runs []jobs.JobRun) mcpRunSummary {
 
 func isTerminalRunStatus(status string) bool {
 	switch status {
-	case jobs.RunStatusSuccess, jobs.RunStatusFailed, jobs.RunStatusCanceled:
+	case jobs.RunStatusSuccess, jobs.RunStatusFailed, jobs.RunStatusCanceled, jobs.RunStatusDenied:
 		return true
 	default:
 		return false
@@ -993,12 +1003,16 @@ func isJobLifecycleAuditEvent(typ audit.EventType) bool {
 	case audit.EventJobCreated,
 		audit.EventJobUpdated,
 		audit.EventJobDeleted,
+		audit.EventJobRunAdmissionAllowed,
+		audit.EventJobRunAdmissionQueued,
+		audit.EventJobRunAdmissionDenied,
 		audit.EventJobRunQueued,
 		audit.EventJobRunStarted,
 		audit.EventJobRunRetryScheduled,
 		audit.EventJobRunSucceeded,
 		audit.EventJobRunFailed,
-		audit.EventJobRunCanceled:
+		audit.EventJobRunCanceled,
+		audit.EventJobRunDenied:
 		return true
 	default:
 		return false
@@ -1010,12 +1024,16 @@ func isJobLifecycleBusEvent(typ events.EventType) bool {
 	case events.JobCreated,
 		events.JobUpdated,
 		events.JobDeleted,
+		events.JobRunAdmissionAllowed,
+		events.JobRunAdmissionQueued,
+		events.JobRunAdmissionDenied,
 		events.JobRunQueued,
 		events.JobRunStarted,
 		events.JobRunRetryScheduled,
 		events.JobRunSucceeded,
 		events.JobRunFailed,
-		events.JobRunCanceled:
+		events.JobRunCanceled,
+		events.JobRunDenied:
 		return true
 	default:
 		return false

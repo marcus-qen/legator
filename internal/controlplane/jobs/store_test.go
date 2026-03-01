@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -450,6 +451,96 @@ func TestStorePersistsRetryPolicyAndAttemptMetadata(t *testing.T) {
 	}
 	if storedRun.RetryScheduledAt == nil {
 		t.Fatal("expected retry_scheduled_at to be stored")
+	}
+}
+
+func TestStoreQueuedAdmissionTransitionsToExecution(t *testing.T) {
+	store := newTestStore(t)
+	job := createTestJob(t, store)
+	retryAt := time.Now().UTC().Add(20 * time.Second)
+
+	run, err := store.RecordRunStart(JobRun{
+		JobID:             job.ID,
+		ProbeID:           "probe-1",
+		RequestID:         "queued-run",
+		ExecutionID:       "exec-queued",
+		Attempt:           1,
+		MaxAttempts:       3,
+		Status:            RunStatusQueued,
+		RetryScheduledAt:  &retryAt,
+		AdmissionDecision: string(AdmissionOutcomeQueue),
+		AdmissionReason:   "capacity limited",
+		AdmissionRationale: json.RawMessage(`{"availability":"limited"}`),
+	})
+	if err != nil {
+		t.Fatalf("record queued run: %v", err)
+	}
+
+	run, err = store.UpdateQueuedRunAdmission(run.ID, string(AdmissionOutcomeAllow), "capacity recovered", map[string]any{"availability": "normal"}, nil)
+	if err != nil {
+		t.Fatalf("update queued admission: %v", err)
+	}
+	if run.AdmissionDecision != string(AdmissionOutcomeAllow) {
+		t.Fatalf("expected admission decision allow, got %q", run.AdmissionDecision)
+	}
+
+	if err := store.MarkRunPending(run.ID); err != nil {
+		t.Fatalf("mark run pending: %v", err)
+	}
+	if err := store.MarkRunRunning(run.ID); err != nil {
+		t.Fatalf("mark run running: %v", err)
+	}
+	if err := store.CompleteRun(run.ID, RunStatusSuccess, intPtr(0), "ok"); err != nil {
+		t.Fatalf("complete run: %v", err)
+	}
+
+	updated, err := store.GetRun(run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if updated.Status != RunStatusSuccess {
+		t.Fatalf("expected success, got %s", updated.Status)
+	}
+	if updated.AdmissionDecision != string(AdmissionOutcomeAllow) {
+		t.Fatalf("expected admission decision allow on terminal run, got %q", updated.AdmissionDecision)
+	}
+}
+
+func TestStoreMarkRunDeniedPersistsAdmissionReason(t *testing.T) {
+	store := newTestStore(t)
+	job := createTestJob(t, store)
+
+	run, err := store.RecordRunStart(JobRun{
+		JobID:             job.ID,
+		ProbeID:           "probe-1",
+		RequestID:         "queued-deny",
+		ExecutionID:       "exec-deny",
+		Attempt:           1,
+		MaxAttempts:       2,
+		Status:            RunStatusQueued,
+		AdmissionDecision: string(AdmissionOutcomeQueue),
+		AdmissionReason:   "awaiting capacity",
+	})
+	if err != nil {
+		t.Fatalf("record run: %v", err)
+	}
+
+	if err := store.MarkRunDenied(run.ID, "capacity degraded", map[string]any{"availability": "degraded"}); err != nil {
+		t.Fatalf("mark denied: %v", err)
+	}
+
+	updated, err := store.GetRun(run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if updated.Status != RunStatusDenied {
+		t.Fatalf("expected denied status, got %s", updated.Status)
+	}
+	if updated.AdmissionDecision != string(AdmissionOutcomeDeny) {
+		t.Fatalf("expected deny decision, got %q", updated.AdmissionDecision)
+	}
+	if !strings.Contains(strings.ToLower(updated.Output), "capacity") {
+		t.Fatalf("expected output to include denial reason, got %q", updated.Output)
 	}
 }
 

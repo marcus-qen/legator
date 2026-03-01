@@ -57,6 +57,20 @@
     - MCP tool payload parity vs REST Grafana status/snapshot routes
     - MCP capacity-policy rationale schema assertions
     - Tool/resource registration and permission coverage tests
+- **Stage 3.3 capacity-aware admission controller for async jobs**
+  - Integrated scheduled-job admission decisions with existing capacity policy outcomes (`allow` / `queue` / `deny`) before dispatch.
+  - Added deferred admission queue behavior (`queue`) with persisted queued runs and automatic re-evaluation/drain path.
+  - Added explicit denied run outcome (`status=denied`) with additive rationale fields on runs:
+    - `admission_decision`
+    - `admission_reason`
+    - `admission_rationale`
+  - Added admission lifecycle events for observability/audit parity:
+    - `job.run.admission_allowed`
+    - `job.run.admission_queued`
+    - `job.run.admission_denied`
+    - `job.run.denied`
+  - Expanded run filters/summaries to include additive `queued` and `denied` states.
+  - Added scheduler/store/handler coverage for admission decision paths and deferred queue drain behavior.
 - **Jobs cancellation API + lifecycle guardrails**
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.

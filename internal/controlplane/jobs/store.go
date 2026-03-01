@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -94,6 +95,9 @@ func NewStore(dbPath string) (*Store, error) {
 		started_at         TEXT NOT NULL,
 		ended_at           TEXT,
 		status             TEXT NOT NULL,
+		admission_decision TEXT NOT NULL DEFAULT '',
+		admission_reason   TEXT NOT NULL DEFAULT '',
+		admission_rationale TEXT NOT NULL DEFAULT '',
 		exit_code          INTEGER,
 		output             TEXT NOT NULL DEFAULT '',
 		FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
@@ -154,6 +158,15 @@ func ensureRunColumns(db *sql.DB) error {
 	}
 	if err := ensureColumn(db, "job_runs", "retry_scheduled_at", "retry_scheduled_at TEXT"); err != nil {
 		return fmt.Errorf("add job_runs.retry_scheduled_at: %w", err)
+	}
+	if err := ensureColumn(db, "job_runs", "admission_decision", "admission_decision TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("add job_runs.admission_decision: %w", err)
+	}
+	if err := ensureColumn(db, "job_runs", "admission_reason", "admission_reason TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("add job_runs.admission_reason: %w", err)
+	}
+	if err := ensureColumn(db, "job_runs", "admission_rationale", "admission_rationale TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("add job_runs.admission_rationale: %w", err)
 	}
 	return nil
 }
@@ -401,8 +414,8 @@ func (s *Store) RecordRunStart(run JobRun) (*JobRun, error) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	_, err = tx.Exec(`INSERT INTO job_runs (id, job_id, probe_id, request_id, execution_id, attempt, max_attempts, retry_scheduled_at, started_at, ended_at, status, exit_code, output)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err = tx.Exec(`INSERT INTO job_runs (id, job_id, probe_id, request_id, execution_id, attempt, max_attempts, retry_scheduled_at, started_at, ended_at, status, admission_decision, admission_reason, admission_rationale, exit_code, output)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		run.ID,
 		run.JobID,
 		run.ProbeID,
@@ -414,6 +427,9 @@ func (s *Store) RecordRunStart(run JobRun) (*JobRun, error) {
 		run.StartedAt.UTC().Format(time.RFC3339Nano),
 		nullableTime(run.EndedAt),
 		run.Status,
+		strings.TrimSpace(run.AdmissionDecision),
+		strings.TrimSpace(run.AdmissionReason),
+		serializeAdmissionRationale(run.AdmissionRationale),
 		nullableInt(run.ExitCode),
 		truncateOutput(run.Output),
 	)
@@ -439,6 +455,15 @@ func (s *Store) RecordRunStart(run JobRun) (*JobRun, error) {
 	return &out, nil
 }
 
+// MarkRunPending transitions a run from queued to pending.
+func (s *Store) MarkRunPending(runID string) error {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("run id required")
+	}
+	return s.transitionRun(runID, []string{RunStatusQueued}, RunStatusPending, nil, "", false, nil)
+}
+
 // MarkRunRunning transitions a run from pending to running.
 func (s *Store) MarkRunRunning(runID string) error {
 	runID = strings.TrimSpace(runID)
@@ -446,6 +471,35 @@ func (s *Store) MarkRunRunning(runID string) error {
 		return fmt.Errorf("run id required")
 	}
 	return s.transitionRun(runID, []string{RunStatusPending}, RunStatusRunning, nil, "", false, nil)
+}
+
+// MarkRunDenied transitions a queued/pending/running run to denied with rationale context.
+func (s *Store) MarkRunDenied(runID, reason string, rationale any) error {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("run id required")
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "admission denied by policy"
+	}
+	if err := s.transitionRun(runID, []string{RunStatusQueued, RunStatusPending, RunStatusRunning}, RunStatusDenied, nil, reason, true, nil); err != nil {
+		return err
+	}
+	_, err := s.setRunAdmission(runID, string(AdmissionOutcomeDeny), reason, rationale, nil)
+	return err
+}
+
+// UpdateQueuedRunAdmission refreshes queued-run rationale and next re-evaluation time.
+func (s *Store) UpdateQueuedRunAdmission(runID, decision, reason string, rationale any, retryScheduledAt *time.Time) (*JobRun, error) {
+	run, err := s.GetRun(runID)
+	if err != nil {
+		return nil, err
+	}
+	if run.Status != RunStatusQueued {
+		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidRunTransition, run.Status, RunStatusQueued)
+	}
+	return s.setRunAdmission(runID, decision, reason, rationale, retryScheduledAt)
 }
 
 // CompleteRun finalizes a previously recorded job run.
@@ -477,12 +531,48 @@ func (s *Store) CancelRun(runID, reason string) error {
 	if reason == "" {
 		reason = "run canceled"
 	}
-	return s.transitionRun(runID, []string{RunStatusPending, RunStatusRunning}, RunStatusCanceled, nil, reason, true, nil)
+	return s.transitionRun(runID, []string{RunStatusQueued, RunStatusPending, RunStatusRunning}, RunStatusCanceled, nil, reason, true, nil)
+}
+
+func (s *Store) setRunAdmission(runID, decision, reason string, rationale any, retryScheduledAt *time.Time) (*JobRun, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil, fmt.Errorf("run id required")
+	}
+
+	decision = strings.TrimSpace(decision)
+	reason = strings.TrimSpace(reason)
+	rationaleRaw, err := mustMarshalAdmissionRationale(rationale)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := s.db.Exec(`UPDATE job_runs
+		SET admission_decision = ?,
+			admission_reason = ?,
+			admission_rationale = ?,
+			retry_scheduled_at = ?
+		WHERE id = ?`,
+		decision,
+		reason,
+		string(rationaleRaw),
+		nullableTime(retryScheduledAt),
+		runID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return nil, sql.ErrNoRows
+	}
+
+	return s.GetRun(runID)
 }
 
 // GetRun returns one run by id.
 func (s *Store) GetRun(id string) (*JobRun, error) {
-	row := s.db.QueryRow(`SELECT id, job_id, probe_id, request_id, execution_id, attempt, max_attempts, retry_scheduled_at, started_at, ended_at, status, exit_code, output
+	row := s.db.QueryRow(`SELECT id, job_id, probe_id, request_id, execution_id, attempt, max_attempts, retry_scheduled_at, started_at, ended_at, status, admission_decision, admission_reason, admission_rationale, exit_code, output
 		FROM job_runs WHERE id = ?`, id)
 	return scanRun(row)
 }
@@ -494,10 +584,10 @@ func (s *Store) ListActiveRunsByJob(jobID string) ([]JobRun, error) {
 		return nil, fmt.Errorf("job id required")
 	}
 
-	rows, err := s.db.Query(`SELECT id, job_id, probe_id, request_id, execution_id, attempt, max_attempts, retry_scheduled_at, started_at, ended_at, status, exit_code, output
+	rows, err := s.db.Query(`SELECT id, job_id, probe_id, request_id, execution_id, attempt, max_attempts, retry_scheduled_at, started_at, ended_at, status, admission_decision, admission_reason, admission_rationale, exit_code, output
 		FROM job_runs
-		WHERE job_id = ? AND status IN (?, ?)
-		ORDER BY started_at DESC`, jobID, RunStatusPending, RunStatusRunning)
+		WHERE job_id = ? AND status IN (?, ?, ?)
+		ORDER BY started_at DESC`, jobID, RunStatusQueued, RunStatusPending, RunStatusRunning)
 	if err != nil {
 		return nil, err
 	}
@@ -606,25 +696,31 @@ func (s *Store) updateJobStatusForLatestBatch(tx *sql.Tx, jobID, runStartedAt st
 	}
 
 	var (
+		queuedCount   int
 		pendingCount  int
 		runningCount  int
 		failedCount   int
+		deniedCount   int
 		canceledCount int
 	)
 	if err := tx.QueryRow(`SELECT
 		COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0)
 		FROM job_runs
 		WHERE job_id = ? AND started_at = ?`,
+		RunStatusQueued,
 		RunStatusPending,
 		RunStatusRunning,
 		RunStatusFailed,
+		RunStatusDenied,
 		RunStatusCanceled,
 		jobID,
 		latestStartedAt,
-	).Scan(&pendingCount, &runningCount, &failedCount, &canceledCount); err != nil {
+	).Scan(&queuedCount, &pendingCount, &runningCount, &failedCount, &deniedCount, &canceledCount); err != nil {
 		return err
 	}
 
@@ -634,8 +730,12 @@ func (s *Store) updateJobStatusForLatestBatch(tx *sql.Tx, jobID, runStartedAt st
 		finalStatus = RunStatusRunning
 	case pendingCount > 0:
 		finalStatus = RunStatusPending
+	case queuedCount > 0:
+		finalStatus = RunStatusQueued
 	case failedCount > 0:
 		finalStatus = RunStatusFailed
+	case deniedCount > 0:
+		finalStatus = RunStatusDenied
 	case canceledCount > 0:
 		finalStatus = RunStatusCanceled
 	}
@@ -680,7 +780,7 @@ func (s *Store) ListRuns(query RunQuery) ([]JobRun, error) {
 		args = append(args, query.StartedBefore.UTC().Format(time.RFC3339Nano))
 	}
 
-	stmt := `SELECT id, job_id, probe_id, request_id, execution_id, attempt, max_attempts, retry_scheduled_at, started_at, ended_at, status, exit_code, output FROM job_runs`
+	stmt := `SELECT id, job_id, probe_id, request_id, execution_id, attempt, max_attempts, retry_scheduled_at, started_at, ended_at, status, admission_decision, admission_reason, admission_rationale, exit_code, output FROM job_runs`
 	if len(clauses) > 0 {
 		stmt += ` WHERE ` + strings.Join(clauses, " AND ")
 	}
@@ -788,11 +888,14 @@ func scanJob(s scanner) (*Job, error) {
 
 func scanRun(s scanner) (*JobRun, error) {
 	var (
-		run              JobRun
-		startedAt        string
-		endedAt          sql.NullString
-		retryScheduledAt sql.NullString
-		exitCode         sql.NullInt64
+		run               JobRun
+		startedAt         string
+		endedAt           sql.NullString
+		retryScheduledAt  sql.NullString
+		admissionDecision sql.NullString
+		admissionReason   sql.NullString
+		admissionRationale sql.NullString
+		exitCode          sql.NullInt64
 	)
 
 	if err := s.Scan(
@@ -807,6 +910,9 @@ func scanRun(s scanner) (*JobRun, error) {
 		&startedAt,
 		&endedAt,
 		&run.Status,
+		&admissionDecision,
+		&admissionReason,
+		&admissionRationale,
 		&exitCode,
 		&run.Output,
 	); err != nil {
@@ -824,6 +930,18 @@ func scanRun(s scanner) (*JobRun, error) {
 		ts, err := time.Parse(time.RFC3339Nano, endedAt.String)
 		if err == nil {
 			run.EndedAt = &ts
+		}
+	}
+	if admissionDecision.Valid {
+		run.AdmissionDecision = strings.TrimSpace(admissionDecision.String)
+	}
+	if admissionReason.Valid {
+		run.AdmissionReason = strings.TrimSpace(admissionReason.String)
+	}
+	if admissionRationale.Valid {
+		raw := strings.TrimSpace(admissionRationale.String)
+		if raw != "" {
+			run.AdmissionRationale = json.RawMessage(raw)
 		}
 	}
 	if exitCode.Valid {
@@ -914,6 +1032,60 @@ func nullableRetryDuration(policy *RetryPolicy, get func(*RetryPolicy) string) s
 	return sql.NullString{String: value, Valid: true}
 }
 
+func mustMarshalAdmissionRationale(rationale any) (json.RawMessage, error) {
+	if rationale == nil {
+		return nil, nil
+	}
+	switch typed := rationale.(type) {
+	case json.RawMessage:
+		trimmed := strings.TrimSpace(string(typed))
+		if trimmed == "" {
+			return nil, nil
+		}
+		return json.RawMessage(trimmed), nil
+	case []byte:
+		trimmed := strings.TrimSpace(string(typed))
+		if trimmed == "" {
+			return nil, nil
+		}
+		return json.RawMessage(trimmed), nil
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return nil, nil
+		}
+		if json.Valid([]byte(trimmed)) {
+			return json.RawMessage(trimmed), nil
+		}
+		encoded, err := json.Marshal(trimmed)
+		if err != nil {
+			return nil, fmt.Errorf("marshal admission rationale: %w", err)
+		}
+		return json.RawMessage(encoded), nil
+	default:
+		encoded, err := json.Marshal(rationale)
+		if err != nil {
+			return nil, fmt.Errorf("marshal admission rationale: %w", err)
+		}
+		return json.RawMessage(encoded), nil
+	}
+}
+
+func serializeAdmissionRationale(rationale json.RawMessage) string {
+	trimmed := strings.TrimSpace(string(rationale))
+	if trimmed == "" {
+		return ""
+	}
+	if !json.Valid([]byte(trimmed)) {
+		encoded, err := json.Marshal(trimmed)
+		if err != nil {
+			return ""
+		}
+		return string(encoded)
+	}
+	return trimmed
+}
+
 func truncateOutput(output string) string {
 	if len(output) <= maxRunOutputBytes {
 		return output
@@ -926,7 +1098,7 @@ func truncateOutput(output string) string {
 
 func isKnownRunStatus(status string) bool {
 	switch strings.TrimSpace(status) {
-	case RunStatusPending, RunStatusRunning, RunStatusSuccess, RunStatusFailed, RunStatusCanceled:
+	case RunStatusQueued, RunStatusPending, RunStatusRunning, RunStatusSuccess, RunStatusFailed, RunStatusCanceled, RunStatusDenied:
 		return true
 	default:
 		return false

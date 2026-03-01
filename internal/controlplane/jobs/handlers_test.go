@@ -93,6 +93,65 @@ func TestHandleListRunsSupportsFiltersAndSummary(t *testing.T) {
 	}
 }
 
+func TestHandleListRunsSupportsQueuedAndDeniedStatuses(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	defer store.Close()
+
+	job, err := store.CreateJob(Job{
+		Name:     "admission-statuses",
+		Command:  "echo ok",
+		Schedule: "5m",
+		Target:   Target{Kind: TargetKindProbe, Value: "probe-1"},
+		Enabled:  true,
+	})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	queuedAt := time.Now().UTC().Add(-time.Minute)
+	_, err = store.RecordRunStart(JobRun{JobID: job.ID, ProbeID: "probe-1", RequestID: "queued", StartedAt: queuedAt, Status: RunStatusQueued, AdmissionDecision: string(AdmissionOutcomeQueue), AdmissionReason: "limited"})
+	if err != nil {
+		t.Fatalf("record queued run: %v", err)
+	}
+
+	endedAt := time.Now().UTC().Add(-30 * time.Second)
+	_, err = store.RecordRunStart(JobRun{JobID: job.ID, ProbeID: "probe-1", RequestID: "denied", StartedAt: endedAt, EndedAt: &endedAt, Status: RunStatusDenied, AdmissionDecision: string(AdmissionOutcomeDeny), AdmissionReason: "degraded", Output: "degraded"})
+	if err != nil {
+		t.Fatalf("record denied run: %v", err)
+	}
+
+	h := NewHandler(store, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/"+job.ID+"/runs?status=denied", nil)
+	req.SetPathValue("id", job.ID)
+	rr := httptest.NewRecorder()
+	h.HandleListRuns(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Runs        []JobRun `json:"runs"`
+		Count       int      `json:"count"`
+		DeniedCount int      `json:"denied_count"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload.Count != 1 || len(payload.Runs) != 1 {
+		t.Fatalf("expected one denied run, got count=%d len=%d", payload.Count, len(payload.Runs))
+	}
+	if payload.Runs[0].Status != RunStatusDenied {
+		t.Fatalf("expected denied run, got %s", payload.Runs[0].Status)
+	}
+	if payload.DeniedCount != 1 {
+		t.Fatalf("expected denied_count=1, got %d", payload.DeniedCount)
+	}
+}
+
 func TestHandleListAllRunsSupportsJobFilter(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "jobs.db"))
 	if err != nil {
@@ -451,7 +510,7 @@ func TestHandleRetryRunRejectsNonFailedRun(t *testing.T) {
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("expected 409 for retry on successful run, got %d body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "only failed or canceled") {
+	if !strings.Contains(rr.Body.String(), "only failed, canceled, or denied") {
 		t.Fatalf("unexpected body: %s", rr.Body.String())
 	}
 }

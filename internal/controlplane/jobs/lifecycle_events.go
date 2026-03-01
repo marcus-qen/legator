@@ -13,26 +13,34 @@ const (
 	EventJobCreated          LifecycleEventType = "job.created"
 	EventJobUpdated          LifecycleEventType = "job.updated"
 	EventJobDeleted          LifecycleEventType = "job.deleted"
-	EventJobRunQueued        LifecycleEventType = "job.run.queued"
-	EventJobRunStarted       LifecycleEventType = "job.run.started"
-	EventJobRunRetryScheduled LifecycleEventType = "job.run.retry_scheduled"
-	EventJobRunSucceeded     LifecycleEventType = "job.run.succeeded"
-	EventJobRunFailed        LifecycleEventType = "job.run.failed"
-	EventJobRunCanceled      LifecycleEventType = "job.run.canceled"
+	EventJobRunAdmissionAllowed LifecycleEventType = "job.run.admission_allowed"
+	EventJobRunAdmissionQueued  LifecycleEventType = "job.run.admission_queued"
+	EventJobRunAdmissionDenied  LifecycleEventType = "job.run.admission_denied"
+	EventJobRunQueued           LifecycleEventType = "job.run.queued"
+	EventJobRunStarted          LifecycleEventType = "job.run.started"
+	EventJobRunRetryScheduled   LifecycleEventType = "job.run.retry_scheduled"
+	EventJobRunSucceeded        LifecycleEventType = "job.run.succeeded"
+	EventJobRunFailed           LifecycleEventType = "job.run.failed"
+	EventJobRunCanceled         LifecycleEventType = "job.run.canceled"
+	EventJobRunDenied           LifecycleEventType = "job.run.denied"
 )
 
 // LifecycleEvent carries job/run correlation metadata for audit + SSE consumers.
 type LifecycleEvent struct {
-	Type        LifecycleEventType `json:"type"`
-	Timestamp   time.Time          `json:"timestamp"`
-	Actor       string             `json:"actor,omitempty"`
-	JobID       string             `json:"job_id,omitempty"`
-	RunID       string             `json:"run_id,omitempty"`
-	ExecutionID string             `json:"execution_id,omitempty"`
-	ProbeID     string             `json:"probe_id,omitempty"`
-	Attempt     int                `json:"attempt,omitempty"`
-	MaxAttempts int                `json:"max_attempts,omitempty"`
-	RequestID   string             `json:"request_id,omitempty"`
+	Type               LifecycleEventType `json:"type"`
+	Timestamp          time.Time          `json:"timestamp"`
+	Actor              string             `json:"actor,omitempty"`
+	JobID              string             `json:"job_id,omitempty"`
+	RunID              string             `json:"run_id,omitempty"`
+	ExecutionID        string             `json:"execution_id,omitempty"`
+	ProbeID            string             `json:"probe_id,omitempty"`
+	Attempt            int                `json:"attempt,omitempty"`
+	MaxAttempts        int                `json:"max_attempts,omitempty"`
+	RequestID          string             `json:"request_id,omitempty"`
+	AdmissionDecision  string             `json:"admission_decision,omitempty"`
+	AdmissionReason    string             `json:"admission_reason,omitempty"`
+	AdmissionRationale any                `json:"admission_rationale,omitempty"`
+	DeferredUntil      *time.Time         `json:"deferred_until,omitempty"`
 }
 
 // CorrelationMetadata exposes stable correlation keys for audit detail/event payloads.
@@ -59,6 +67,18 @@ func (e LifecycleEvent) CorrelationMetadata() map[string]any {
 	if id := strings.TrimSpace(e.RequestID); id != "" {
 		meta["request_id"] = id
 	}
+	if decision := strings.TrimSpace(e.AdmissionDecision); decision != "" {
+		meta["admission_decision"] = decision
+	}
+	if reason := strings.TrimSpace(e.AdmissionReason); reason != "" {
+		meta["admission_reason"] = reason
+	}
+	if e.AdmissionRationale != nil {
+		meta["admission_rationale"] = e.AdmissionRationale
+	}
+	if e.DeferredUntil != nil && !e.DeferredUntil.IsZero() {
+		meta["deferred_until"] = e.DeferredUntil.UTC().Format(time.RFC3339Nano)
+	}
 	return meta
 }
 
@@ -76,6 +96,12 @@ func (e LifecycleEvent) Summary() string {
 		return fmt.Sprintf("Job updated: %s", target)
 	case EventJobDeleted:
 		return fmt.Sprintf("Job deleted: %s", target)
+	case EventJobRunAdmissionAllowed:
+		return fmt.Sprintf("Job run admission allowed: %s", target)
+	case EventJobRunAdmissionQueued:
+		return fmt.Sprintf("Job run admission queued: %s", target)
+	case EventJobRunAdmissionDenied:
+		return fmt.Sprintf("Job run admission denied: %s", target)
 	case EventJobRunQueued:
 		return fmt.Sprintf("Job run queued: %s", target)
 	case EventJobRunStarted:
@@ -88,6 +114,8 @@ func (e LifecycleEvent) Summary() string {
 		return fmt.Sprintf("Job run failed: %s", target)
 	case EventJobRunCanceled:
 		return fmt.Sprintf("Job run canceled: %s", target)
+	case EventJobRunDenied:
+		return fmt.Sprintf("Job run denied: %s", target)
 	default:
 		return fmt.Sprintf("Job event: %s", target)
 	}
@@ -101,6 +129,12 @@ func (e LifecycleEvent) normalize() LifecycleEvent {
 	e.ExecutionID = strings.TrimSpace(e.ExecutionID)
 	e.ProbeID = strings.TrimSpace(e.ProbeID)
 	e.RequestID = strings.TrimSpace(e.RequestID)
+	e.AdmissionDecision = strings.TrimSpace(e.AdmissionDecision)
+	e.AdmissionReason = strings.TrimSpace(e.AdmissionReason)
+	if e.DeferredUntil != nil {
+		ts := e.DeferredUntil.UTC()
+		e.DeferredUntil = &ts
+	}
 	if e.Timestamp.IsZero() {
 		e.Timestamp = time.Now().UTC()
 	}

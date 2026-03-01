@@ -502,6 +502,7 @@ func (s *Server) initJobs() {
 		s.cmdTracker,
 		s.logger.Named("jobs"),
 		jobs.WithDefaultRetryPolicy(retryPolicy),
+		jobs.WithAdmissionEvaluator(jobs.JobAdmissionEvaluatorFunc(s.evaluateScheduledJobAdmission)),
 		jobs.WithLifecycleObserver(jobs.LifecycleObserverFunc(s.handleJobLifecycleEvent)),
 	)
 	s.jobsHandler = jobs.NewHandler(
@@ -1114,6 +1115,29 @@ func (s *Server) metricsAuditCounter() metrics.AuditCounter {
 		return s.auditStore
 	}
 	return s.auditLog
+}
+
+func (s *Server) evaluateScheduledJobAdmission(ctx context.Context, job jobs.Job, probeID string) jobs.JobAdmissionDecision {
+	_ = probeID
+	if s == nil || s.approvalCore == nil {
+		return jobs.JobAdmissionDecision{Outcome: jobs.AdmissionOutcomeAllow}
+	}
+
+	payload := &protocol.CommandPayload{
+		Command: "/bin/sh",
+		Args:    []string{"-lc", strings.TrimSpace(job.Command)},
+		Level:   protocol.CapObserve,
+	}
+	decision := s.approvalCore.EvaluateCommandPolicy(ctx, payload, protocol.CapObserve)
+	result := jobs.JobAdmissionDecision{
+		Outcome:   jobs.JobAdmissionOutcome(decision.Outcome),
+		Reason:    strings.TrimSpace(decision.Rationale.Summary),
+		Rationale: decision.Rationale,
+	}
+	if result.Outcome == "" {
+		result.Outcome = jobs.AdmissionOutcomeAllow
+	}
+	return result
 }
 
 func (s *Server) handleJobLifecycleEvent(event jobs.LifecycleEvent) {

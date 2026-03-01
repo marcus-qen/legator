@@ -47,7 +47,7 @@ func (s *MCPServer) registerResources() {
 	s.server.AddResource(&mcp.Resource{
 		URI:         resourceJobsActiveRuns,
 		Name:        "Jobs Active Runs",
-		Description: "Pending/running job runs across all jobs",
+		Description: "Queued/pending/running job runs across all jobs",
 		MIMEType:    "application/json",
 	}, s.handleJobsActiveRunsResource)
 
