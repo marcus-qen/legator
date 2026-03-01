@@ -107,8 +107,9 @@ type Server struct {
 	webhookStore    *webhook.Store
 
 	// Alerts
-	alertEngine *alerts.Engine
-	alertStore  *alerts.Store
+	alertEngine  *alerts.Engine
+	alertStore   *alerts.Store
+	routingStore *alerts.RoutingStore
 
 	// Scheduled jobs
 	jobsStore     *jobs.Store
@@ -381,6 +382,9 @@ func (s *Server) Close() {
 	if s.alertStore != nil {
 		s.alertStore.Close()
 	}
+	if s.routingStore != nil {
+		s.routingStore.Close()
+	}
 	if s.jobsStore != nil {
 		s.jobsStore.Close()
 	}
@@ -509,6 +513,18 @@ func (s *Server) initAlerts() {
 
 	s.alertStore = store
 	s.alertEngine = alerts.NewEngine(store, s.fleetMgr, s.webhookNotifier, s.eventBus, s.logger.Named("alerts"))
+
+	routingDBPath := filepath.Join(s.cfg.DataDir, "routing.db")
+	rs, err2 := alerts.NewRoutingStore(routingDBPath)
+	if err2 != nil {
+		s.logger.Warn("cannot open routing database, alert routing disabled",
+			zap.String("path", routingDBPath), zap.Error(err2))
+	} else {
+		s.routingStore = rs
+		s.alertEngine.SetRoutingStore(rs)
+		s.logger.Info("alert routing store initialized", zap.String("path", routingDBPath))
+	}
+
 	s.alertEngine.Start()
 	s.logger.Info("alerts engine initialized", zap.String("path", alertsDBPath))
 }

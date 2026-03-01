@@ -20,6 +20,11 @@ type AlertCondition struct {
 	Threshold float64  `json:"threshold"` // e.g., 90.0 for 90% disk
 	Duration  string   `json:"duration"`  // e.g., "2m" — condition must persist
 	Tags      []string `json:"tags,omitempty"`
+	// Severity is an optional routing hint consumed by alert routing policies.
+	// Valid values: "critical", "warning", "info". Omitting it leaves routing
+	// to condition-type and tag matchers. Backward-compatible: old rules without
+	// this field deserialise with Severity == "".
+	Severity string `json:"severity,omitempty"`
 }
 
 // AlertAction defines what to do when a rule fires.

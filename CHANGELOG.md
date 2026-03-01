@@ -1,6 +1,53 @@
 ## [Unreleased]
 
 ### Added
+- **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
+  - Added RoutingPolicy and EscalationPolicy policy-as-code types (internal/controlplane/alerts/routing.go).
+    - RoutingPolicy: owner label/contact, runbook URL, escalation reference, AND-chained matchers on
+      severity, condition_type, rule_name, and tag fields; priority-ordered.
+    - EscalationPolicy: ordered steps with target, target type, delay, and per-step runbook URL.
+    - IsDefault flag on routing policies acts as fallback when no matchers match.
+  - Added RoutingStore (routing_store.go): SQLite-backed CRUD for routing and escalation policies.
+  - Added Resolve(RoutingContext) RoutingOutcome for deterministic policy matching with full explainability:
+    - explain.matched_by: which matcher(s) triggered selection.
+    - explain.fallback_used: true when default policy was used.
+    - explain.reason: human-readable rationale.
+  - Wired routing resolution into Engine.deliver() (additive): each event on the bus and delivered to
+    webhooks is now a DeliveredAlertEvent{AlertEvent, Routing *RoutingOutcome}. Existing consumers
+    reading only AlertEvent fields are unaffected.
+  - Added optional severity field to AlertCondition (JSON-serialised, backward-compatible; old rules
+    without it default to empty string).
+  - Added new HTTP API routes [compat:additive]:
+    - GET/POST /api/v1/alerts/routing/policies — list/create routing policies (fleet:read / fleet:write)
+    - GET/PUT/DELETE /api/v1/alerts/routing/policies/{id} — get/update/delete
+    - POST /api/v1/alerts/routing/resolve — resolve routing for a RoutingContext; returns RoutingOutcome
+      with explain fields (owner, runbook, escalation steps, why selected, fallback flag)
+    - GET/POST /api/v1/alerts/escalation/policies — list/create escalation policies
+    - GET/PUT/DELETE /api/v1/alerts/escalation/policies/{id} — get/update/delete
+  - Added 29 new tests covering: matcher logic, CRUD, priority precedence, fallback routing,
+    specific-beats-default ordering, escalation step resolution, explainability fields, and
+    HTTP handler permission gates.
+  - Updated docs/contracts/api-v1-stable-routes.txt baseline with new routes.
+- **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
+  - Added  and  policy-as-code types ().
+    - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
+    - : ordered steps with target, target type, delay, and per-step runbook URL.
+    -  flag on routing policies as the fallback policy when no matchers match.
+  - Added  (): SQLite-backed CRUD for routing and escalation policies.
+  - Added  for deterministic policy matching with full explainability:
+    - : which matcher(s) triggered selection.
+    - :  when default policy was used.
+    - : human-readable rationale.
+  - Wired routing resolution into  (additive): each event on the bus and delivered to webhooks is now a . Existing consumers reading only  fields are unaffected.
+  - Added optional  field to  (JSON-serialised, backward-compatible; old rules without it default to empty string).
+  - Added new HTTP API routes [compat:additive]:
+    -  — list / create routing policies ( / )
+    -  — get / update / delete
+    -  — resolve routing for a given , returns  with explain fields
+    -  — list / create escalation policies
+    -  — get / update / delete
+  - Added 29 new tests covering: matcher logic, CRUD, priority precedence, fallback routing, default-vs-specific ordering, escalation step resolution, explainability fields, and HTTP handler permission gates.
+  - Updated  baseline with new routes.
 - **Stage 3.9.1 Reliability: SLO definitions + service health scorecards**
   - Added additive reliability scorecard model (`internal/controlplane/reliability`) for core surfaces:
     - control-plane availability / p95 latency / error-rate
@@ -245,6 +292,26 @@
 ## [v1.0.0-alpha.17] — 2026-02-28
 
 ### Added
+- **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
+  - Added  and  policy-as-code types ().
+    - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
+    - : ordered steps with target, target type, delay, and per-step runbook URL.
+    -  flag on routing policies as the fallback policy when no matchers match.
+  - Added  (): SQLite-backed CRUD for routing and escalation policies.
+  - Added  for deterministic policy matching with full explainability:
+    - : which matcher(s) triggered selection.
+    - :  when default policy was used.
+    - : human-readable rationale.
+  - Wired routing resolution into  (additive): each event on the bus and delivered to webhooks is now a . Existing consumers reading only  fields are unaffected.
+  - Added optional  field to  (JSON-serialised, backward-compatible; old rules without it default to empty string).
+  - Added new HTTP API routes [compat:additive]:
+    -  — list / create routing policies ( / )
+    -  — get / update / delete
+    -  — resolve routing for a given , returns  with explain fields
+    -  — list / create escalation policies
+    -  — get / update / delete
+  - Added 29 new tests covering: matcher logic, CRUD, priority precedence, fallback routing, default-vs-specific ordering, escalation step resolution, explainability fields, and HTTP handler permission gates.
+  - Updated  baseline with new routes.
 - **Scheduled probe jobs (cron engine)**
   - Added recurring job execution with probe/tag/all targeting.
   - Added jobs persistence (`jobs.db`) and scheduler wiring in control plane startup.
@@ -268,6 +335,26 @@
 ## [v1.0.0-alpha.16] — 2026-02-28
 
 ### Added
+- **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
+  - Added  and  policy-as-code types ().
+    - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
+    - : ordered steps with target, target type, delay, and per-step runbook URL.
+    -  flag on routing policies as the fallback policy when no matchers match.
+  - Added  (): SQLite-backed CRUD for routing and escalation policies.
+  - Added  for deterministic policy matching with full explainability:
+    - : which matcher(s) triggered selection.
+    - :  when default policy was used.
+    - : human-readable rationale.
+  - Wired routing resolution into  (additive): each event on the bus and delivered to webhooks is now a . Existing consumers reading only  fields are unaffected.
+  - Added optional  field to  (JSON-serialised, backward-compatible; old rules without it default to empty string).
+  - Added new HTTP API routes [compat:additive]:
+    -  — list / create routing policies ( / )
+    -  — get / update / delete
+    -  — resolve routing for a given , returns  with explain fields
+    -  — list / create escalation policies
+    -  — get / update / delete
+  - Added 29 new tests covering: matcher logic, CRUD, priority precedence, fallback routing, default-vs-specific ordering, escalation step resolution, explainability fields, and HTTP handler permission gates.
+  - Updated  baseline with new routes.
 - **Persistent token storage** — Registration tokens now survive control plane restarts. SQLite-backed `tokens.db` with in-memory cache. Fixes DaemonSet CrashLoopBackOff caused by lost tokens on restart.
 - **Probe re-registration deduplication** — When a probe registers with a hostname that already exists, the existing probe ID is reused and credentials rotated. Eliminates duplicate probe entries after DaemonSet rolling updates.
 - `FindByHostname()` on the Fleet interface for hostname-based probe lookup.
@@ -428,6 +515,26 @@
   - Refactored HTTP command dispatch and MCP run-command renderers into pure transport wiring over codec outputs, with strict legacy-vs-codec parity tests to preserve status, payload shape, and error wording semantics.
 
 ### Added
+- **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
+  - Added  and  policy-as-code types ().
+    - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
+    - : ordered steps with target, target type, delay, and per-step runbook URL.
+    -  flag on routing policies as the fallback policy when no matchers match.
+  - Added  (): SQLite-backed CRUD for routing and escalation policies.
+  - Added  for deterministic policy matching with full explainability:
+    - : which matcher(s) triggered selection.
+    - :  when default policy was used.
+    - : human-readable rationale.
+  - Wired routing resolution into  (additive): each event on the bus and delivered to webhooks is now a . Existing consumers reading only  fields are unaffected.
+  - Added optional  field to  (JSON-serialised, backward-compatible; old rules without it default to empty string).
+  - Added new HTTP API routes [compat:additive]:
+    -  — list / create routing policies ( / )
+    -  — get / update / delete
+    -  — resolve routing for a given , returns  with explain fields
+    -  — list / create escalation policies
+    -  — get / update / delete
+  - Added 29 new tests covering: matcher logic, CRUD, priority precedence, fallback routing, default-vs-specific ordering, escalation step resolution, explainability fields, and HTTP handler permission gates.
+  - Updated  baseline with new routes.
 - Parity tests for the extracted core service and server policy-apply paths (not found + offline apply-local behavior).
 - **Kernel split S3 (dispatch contract + policy envelope)**
   - Added a unified core command-dispatch result envelope with shared API/MCP error mapping helpers.
@@ -437,6 +544,26 @@
 ## [v1.0.0-alpha.14] — 2026-02-27
 
 ### Added
+- **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
+  - Added  and  policy-as-code types ().
+    - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
+    - : ordered steps with target, target type, delay, and per-step runbook URL.
+    -  flag on routing policies as the fallback policy when no matchers match.
+  - Added  (): SQLite-backed CRUD for routing and escalation policies.
+  - Added  for deterministic policy matching with full explainability:
+    - : which matcher(s) triggered selection.
+    - :  when default policy was used.
+    - : human-readable rationale.
+  - Wired routing resolution into  (additive): each event on the bus and delivered to webhooks is now a . Existing consumers reading only  fields are unaffected.
+  - Added optional  field to  (JSON-serialised, backward-compatible; old rules without it default to empty string).
+  - Added new HTTP API routes [compat:additive]:
+    -  — list / create routing policies ( / )
+    -  — get / update / delete
+    -  — resolve routing for a given , returns  with explain fields
+    -  — list / create escalation policies
+    -  — get / update / delete
+  - Added 29 new tests covering: matcher logic, CRUD, priority precedence, fallback routing, default-vs-specific ordering, escalation step resolution, explainability fields, and HTTP handler permission gates.
+  - Updated  baseline with new routes.
 - **Network Device Probes MVP (phase 1)**
   - SQLite-backed `network_devices` target store (id, name, host, port, vendor, username, auth mode, tags, timestamps)
   - Auth-protected API endpoints:
@@ -467,6 +594,26 @@
   - Write actions on Approvals/Alerts/Model Dock/Cloud Connectors/Discovery are read-only or disabled when `fleet:write` / `approval:write` is missing
 
 ### Added
+- **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
+  - Added  and  policy-as-code types ().
+    - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
+    - : ordered steps with target, target type, delay, and per-step runbook URL.
+    -  flag on routing policies as the fallback policy when no matchers match.
+  - Added  (): SQLite-backed CRUD for routing and escalation policies.
+  - Added  for deterministic policy matching with full explainability:
+    - : which matcher(s) triggered selection.
+    - :  when default policy was used.
+    - : human-readable rationale.
+  - Wired routing resolution into  (additive): each event on the bus and delivered to webhooks is now a . Existing consumers reading only  fields are unaffected.
+  - Added optional  field to  (JSON-serialised, backward-compatible; old rules without it default to empty string).
+  - Added new HTTP API routes [compat:additive]:
+    -  — list / create routing policies ( / )
+    -  — get / update / delete
+    -  — resolve routing for a given , returns  with explain fields
+    -  — list / create escalation policies
+    -  — get / update / delete
+  - Added 29 new tests covering: matcher logic, CRUD, priority precedence, fallback routing, default-vs-specific ordering, escalation step resolution, explainability fields, and HTTP handler permission gates.
+  - Updated  baseline with new routes.
 - **Authorization denial audit events**
   - New `auth.authorization_denied` audit event recorded for permission denials
   - Captures method/path/required permission/reason without request payload leakage
@@ -475,6 +622,26 @@
 ## [v1.0.0-alpha.12] — 2026-02-27
 
 ### Added
+- **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
+  - Added  and  policy-as-code types ().
+    - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
+    - : ordered steps with target, target type, delay, and per-step runbook URL.
+    -  flag on routing policies as the fallback policy when no matchers match.
+  - Added  (): SQLite-backed CRUD for routing and escalation policies.
+  - Added  for deterministic policy matching with full explainability:
+    - : which matcher(s) triggered selection.
+    - :  when default policy was used.
+    - : human-readable rationale.
+  - Wired routing resolution into  (additive): each event on the bus and delivered to webhooks is now a . Existing consumers reading only  fields are unaffected.
+  - Added optional  field to  (JSON-serialised, backward-compatible; old rules without it default to empty string).
+  - Added new HTTP API routes [compat:additive]:
+    -  — list / create routing policies ( / )
+    -  — get / update / delete
+    -  — resolve routing for a given , returns  with explain fields
+    -  — list / create escalation policies
+    -  — get / update / delete
+  - Added 29 new tests covering: matcher logic, CRUD, priority precedence, fallback routing, default-vs-specific ordering, escalation step resolution, explainability fields, and HTTP handler permission gates.
+  - Updated  baseline with new routes.
 - **MCP tool surface** via official Go MCP SDK (`github.com/modelcontextprotocol/go-sdk v1.3.1`)
   - SSE transport endpoint at `GET /mcp`
   - 7 tools: `legator_list_probes`, `legator_probe_info`, `legator_run_command`, `legator_get_inventory`, `legator_fleet_query`, `legator_search_audit`, `legator_probe_health`
@@ -493,6 +660,26 @@
 ## [v1.0.0-alpha.11] — 2026-02-27
 
 ### Added
+- **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
+  - Added  and  policy-as-code types ().
+    - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
+    - : ordered steps with target, target type, delay, and per-step runbook URL.
+    -  flag on routing policies as the fallback policy when no matchers match.
+  - Added  (): SQLite-backed CRUD for routing and escalation policies.
+  - Added  for deterministic policy matching with full explainability:
+    - : which matcher(s) triggered selection.
+    - :  when default policy was used.
+    - : human-readable rationale.
+  - Wired routing resolution into  (additive): each event on the bus and delivered to webhooks is now a . Existing consumers reading only  fields are unaffected.
+  - Added optional  field to  (JSON-serialised, backward-compatible; old rules without it default to empty string).
+  - Added new HTTP API routes [compat:additive]:
+    -  — list / create routing policies ( / )
+    -  — get / update / delete
+    -  — resolve routing for a given , returns  with explain fields
+    -  — list / create escalation policies
+    -  — get / update / delete
+  - Added 29 new tests covering: matcher logic, CRUD, priority precedence, fallback routing, default-vs-specific ordering, escalation step resolution, explainability fields, and HTTP handler permission gates.
+  - Updated  baseline with new routes.
 - **Audit log JSONL export** — `GET /api/v1/audit/export` streams full audit log as newline-delimited JSON with filter support (`probe_id`, `type`, `since`, `until`)
 - **Audit log CSV export** — `GET /api/v1/audit/export/csv` streams audit events as CSV with 6 key columns
 - **Cursor pagination** on `GET /api/v1/audit` — `limit`, `cursor` parameters, response includes `next_cursor` and `has_more`
@@ -512,6 +699,26 @@
 ## [v1.0.0-alpha.10] — 2026-02-27
 
 ### Added
+- **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
+  - Added  and  policy-as-code types ().
+    - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
+    - : ordered steps with target, target type, delay, and per-step runbook URL.
+    -  flag on routing policies as the fallback policy when no matchers match.
+  - Added  (): SQLite-backed CRUD for routing and escalation policies.
+  - Added  for deterministic policy matching with full explainability:
+    - : which matcher(s) triggered selection.
+    - :  when default policy was used.
+    - : human-readable rationale.
+  - Wired routing resolution into  (additive): each event on the bus and delivered to webhooks is now a . Existing consumers reading only  fields are unaffected.
+  - Added optional  field to  (JSON-serialised, backward-compatible; old rules without it default to empty string).
+  - Added new HTTP API routes [compat:additive]:
+    -  — list / create routing policies ( / )
+    -  — get / update / delete
+    -  — resolve routing for a given , returns  with explain fields
+    -  — list / create escalation policies
+    -  — get / update / delete
+  - Added 29 new tests covering: matcher logic, CRUD, priority precedence, fallback routing, default-vs-specific ordering, escalation step resolution, explainability fields, and HTTP handler permission gates.
+  - Updated  baseline with new routes.
 - **K8s DaemonSet probe deployment** — container image, DaemonSet manifests, multi-use registration tokens, auto-init from environment variables, K8s inventory enrichment (cluster, node, namespace, pod metadata)
 - **Windows probe MVP** — cross-compilation, Windows service management, platform-specific inventory, command execution
 - **BYOK model dock** — user-provided API key profiles per vendor, runtime model switching, usage tracking UI
@@ -544,6 +751,26 @@ All notable changes to Legator are documented here.
 ## [v1.0.0-alpha.6] — 2026-02-26
 
 ### Added
+- **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
+  - Added  and  policy-as-code types ().
+    - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
+    - : ordered steps with target, target type, delay, and per-step runbook URL.
+    -  flag on routing policies as the fallback policy when no matchers match.
+  - Added  (): SQLite-backed CRUD for routing and escalation policies.
+  - Added  for deterministic policy matching with full explainability:
+    - : which matcher(s) triggered selection.
+    - :  when default policy was used.
+    - : human-readable rationale.
+  - Wired routing resolution into  (additive): each event on the bus and delivered to webhooks is now a . Existing consumers reading only  fields are unaffected.
+  - Added optional  field to  (JSON-serialised, backward-compatible; old rules without it default to empty string).
+  - Added new HTTP API routes [compat:additive]:
+    -  — list / create routing policies ( / )
+    -  — get / update / delete
+    -  — resolve routing for a given , returns  with explain fields
+    -  — list / create escalation policies
+    -  — get / update / delete
+  - Added 29 new tests covering: matcher logic, CRUD, priority precedence, fallback routing, default-vs-specific ordering, escalation step resolution, explainability fields, and HTTP handler permission gates.
+  - Updated  baseline with new routes.
 - OIDC authentication (optional SSO via Keycloak, Auth0, Okta, Google, etc.)
 - Consistent JSON error responses with error codes across all API endpoints
 - Graceful LLM-down handling (user-friendly message instead of 500)
@@ -567,6 +794,26 @@ All notable changes to Legator are documented here.
 ## [v1.0.0-alpha.5] — 2026-02-26
 
 ### Added
+- **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
+  - Added  and  policy-as-code types ().
+    - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
+    - : ordered steps with target, target type, delay, and per-step runbook URL.
+    -  flag on routing policies as the fallback policy when no matchers match.
+  - Added  (): SQLite-backed CRUD for routing and escalation policies.
+  - Added  for deterministic policy matching with full explainability:
+    - : which matcher(s) triggered selection.
+    - :  when default policy was used.
+    - : human-readable rationale.
+  - Wired routing resolution into  (additive): each event on the bus and delivered to webhooks is now a . Existing consumers reading only  fields are unaffected.
+  - Added optional  field to  (JSON-serialised, backward-compatible; old rules without it default to empty string).
+  - Added new HTTP API routes [compat:additive]:
+    -  — list / create routing policies ( / )
+    -  — get / update / delete
+    -  — resolve routing for a given , returns  with explain fields
+    -  — list / create escalation policies
+    -  — get / update / delete
+  - Added 29 new tests covering: matcher logic, CRUD, priority precedence, fallback routing, default-vs-specific ordering, escalation step resolution, explainability fields, and HTTP handler permission gates.
+  - Updated  baseline with new routes.
 - Token lifecycle hardening with list tokens API
 - Command classifier with defence-in-depth policy enforcement
 - Install script hardening with SHA256 verification
@@ -577,6 +824,26 @@ All notable changes to Legator are documented here.
 ## [v1.0.0-alpha.4] — 2026-02-26
 
 ### Added
+- **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
+  - Added  and  policy-as-code types ().
+    - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
+    - : ordered steps with target, target type, delay, and per-step runbook URL.
+    -  flag on routing policies as the fallback policy when no matchers match.
+  - Added  (): SQLite-backed CRUD for routing and escalation policies.
+  - Added  for deterministic policy matching with full explainability:
+    - : which matcher(s) triggered selection.
+    - :  when default policy was used.
+    - : human-readable rationale.
+  - Wired routing resolution into  (additive): each event on the bus and delivered to webhooks is now a . Existing consumers reading only  fields are unaffected.
+  - Added optional  field to  (JSON-serialised, backward-compatible; old rules without it default to empty string).
+  - Added new HTTP API routes [compat:additive]:
+    -  — list / create routing policies ( / )
+    -  — get / update / delete
+    -  — resolve routing for a given , returns  with explain fields
+    -  — list / create escalation policies
+    -  — get / update / delete
+  - Added 29 new tests covering: matcher logic, CRUD, priority precedence, fallback routing, default-vs-specific ordering, escalation step resolution, explainability fields, and HTTP handler permission gates.
+  - Updated  baseline with new routes.
 - Multi-user RBAC (admin, operator, viewer roles)
 - Login UI with session-based authentication
 - User management API (create, list, delete)
@@ -586,6 +853,26 @@ All notable changes to Legator are documented here.
 ## [v1.0.0-alpha.3] — 2026-02-26
 
 ### Added
+- **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
+  - Added  and  policy-as-code types ().
+    - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
+    - : ordered steps with target, target type, delay, and per-step runbook URL.
+    -  flag on routing policies as the fallback policy when no matchers match.
+  - Added  (): SQLite-backed CRUD for routing and escalation policies.
+  - Added  for deterministic policy matching with full explainability:
+    - : which matcher(s) triggered selection.
+    - :  when default policy was used.
+    - : human-readable rationale.
+  - Wired routing resolution into  (additive): each event on the bus and delivered to webhooks is now a . Existing consumers reading only  fields are unaffected.
+  - Added optional  field to  (JSON-serialised, backward-compatible; old rules without it default to empty string).
+  - Added new HTTP API routes [compat:additive]:
+    -  — list / create routing policies ( / )
+    -  — get / update / delete
+    -  — resolve routing for a given , returns  with explain fields
+    -  — list / create escalation policies
+    -  — get / update / delete
+  - Added 29 new tests covering: matcher logic, CRUD, priority precedence, fallback routing, default-vs-specific ordering, escalation step resolution, explainability fields, and HTTP handler permission gates.
+  - Updated  baseline with new routes.
 - Build/version injection hardening with Makefile
 - Webhook delivery metrics and diagnostics endpoint
 - Incremental SSE updates on probe detail page
@@ -594,6 +881,26 @@ All notable changes to Legator are documented here.
 ## [v1.0.0-alpha.2] — 2026-02-26
 
 ### Added
+- **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
+  - Added  and  policy-as-code types ().
+    - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
+    - : ordered steps with target, target type, delay, and per-step runbook URL.
+    -  flag on routing policies as the fallback policy when no matchers match.
+  - Added  (): SQLite-backed CRUD for routing and escalation policies.
+  - Added  for deterministic policy matching with full explainability:
+    - : which matcher(s) triggered selection.
+    - :  when default policy was used.
+    - : human-readable rationale.
+  - Wired routing resolution into  (additive): each event on the bus and delivered to webhooks is now a . Existing consumers reading only  fields are unaffected.
+  - Added optional  field to  (JSON-serialised, backward-compatible; old rules without it default to empty string).
+  - Added new HTTP API routes [compat:additive]:
+    -  — list / create routing policies ( / )
+    -  — get / update / delete
+    -  — resolve routing for a given , returns  with explain fields
+    -  — list / create escalation policies
+    -  — get / update / delete
+  - Added 29 new tests covering: matcher logic, CRUD, priority precedence, fallback routing, default-vs-specific ordering, escalation step resolution, explainability fields, and HTTP handler permission gates.
+  - Updated  baseline with new routes.
 - Real-time SSE updates on probe detail page
 - Webhook notifier (wired to event bus)
 - Scoped API key permissions on all routes
@@ -605,6 +912,26 @@ All notable changes to Legator are documented here.
 ## [v1.0.0-alpha.1] — 2026-02-26
 
 ### Added
+- **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
+  - Added  and  policy-as-code types ().
+    - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
+    - : ordered steps with target, target type, delay, and per-step runbook URL.
+    -  flag on routing policies as the fallback policy when no matchers match.
+  - Added  (): SQLite-backed CRUD for routing and escalation policies.
+  - Added  for deterministic policy matching with full explainability:
+    - : which matcher(s) triggered selection.
+    - :  when default policy was used.
+    - : human-readable rationale.
+  - Wired routing resolution into  (additive): each event on the bus and delivered to webhooks is now a . Existing consumers reading only  fields are unaffected.
+  - Added optional  field to  (JSON-serialised, backward-compatible; old rules without it default to empty string).
+  - Added new HTTP API routes [compat:additive]:
+    -  — list / create routing policies ( / )
+    -  — get / update / delete
+    -  — resolve routing for a given , returns  with explain fields
+    -  — list / create escalation policies
+    -  — get / update / delete
+  - Added 29 new tests covering: matcher logic, CRUD, priority precedence, fallback routing, default-vs-specific ordering, escalation step resolution, explainability fields, and HTTP handler permission gates.
+  - Updated  baseline with new routes.
 - Standalone Go control plane (no Kubernetes dependency)
 - Probe agent (systemd service, WebSocket connection, heartbeat)
 - Fleet management (register, list, health scoring, tags)

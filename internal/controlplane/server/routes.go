@@ -143,6 +143,21 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("PUT /api/v1/alerts/{id}", s.withPermission(auth.PermFleetWrite, s.alertEngine.HandleUpdateRule))
 		mux.HandleFunc("DELETE /api/v1/alerts/{id}", s.withPermission(auth.PermFleetWrite, s.alertEngine.HandleDeleteRule))
 		mux.HandleFunc("GET /api/v1/alerts/{id}/history", s.withPermission(auth.PermFleetRead, s.alertEngine.HandleRuleHistory))
+
+		// Alert routing policies (additive; requires routingStore)
+		if s.routingStore != nil {
+			mux.HandleFunc("GET /api/v1/alerts/routing/policies", s.withPermission(auth.PermFleetRead, s.routingStore.HandleListRoutingPolicies))
+			mux.HandleFunc("POST /api/v1/alerts/routing/policies", s.withPermission(auth.PermFleetWrite, s.routingStore.HandleCreateRoutingPolicy))
+			mux.HandleFunc("POST /api/v1/alerts/routing/resolve", s.withPermission(auth.PermFleetRead, s.routingStore.HandleResolveRouting))
+			mux.HandleFunc("GET /api/v1/alerts/routing/policies/{id}", s.withPermission(auth.PermFleetRead, s.routingStore.HandleGetRoutingPolicy))
+			mux.HandleFunc("PUT /api/v1/alerts/routing/policies/{id}", s.withPermission(auth.PermFleetWrite, s.routingStore.HandleUpdateRoutingPolicy))
+			mux.HandleFunc("DELETE /api/v1/alerts/routing/policies/{id}", s.withPermission(auth.PermFleetWrite, s.routingStore.HandleDeleteRoutingPolicy))
+			mux.HandleFunc("GET /api/v1/alerts/escalation/policies", s.withPermission(auth.PermFleetRead, s.routingStore.HandleListEscalationPolicies))
+			mux.HandleFunc("POST /api/v1/alerts/escalation/policies", s.withPermission(auth.PermFleetWrite, s.routingStore.HandleCreateEscalationPolicy))
+			mux.HandleFunc("GET /api/v1/alerts/escalation/policies/{id}", s.withPermission(auth.PermFleetRead, s.routingStore.HandleGetEscalationPolicy))
+			mux.HandleFunc("PUT /api/v1/alerts/escalation/policies/{id}", s.withPermission(auth.PermFleetWrite, s.routingStore.HandleUpdateEscalationPolicy))
+			mux.HandleFunc("DELETE /api/v1/alerts/escalation/policies/{id}", s.withPermission(auth.PermFleetWrite, s.routingStore.HandleDeleteEscalationPolicy))
+		}
 	} else {
 		mux.HandleFunc("GET /api/v1/alerts", s.withPermission(auth.PermFleetRead, s.handleAlertsUnavailable))
 		mux.HandleFunc("POST /api/v1/alerts", s.withPermission(auth.PermFleetWrite, s.handleAlertsUnavailable))
