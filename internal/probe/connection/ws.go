@@ -5,8 +5,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"math/big"
+	"net/http"
 	"sync"
 	"time"
 
@@ -17,11 +20,13 @@ import (
 )
 
 const (
-	heartbeatInterval = 30 * time.Second
-	offlineThreshold  = 60 * time.Second
-	maxReconnectDelay = 5 * time.Minute
-	writeTimeout      = 10 * time.Second
-	pongWait          = 70 * time.Second // slightly longer than heartbeat
+	heartbeatInterval      = 30 * time.Second
+	offlineThreshold       = 60 * time.Second
+	maxReconnectDelay      = 5 * time.Minute
+	authReconnectDelay     = 30 * time.Second
+	writeTimeout           = 10 * time.Second
+	pongWait               = 70 * time.Second // slightly longer than heartbeat
+	authErrorBodyMaxLength = 256
 )
 
 // Client manages a persistent WebSocket connection to the control plane.
@@ -36,6 +41,18 @@ type Client struct {
 	connected bool
 	inbox     chan protocol.Envelope
 	closed    chan struct{}
+}
+
+type authHandshakeError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *authHandshakeError) Error() string {
+	if e.Body == "" {
+		return fmt.Sprintf("control plane rejected probe credentials (status=%d)", e.StatusCode)
+	}
+	return fmt.Sprintf("control plane rejected probe credentials (status=%d): %s", e.StatusCode, e.Body)
 }
 
 // NewClient creates a new WebSocket client.
@@ -89,15 +106,33 @@ func (c *Client) Run(ctx context.Context) error {
 			delay = time.Second
 		}
 
-		c.logger.Warn("connection lost, reconnecting",
-			zap.Error(err),
-			zap.Duration("backoff", delay),
-		)
+		var authErr *authHandshakeError
+		if errors.As(err, &authErr) {
+			if delay < authReconnectDelay {
+				delay = authReconnectDelay
+			}
+			c.logger.Warn("control plane rejected probe credentials; retrying with extended backoff",
+				zap.Int("status_code", authErr.StatusCode),
+				zap.String("remediation", "re-run probe init or rotate the probe API key"),
+				zap.Duration("backoff", delay),
+			)
+		} else {
+			c.logger.Warn("connection lost, reconnecting",
+				zap.Error(err),
+				zap.Duration("backoff", delay),
+			)
+		}
 
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(jitter(delay)):
+		}
+
+		if errors.As(err, &authErr) {
+			// Keep retries at a steady cadence for invalid credentials so we avoid
+			// hot reconnect loops while still recovering quickly after remediation.
+			continue
 		}
 
 		// Exponential backoff with cap
@@ -127,8 +162,15 @@ func (c *Client) connectAndServe(ctx context.Context) (bool, error) {
 		"Authorization": {fmt.Sprintf("Bearer %s", c.apiKey)},
 	}
 
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, url, header)
+	conn, resp, err := websocket.DefaultDialer.DialContext(ctx, url, header)
 	if err != nil {
+		if resp != nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+				body, _ := io.ReadAll(io.LimitReader(resp.Body, authErrorBodyMaxLength))
+				return false, &authHandshakeError{StatusCode: resp.StatusCode, Body: string(body)}
+			}
+		}
 		return false, fmt.Errorf("dial: %w", err)
 	}
 

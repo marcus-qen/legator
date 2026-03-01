@@ -71,6 +71,13 @@
     - `job.run.denied`
   - Expanded run filters/summaries to include additive `queued` and `denied` states.
   - Added scheduler/store/handler coverage for admission decision paths and deferred queue drain behavior.
+- **Stage 3.4 probe connectivity resilience (DaemonSet flapping + stale probe cleanup)**
+  - Hardened probe reconnect semantics so stale superseded WebSocket connections no longer emit disconnect lifecycle hooks/events.
+  - Improved probe identity reuse by selecting the healthiest/most recent hostname match when duplicates exist.
+  - Added stale duplicate-hostname cleanup during re-registration (offline or long-stale non-online entries are pruned safely).
+  - Tuned control-plane offline transition guard from 60s to 90s and expanded stale transition handling to mark degraded/pending stale probes offline.
+  - Added probe-side invalid-credential backoff/remediation path (explicit 401/403 classification, clearer warning logs, and fixed extended retry cadence).
+  - Added targeted tests for reconnect replacement hooks, hostname duplicate selection/cleanup, degraded→offline transition, and auth-failure backoff behaviour.
 - **Jobs cancellation API + lifecycle guardrails**
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -98,6 +99,7 @@ type registerProbeResult struct {
 	probeID      string
 	apiKey       string
 	reRegistered bool
+	cleanedStale []string
 }
 
 func registerProbe(fm fleet.Fleet, req RegisterRequest) (*registerProbeResult, error) {
@@ -116,12 +118,51 @@ func registerProbe(fm fleet.Fleet, req RegisterRequest) (*registerProbeResult, e
 	fm.Register(probeID, req.Hostname, req.OS, req.Arch)
 	_ = fm.SetAPIKey(probeID, apiKey)
 	_ = fm.SetTags(probeID, req.Tags)
+	cleaned := cleanupStaleHostnameDuplicates(fm, probeID, req.Hostname)
 
 	return &registerProbeResult{
 		probeID:      probeID,
 		apiKey:       apiKey,
 		reRegistered: reRegistered,
+		cleanedStale: cleaned,
 	}, nil
+}
+
+func cleanupStaleHostnameDuplicates(fm fleet.Fleet, canonicalID, hostname string) []string {
+	hostname = strings.TrimSpace(hostname)
+	if hostname == "" {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	removed := make([]string, 0)
+	for _, ps := range fm.List() {
+		if ps == nil || ps.ID == canonicalID || ps.Hostname != hostname {
+			continue
+		}
+		if !shouldPruneDuplicateProbe(ps, now) {
+			continue
+		}
+		if err := fm.Delete(ps.ID); err == nil {
+			removed = append(removed, ps.ID)
+		}
+	}
+	sort.Strings(removed)
+	return removed
+}
+
+func shouldPruneDuplicateProbe(ps *fleet.ProbeState, now time.Time) bool {
+	status := strings.ToLower(strings.TrimSpace(ps.Status))
+	if status == "offline" {
+		return true
+	}
+	if status == "online" {
+		return false
+	}
+	if ps.LastSeen.IsZero() {
+		return true
+	}
+	return now.Sub(ps.LastSeen) > 30*time.Minute
 }
 
 // HandleRegister returns an HTTP handler for probe registration.
@@ -150,6 +191,7 @@ func HandleRegister(ts *TokenStore, fm fleet.Fleet, logger *zap.Logger) http.Han
 				zap.String("hostname", req.Hostname),
 				zap.String("os", req.OS),
 				zap.String("arch", req.Arch),
+				zap.Strings("cleaned_stale_probe_ids", result.cleanedStale),
 			)
 		} else {
 			logger.Info("probe registered",
@@ -157,6 +199,7 @@ func HandleRegister(ts *TokenStore, fm fleet.Fleet, logger *zap.Logger) http.Han
 				zap.String("hostname", req.Hostname),
 				zap.String("os", req.OS),
 				zap.String("arch", req.Arch),
+				zap.Strings("cleaned_stale_probe_ids", result.cleanedStale),
 			)
 		}
 
@@ -245,11 +288,13 @@ func HandleRegisterWithAudit(ts *TokenStore, fm fleet.Fleet, al AuditRecorder, l
 			logger.Info("probe re-registered",
 				zap.String("probe_id", result.probeID),
 				zap.String("hostname", req.Hostname),
+				zap.Strings("cleaned_stale_probe_ids", result.cleanedStale),
 			)
 		} else {
 			logger.Info("probe registered",
 				zap.String("probe_id", result.probeID),
 				zap.String("hostname", req.Hostname),
+				zap.Strings("cleaned_stale_probe_ids", result.cleanedStale),
 			)
 		}
 

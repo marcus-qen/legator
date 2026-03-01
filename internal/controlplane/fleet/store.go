@@ -90,7 +90,21 @@ func (s *Store) FindByHostname(hostname string) (*ProbeState, bool) {
 	}
 
 	var id string
-	err := s.db.QueryRow(`SELECT id FROM probes WHERE hostname = ? LIMIT 1`, hostname).Scan(&id)
+	err := s.db.QueryRow(`SELECT id
+		FROM probes
+		WHERE hostname = ?
+		ORDER BY
+			CASE lower(status)
+				WHEN 'online' THEN 4
+				WHEN 'degraded' THEN 3
+				WHEN 'pending' THEN 2
+				WHEN 'offline' THEN 1
+				ELSE 0
+			END DESC,
+			last_seen DESC,
+			registered DESC,
+			id ASC
+		LIMIT 1`, hostname).Scan(&id)
 	if err != nil {
 		return nil, false
 	}

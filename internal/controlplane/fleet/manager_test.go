@@ -51,6 +51,27 @@ func TestFindByHostname(t *testing.T) {
 	}
 }
 
+func TestFindByHostname_PrefersHealthyRecentCandidate(t *testing.T) {
+	m := NewManager(testLogger())
+	m.Register("probe-old-offline", "dup-host", "linux", "amd64")
+	m.Register("probe-active", "dup-host", "linux", "amd64")
+
+	m.mu.Lock()
+	m.probes["probe-old-offline"].Status = "offline"
+	m.probes["probe-old-offline"].LastSeen = time.Now().UTC().Add(-2 * time.Hour)
+	m.probes["probe-active"].Status = "online"
+	m.probes["probe-active"].LastSeen = time.Now().UTC().Add(-2 * time.Minute)
+	m.mu.Unlock()
+
+	ps, ok := m.FindByHostname("dup-host")
+	if !ok {
+		t.Fatal("expected to find duplicate hostname")
+	}
+	if ps.ID != "probe-active" {
+		t.Fatalf("expected online probe to win duplicate hostname lookup, got %s", ps.ID)
+	}
+}
+
 func TestHeartbeat(t *testing.T) {
 	m := NewManager(testLogger())
 	m.Register("probe-1", "web-01", "linux", "amd64")
@@ -80,6 +101,23 @@ func TestMarkOffline(t *testing.T) {
 	ps, _ := m.Get("probe-1")
 	if ps.Status != "offline" {
 		t.Errorf("expected offline, got %s", ps.Status)
+	}
+}
+
+func TestMarkOffline_TransitionsDegradedProbe(t *testing.T) {
+	m := NewManager(testLogger())
+	m.Register("probe-degraded", "db-01", "linux", "amd64")
+
+	m.mu.Lock()
+	m.probes["probe-degraded"].Status = "degraded"
+	m.probes["probe-degraded"].LastSeen = time.Now().UTC().Add(-3 * time.Minute)
+	m.mu.Unlock()
+
+	m.MarkOffline(60 * time.Second)
+
+	ps, _ := m.Get("probe-degraded")
+	if ps.Status != "offline" {
+		t.Fatalf("expected degraded probe to transition offline, got %s", ps.Status)
 	}
 }
 

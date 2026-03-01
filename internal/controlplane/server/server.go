@@ -56,6 +56,11 @@ var (
 	Date    = "unknown"
 )
 
+const (
+	probeOfflineCheckInterval = 30 * time.Second
+	probeOfflineThreshold     = 90 * time.Second
+)
+
 // Server is the assembled control plane.
 type Server struct {
 	cfg    config.Config
@@ -1190,7 +1195,7 @@ func (s *Server) dispatchAndWait(probeID string, cmd *protocol.CommandPayload) (
 
 // offlineChecker runs the periodic offline detection and publishes events.
 func (s *Server) offlineChecker(ctx context.Context) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(probeOfflineCheckInterval)
 	defer ticker.Stop()
 	lastOffline := map[string]bool{}
 	for {
@@ -1198,7 +1203,7 @@ func (s *Server) offlineChecker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.fleetMgr.MarkOffline(60 * time.Second)
+			s.fleetMgr.MarkOffline(probeOfflineThreshold)
 			for _, ps := range s.fleetMgr.List() {
 				if ps.Status == "offline" && !lastOffline[ps.ID] {
 					s.publishEvent(events.ProbeOffline, ps.ID,
