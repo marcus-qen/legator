@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Legator</title>
+    <title>Legator — Fleet Management Control Plane</title>
     <style>
       :root {
         --bg: #0f1117;
@@ -73,6 +73,19 @@
         text-transform: uppercase;
       }
 
+      .badge {
+        display: inline-block;
+        margin-left: 0.6rem;
+        padding: 0.15rem 0.5rem;
+        background: rgba(212,160,83,0.15);
+        border: 1px solid rgba(212,160,83,0.4);
+        border-radius: 3px;
+        color: var(--accent);
+        font-size: 0.72rem;
+        letter-spacing: 0.04em;
+        vertical-align: middle;
+      }
+
       .hero p {
         margin-top: 1.1rem;
         max-width: 44rem;
@@ -122,6 +135,34 @@
         font-size: 0.93rem;
       }
 
+      .features {
+        max-width: 56rem;
+      }
+
+      .features-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 1.2rem;
+        margin-top: 1rem;
+      }
+
+      .feature-card {
+        border: 1px solid var(--line);
+        padding: 1rem 1.2rem;
+        background: rgba(255,255,255,0.015);
+      }
+
+      .feature-card h3 {
+        margin: 0 0 0.4rem;
+        font-size: 0.95rem;
+        color: var(--accent);
+      }
+
+      .feature-card p {
+        font-size: 0.88rem;
+        line-height: 1.5;
+      }
+
       .stats {
         max-width: 42rem;
       }
@@ -138,6 +179,27 @@
 
       .stats li:last-child {
         margin-bottom: 0;
+      }
+
+      .cta-row {
+        display: flex;
+        gap: 1.2rem;
+        flex-wrap: wrap;
+        margin-top: 1.3rem;
+      }
+
+      .cta-btn {
+        display: inline-block;
+        padding: 0.55rem 1.2rem;
+        border: 1px solid var(--accent);
+        color: var(--accent);
+        font-size: 0.9rem;
+        letter-spacing: 0.02em;
+      }
+
+      .cta-btn:hover {
+        background: rgba(212,160,83,0.1);
+        text-decoration: none;
       }
 
       footer {
@@ -162,6 +224,10 @@
         }
 
         .quickstart {
+          margin-left: 2rem;
+        }
+
+        .features {
           margin-left: 2rem;
         }
 
@@ -192,14 +258,18 @@
   <body>
     <main>
       <header class="hero">
-        <span class="mark">Legator</span>
+        <span class="mark">Legator<span class="badge">v1.0.0-beta.1</span></span>
         <h1>Your servers. Your models. Your rules.</h1>
         <p>
           Legator is a self-hosted fleet management control plane. It deploys AI probes that talk to your
           infrastructure — but the AI never touches your servers directly. Brain and hands are separate.
         </p>
         <p class="split">Brain decides. Probe executes. Policy gates everything.</p>
-        <p style="margin-top:1.1rem"><a href="https://github.com/marcus-qen/legator">→ GitHub</a></p>
+        <div class="cta-row">
+          <a class="cta-btn" href="https://github.com/marcus-qen/legator">→ GitHub</a>
+          <a class="cta-btn" href="https://github.com/marcus-qen/legator/blob/main/docs/getting-started.md">→ Getting Started</a>
+          <a class="cta-btn" href="https://github.com/marcus-qen/legator/blob/main/docs/deployment.md">→ Deployment Guide</a>
+        </div>
       </header>
 
       <section class="what" aria-labelledby="what-it-does">
@@ -215,12 +285,51 @@
         </p>
       </section>
 
+      <section class="features" aria-labelledby="features">
+        <h2 id="features">What's in beta.1</h2>
+        <div class="features-grid">
+          <div class="feature-card">
+            <h3>Reliability Suite</h3>
+            <p>SLO scorecards, alert routing &amp; escalation policies, failure drill framework, incident management with postmortem export.</p>
+          </div>
+          <div class="feature-card">
+            <h3>Security Hardening</h3>
+            <p>Full auth coverage on all routes, request body limits, credential sanitiser, SQLite pragma hardening (WAL mode).</p>
+          </div>
+          <div class="feature-card">
+            <h3>Database Migrations</h3>
+            <p>Schema versioning, transactional migration runner, automated backups with integrity checks, downgrade guard.</p>
+          </div>
+          <div class="feature-card">
+            <h3>MCP Tool Surface</h3>
+            <p>40+ MCP tools and resources covering fleet, jobs, Grafana, Kubeflow, federation, and automation packs.</p>
+          </div>
+          <div class="feature-card">
+            <h3>Federation</h3>
+            <p>Multi-cluster inventory read model with cross-cluster query/filter parity, scoped auth, failover semantics, and consistency guards.</p>
+          </div>
+          <div class="feature-card">
+            <h3>Automation Packs</h3>
+            <p>Declarative workflow schema, dry-run planning with policy simulation, guarded execution with rollback hooks, audit timeline.</p>
+          </div>
+          <div class="feature-card">
+            <h3>Policy Engine</h3>
+            <p>Per-host autonomy levels, approval queues with explainability, capacity-aware admission, policy-as-code routing.</p>
+          </div>
+          <div class="feature-card">
+            <h3>Full Docs</h3>
+            <p>API reference (60+ endpoints), security model, MCP tools guide, deployment guide, and compatibility contract.</p>
+          </div>
+        </div>
+      </section>
+
       <section class="architecture" aria-labelledby="architecture">
         <h2 id="architecture">Architecture</h2>
         <pre>┌────────────────────────────────────────────┐
 │            Control Plane (15MB)            │
 │  Web UI · REST API · WebSocket · LLM       │
 │  Policy Engine · Approval Queue · Audit    │
+│  Federation · Automation Packs · MCP       │
 └──────────────────┬─────────────────────────┘
                    │ WSS (TLS)
         ┌──────────┼──────────┐
@@ -242,23 +351,26 @@ git clone https://github.com/marcus-qen/legator && cd legator && make
 # Connect a probe
 TOKEN=$(curl -sf -X POST http://localhost:8080/api/v1/tokens | jq -r .token)
 curl -sSL http://localhost:8080/install.sh | sudo bash -s -- --server http://localhost:8080 --token "$TOKEN"</code></pre>
+        <p style="margin-top:0.9rem">→ <a href="https://github.com/marcus-qen/legator/blob/main/docs/getting-started.md">Full getting-started guide</a></p>
       </section>
 
       <section class="stats" aria-labelledby="stats">
         <h2 id="stats">Stats</h2>
         <ul>
-          <li>155 Go files</li>
-          <li>30 test suites, 29 E2E checks</li>
-          <li>Control plane: 15MB. Probe: 7MB. Zero dependencies.</li>
+          <li>60+ REST API endpoints across 19 SQLite stores</li>
+          <li>40+ MCP tools and resources</li>
+          <li>6 probe command types supported</li>
+          <li>Control plane: 15MB. Probe: 7MB. Zero runtime dependencies.</li>
           <li>Runs on Linux, Windows, K8s DaemonSet</li>
-          <li>BYOK: bring your own API keys (OpenAI, Anthropic, local Ollama, whatever)</li>
+          <li>BYOK: bring your own API keys (OpenAI, Anthropic, local Ollama)</li>
+          <li>Full additive compatibility contract — no surprise breaking changes</li>
           <li>Apache 2.0</li>
         </ul>
       </section>
 
       <footer>
         <a href="https://github.com/marcus-qen/legator">github.com/marcus-qen/legator</a><br />
-        Made by marcus-qen
+        v1.0.0-beta.1 · Made by marcus-qen
       </footer>
     </main>
   </body>

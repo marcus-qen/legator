@@ -1,6 +1,61 @@
 ## [Unreleased]
 
+---
+
+## [v1.0.0-beta.1] — 2026-03-02
+
+This is the first public beta of Legator — a self-hosted fleet management control plane that separates
+AI reasoning from infrastructure execution. Beta.1 marks the end of the alpha development track and
+represents a feature-complete, production-ready-for-evaluation release. All core surfaces (REST API,
+MCP tools, probe connectivity, policy engine, federation, automation packs) are stable and covered by
+the additive compatibility contract introduced in Stage 3.5.
+
+The reliability track (3.9.1–3.9.4), security hardening (4.0.1), database migration framework (4.0.2),
+and docs freeze (4.0.3) complete the pre-beta work. See the full release notes in
+`docs/releases/v1.0.0-beta.1.md`.
+
 ### Added
+- **Stage 4.0.3: Docs freeze — API reference, security model, MCP tools, deployment guide**
+  - Froze and published `docs/api-reference.md` covering all 60+ REST endpoints with request/response
+    schemas, permission gates, and compatibility annotations.
+  - Expanded `docs/security.md` with the full security model: authentication layers, SQLite pragma
+    hardening, body-limit middleware, credential sanitiser, and threat model notes.
+  - Published `docs/mcp-tools.md` covering all stable MCP tools and resources with usage examples.
+  - Published `docs/deployment.md` covering single-node, Docker, and Kubernetes (DaemonSet) deployment
+    paths with environment variable reference.
+  - Updated `README.md` with architecture diagram, quick-start, and links to all doc surfaces.
+- **Stage 4.0.2: Database migration framework — schema versioning, runner, backup, downgrade guard**
+  - Added `internal/controlplane/migration` package with schema versioning, idempotent `EnsureVersion`,
+    a transaction-safe `Runner` supporting `Migrate`/`MigrateTo`/`Rollback`, and `BackupDatabase` with
+    integrity check and age-based cleanup.
+  - Stamped all 19 SQLite store constructors with `migration.EnsureVersion(db, 1)` to establish
+    schema version baseline.
+  - Added downgrade guard (`CheckVersion`) that rejects startup against a newer schema.
+  - Full test coverage: schema read/write, idempotency, forward migration, rollback, backup integrity,
+    downgrade guard, and transaction safety.
+- **Stage 4.0.1: Security hardening — auth coverage, body limits, credential sanitiser**
+  - Applied authentication gates to all previously unprotected API routes (full coverage audit).
+  - Added `body_limit.go` middleware capping request bodies to prevent memory exhaustion.
+  - Added `internal/shared/security/sanitize.go` — credential sanitiser that strips secrets from
+    error messages, log lines, and API payloads before they leave the process.
+  - Added SQLite pragma hardening (WAL mode, synchronous=NORMAL, journal_mode=WAL) across all stores.
+  - Added 210+ new auth-coverage tests and 74 body-limit tests.
+- **Stage 3.9.4: Incident export and postmortem bundle generation**
+  - Added incident lifecycle model with `IncidentStore` (SQLite-backed CRUD).
+  - Added incident export API returning a structured postmortem bundle (timeline, affected probes,
+    alert history, drill results, remediation notes).
+  - Added `GET /api/v1/incidents`, `POST /api/v1/incidents`, `GET/PUT/DELETE /api/v1/incidents/{id}`,
+    and `GET /api/v1/incidents/{id}/export`.
+  - 633-line test suite covering lifecycle, export bundle structure, and permission gates.
+- **Stage 3.9.3: Failure drills and recovery verification suite**
+  - Added `DrillDefinition` and `DrillRunner` with 5 built-in failure scenarios:
+    `probe_disconnect`, `db_write_failure`, `llm_timeout`, `websocket_flood`, `concurrent_job_storm`.
+  - Added `RecoveryVerifier` validating system recovery after each drill, detecting both happy-path
+    recovery and failure-to-recover via injectable interface stubs.
+  - Added `DrillStore` for SQLite-backed drill history.
+  - Added drill API: `POST /api/v1/reliability/drills/run`, `GET /api/v1/reliability/drills`.
+
+### Added (continued from alpha — full reliability track now promoted to beta.1)
 - **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
   - Added RoutingPolicy and EscalationPolicy policy-as-code types (internal/controlplane/alerts/routing.go).
     - RoutingPolicy: owner label/contact, runbook URL, escalation reference, AND-chained matchers on
