@@ -1,7 +1,9 @@
-# Stable REST API routes (v1 + health/version + MCP transport)
+
 # Append-only list. Do not remove entries; use docs/contracts/deprecations.json with status="removed".
 # New stable entries must be reflected in CHANGELOG.md and docs/releases/README.md annotations.
-
+# Stable REST API routes (v1 + health/version + MCP transport)
+DELETE /api/v1/alerts/escalation/policies/{id}
+DELETE /api/v1/alerts/routing/policies/{id}
 DELETE /api/v1/alerts/{id}
 DELETE /api/v1/audit/purge
 DELETE /api/v1/auth/keys/{id}
@@ -16,6 +18,10 @@ DELETE /api/v1/users/{id}
 DELETE /api/v1/webhooks/{id}
 GET /api/v1/alerts
 GET /api/v1/alerts/active
+GET /api/v1/alerts/escalation/policies
+GET /api/v1/alerts/escalation/policies/{id}
+GET /api/v1/alerts/routing/policies
+GET /api/v1/alerts/routing/policies/{id}
 GET /api/v1/alerts/{id}
 GET /api/v1/alerts/{id}/history
 GET /api/v1/approvals
@@ -23,12 +29,12 @@ GET /api/v1/approvals/{id}
 GET /api/v1/audit
 GET /api/v1/audit/export
 GET /api/v1/audit/export/csv
+GET /api/v1/auth/keys
 GET /api/v1/automation-packs
 GET /api/v1/automation-packs/executions/{executionID}
 GET /api/v1/automation-packs/executions/{executionID}/artifacts
 GET /api/v1/automation-packs/executions/{executionID}/timeline
 GET /api/v1/automation-packs/{id}
-GET /api/v1/auth/keys
 GET /api/v1/cloud/assets
 GET /api/v1/cloud/connectors
 GET /api/v1/commands/pending
@@ -75,11 +81,14 @@ GET /healthz
 GET /mcp
 GET /version
 POST /api/v1/alerts
+POST /api/v1/alerts/escalation/policies
+POST /api/v1/alerts/routing/policies
+POST /api/v1/alerts/routing/resolve
 POST /api/v1/approvals/{id}/decide
+POST /api/v1/auth/keys
 POST /api/v1/automation-packs
 POST /api/v1/automation-packs/dry-run
 POST /api/v1/automation-packs/{id}/executions
-POST /api/v1/auth/keys
 POST /api/v1/cloud/connectors
 POST /api/v1/cloud/connectors/{id}/scan
 POST /api/v1/discovery/install-token
@@ -115,6 +124,8 @@ POST /api/v1/users
 POST /api/v1/webhooks
 POST /api/v1/webhooks/{id}/test
 POST /mcp
+PUT /api/v1/alerts/escalation/policies/{id}
+PUT /api/v1/alerts/routing/policies/{id}
 PUT /api/v1/alerts/{id}
 PUT /api/v1/cloud/connectors/{id}
 PUT /api/v1/jobs/{id}

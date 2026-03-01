@@ -23,11 +23,12 @@ type Notifier interface {
 
 // Engine evaluates alert rules and delivers notifications.
 type Engine struct {
-	store    *Store
-	fleet    fleet.Fleet
-	notifier Notifier
-	bus      *events.Bus
-	logger   *zap.Logger
+	store        *Store
+	routingStore *RoutingStore
+	fleet        fleet.Fleet
+	notifier     Notifier
+	bus          *events.Bus
+	logger       *zap.Logger
 
 	evalMu sync.Mutex
 
@@ -64,6 +65,14 @@ func NewEngine(store *Store, fleetMgr fleet.Fleet, notifier Notifier, bus *event
 	}
 
 	return e
+}
+
+// SetRoutingStore attaches an optional routing store to the engine.
+// When set, each alert delivery is enriched with a resolved RoutingOutcome.
+// This method is safe to call before Start(); it is additive and does not
+// affect the core alert evaluation behaviour.
+func (e *Engine) SetRoutingStore(rs *RoutingStore) {
+	e.routingStore = rs
 }
 
 // Start begins periodic rule evaluation.
