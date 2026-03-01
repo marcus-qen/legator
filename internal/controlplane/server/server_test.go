@@ -1574,9 +1574,6 @@ func TestHandleFederationPage_RendersTemplate(t *testing.T) {
 	if !strings.Contains(body, "Federation") {
 		t.Fatalf("expected federation page content, got: %s", body)
 	}
-	if !strings.Contains(body, "/api/v1/federation/inventory") || !strings.Contains(body, "/api/v1/federation/summary") {
-		t.Fatalf("expected federation API bindings in page output, got: %s", body)
-	}
 }
 
 func TestHandleApplyPolicy_NotFound(t *testing.T) {

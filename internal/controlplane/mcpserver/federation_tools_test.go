@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/protocol"
@@ -51,6 +52,8 @@ func TestFederationToolsAndResourcesParityWithFilters(t *testing.T) {
 	decodeToolJSON(t, invResult, &invPayload)
 
 	expectedInv := srv.federationStore.Inventory(context.Background(), filter)
+	normalizeFederatedInventoryForCompare(&invPayload)
+	normalizeFederatedInventoryForCompare(&expectedInv)
 	if !reflect.DeepEqual(invPayload, expectedInv) {
 		t.Fatalf("inventory parity mismatch:\nmcp=%+v\nexpected=%+v", invPayload, expectedInv)
 	}
@@ -63,6 +66,8 @@ func TestFederationToolsAndResourcesParityWithFilters(t *testing.T) {
 	decodeToolJSON(t, summaryResult, &summaryPayload)
 
 	expectedSummary := srv.federationStore.Summary(context.Background(), filter)
+	normalizeFederatedSummaryForCompare(&summaryPayload)
+	normalizeFederatedSummaryForCompare(&expectedSummary)
 	if !reflect.DeepEqual(summaryPayload, expectedSummary) {
 		t.Fatalf("summary parity mismatch:\nmcp=%+v\nexpected=%+v", summaryPayload, expectedSummary)
 	}
@@ -75,6 +80,7 @@ func TestFederationToolsAndResourcesParityWithFilters(t *testing.T) {
 	if err := json.Unmarshal([]byte(resourceInv.Contents[0].Text), &resourceInvPayload); err != nil {
 		t.Fatalf("decode federation inventory resource payload: %v", err)
 	}
+	normalizeFederatedInventoryForCompare(&resourceInvPayload)
 	if !reflect.DeepEqual(resourceInvPayload, expectedInv) {
 		t.Fatalf("resource inventory parity mismatch:\nresource=%+v\nexpected=%+v", resourceInvPayload, expectedInv)
 	}
@@ -87,6 +93,7 @@ func TestFederationToolsAndResourcesParityWithFilters(t *testing.T) {
 	if err := json.Unmarshal([]byte(resourceSummary.Contents[0].Text), &resourceSummaryPayload); err != nil {
 		t.Fatalf("decode federation summary resource payload: %v", err)
 	}
+	normalizeFederatedSummaryForCompare(&resourceSummaryPayload)
 	if !reflect.DeepEqual(resourceSummaryPayload, expectedSummary) {
 		t.Fatalf("resource summary parity mismatch:\nresource=%+v\nexpected=%+v", resourceSummaryPayload, expectedSummary)
 	}
@@ -111,5 +118,23 @@ func TestFederationResourcesRegistered(t *testing.T) {
 		if !containsString(resourceURIs, expected) {
 			t.Fatalf("expected resource %s in %v", expected, resourceURIs)
 		}
+	}
+}
+
+func normalizeFederatedInventoryForCompare(inventory *fleet.FederatedInventory) {
+	if inventory == nil {
+		return
+	}
+	for i := range inventory.Sources {
+		inventory.Sources[i].CollectedAt = time.Time{}
+	}
+}
+
+func normalizeFederatedSummaryForCompare(summary *fleet.FederatedInventorySummary) {
+	if summary == nil {
+		return
+	}
+	for i := range summary.Sources {
+		summary.Sources[i].CollectedAt = time.Time{}
 	}
 }
