@@ -157,6 +157,16 @@
   - Added tests for outage failover, stale snapshots, partial-result semantics, and API/MCP consistency exposure.
   - Updated federation docs/release notes for Stage 3.7.4.
   - **[compat:additive]** Added additive federation consistency/failover fields and guard behavior without removing or renaming existing API/MCP identifiers.
+- **Stage 3.8.1 Automation packs: declarative workflow schema**
+  - Added `internal/controlplane/automationpacks` with machine-readable workflow schema model covering metadata, typed inputs/constraints, ordered steps, per-workflow/per-step approvals, and expected outcomes/success criteria.
+  - Added server-side schema validation with explicit normalization + contract checks (id/version format, typed defaults/enums, type-specific constraints, unique step/input ids, approval bounds, and expected-outcome references).
+  - Added additive persistence + API surface for definitions (no execution yet):
+    - `POST /api/v1/automation-packs`
+    - `GET /api/v1/automation-packs`
+    - `GET /api/v1/automation-packs/{id}` (`?version=` optional; latest returned when omitted)
+  - Added tests for schema validation, automation-pack store behavior, API handlers, and server permission gates.
+  - Added documentation: `docs/automation-packs.md`, README API/docs updates, and release notes for Stage 3.8.1.
+  - **[compat:additive]** Added automation-pack definition routes and payloads without removing or renaming existing REST/MCP identifiers.
 - **Jobs cancellation API + lifecycle guardrails**
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.
