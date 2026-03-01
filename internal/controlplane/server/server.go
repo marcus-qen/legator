@@ -218,6 +218,19 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 				return s.approvalCore.DecideAndDispatch(id, request.Decision, request.DecidedBy, s.dispatchApprovedCommand)
 			},
 			mcpserver.WithKubeflowTools(s.mcpKubeflowRunStatus, s.mcpKubeflowSubmitRun, s.mcpKubeflowCancelRun),
+			mcpserver.WithGrafanaClient(s.grafanaClient),
+			mcpserver.WithPermissionChecker(func(ctx context.Context, perm auth.Permission) error {
+				if s.authStore == nil && s.sessionValidator == nil {
+					return nil
+				}
+				if !auth.IsAuthenticated(ctx) {
+					return fmt.Errorf("authentication required")
+				}
+				if !auth.HasPermissionFromContext(ctx, perm) {
+					return fmt.Errorf("insufficient permissions (required: %s)", perm)
+				}
+				return nil
+			}),
 		)
 		s.logger.Info("mcp server enabled", zap.String("path", "/mcp"), zap.String("version", mcpserver.Version))
 	}

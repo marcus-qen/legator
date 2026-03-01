@@ -42,6 +42,21 @@
     - `legator_kubeflow_submit_run`
     - `legator_kubeflow_cancel_run`
   - Added tests across Kubeflow client/handlers, server policy flow, approval dispatch, permission gates, and MCP tool registration.
+- **Stage 3.2 Grafana MCP parity (capacity + rationale surfaces)**
+  - Added MCP Grafana tools (when adapter enabled):
+    - `legator_grafana_status`
+    - `legator_grafana_snapshot`
+    - `legator_grafana_capacity_policy`
+  - Added MCP Grafana resources:
+    - `legator://grafana/status`
+    - `legator://grafana/snapshot`
+    - `legator://grafana/capacity-policy`
+  - Added capacity-policy projection payload for MCP (`capacity`, `policy_decision`, `policy_rationale`) using the existing policy rationale schema.
+  - Added MCP permission checks for Grafana tools/resources (`fleet:read`) while preserving additive behavior for existing MCP tools.
+  - Added parity coverage:
+    - MCP tool payload parity vs REST Grafana status/snapshot routes
+    - MCP capacity-policy rationale schema assertions
+    - Tool/resource registration and permission coverage tests
 - **Jobs cancellation API + lifecycle guardrails**
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.

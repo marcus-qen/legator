@@ -5,11 +5,13 @@ import (
 	"net/http"
 
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
+	"github.com/marcus-qen/legator/internal/controlplane/auth"
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
 	coreapprovalpolicy "github.com/marcus-qen/legator/internal/controlplane/core/approvalpolicy"
 	corecommanddispatch "github.com/marcus-qen/legator/internal/controlplane/core/commanddispatch"
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
+	"github.com/marcus-qen/legator/internal/controlplane/grafana"
 	"github.com/marcus-qen/legator/internal/controlplane/jobs"
 	"github.com/marcus-qen/legator/internal/controlplane/kubeflow"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
@@ -34,6 +36,8 @@ type MCPServer struct {
 	kubeflowRunStatus func(context.Context, kubeflow.RunStatusRequest) (kubeflow.RunStatusResult, error)
 	kubeflowSubmitRun func(context.Context, kubeflow.SubmitRunRequest) (map[string]any, error)
 	kubeflowCancelRun func(context.Context, kubeflow.CancelRunRequest) (map[string]any, error)
+	grafanaClient     grafana.Client
+	permissionChecker func(context.Context, auth.Permission) error
 	logger            *zap.Logger
 }
 
@@ -53,6 +57,26 @@ func WithKubeflowTools(
 		server.kubeflowRunStatus = runStatus
 		server.kubeflowSubmitRun = submitRun
 		server.kubeflowCancelRun = cancelRun
+	}
+}
+
+// WithGrafanaClient wires read-only Grafana tools/resources when the adapter is available.
+func WithGrafanaClient(client grafana.Client) Option {
+	return func(server *MCPServer) {
+		if server == nil {
+			return
+		}
+		server.grafanaClient = client
+	}
+}
+
+// WithPermissionChecker enforces permission checks for MCP handlers that opt in.
+func WithPermissionChecker(checker func(context.Context, auth.Permission) error) Option {
+	return func(server *MCPServer) {
+		if server == nil {
+			return
+		}
+		server.permissionChecker = checker
 	}
 }
 
@@ -114,4 +138,11 @@ func (s *MCPServer) Handler() http.Handler {
 		return http.NotFoundHandler()
 	}
 	return s.handler
+}
+
+func (s *MCPServer) requirePermission(ctx context.Context, perm auth.Permission) error {
+	if s == nil || s.permissionChecker == nil {
+		return nil
+	}
+	return s.permissionChecker(ctx, perm)
 }

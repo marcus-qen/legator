@@ -37,6 +37,29 @@ If disabled, both return:
 {"code":"service_unavailable","error":"grafana adapter unavailable"}
 ```
 
+## MCP parity (Stage 3.2)
+
+When the Grafana adapter is enabled, the MCP surface now exposes read-only parity tools/resources.
+
+### MCP tools
+
+- `legator_grafana_status` → payload parity with `GET /api/v1/grafana/status`
+- `legator_grafana_snapshot` → payload parity with `GET /api/v1/grafana/snapshot`
+- `legator_grafana_capacity_policy` → policy-facing capacity view:
+  - `capacity` (`source`, `availability`, coverage, datasource count, `partial`, warnings)
+  - `policy_decision` (`allow` / `queue` / `deny`)
+  - `policy_rationale` (same rationale contract used by command policy responses)
+
+### MCP resources
+
+- `legator://grafana/status`
+- `legator://grafana/snapshot`
+- `legator://grafana/capacity-policy`
+
+### Permissions
+
+Grafana MCP tools/resources require `fleet:read` (matching REST Grafana read routes).
+
 ## Snapshot fields (minimal practical signals)
 
 - **Service health**: database status/version/commit + healthy bool

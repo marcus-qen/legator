@@ -6,16 +6,20 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/marcus-qen/legator/internal/controlplane/auth"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/jobs"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
-	resourceFleetSummary   = "legator://fleet/summary"
-	resourceFleetInventory = "legator://fleet/inventory"
-	resourceJobsList       = "legator://jobs/list"
-	resourceJobsActiveRuns = "legator://jobs/active-runs"
+	resourceFleetSummary         = "legator://fleet/summary"
+	resourceFleetInventory       = "legator://fleet/inventory"
+	resourceJobsList             = "legator://jobs/list"
+	resourceJobsActiveRuns       = "legator://jobs/active-runs"
+	resourceGrafanaStatus        = "legator://grafana/status"
+	resourceGrafanaSnapshot      = "legator://grafana/snapshot"
+	resourceGrafanaCapacityPolicy = "legator://grafana/capacity-policy"
 )
 
 func (s *MCPServer) registerResources() {
@@ -46,6 +50,27 @@ func (s *MCPServer) registerResources() {
 		Description: "Pending/running job runs across all jobs",
 		MIMEType:    "application/json",
 	}, s.handleJobsActiveRunsResource)
+
+	if s.grafanaClient != nil {
+		s.server.AddResource(&mcp.Resource{
+			URI:         resourceGrafanaStatus,
+			Name:        "Grafana Status",
+			Description: "Read-only Grafana adapter status summary",
+			MIMEType:    "application/json",
+		}, s.handleGrafanaStatusResource)
+		s.server.AddResource(&mcp.Resource{
+			URI:         resourceGrafanaSnapshot,
+			Name:        "Grafana Snapshot",
+			Description: "Read-only Grafana capacity snapshot",
+			MIMEType:    "application/json",
+		}, s.handleGrafanaSnapshotResource)
+		s.server.AddResource(&mcp.Resource{
+			URI:         resourceGrafanaCapacityPolicy,
+			Name:        "Grafana Capacity Policy",
+			Description: "Grafana-derived capacity signals and policy rationale projection",
+			MIMEType:    "application/json",
+		}, s.handleGrafanaCapacityPolicyResource)
+	}
 }
 
 func (s *MCPServer) handleFleetSummaryResource(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
@@ -173,6 +198,74 @@ func (s *MCPServer) handleJobsActiveRunsResource(_ context.Context, req *mcp.Rea
 		uri = req.Params.URI
 	}
 
+	return &mcp.ReadResourceResult{
+		Contents: []*mcp.ResourceContents{{
+			URI:      uri,
+			MIMEType: "application/json",
+			Text:     string(data),
+		}},
+	}, nil
+}
+
+func (s *MCPServer) handleGrafanaStatusResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	if s.grafanaClient == nil {
+		return nil, fmt.Errorf("grafana adapter unavailable")
+	}
+	if err := s.requirePermission(ctx, auth.PermFleetRead); err != nil {
+		return nil, err
+	}
+	status, err := s.grafanaClient.Status(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return buildJSONResourceResult(req, resourceGrafanaStatus, map[string]any{"status": status})
+}
+
+func (s *MCPServer) handleGrafanaSnapshotResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	if s.grafanaClient == nil {
+		return nil, fmt.Errorf("grafana adapter unavailable")
+	}
+	if err := s.requirePermission(ctx, auth.PermFleetRead); err != nil {
+		return nil, err
+	}
+	snapshot, err := s.grafanaClient.Snapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return buildJSONResourceResult(req, resourceGrafanaSnapshot, map[string]any{"snapshot": snapshot})
+}
+
+func (s *MCPServer) handleGrafanaCapacityPolicyResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	if s.grafanaClient == nil {
+		return nil, fmt.Errorf("grafana adapter unavailable")
+	}
+	if err := s.requirePermission(ctx, auth.PermFleetRead); err != nil {
+		return nil, err
+	}
+	snapshot, err := s.grafanaClient.Snapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	signals := grafanaCapacitySignalsFromSnapshot(snapshot)
+	decision := evaluateGrafanaCapacityPolicy(ctx, signals)
+
+	payload := grafanaCapacityPolicyPayload{
+		Capacity:        signals,
+		PolicyDecision:  decision.Outcome,
+		PolicyRationale: decision.Rationale,
+	}
+	return buildJSONResourceResult(req, resourceGrafanaCapacityPolicy, payload)
+}
+
+func buildJSONResourceResult(req *mcp.ReadResourceRequest, defaultURI string, payload any) (*mcp.ReadResourceResult, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	uri := defaultURI
+	if req != nil && req.Params != nil && req.Params.URI != "" {
+		uri = req.Params.URI
+	}
 	return &mcp.ReadResourceResult{
 		Contents: []*mcp.ResourceContents{{
 			URI:      uri,
