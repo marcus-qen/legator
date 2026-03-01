@@ -1,0 +1,84 @@
+# CI Architecture Guardrails Contract (Stage 3.6.1)
+
+This document defines the architecture boundary contract used to drive CI guardrails.
+
+Machine-readable source of truth:
+
+- `docs/contracts/architecture-boundaries.yaml`
+
+## Scope
+
+The contract defines:
+
+1. Boundary zones and package coverage.
+2. Allow/deny dependency policy between zones.
+3. Ownership assignments for each boundary.
+4. Intended rollout model for automated CI enforcement.
+
+## Boundary zones
+
+| Boundary ID | Purpose | Package examples |
+|---|---|---|
+| `core-domain` | Domain policy and orchestration (transport-agnostic business logic) | `internal/controlplane/core/...`, `approval`, `policy`, `jobs`, `fleet`, `audit` |
+| `adapters-integrations` | External provider/integration adapters | `grafana`, `kubeflow`, `networkdevices`, `cloudconnectors`, `modeldock`, `llm` |
+| `surfaces` | Public/operator surfaces (HTTP, MCP, UI) | `internal/controlplane/server/...`, `mcpserver`, `api`, `web/...` |
+| `platform-runtime` | Runtime wiring and shared infrastructure concerns | `auth`, `config`, `session`, `events`, `metrics`, `websocket`, `internal/shared/...`, `internal/protocol/...` |
+| `probe-runtime` | Probe-side runtime and host execution lifecycle | `cmd/probe/...`, `internal/probe/...` |
+
+## Dependency policy (contract)
+
+Default policy is **deny**. Explicit allow rules define approved edges.
+
+### Key allow edges
+
+- `surfaces -> core-domain`
+- `surfaces -> adapters-integrations` (transitional; existing handlers still wire adapters directly)
+- `surfaces -> platform-runtime`
+- `core-domain -> adapters-integrations`
+- `core-domain -> platform-runtime`
+- `adapters-integrations -> platform-runtime`
+- `platform-runtime -> core-domain`
+- `platform-runtime -> adapters-integrations`
+- `probe-runtime -> platform-runtime`
+
+### Key deny edges
+
+- `core-domain -/-> surfaces`
+- `adapters-integrations -/-> surfaces`
+- `probe-runtime -/-> surfaces`
+- `probe-runtime -/-> core-domain`
+
+## Ownership map
+
+| Boundary | Owner area |
+|---|---|
+| `core-domain` | Control Plane Core |
+| `adapters-integrations` | Integrations and Connectors |
+| `surfaces` | Product Surfaces |
+| `platform-runtime` | Runtime Platform |
+| `probe-runtime` | Probe Runtime |
+
+Ownership details and key module patterns are stored in the YAML contract.
+
+## CI model
+
+### Stage 3.6.1 (this change)
+
+- Validate contract integrity in CI:
+  - required boundary IDs exist
+  - dependency rules are internally consistent
+  - ownership assignments are complete and valid
+  - package patterns resolve to existing paths
+
+### Stage 3.6.2 (next)
+
+- Use the contract to compute/import boundary edges from the Go import graph.
+- Enforce `allow`/`deny` edges in CI (initially report-only, then fail-on-violation).
+
+## Validation entrypoint
+
+```bash
+go test ./internal/controlplane/compat -count=1
+```
+
+The boundary contract tests live with compatibility-contract checks so the same CI lane verifies API/MCP compatibility and architecture-boundary contract integrity.
