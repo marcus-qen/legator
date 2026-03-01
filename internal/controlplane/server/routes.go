@@ -72,6 +72,25 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/v1/reliability/drills/{name}/run", s.withPermission(auth.PermFleetWrite, s.handleDrillsUnavailable))
 		mux.HandleFunc("GET /api/v1/reliability/drills/history", s.withPermission(auth.PermFleetRead, s.handleDrillsUnavailable))
 	}
+
+	// Incidents
+	if s.incidentStore != nil {
+		mux.HandleFunc("POST /api/v1/reliability/incidents", s.withPermission(auth.PermFleetWrite, s.handleCreateIncident))
+		mux.HandleFunc("GET /api/v1/reliability/incidents", s.withPermission(auth.PermFleetRead, s.handleListIncidents))
+		mux.HandleFunc("GET /api/v1/reliability/incidents/{id}/export", s.withPermission(auth.PermFleetRead, s.handleExportIncident))
+		mux.HandleFunc("GET /api/v1/reliability/incidents/{id}", s.withPermission(auth.PermFleetRead, s.handleGetIncident))
+		mux.HandleFunc("PATCH /api/v1/reliability/incidents/{id}", s.withPermission(auth.PermFleetWrite, s.handleUpdateIncident))
+		mux.HandleFunc("POST /api/v1/reliability/incidents/{id}/timeline", s.withPermission(auth.PermFleetWrite, s.handleAddTimelineEntry))
+		mux.HandleFunc("DELETE /api/v1/reliability/incidents/{id}", s.withPermission(auth.PermFleetWrite, s.handleDeleteIncident))
+	} else {
+		mux.HandleFunc("POST /api/v1/reliability/incidents", s.withPermission(auth.PermFleetWrite, s.handleIncidentsUnavailable))
+		mux.HandleFunc("GET /api/v1/reliability/incidents", s.withPermission(auth.PermFleetRead, s.handleIncidentsUnavailable))
+		mux.HandleFunc("GET /api/v1/reliability/incidents/{id}/export", s.withPermission(auth.PermFleetRead, s.handleIncidentsUnavailable))
+		mux.HandleFunc("GET /api/v1/reliability/incidents/{id}", s.withPermission(auth.PermFleetRead, s.handleIncidentsUnavailable))
+		mux.HandleFunc("PATCH /api/v1/reliability/incidents/{id}", s.withPermission(auth.PermFleetWrite, s.handleIncidentsUnavailable))
+		mux.HandleFunc("POST /api/v1/reliability/incidents/{id}/timeline", s.withPermission(auth.PermFleetWrite, s.handleIncidentsUnavailable))
+		mux.HandleFunc("DELETE /api/v1/reliability/incidents/{id}", s.withPermission(auth.PermFleetWrite, s.handleIncidentsUnavailable))
+	}
 	mux.HandleFunc("GET /api/v1/fleet/inventory", s.handleFleetInventory)
 	mux.HandleFunc("GET /api/v1/federation/inventory", s.handleFederationInventory)
 	mux.HandleFunc("GET /api/v1/federation/summary", s.handleFederationSummary)
