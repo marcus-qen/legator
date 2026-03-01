@@ -1442,10 +1442,10 @@ func TestHandleFederationInventory_WithFilters(t *testing.T) {
 }
 
 func TestFederationFilterFromRequest_ParsesSearch(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/federation/inventory?tag=prod&status=online&source=local&cluster=primary&site=local&search=web", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/federation/inventory?tag=prod&status=online&source=local&cluster=primary&site=local&search=web&tenant_id=tenant-a&org=org-a&scope=scope-a", nil)
 	filter := federationFilterFromRequest(req)
 
-	if filter.Tag != "prod" || filter.Status != "online" || filter.Source != "local" || filter.Cluster != "primary" || filter.Site != "local" || filter.Search != "web" {
+	if filter.Tag != "prod" || filter.Status != "online" || filter.Source != "local" || filter.Cluster != "primary" || filter.Site != "local" || filter.Search != "web" || filter.TenantID != "tenant-a" || filter.OrgID != "org-a" || filter.ScopeID != "scope-a" {
 		t.Fatalf("unexpected parsed federation filter: %+v", filter)
 	}
 }

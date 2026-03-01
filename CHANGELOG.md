@@ -137,6 +137,17 @@
   - Added parity/semantics test coverage for federation filters across read-model, REST, and MCP resource/tool paths.
   - Updated docs/contracts/release notes for Stage 3.7.2.
   - **[compat:additive]** Added MCP federation tools/resources and additive federation filter/aggregate fields without changing existing identifiers.
+- **Stage 3.7.3 Federation: scoped auth + tenancy boundaries**
+  - Added additive federation tenancy model fields on source attribution and filters: `tenant_id`, `org_id`, `scope_id`.
+  - Added federated aggregate distributions by tenancy dimension: `tenant_distribution`, `org_distribution`, `scope_distribution`.
+  - Enforced scoped federation authorization on REST + MCP federation surfaces:
+    - optional grants: `tenant:<id>`, `org:<id>`, `scope:<id>`
+    - unauthorized explicit scope requests now fail with scoped authz errors (`forbidden_scope` on REST).
+    - scoped callers receive only permitted tenant/scope data even without explicit tenancy query filters.
+  - Added federation read audit attribution with tenant/org/scope context and scoped-denial attribution metadata.
+  - Added tests for tenancy segmentation, scope authorization coverage, MCP permission gates, and audit attribution fields.
+  - Updated federation docs/release notes for Stage 3.7.3.
+  - **[compat:additive]** Added additive tenancy fields/filter params/audit metadata without removing or renaming existing API/MCP identifiers.
 - **Jobs cancellation API + lifecycle guardrails**
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.

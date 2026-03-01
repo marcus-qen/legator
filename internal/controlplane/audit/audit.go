@@ -23,6 +23,7 @@ const (
 	EventApprovalDecided   EventType = "approval.decided"
 	EventTokenGenerated    EventType = "token.generated"
 	EventInventoryUpdate   EventType = "inventory.updated"
+	EventFederationRead    EventType = "federation.read"
 	EventProbeKeyRotated   EventType = "probe.key_rotated"
 	EventProbeDeregistered EventType = "probe.deregistered"
 	EventJobCreated            EventType = "job.created"

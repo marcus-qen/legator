@@ -3,15 +3,36 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/marcus-qen/legator/internal/controlplane/audit"
+	"github.com/marcus-qen/legator/internal/controlplane/auth"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/protocol"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+type mcpStubFederationAdapter struct {
+	source fleet.FederationSourceDescriptor
+	result fleet.FederationSourceResult
+	err   error
+}
+
+func (a *mcpStubFederationAdapter) Source() fleet.FederationSourceDescriptor {
+	return a.source
+}
+
+func (a *mcpStubFederationAdapter) Inventory(_ context.Context, _ fleet.InventoryFilter) (fleet.FederationSourceResult, error) {
+	if a.err != nil {
+		return fleet.FederationSourceResult{}, a.err
+	}
+	return a.result, nil
+}
 
 func TestFederationToolsAndResourcesParityWithFilters(t *testing.T) {
 	srv, fleetStore, _, _ := newTestMCPServer(t)
@@ -118,6 +139,125 @@ func TestFederationResourcesRegistered(t *testing.T) {
 		if !containsString(resourceURIs, expected) {
 			t.Fatalf("expected resource %s in %v", expected, resourceURIs)
 		}
+	}
+}
+
+func TestFederationMCPPermissionCoverage(t *testing.T) {
+	deniedErr := errors.New("insufficient permissions (required: fleet:read)")
+	requestedPerms := make([]auth.Permission, 0, 4)
+	srv, _, _, _ := newTestMCPServerWithOptions(t,
+		WithPermissionChecker(func(_ context.Context, perm auth.Permission) error {
+			requestedPerms = append(requestedPerms, perm)
+			return deniedErr
+		}),
+	)
+
+	for _, tc := range []struct {
+		name string
+		call func() error
+	}{
+		{name: "tool inventory", call: func() error {
+			_, _, err := srv.handleFederationInventory(context.Background(), nil, federationQueryInput{})
+			return err
+		}},
+		{name: "tool summary", call: func() error {
+			_, _, err := srv.handleFederationSummary(context.Background(), nil, federationQueryInput{})
+			return err
+		}},
+		{name: "resource inventory", call: func() error {
+			_, err := srv.handleFederationInventoryResource(context.Background(), nil)
+			return err
+		}},
+		{name: "resource summary", call: func() error {
+			_, err := srv.handleFederationSummaryResource(context.Background(), nil)
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.call()
+			if !errors.Is(err, deniedErr) {
+				t.Fatalf("expected denied error, got %v", err)
+			}
+		})
+	}
+
+	if len(requestedPerms) != 4 {
+		t.Fatalf("expected 4 permission checks, got %d (%v)", len(requestedPerms), requestedPerms)
+	}
+	for _, perm := range requestedPerms {
+		if perm != auth.PermFleetRead {
+			t.Fatalf("expected fleet:read permission check, got %s", perm)
+		}
+	}
+}
+
+func TestFederationMCPScopedAuthorizationAndAuditAttribution(t *testing.T) {
+	srv, _, auditStore, _ := newTestMCPServer(t)
+	srv.federationStore.RegisterSource(&mcpStubFederationAdapter{
+		source: fleet.FederationSourceDescriptor{ID: "tenant-a", Name: "Tenant A", Kind: "cluster", Cluster: "primary", Site: "dc-1", TenantID: "tenant-a", OrgID: "org-a", ScopeID: "scope-a"},
+		result: fleet.FederationSourceResult{Inventory: fleet.FleetInventory{Probes: []fleet.ProbeInventorySummary{{ID: "probe-a", Hostname: "a-1", Status: "online", OS: "linux"}}}},
+	})
+	srv.federationStore.RegisterSource(&mcpStubFederationAdapter{
+		source: fleet.FederationSourceDescriptor{ID: "tenant-b", Name: "Tenant B", Kind: "cluster", Cluster: "primary", Site: "dc-2", TenantID: "tenant-b", OrgID: "org-b", ScopeID: "scope-b"},
+		result: fleet.FederationSourceResult{Inventory: fleet.FleetInventory{Probes: []fleet.ProbeInventorySummary{{ID: "probe-b", Hostname: "b-1", Status: "online", OS: "linux"}}}},
+	})
+
+	ctx := auth.ContextWithAPIKey(context.Background(), &auth.APIKey{
+		Name: "tenant-a-reader",
+		Permissions: []auth.Permission{
+			auth.PermFleetRead,
+			auth.Permission("tenant:tenant-a"),
+			auth.Permission("org:org-a"),
+			auth.Permission("scope:scope-a"),
+		},
+	})
+
+	result, _, err := srv.handleFederationInventory(ctx, nil, federationQueryInput{})
+	if err != nil {
+		t.Fatalf("expected scoped inventory read to succeed, got %v", err)
+	}
+	var payload fleet.FederatedInventory
+	decodeToolJSON(t, result, &payload)
+	if len(payload.Probes) != 1 || payload.Probes[0].Probe.ID != "probe-a" {
+		t.Fatalf("expected tenant-a segmented result, got %+v", payload.Probes)
+	}
+	if payload.Probes[0].Source.ScopeID != "scope-a" {
+		t.Fatalf("expected scope attribution in result, got %+v", payload.Probes[0].Source)
+	}
+
+	_, _, err = srv.handleFederationSummary(ctx, nil, federationQueryInput{TenantID: "tenant-b", ScopeID: "scope-b"})
+	if err == nil {
+		t.Fatal("expected forbidden scoped access error")
+	}
+	if !strings.Contains(err.Error(), "not permitted") {
+		t.Fatalf("expected scoped authz denial error, got %v", err)
+	}
+
+	denials := auditStore.Query(audit.Filter{Type: audit.EventAuthorizationDenied, Limit: 10})
+	if len(denials) == 0 {
+		t.Fatal("expected authorization denied audit event")
+	}
+	foundDeniedContext := false
+	for _, evt := range denials {
+		detail, ok := evt.Detail.(map[string]any)
+		if !ok {
+			continue
+		}
+		if detail["surface"] != "tool:legator_federation_summary" {
+			continue
+		}
+		if detail["requested_tenant_id"] == "tenant-b" && detail["requested_scope_id"] == "scope-b" {
+			foundDeniedContext = true
+			break
+		}
+	}
+	if !foundDeniedContext {
+		t.Fatalf("expected denied audit attribution with tenant/scope context, events=%+v", denials)
+	}
+
+	reads := auditStore.Query(audit.Filter{Type: audit.EventFederationRead, Limit: 10})
+	if len(reads) == 0 {
+		t.Fatal("expected federation read audit events")
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
 	"github.com/marcus-qen/legator/internal/controlplane/config"
+	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"go.uber.org/zap"
 )
 
@@ -177,6 +178,93 @@ func TestPermissionsFleetReadCanAccessFleetInventoryAndChat(t *testing.T) {
 	history := makeRequest(t, srv, http.MethodGet, "/api/v1/fleet/chat", token, "")
 	if history.Code == http.StatusUnauthorized || history.Code == http.StatusForbidden {
 		t.Fatalf("expected fleet chat read access, got %d body=%s", history.Code, history.Body.String())
+	}
+}
+
+func TestFederationScopeAuthorizationAndSegmentation(t *testing.T) {
+	srv := newAuthTestServer(t)
+
+	tenantA := &fakeFederationSourceAdapter{
+		source: fleet.FederationSourceDescriptor{ID: "tenant-a-source", Name: "Tenant A", Kind: "cluster", Cluster: "primary", Site: "dc-1", TenantID: "tenant-a", OrgID: "org-a", ScopeID: "scope-a"},
+		result: fleet.FederationSourceResult{Inventory: fleet.FleetInventory{Probes: []fleet.ProbeInventorySummary{{ID: "probe-a", Hostname: "a-01", Status: "online", OS: "linux"}}}},
+	}
+	tenantB := &fakeFederationSourceAdapter{
+		source: fleet.FederationSourceDescriptor{ID: "tenant-b-source", Name: "Tenant B", Kind: "cluster", Cluster: "primary", Site: "dc-2", TenantID: "tenant-b", OrgID: "org-b", ScopeID: "scope-b"},
+		result: fleet.FederationSourceResult{Inventory: fleet.FleetInventory{Probes: []fleet.ProbeInventorySummary{{ID: "probe-b", Hostname: "b-01", Status: "online", OS: "linux"}}}},
+	}
+	srv.federationStore.RegisterSource(tenantA)
+	srv.federationStore.RegisterSource(tenantB)
+
+	token := createAPIKey(t, srv, "tenant-a-read",
+		auth.PermFleetRead,
+		auth.Permission("tenant:tenant-a"),
+		auth.Permission("org:org-a"),
+		auth.Permission("scope:scope-a"),
+	)
+
+	segmented := makeRequest(t, srv, http.MethodGet, "/api/v1/federation/inventory", token, "")
+	if segmented.Code != http.StatusOK {
+		t.Fatalf("expected tenant scoped federation read to succeed, got %d body=%s", segmented.Code, segmented.Body.String())
+	}
+	var payload fleet.FederatedInventory
+	if err := json.Unmarshal(segmented.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode inventory payload: %v", err)
+	}
+	if len(payload.Probes) != 1 || payload.Probes[0].Probe.ID != "probe-a" {
+		t.Fatalf("expected tenant-a data only, got %+v", payload.Probes)
+	}
+	if payload.Probes[0].Source.TenantID != "tenant-a" || payload.Probes[0].Source.ScopeID != "scope-a" {
+		t.Fatalf("expected tenant/scope attribution in payload, got %+v", payload.Probes[0].Source)
+	}
+
+	forbidden := makeRequest(t, srv, http.MethodGet, "/api/v1/federation/inventory?tenant_id=tenant-b&scope_id=scope-b", token, "")
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("expected forbidden tenant access, got %d body=%s", forbidden.Code, forbidden.Body.String())
+	}
+	var errPayload APIError
+	if err := json.Unmarshal(forbidden.Body.Bytes(), &errPayload); err != nil {
+		t.Fatalf("decode forbidden payload: %v", err)
+	}
+	if errPayload.Code != "forbidden_scope" {
+		t.Fatalf("expected forbidden_scope code, got %+v", errPayload)
+	}
+
+	authzEvents := srv.queryAudit(audit.Filter{Type: audit.EventAuthorizationDenied, Limit: 10})
+	if len(authzEvents) == 0 {
+		t.Fatal("expected authorization denied audit event for forbidden federation scope")
+	}
+	foundDeniedContext := false
+	for _, evt := range authzEvents {
+		detail, ok := evt.Detail.(map[string]any)
+		if !ok {
+			continue
+		}
+		if detail["path"] != "/api/v1/federation/inventory" {
+			continue
+		}
+		if detail["requested_tenant_id"] != "tenant-b" || detail["requested_scope_id"] != "scope-b" {
+			continue
+		}
+		allowedOK := false
+		switch scopes := detail["allowed_scope_ids"].(type) {
+		case []string:
+			allowedOK = len(scopes) > 0 && scopes[0] == "scope-a"
+		case []any:
+			allowedOK = len(scopes) > 0 && scopes[0] == "scope-a"
+		}
+		if !allowedOK {
+			continue
+		}
+		foundDeniedContext = true
+		break
+	}
+	if !foundDeniedContext {
+		t.Fatalf("expected denied audit detail to include tenant/scope context, events=%+v", authzEvents)
+	}
+
+	readEvents := srv.queryAudit(audit.Filter{Type: audit.EventFederationRead, Limit: 10})
+	if len(readEvents) == 0 {
+		t.Fatal("expected federation read audit event")
 	}
 }
 

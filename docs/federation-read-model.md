@@ -1,4 +1,4 @@
-# Federation Read Model (Stage 3.7.2)
+# Federation Read Model (Stage 3.7.3)
 
 Legator exposes a **read-only federation inventory layer** that aggregates inventory snapshots across multiple sources (clusters/sites) with explicit source attribution, health rollups, and filter parity across API/MCP/UI surfaces.
 
@@ -8,8 +8,9 @@ Compatibility/deprecation policy for API + MCP identifiers: `docs/api-mcp-compat
 
 - Read-only federation inventory listing
 - Read-only federation summary rollups
-- Per-source attribution on every probe summary (`source.id`, `source.cluster`, `source.site`, etc.)
-- Unified federation filters across all read surfaces: `source`, `cluster`, `site`, `tag`, `status`, `search`
+- Per-source attribution on every probe summary (`source.id`, `source.cluster`, `source.site`, `source.tenant_id`, `source.org_id`, `source.scope_id`)
+- Unified federation filters across all read surfaces: `source`, `cluster`, `site`, `tag`, `status`, `search`, `tenant_id`, `org_id`, `scope_id`
+- Scoped federation authorization boundaries (tenant/org/scope) across API + MCP surfaces
 - Health rollups:
   - overall federation health (`healthy` / `degraded` / `unavailable` / `unknown`)
   - per-source status and warnings/errors
@@ -31,11 +32,14 @@ Both endpoints require `fleet:read` and are additive to existing fleet APIs.
 | `source` | Filter by source ID/name |
 | `cluster` | Filter by source cluster |
 | `site` | Filter by source site |
-| `search` | Case-insensitive free-text search across source/probe fields (source id/name/kind/cluster/site, probe id/hostname/status/os/arch/kernel/policy/tags) |
+| `search` | Case-insensitive free-text search across source/probe fields (source id/name/kind/cluster/site/tenant/org/scope, probe id/hostname/status/os/arch/kernel/policy/tags) |
+| `tenant_id` (`tenant`) | Filter by source tenant identifier |
+| `org_id` (`org`) | Filter by source organization identifier |
+| `scope_id` (`scope`) | Filter by source scope identifier |
 
 ## MCP parity
 
-Federation read parity is available through MCP tools/resources with the same filter fields (`tag`, `status`, `source`, `cluster`, `site`, `search`).
+Federation read parity is available through MCP tools/resources with the same filter fields (`tag`, `status`, `source`, `cluster`, `site`, `search`, `tenant_id`, `org_id`, `scope_id`).
 
 ### MCP tools
 
@@ -49,7 +53,7 @@ Federation read parity is available through MCP tools/resources with the same fi
 
 Resource URIs support query parameters, for example:
 
-- `legator://federation/inventory?cluster=primary&tag=prod&search=web`
+- `legator://federation/inventory?cluster=primary&tag=prod&tenant_id=acme&scope_id=prod&search=web`
 
 ## UI parity
 
@@ -58,7 +62,7 @@ The web UI now includes a dedicated Federation view at `/federation` that calls:
 - `GET /api/v1/federation/inventory`
 - `GET /api/v1/federation/summary`
 
-with shared filter inputs (`source`, `cluster`, `site`, `tag`, `status`, `search`).
+with shared filter inputs (`source`, `cluster`, `site`, `tag`, `status`, `search`). Tenancy segmentation still applies based on caller scope grants.
 
 ## Response model
 
@@ -68,12 +72,28 @@ Returns:
 
 - `probes[]` with `source` attribution and probe summary payload
 - `sources[]` with per-source aggregates and source-level health context
-- `aggregates` with cross-source totals and distributions (including `tag_distribution`)
+- `aggregates` with cross-source totals and distributions (including `tag_distribution`, `tenant_distribution`, `org_distribution`, `scope_distribution`)
 - `health` with overall + per-source status rollups
 
 ### `/api/v1/federation/summary`
 
 Returns the same source/aggregate/health rollups without the full `probes[]` list.
+
+## Scoped authorization model
+
+Federation reads continue to require `fleet:read`. In Stage 3.7.3, optional additive scope grants can further constrain federation reads:
+
+- `tenant:<tenant-id>`
+- `org:<org-id>`
+- `scope:<scope-id>`
+
+Equivalent prefixed grants (`federation:tenant:*`, `federation:org:*`, `federation:scope:*`) are also accepted. When these grants are present:
+
+- callers only receive sources/probes within permitted tenant/org/scope boundaries
+- explicit unauthorized tenant/org/scope filter requests return `403` (`code: forbidden_scope`) on REST surfaces
+- MCP tools/resources return scoped authorization errors
+
+When no tenant/org/scope grants are configured, behavior remains backward-compatible and effectively single-tenant (`default` tenancy IDs when unset).
 
 ## Source status semantics
 
@@ -84,4 +104,4 @@ Returns the same source/aggregate/health rollups without the full `probes[]` lis
 
 ## Current wiring
 
-By default, the control plane registers one local federation source (`local`) backed by the existing fleet inventory store. The federation store supports registering additional adapters for remote clusters/sites without changing existing fleet write paths.
+By default, the control plane registers one local federation source (`local`) backed by the existing fleet inventory store. If tenant/org/scope IDs are not provided by an adapter, Legator normalizes them to `default` for backward compatibility. The federation store supports registering additional adapters for remote clusters/sites/tenancies without changing existing fleet write paths.

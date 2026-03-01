@@ -806,7 +806,17 @@ func (s *Server) handleFederationInventory(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	inv := s.federationStore.Inventory(r.Context(), federationFilterFromRequest(r))
+	requested := federationFilterFromRequest(r)
+	access := auth.FederationAccessScopeFromContext(r.Context())
+	effective, authzErr := applyFederationAccessFilter(requested, access)
+	if authzErr != nil {
+		s.recordFederationAuthorizationDenied(r, auth.PermFleetRead, requested, effective, access, authzErr)
+		writeJSONError(w, http.StatusForbidden, "forbidden_scope", authzErr.Error())
+		return
+	}
+
+	inv := s.federationStore.Inventory(r.Context(), effective)
+	s.recordFederationReadAudit(r, "api:federation_inventory", requested, effective, access, len(inv.Sources), len(inv.Probes))
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(inv)
@@ -821,7 +831,17 @@ func (s *Server) handleFederationSummary(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	summary := s.federationStore.Summary(r.Context(), federationFilterFromRequest(r))
+	requested := federationFilterFromRequest(r)
+	access := auth.FederationAccessScopeFromContext(r.Context())
+	effective, authzErr := applyFederationAccessFilter(requested, access)
+	if authzErr != nil {
+		s.recordFederationAuthorizationDenied(r, auth.PermFleetRead, requested, effective, access, authzErr)
+		writeJSONError(w, http.StatusForbidden, "forbidden_scope", authzErr.Error())
+		return
+	}
+
+	summary := s.federationStore.Summary(r.Context(), effective)
+	s.recordFederationReadAudit(r, "api:federation_summary", requested, effective, access, len(summary.Sources), summary.Aggregates.TotalProbes)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(summary)
@@ -830,12 +850,15 @@ func (s *Server) handleFederationSummary(w http.ResponseWriter, r *http.Request)
 func federationFilterFromRequest(r *http.Request) fleet.FederationFilter {
 	q := r.URL.Query()
 	return fleet.FederationFilter{
-		Tag:     q.Get("tag"),
-		Status:  q.Get("status"),
-		Source:  q.Get("source"),
-		Cluster: q.Get("cluster"),
-		Site:    q.Get("site"),
-		Search:  q.Get("search"),
+		Tag:      q.Get("tag"),
+		Status:   q.Get("status"),
+		Source:   q.Get("source"),
+		Cluster:  q.Get("cluster"),
+		Site:     q.Get("site"),
+		Search:   q.Get("search"),
+		TenantID: firstNonEmptyFederationQueryParam(q.Get("tenant_id"), q.Get("tenant")),
+		OrgID:    firstNonEmptyFederationQueryParam(q.Get("org_id"), q.Get("org")),
+		ScopeID:  firstNonEmptyFederationQueryParam(q.Get("scope_id"), q.Get("scope")),
 	}
 }
 

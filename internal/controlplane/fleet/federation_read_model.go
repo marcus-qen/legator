@@ -27,6 +27,14 @@ type FederationFilter struct {
 	Cluster string `json:"cluster,omitempty"`
 	Site    string `json:"site,omitempty"`
 	Search  string `json:"search,omitempty"`
+
+	TenantID string `json:"tenant_id,omitempty"`
+	OrgID    string `json:"org_id,omitempty"`
+	ScopeID  string `json:"scope_id,omitempty"`
+
+	AllowedTenantIDs []string `json:"-"`
+	AllowedOrgIDs    []string `json:"-"`
+	AllowedScopeIDs  []string `json:"-"`
 }
 
 // FederationSourceDescriptor identifies an inventory source.
@@ -36,6 +44,10 @@ type FederationSourceDescriptor struct {
 	Kind    string `json:"kind"`
 	Cluster string `json:"cluster,omitempty"`
 	Site    string `json:"site,omitempty"`
+
+	TenantID string `json:"tenant_id,omitempty"`
+	OrgID    string `json:"org_id,omitempty"`
+	ScopeID  string `json:"scope_id,omitempty"`
 }
 
 // FederatedSourceAttribution annotates probe data with source metadata.
@@ -46,6 +58,10 @@ type FederatedSourceAttribution struct {
 	Cluster string                 `json:"cluster,omitempty"`
 	Site    string                 `json:"site,omitempty"`
 	Status  FederationSourceStatus `json:"status"`
+
+	TenantID string `json:"tenant_id,omitempty"`
+	OrgID    string `json:"org_id,omitempty"`
+	ScopeID  string `json:"scope_id,omitempty"`
 }
 
 // FederationSourceResult is the adapter snapshot returned for a source.
@@ -148,6 +164,9 @@ type FederatedAggregates struct {
 	SourceDistribution  map[string]int `json:"source_distribution"`
 	ClusterDistribution map[string]int `json:"cluster_distribution"`
 	SiteDistribution    map[string]int `json:"site_distribution"`
+	TenantDistribution  map[string]int `json:"tenant_distribution"`
+	OrgDistribution     map[string]int `json:"org_distribution"`
+	ScopeDistribution   map[string]int `json:"scope_distribution"`
 }
 
 // FederatedInventory is the additive API payload for federated inventory reads.
@@ -210,6 +229,9 @@ func (s *FederationStore) Inventory(ctx context.Context, filter FederationFilter
 			SourceDistribution:  map[string]int{},
 			ClusterDistribution: map[string]int{},
 			SiteDistribution:    map[string]int{},
+			TenantDistribution:  map[string]int{},
+			OrgDistribution:     map[string]int{},
+			ScopeDistribution:   map[string]int{},
 		},
 		Health: FederationHealthRollup{Sources: []FederatedSourceHealth{}},
 	}
@@ -231,12 +253,15 @@ func (s *FederationStore) Inventory(ctx context.Context, filter FederationFilter
 		sourceStatus := FederationSourceHealthy
 		summary := FederatedSourceSummary{
 			Source: FederatedSourceAttribution{
-				ID:      source.ID,
-				Name:    source.Name,
-				Kind:    source.Kind,
-				Cluster: source.Cluster,
-				Site:    source.Site,
-				Status:  FederationSourceHealthy,
+				ID:       source.ID,
+				Name:     source.Name,
+				Kind:     source.Kind,
+				Cluster:  source.Cluster,
+				Site:     source.Site,
+				Status:   FederationSourceHealthy,
+				TenantID: source.TenantID,
+				OrgID:    source.OrgID,
+				ScopeID:  source.ScopeID,
 			},
 			Aggregates: FleetAggregates{
 				ProbesByOS:      map[string]int{},
@@ -302,6 +327,9 @@ func (s *FederationStore) Inventory(ctx context.Context, filter FederationFilter
 		result.Aggregates.SourceDistribution[source.ID] += summary.Aggregates.TotalProbes
 		result.Aggregates.ClusterDistribution[source.Cluster] += summary.Aggregates.TotalProbes
 		result.Aggregates.SiteDistribution[source.Site] += summary.Aggregates.TotalProbes
+		result.Aggregates.TenantDistribution[source.TenantID] += summary.Aggregates.TotalProbes
+		result.Aggregates.OrgDistribution[source.OrgID] += summary.Aggregates.TotalProbes
+		result.Aggregates.ScopeDistribution[source.ScopeID] += summary.Aggregates.TotalProbes
 
 		for _, probe := range filteredProbes {
 			result.Probes = append(result.Probes, FederatedProbeInventory{
@@ -414,7 +442,45 @@ func matchesFederationSourceFilter(source FederationSourceDescriptor, filter Fed
 		return false
 	}
 
+	tenantNeedle := strings.ToLower(strings.TrimSpace(filter.TenantID))
+	if tenantNeedle != "" && tenantNeedle != strings.ToLower(strings.TrimSpace(source.TenantID)) {
+		return false
+	}
+
+	orgNeedle := strings.ToLower(strings.TrimSpace(filter.OrgID))
+	if orgNeedle != "" && orgNeedle != strings.ToLower(strings.TrimSpace(source.OrgID)) {
+		return false
+	}
+
+	scopeNeedle := strings.ToLower(strings.TrimSpace(filter.ScopeID))
+	if scopeNeedle != "" && scopeNeedle != strings.ToLower(strings.TrimSpace(source.ScopeID)) {
+		return false
+	}
+
+	if !matchesFederationAllowedDimension(source.TenantID, filter.AllowedTenantIDs) {
+		return false
+	}
+	if !matchesFederationAllowedDimension(source.OrgID, filter.AllowedOrgIDs) {
+		return false
+	}
+	if !matchesFederationAllowedDimension(source.ScopeID, filter.AllowedScopeIDs) {
+		return false
+	}
+
 	return true
+}
+
+func matchesFederationAllowedDimension(value string, allowed []string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	needle := strings.ToLower(strings.TrimSpace(value))
+	for _, candidate := range allowed {
+		if needle == strings.ToLower(strings.TrimSpace(candidate)) {
+			return true
+		}
+	}
+	return false
 }
 
 func filterFederatedProbes(probes []ProbeInventorySummary, source FederationSourceDescriptor, filter InventoryFilter, searchNeedle string, sourceMatchesSearch bool) []ProbeInventorySummary {
@@ -460,7 +526,7 @@ func matchesFederationSearchInSource(source FederationSourceDescriptor, needle s
 	if needle == "" {
 		return true
 	}
-	fields := []string{source.ID, source.Name, source.Kind, source.Cluster, source.Site}
+	fields := []string{source.ID, source.Name, source.Kind, source.Cluster, source.Site, source.TenantID, source.OrgID, source.ScopeID}
 	for _, field := range fields {
 		if strings.Contains(strings.ToLower(strings.TrimSpace(field)), needle) {
 			return true
@@ -557,7 +623,19 @@ func normalizeFederationSourceDescriptor(source FederationSourceDescriptor) Fede
 		source.Site = "unknown"
 	}
 
+	source.TenantID = normalizeFederationTenantField(source.TenantID)
+	source.OrgID = normalizeFederationTenantField(source.OrgID)
+	source.ScopeID = normalizeFederationTenantField(source.ScopeID)
+
 	return source
+}
+
+func normalizeFederationTenantField(raw string) string {
+	norm := strings.ToLower(strings.TrimSpace(raw))
+	if norm == "" {
+		return "default"
+	}
+	return norm
 }
 
 func sanitizeSourceID(raw string) string {
