@@ -1,0 +1,57 @@
+version: "1"
+contract_id: legator.architecture.boundary-exceptions
+summary: >-
+  Time-bounded exception registry for intentional/transitional architecture
+  boundary dependencies. Every entry must include reviewer sign-off, rationale,
+  tracking issue, and a removal expectation with expiry.
+
+exceptions:
+  - id: ARCH-EXC-2026-0001
+    from_boundary: surfaces
+    to_boundary: adapters-integrations
+    scope: >-
+      Existing HTTP handlers still wire adapter packages directly during staged
+      extraction into core-domain orchestration seams.
+    rationale: >-
+      Transitional edge retained while product surfaces move to pure
+      surface->core-domain orchestration boundaries.
+    reviewer_signoff: "@marcus-qen (architecture review, Stage 3.6.4)"
+    tracking_issue: "TODO(stage-3.6.4): remove direct surface->adapter wiring"
+    approved_on: "2026-03-01"
+    expires_on: "2026-06-30"
+    removal_expectations: >-
+      Remove after migrating remaining direct adapter handlers behind core
+      orchestrators; delete this exception in the same PR that removes the edge.
+
+  - id: ARCH-EXC-2026-0002
+    from_boundary: adapters-integrations
+    to_boundary: core-domain
+    scope: >-
+      llm integration still imports fleet/core projections pending extraction of
+      stable adapter-facing contracts.
+    rationale: >-
+      Transitional coupling required to maintain existing behavior while domain
+      projection interfaces are carved out.
+    reviewer_signoff: "@marcus-qen (architecture review, Stage 3.6.4)"
+    tracking_issue: "TODO(stage-3.6.4): split llm projection dependencies"
+    approved_on: "2026-03-01"
+    expires_on: "2026-06-30"
+    removal_expectations: >-
+      Replace with explicit projection interfaces in core-domain and remove
+      adapter->core direct imports; delete exception once complete.
+
+  - id: ARCH-EXC-2026-0003
+    from_boundary: platform-runtime
+    to_boundary: surfaces
+    scope: >-
+      Discovery runtime currently reuses API registration helpers in surfaces.
+    rationale: >-
+      Transitional dependency accepted to avoid duplicate registration code while
+      shared runtime registration seam is extracted.
+    reviewer_signoff: "@marcus-qen (architecture review, Stage 3.6.4)"
+    tracking_issue: "TODO(stage-3.6.4): move discovery registration helpers"
+    approved_on: "2026-03-01"
+    expires_on: "2026-06-30"
+    removal_expectations: >-
+      Extract shared registration helpers into platform-runtime or core-domain,
+      then remove platform-runtime->surfaces import and delete this exception.
