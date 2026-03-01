@@ -9,6 +9,8 @@
 - Every action is observable, auditable, and reversible where possible
 - The LLM never touches target servers directly
 
+Architecture guardrails contract: `docs/contracts/architecture-boundaries.yaml` (overview: `docs/architecture/ci-boundary-guardrails.md`).
+
 ## Components
 
 ```text

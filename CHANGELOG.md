@@ -88,6 +88,13 @@
   - Added CI-enforced contract tests (`internal/controlplane/compat/contracts_test.go`) that fail on untracked route/tool/resource additions and on undeclared removals/renames.
   - Added release-note guidance (`docs/releases/README.md`) and linked API/MCP docs to the compatibility contract.
   - **[compat:additive]** Contract enforcement is additive and backward-compatible; no existing REST/MCP identifiers changed.
+- **Stage 3.6.1 CI guardrails: boundary rule specification + ownership map**
+  - Added machine-readable architecture boundary contract: `docs/contracts/architecture-boundaries.yaml`.
+  - Defined explicit boundary zones for core domain, adapters/integrations, surfaces (HTTP/MCP/UI), platform/runtime wiring, and probe runtime.
+  - Added allow/deny dependency policy and default-deny model intended for Stage 3.6.2 import-graph enforcement.
+  - Added ownership map for each boundary zone (owners + key module patterns).
+  - Added CI integrity tests (`internal/controlplane/compat/boundary_contract_test.go`) to validate boundary IDs, dependency-rule consistency, ownership assignments, and path-pattern validity.
+  - Added human guide for enforcement rollout (`docs/architecture/ci-boundary-guardrails.md`) and linked architecture docs to the contract.
 - **Jobs cancellation API + lifecycle guardrails**
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.

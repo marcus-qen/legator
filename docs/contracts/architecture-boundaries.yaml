@@ -1,0 +1,200 @@
+version: "1"
+contract_id: legator.architecture.boundaries
+stage: "3.6.1"
+summary: >-
+  Canonical boundary and ownership contract for CI architecture guardrails.
+  Stage 3.6.1 defines the contract and validates integrity only.
+module_root: .
+required_boundaries:
+  - core-domain
+  - adapters-integrations
+  - surfaces
+  - platform-runtime
+
+boundaries:
+  - id: core-domain
+    name: Core domain
+    description: >-
+      Business orchestration and policy decisions independent of transport details.
+    package_patterns:
+      - internal/controlplane/core/...
+      - internal/controlplane/approval/...
+      - internal/controlplane/policy/...
+      - internal/controlplane/jobs/...
+      - internal/controlplane/fleet/...
+      - internal/controlplane/audit/...
+      - internal/controlplane/cmdtracker/...
+      - internal/controlplane/alerts/...
+
+  - id: adapters-integrations
+    name: Adapters and integrations
+    description: >-
+      External system integrations and provider-specific translation layers.
+    package_patterns:
+      - internal/controlplane/grafana/...
+      - internal/controlplane/kubeflow/...
+      - internal/controlplane/networkdevices/...
+      - internal/controlplane/cloudconnectors/...
+      - internal/controlplane/modeldock/...
+      - internal/controlplane/llm/...
+
+  - id: surfaces
+    name: Surfaces (HTTP, MCP, UI)
+    description: >-
+      User- and agent-facing surfaces: REST handlers, MCP tools/resources, and web assets.
+    package_patterns:
+      - internal/controlplane/server/...
+      - internal/controlplane/api/...
+      - internal/controlplane/mcpserver/...
+      - cmd/control-plane/...
+      - cmd/legatorctl/...
+      - web/...
+
+  - id: platform-runtime
+    name: Platform and runtime wiring
+    description: >-
+      Cross-cutting runtime concerns: auth, configuration, sessions, transport hubs,
+      metrics, events, shared protocol/security primitives.
+    package_patterns:
+      - internal/controlplane/auth/...
+      - internal/controlplane/config/...
+      - internal/controlplane/discovery/...
+      - internal/controlplane/events/...
+      - internal/controlplane/metrics/...
+      - internal/controlplane/oidc/...
+      - internal/controlplane/session/...
+      - internal/controlplane/users/...
+      - internal/controlplane/webhook/...
+      - internal/controlplane/websocket/...
+      - internal/shared/...
+      - internal/protocol/...
+
+  - id: probe-runtime
+    name: Probe runtime
+    description: >-
+      Probe execution loop and host-side command/inventory/runtime behavior.
+    package_patterns:
+      - cmd/probe/...
+      - internal/probe/...
+
+dependency_policy:
+  default_effect: deny
+  allow:
+    - from: surfaces
+      to: core-domain
+      rationale: Surfaces translate requests/responses and call core orchestration.
+    - from: surfaces
+      to: adapters-integrations
+      rationale: Existing surfaces still include direct adapter handlers during migration.
+    - from: surfaces
+      to: platform-runtime
+      rationale: Surfaces depend on auth/session/config and transport plumbing.
+
+    - from: core-domain
+      to: adapters-integrations
+      rationale: Core orchestrates integrations through adapter-facing seams.
+    - from: core-domain
+      to: platform-runtime
+      rationale: Core emits events/metrics and consumes shared runtime primitives.
+
+    - from: adapters-integrations
+      to: platform-runtime
+      rationale: Integrations use config, transport clients, and shared runtime utilities.
+
+    - from: platform-runtime
+      to: core-domain
+      rationale: Runtime wiring composes and initializes core services.
+    - from: platform-runtime
+      to: adapters-integrations
+      rationale: Runtime wiring initializes integration adapters.
+
+    - from: probe-runtime
+      to: platform-runtime
+      rationale: Probe runtime consumes shared protocol/security primitives.
+
+  deny:
+    - from: core-domain
+      to: surfaces
+      rationale: Core logic must stay transport-agnostic.
+    - from: adapters-integrations
+      to: surfaces
+      rationale: Adapter packages must not render HTTP/MCP/UI concerns.
+    - from: probe-runtime
+      to: surfaces
+      rationale: Probe runtime must not call control-plane surface code.
+    - from: probe-runtime
+      to: core-domain
+      rationale: Probe runtime executes commands; core governance remains in control plane.
+
+ownership:
+  owners:
+    - id: control-plane-core
+      display_name: Control Plane Core
+      scope: Core policy/approval/fleet/jobs/audit orchestration.
+    - id: integrations
+      display_name: Integrations and Connectors
+      scope: External providers (Grafana, Kubeflow, cloud, model providers, network devices).
+    - id: product-surfaces
+      display_name: Product Surfaces
+      scope: REST, MCP, UI and operator workflow experiences.
+    - id: runtime-platform
+      display_name: Runtime Platform
+      scope: Auth/config/session/events/metrics/transport runtime.
+    - id: probe-runtime
+      display_name: Probe Runtime
+      scope: Host-side probe process, command execution, inventory, updater lifecycle.
+
+  assignments:
+    - boundary_id: core-domain
+      owner_id: control-plane-core
+      key_modules:
+        - internal/controlplane/core/...
+        - internal/controlplane/approval/...
+        - internal/controlplane/policy/...
+        - internal/controlplane/jobs/...
+        - internal/controlplane/fleet/...
+        - internal/controlplane/audit/...
+
+    - boundary_id: adapters-integrations
+      owner_id: integrations
+      key_modules:
+        - internal/controlplane/grafana/...
+        - internal/controlplane/kubeflow/...
+        - internal/controlplane/networkdevices/...
+        - internal/controlplane/cloudconnectors/...
+        - internal/controlplane/modeldock/...
+        - internal/controlplane/llm/...
+
+    - boundary_id: surfaces
+      owner_id: product-surfaces
+      key_modules:
+        - internal/controlplane/server/...
+        - internal/controlplane/mcpserver/...
+        - web/...
+
+    - boundary_id: platform-runtime
+      owner_id: runtime-platform
+      key_modules:
+        - internal/controlplane/auth/...
+        - internal/controlplane/config/...
+        - internal/controlplane/session/...
+        - internal/controlplane/websocket/...
+        - internal/shared/...
+        - internal/protocol/...
+
+    - boundary_id: probe-runtime
+      owner_id: probe-runtime
+      key_modules:
+        - cmd/probe/...
+        - internal/probe/...
+
+enforcement_model:
+  stage_3_6_1: >-
+    Validate contract file schema/basic consistency in CI. No import-graph enforcement
+    yet.
+  stage_3_6_2: >-
+    Load this contract to map packages to boundaries, compute Go import edges,
+    and enforce allow/deny rules in CI.
+  rollout_notes:
+    - Start Stage 3.6.2 in report-only mode to enumerate violations.
+    - Promote to fail-on-violation after targeted boundary cleanup.

@@ -34,6 +34,11 @@ Primary next reuse target: research infrastructure workflows (Kubeflow jobs + Gr
 - `adapters -> external systems`
 - **No domain logic in handlers/templates**
 
+Canonical CI guardrail contract (Stage 3.6.1):
+
+- `docs/contracts/architecture-boundaries.yaml`
+- Human guide: `docs/architecture/ci-boundary-guardrails.md`
+
 ---
 
 ## Target Module Map
