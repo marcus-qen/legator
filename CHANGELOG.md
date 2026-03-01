@@ -114,6 +114,19 @@
   - Added exception registry (`docs/contracts/architecture-boundary-exceptions.yaml`) and Stage 3.6.4 contract metadata for intentional transitional boundary exceptions.
   - Added `TestBoundaryContract_ExceptionRegistry` to enforce exception rationale/reviewer sign-off, tracking issue, expiry validity, and coverage for transitional allow edges.
   - Added `make preflight` target for local guardrail-first checks (`architecture-guard` then `go test ./...`).
+- **Stage 3.7.1 Federation: multi-cluster inventory read model**
+  - Added federation read-model components in `internal/controlplane/fleet`:
+    - source adapter interface (`FederationSourceAdapter`)
+    - local fleet adapter (`FleetSourceAdapter`)
+    - federation store/aggregator (`FederationStore`) with source filtering (`source`, `cluster`, `site`) and passthrough inventory filters (`tag`, `status`).
+  - Added additive read-only API routes:
+    - `GET /api/v1/federation/inventory`
+    - `GET /api/v1/federation/summary`
+  - Added source attribution fields on federated probe records (`source.id`, `source.name`, `source.kind`, `source.cluster`, `source.site`, `source.status`).
+  - Added health rollups across sources (overall + per-source status, warnings/errors, and unavailable-source handling).
+  - Added tests for aggregation behavior, unavailable/partial source edge cases, and server handler/permission responses.
+  - Added docs: `docs/federation-read-model.md` and README API/docs updates.
+  - **[compat:additive]** Added read-only federation endpoints and payloads; existing write/mutation surfaces are unchanged.
 - **Jobs cancellation API + lifecycle guardrails**
   - Added `POST /api/v1/jobs/{id}/cancel` to cancel all active runs for a job.
   - Added `POST /api/v1/jobs/{id}/runs/{runId}/cancel` to cancel an individual run.

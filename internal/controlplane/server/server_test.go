@@ -60,6 +60,25 @@ func (p testCapacityProvider) CapacitySignals(context.Context) (*coreapprovalpol
 	return &clone, p.err
 }
 
+type fakeFederationSourceAdapter struct {
+	source   fleet.FederationSourceDescriptor
+	result   fleet.FederationSourceResult
+	err      error
+	filters  []fleet.InventoryFilter
+}
+
+func (f *fakeFederationSourceAdapter) Source() fleet.FederationSourceDescriptor {
+	return f.source
+}
+
+func (f *fakeFederationSourceAdapter) Inventory(_ context.Context, filter fleet.InventoryFilter) (fleet.FederationSourceResult, error) {
+	f.filters = append(f.filters, filter)
+	if f.err != nil {
+		return fleet.FederationSourceResult{}, f.err
+	}
+	return f.result, nil
+}
+
 func connectProbeWS(t *testing.T, srv *Server, probeID string) (*websocket.Conn, func()) {
 	t.Helper()
 
@@ -89,6 +108,9 @@ func TestNew_InitializesCoreComponents(t *testing.T) {
 
 	if srv.fleetMgr == nil {
 		t.Fatal("fleet manager not initialized")
+	}
+	if srv.federationStore == nil {
+		t.Fatal("federation store not initialized")
 	}
 	if srv.tokenStore == nil {
 		t.Fatal("token store not initialized")
@@ -1375,6 +1397,83 @@ func TestHandleFleetInventory_WithFilters(t *testing.T) {
 	}
 	if payload.Aggregates.TotalRAMBytes != 8*1024*1024*1024 {
 		t.Fatalf("unexpected total RAM: %d", payload.Aggregates.TotalRAMBytes)
+	}
+}
+
+func TestHandleFederationInventory_WithFilters(t *testing.T) {
+	srv := newTestServer(t)
+
+	srv.fleetMgr.Register("probe-1", "web-01", "linux", "amd64")
+	srv.fleetMgr.Register("probe-2", "db-01", "linux", "amd64")
+	_ = srv.fleetMgr.SetTags("probe-1", []string{"prod"})
+	_ = srv.fleetMgr.SetTags("probe-2", []string{"dev"})
+	_ = srv.fleetMgr.UpdateInventory("probe-1", &protocol.InventoryPayload{CPUs: 4, MemTotal: 8 * 1024 * 1024 * 1024, OS: "linux"})
+	_ = srv.fleetMgr.UpdateInventory("probe-2", &protocol.InventoryPayload{CPUs: 2, MemTotal: 4 * 1024 * 1024 * 1024, OS: "linux"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/federation/inventory?tag=prod&status=online&source=local", nil)
+	rr := httptest.NewRecorder()
+
+	srv.handleFederationInventory(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var payload fleet.FederatedInventory
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if payload.Aggregates.TotalSources != 1 {
+		t.Fatalf("expected 1 source, got %d", payload.Aggregates.TotalSources)
+	}
+	if len(payload.Probes) != 1 || payload.Probes[0].Probe.ID != "probe-1" {
+		t.Fatalf("unexpected federated probes payload: %#v", payload.Probes)
+	}
+	if payload.Probes[0].Source.ID != "local" {
+		t.Fatalf("expected local source attribution, got %+v", payload.Probes[0].Source)
+	}
+	if payload.Health.Overall != fleet.FederationSourceHealthy {
+		t.Fatalf("expected healthy overall rollup, got %q", payload.Health.Overall)
+	}
+}
+
+func TestHandleFederationSummary_UnavailableSourceRollup(t *testing.T) {
+	srv := newTestServer(t)
+
+	unavailable := &fakeFederationSourceAdapter{
+		source: fleet.FederationSourceDescriptor{ID: "remote-a", Name: "Remote A", Kind: "cluster", Cluster: "eu-west", Site: "dc-2"},
+		err:    fmt.Errorf("source timed out"),
+	}
+	srv.federationStore.RegisterSource(unavailable)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/federation/summary?source=remote-a", nil)
+	rr := httptest.NewRecorder()
+	srv.handleFederationSummary(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var payload fleet.FederatedInventorySummary
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if payload.Aggregates.TotalSources != 1 {
+		t.Fatalf("expected 1 source in summary, got %d", payload.Aggregates.TotalSources)
+	}
+	if payload.Aggregates.UnavailableSources != 1 {
+		t.Fatalf("expected unavailable source count to be 1, got %d", payload.Aggregates.UnavailableSources)
+	}
+	if payload.Health.Overall != fleet.FederationSourceUnavailable {
+		t.Fatalf("expected overall unavailable rollup, got %q", payload.Health.Overall)
+	}
+	if len(payload.Sources) != 1 || payload.Sources[0].Error == "" {
+		t.Fatalf("expected source error in summary payload: %#v", payload.Sources)
+	}
+	if len(unavailable.filters) != 1 {
+		t.Fatalf("expected adapter to receive one query, got %d", len(unavailable.filters))
 	}
 }
 

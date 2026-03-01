@@ -67,9 +67,10 @@ type Server struct {
 	logger *zap.Logger
 
 	// Core subsystems
-	fleetMgr      fleet.Fleet
-	fleetStore    *fleet.Store
-	tokenStore    *api.TokenStore
+	fleetMgr        fleet.Fleet
+	fleetStore      *fleet.Store
+	federationStore *fleet.FederationStore
+	tokenStore      *api.TokenStore
 	cmdTracker    *cmdtracker.Tracker
 	approvalQueue *approval.Queue
 	approvalCore  *coreapprovalpolicy.Service
@@ -180,6 +181,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	if err := s.initFleet(); err != nil {
 		return nil, err
 	}
+	s.initFederation()
 	tokensDBPath := filepath.Join(s.cfg.DataDir, "tokens.db")
 	tokenStore, err := api.NewTokenStore(tokensDBPath)
 	if err != nil {
@@ -416,6 +418,18 @@ func (s *Server) initFleet() error {
 		s.fleetMgr = fleet.NewManager(s.logger.Named("fleet"))
 	}
 	return nil
+}
+
+func (s *Server) initFederation() {
+	s.federationStore = fleet.NewFederationStore(
+		fleet.NewFleetSourceAdapter(s.fleetMgr, fleet.FederationSourceDescriptor{
+			ID:      "local",
+			Name:    "Local Fleet",
+			Kind:    "control-plane",
+			Cluster: "primary",
+			Site:    "local",
+		}),
+	)
 }
 
 func (s *Server) initAudit() {
