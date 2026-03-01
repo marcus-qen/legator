@@ -1,7 +1,10 @@
 package reliability
 
 import (
+	"bufio"
+	"io"
 	"math"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -177,10 +180,60 @@ func (t *RequestTelemetry) Snapshot(window time.Duration, now time.Time) Control
 
 type statusRecorder struct {
 	http.ResponseWriter
-	status int
+	status      int
+	wroteHeader bool
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
-	r.status = code
+	if !r.wroteHeader {
+		r.status = code
+		r.wroteHeader = true
+	}
 	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *statusRecorder) Write(data []byte) (int, error) {
+	if !r.wroteHeader {
+		r.WriteHeader(http.StatusOK)
+	}
+	return r.ResponseWriter.Write(data)
+}
+
+func (r *statusRecorder) Flush() {
+	if flusher, ok := r.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	return hijacker.Hijack()
+}
+
+func (r *statusRecorder) ReadFrom(src io.Reader) (int64, error) {
+	if !r.wroteHeader {
+		r.WriteHeader(http.StatusOK)
+	}
+	if readerFrom, ok := r.ResponseWriter.(io.ReaderFrom); ok {
+		return readerFrom.ReadFrom(src)
+	}
+	return io.Copy(r.ResponseWriter, src)
+}
+
+func (r *statusRecorder) Push(target string, opts *http.PushOptions) error {
+	pusher, ok := r.ResponseWriter.(http.Pusher)
+	if !ok {
+		return http.ErrNotSupported
+	}
+	return pusher.Push(target, opts)
+}
+
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	if r == nil {
+		return nil
+	}
+	return r.ResponseWriter
 }
