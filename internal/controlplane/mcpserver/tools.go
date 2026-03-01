@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
+	"github.com/marcus-qen/legator/internal/controlplane/auth"
 	coreapprovalpolicy "github.com/marcus-qen/legator/internal/controlplane/core/approvalpolicy"
 	corecommanddispatch "github.com/marcus-qen/legator/internal/controlplane/core/commanddispatch"
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
+	"github.com/marcus-qen/legator/internal/controlplane/grafana"
 	"github.com/marcus-qen/legator/internal/controlplane/jobs"
 	"github.com/marcus-qen/legator/internal/controlplane/kubeflow"
 	"github.com/marcus-qen/legator/internal/protocol"
@@ -67,6 +69,14 @@ type kubeflowCancelRunInput struct {
 	Name      string `json:"name" jsonschema:"run name"`
 	Kind      string `json:"kind,omitempty" jsonschema:"optional kubernetes resource kind (default runs.kubeflow.org)"`
 	Namespace string `json:"namespace,omitempty" jsonschema:"optional namespace override"`
+}
+
+type grafanaToolInput struct{}
+
+type grafanaCapacityPolicyPayload struct {
+	Capacity       coreapprovalpolicy.CapacitySignals             `json:"capacity"`
+	PolicyDecision coreapprovalpolicy.CommandPolicyDecisionOutcome `json:"policy_decision"`
+	PolicyRationale coreapprovalpolicy.CommandPolicyRationale      `json:"policy_rationale"`
 }
 
 type listJobRunsInput struct {
@@ -228,6 +238,21 @@ func (s *MCPServer) registerTools() {
 		Name:        "legator_stream_job_events",
 		Description: "Stream or poll job lifecycle events using audit/event bus infrastructure",
 	}, s.handleStreamJobEvents)
+
+	if s.grafanaClient != nil {
+		mcp.AddTool(s.server, &mcp.Tool{
+			Name:        "legator_grafana_status",
+			Description: "Get Grafana adapter status (read-only capacity availability summary)",
+		}, s.handleGrafanaStatus)
+		mcp.AddTool(s.server, &mcp.Tool{
+			Name:        "legator_grafana_snapshot",
+			Description: "Get Grafana adapter capacity snapshot (read-only)",
+		}, s.handleGrafanaSnapshot)
+		mcp.AddTool(s.server, &mcp.Tool{
+			Name:        "legator_grafana_capacity_policy",
+			Description: "Get Grafana-derived capacity signals plus policy rationale projection",
+		}, s.handleGrafanaCapacityPolicy)
+	}
 
 	if s.kubeflowRunStatus != nil {
 		mcp.AddTool(s.server, &mcp.Tool{
@@ -393,6 +418,83 @@ func (s *MCPServer) handleKubeflowCancelRun(ctx context.Context, _ *mcp.CallTool
 		return nil, nil, err
 	}
 	return jsonToolResult(result)
+}
+
+func (s *MCPServer) handleGrafanaStatus(ctx context.Context, _ *mcp.CallToolRequest, _ grafanaToolInput) (*mcp.CallToolResult, any, error) {
+	if s.grafanaClient == nil {
+		return nil, nil, fmt.Errorf("grafana adapter unavailable")
+	}
+	if err := s.requirePermission(ctx, auth.PermFleetRead); err != nil {
+		return nil, nil, err
+	}
+	status, err := s.grafanaClient.Status(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return jsonToolResult(map[string]any{"status": status})
+}
+
+func (s *MCPServer) handleGrafanaSnapshot(ctx context.Context, _ *mcp.CallToolRequest, _ grafanaToolInput) (*mcp.CallToolResult, any, error) {
+	if s.grafanaClient == nil {
+		return nil, nil, fmt.Errorf("grafana adapter unavailable")
+	}
+	if err := s.requirePermission(ctx, auth.PermFleetRead); err != nil {
+		return nil, nil, err
+	}
+	snapshot, err := s.grafanaClient.Snapshot(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return jsonToolResult(map[string]any{"snapshot": snapshot})
+}
+
+func (s *MCPServer) handleGrafanaCapacityPolicy(ctx context.Context, _ *mcp.CallToolRequest, _ grafanaToolInput) (*mcp.CallToolResult, any, error) {
+	if s.grafanaClient == nil {
+		return nil, nil, fmt.Errorf("grafana adapter unavailable")
+	}
+	if err := s.requirePermission(ctx, auth.PermFleetRead); err != nil {
+		return nil, nil, err
+	}
+
+	snapshot, err := s.grafanaClient.Snapshot(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	signals := grafanaCapacitySignalsFromSnapshot(snapshot)
+	decision := evaluateGrafanaCapacityPolicy(ctx, signals)
+
+	payload := grafanaCapacityPolicyPayload{
+		Capacity:        signals,
+		PolicyDecision:  decision.Outcome,
+		PolicyRationale: decision.Rationale,
+	}
+	return jsonToolResult(payload)
+}
+
+func evaluateGrafanaCapacityPolicy(ctx context.Context, signals coreapprovalpolicy.CapacitySignals) coreapprovalpolicy.CommandPolicyDecision {
+	svc := coreapprovalpolicy.NewService(
+		nil,
+		nil,
+		nil,
+		coreapprovalpolicy.WithCapacitySignalProvider(coreapprovalpolicy.CapacitySignalProviderFunc(func(context.Context) (*coreapprovalpolicy.CapacitySignals, error) {
+			clone := signals
+			clone.Warnings = append([]string(nil), signals.Warnings...)
+			return &clone, nil
+		})),
+	)
+	return svc.EvaluateCommandPolicy(ctx, &protocol.CommandPayload{Command: "echo grafana-capacity"}, protocol.CapObserve)
+}
+
+func grafanaCapacitySignalsFromSnapshot(snapshot grafana.Snapshot) coreapprovalpolicy.CapacitySignals {
+	return coreapprovalpolicy.CapacitySignals{
+		Source:            "grafana",
+		Availability:      snapshot.Indicators.Availability,
+		DashboardCoverage: snapshot.Indicators.DashboardCoverage,
+		QueryCoverage:     snapshot.Indicators.QueryCoverage,
+		DatasourceCount:   snapshot.Indicators.DatasourceCount,
+		Partial:           snapshot.Partial,
+		Warnings:          append([]string(nil), snapshot.Warnings...),
+	}
 }
 
 func (s *MCPServer) handleGetInventory(_ context.Context, _ *mcp.CallToolRequest, input probeInfoInput) (*mcp.CallToolResult, any, error) {
