@@ -149,7 +149,7 @@ func TestGrafanaCapacityPolicyToolAndResourceRationaleParity(t *testing.T) {
 	if toolPayload.PolicyRationale.Capacity == nil {
 		t.Fatal("expected policy_rationale.capacity to be present")
 	}
-	if !reflect.DeepEqual(toolPayload.PolicyRationale, expectedDecision.Rationale) {
+	if !reflect.DeepEqual(canonicalJSONMap(t, toolPayload.PolicyRationale), canonicalJSONMap(t, expectedDecision.Rationale)) {
 		t.Fatalf("policy rationale mismatch:\ngot=%+v\nwant=%+v", toolPayload.PolicyRationale, expectedDecision.Rationale)
 	}
 	if !reflect.DeepEqual(toolPayload.Capacity, *toolPayload.PolicyRationale.Capacity) {
@@ -238,6 +238,19 @@ func decodeResourceJSON(t *testing.T, result *mcp.ReadResourceResult, out any) {
 	if err := json.Unmarshal([]byte(result.Contents[0].Text), out); err != nil {
 		t.Fatalf("decode resource json: %v (text=%q)", err, result.Contents[0].Text)
 	}
+}
+
+func canonicalJSONMap(t *testing.T, payload any) map[string]any {
+	t.Helper()
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal canonical payload: %v", err)
+	}
+	out := map[string]any{}
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("unmarshal canonical payload: %v", err)
+	}
+	return out
 }
 
 func newStubGrafanaClient() *stubGrafanaClient {
