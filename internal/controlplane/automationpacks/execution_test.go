@@ -8,8 +8,12 @@ import (
 )
 
 type scriptedOutcome struct {
-	err    error
-	output map[string]any
+	err       error
+	output    map[string]any
+	message   string
+	stdout    string
+	stderr    string
+	artifacts map[string]any
 }
 
 type actionCall struct {
@@ -44,7 +48,13 @@ func (r *scriptedActionRunner) Run(_ context.Context, req ActionRequest) (*Actio
 	if outcome.err != nil {
 		return nil, outcome.err
 	}
-	return &ActionResult{Output: cloneMap(outcome.output)}, nil
+	return &ActionResult{
+		Output:        cloneMap(outcome.output),
+		Message:       outcome.message,
+		StdoutSnippet: outcome.stdout,
+		StderrSnippet: outcome.stderr,
+		Artifacts:     cloneMap(outcome.artifacts),
+	}, nil
 }
 
 func (r *scriptedActionRunner) callCount() int {
@@ -255,6 +265,203 @@ func TestExecutionRuntimePolicyAndApprovalBlocking(t *testing.T) {
 			t.Fatalf("expected no action calls when approval is missing, got %d", runner.callCount())
 		}
 	})
+}
+
+func TestExecutionRuntimePersistsOrderedTimelineAndArtifacts(t *testing.T) {
+	store := newTestStore(t)
+	def := executionDefinitionFixture("ops.exec.timeline", []Step{
+		{
+			ID:       "mutating-step",
+			Action:   "run_command",
+			Mutating: boolPtr(true),
+			Parameters: map[string]any{
+				"command": "systemctl restart api",
+			},
+			Approval: &ApprovalRequirement{Required: true, MinimumApprovers: 1, ApproverRoles: []string{"ops"}},
+		},
+		{
+			ID:       "failing-step",
+			Action:   "apply",
+			Mutating: boolPtr(true),
+		},
+	})
+	if _, err := store.CreateDefinition(def); err != nil {
+		t.Fatalf("create definition: %v", err)
+	}
+
+	runner := &scriptedActionRunner{outcomes: map[string][]scriptedOutcome{
+		"mutating-step": {
+			{
+				output:    map[string]any{"ok": true},
+				message:   "step one completed",
+				stdout:    "stdout line 1\nstdout line 2",
+				stderr:    "stderr note",
+				artifacts: map[string]any{"exit_code": 0, "host": "node-1"},
+			},
+		},
+		"failing-step": {
+			{err: errors.New("forced failure")},
+		},
+	}}
+	runtime := NewExecutionRuntime(store, PolicySimulatorFunc(func(_ context.Context, req PolicySimulationRequest) PolicySimulation {
+		return PolicySimulation{
+			Outcome:   PolicyOutcomeAllow,
+			RiskLevel: "high",
+			Summary:   "guardrails satisfied",
+			Rationale: map[string]any{"policy": "capacity-policy-v1", "drove_outcome": true},
+		}
+	}), runner)
+
+	execResult, err := runtime.Start(context.Background(), StartExecutionRequest{
+		DefinitionID: def.Metadata.ID,
+		Version:      def.Metadata.Version,
+		ApprovalContext: ExecutionApprovalContext{
+			Workflow: ApprovalDecision{Approved: true, ApproverCount: 1, ApprovedBy: []string{"ops@example.com"}},
+			Steps: map[string]ApprovalDecision{
+				"mutating-step": {Approved: true, ApproverCount: 1, ApprovedBy: []string{"ops@example.com"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start execution: %v", err)
+	}
+	if execResult.Status != ExecutionStatusFailed {
+		t.Fatalf("expected failed execution, got %q", execResult.Status)
+	}
+
+	timeline, err := runtime.GetTimeline(execResult.ID)
+	if err != nil {
+		t.Fatalf("get timeline: %v", err)
+	}
+	if len(timeline) == 0 {
+		t.Fatal("expected timeline events")
+	}
+	seenIDs := map[string]struct{}{}
+	for idx, event := range timeline {
+		wantSeq := idx + 1
+		if event.Sequence != wantSeq {
+			t.Fatalf("unexpected sequence at idx %d: got=%d want=%d", idx, event.Sequence, wantSeq)
+		}
+		if event.ID == "" {
+			t.Fatalf("event %d missing id", idx)
+		}
+		if _, dup := seenIDs[event.ID]; dup {
+			t.Fatalf("duplicate event id %q", event.ID)
+		}
+		seenIDs[event.ID] = struct{}{}
+		if event.Timestamp.IsZero() {
+			t.Fatalf("event %d missing timestamp", idx)
+		}
+	}
+	if timeline[0].Type != TimelineEventExecutionStarted {
+		t.Fatalf("expected first event %q, got %q", TimelineEventExecutionStarted, timeline[0].Type)
+	}
+	if timeline[len(timeline)-1].Type != TimelineEventExecutionFinished {
+		t.Fatalf("expected last event %q, got %q", TimelineEventExecutionFinished, timeline[len(timeline)-1].Type)
+	}
+
+	artifacts, err := runtime.GetArtifacts(execResult.ID)
+	if err != nil {
+		t.Fatalf("get artifacts: %v", err)
+	}
+	if len(artifacts) == 0 {
+		t.Fatal("expected execution artifacts")
+	}
+	foundTypes := map[string]bool{}
+	for _, artifact := range artifacts {
+		foundTypes[artifact.Type] = true
+	}
+	for _, required := range []string{ArtifactTypePolicyRationale, ArtifactTypeApproval, ArtifactTypeStdoutSnippet, ArtifactTypeStderrSnippet, ArtifactTypeActionPayload, ArtifactTypeErrorContext} {
+		if !foundTypes[required] {
+			t.Fatalf("missing artifact type %q, got=%v", required, foundTypes)
+		}
+	}
+
+	replay, err := runtime.GetReplay(execResult.ID)
+	if err != nil {
+		t.Fatalf("get replay: %v", err)
+	}
+	if replay == nil || !replay.Deterministic {
+		t.Fatalf("expected deterministic replay payload, got %+v", replay)
+	}
+	if replay.EventCount != len(timeline) {
+		t.Fatalf("expected replay event_count %d, got %d", len(timeline), replay.EventCount)
+	}
+	if len(replay.OrderedEventIDs) != len(timeline) {
+		t.Fatalf("expected ordered_event_ids length %d, got %d", len(timeline), len(replay.OrderedEventIDs))
+	}
+	for idx, eventID := range replay.OrderedEventIDs {
+		if eventID != timeline[idx].ID {
+			t.Fatalf("replay ordering mismatch at idx %d: got=%q want=%q", idx, eventID, timeline[idx].ID)
+		}
+	}
+}
+
+func TestExecutionRuntimeApprovalBlockPersistsCheckpointArtifacts(t *testing.T) {
+	store := newTestStore(t)
+	def := executionDefinitionFixture("ops.exec.approval-audit", []Step{{
+		ID:       "guarded",
+		Action:   "apply",
+		Mutating: boolPtr(true),
+		Approval: &ApprovalRequirement{Required: true, MinimumApprovers: 2, ApproverRoles: []string{"ops", "security"}},
+	}})
+	if _, err := store.CreateDefinition(def); err != nil {
+		t.Fatalf("create definition: %v", err)
+	}
+
+	runtime := NewExecutionRuntime(store, PolicySimulatorFunc(func(_ context.Context, _ PolicySimulationRequest) PolicySimulation {
+		return PolicySimulation{Outcome: PolicyOutcomeAllow, RiskLevel: "high", Summary: "allowed"}
+	}), &scriptedActionRunner{outcomes: map[string][]scriptedOutcome{}})
+
+	execResult, err := runtime.Start(context.Background(), StartExecutionRequest{
+		DefinitionID: def.Metadata.ID,
+		Version:      def.Metadata.Version,
+		ApprovalContext: ExecutionApprovalContext{
+			Steps: map[string]ApprovalDecision{
+				"guarded": {Approved: true, ApproverCount: 1, ApprovedBy: []string{"ops@example.com"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start execution: %v", err)
+	}
+	if execResult.Status != ExecutionStatusBlocked {
+		t.Fatalf("expected blocked execution, got %q", execResult.Status)
+	}
+
+	timeline, err := runtime.GetTimeline(execResult.ID)
+	if err != nil {
+		t.Fatalf("get timeline: %v", err)
+	}
+	foundCheckpoint := false
+	for _, event := range timeline {
+		if event.Type == TimelineEventStepApprovalCheck {
+			foundCheckpoint = true
+			break
+		}
+	}
+	if !foundCheckpoint {
+		t.Fatal("expected approval checkpoint event in timeline")
+	}
+
+	artifacts, err := runtime.GetArtifacts(execResult.ID)
+	if err != nil {
+		t.Fatalf("get artifacts: %v", err)
+	}
+	foundApprovalArtifact := false
+	for _, artifact := range artifacts {
+		if artifact.Type == ArtifactTypeApproval {
+			foundApprovalArtifact = true
+			break
+		}
+	}
+	if !foundApprovalArtifact {
+		t.Fatal("expected approval checkpoint artifact")
+	}
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }
 
 func executionDefinitionFixture(id string, steps []Step) Definition {

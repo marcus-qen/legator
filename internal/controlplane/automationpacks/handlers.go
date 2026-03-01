@@ -209,6 +209,138 @@ func (h *Handler) HandleGetExecution(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"execution": execution})
 }
 
+func (h *Handler) HandleGetExecutionTimeline(w http.ResponseWriter, r *http.Request) {
+	if h.executionRuntime == nil {
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "automation pack execution unavailable")
+		return
+	}
+
+	executionID := strings.TrimSpace(r.PathValue("executionID"))
+	if executionID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "execution id is required")
+		return
+	}
+
+	timeline, err := h.executionRuntime.GetTimeline(executionID)
+	if err != nil {
+		if errors.Is(err, ErrExecutionNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "automation pack execution not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to load automation pack timeline")
+		return
+	}
+	replay, err := h.executionRuntime.GetReplay(executionID)
+	if err != nil {
+		if errors.Is(err, ErrExecutionNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "automation pack execution not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to load automation pack replay payload")
+		return
+	}
+
+	if stepID := strings.TrimSpace(r.URL.Query().Get("step_id")); stepID != "" {
+		timeline = filterTimelineByStep(timeline, stepID)
+	}
+	if eventType := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("type"))); eventType != "" {
+		timeline = filterTimelineByType(timeline, eventType)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"execution_id": executionID,
+		"timeline":     timeline,
+		"replay":       replay,
+	})
+}
+
+func (h *Handler) HandleGetExecutionArtifacts(w http.ResponseWriter, r *http.Request) {
+	if h.executionRuntime == nil {
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "automation pack execution unavailable")
+		return
+	}
+
+	executionID := strings.TrimSpace(r.PathValue("executionID"))
+	if executionID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "execution id is required")
+		return
+	}
+
+	artifacts, err := h.executionRuntime.GetArtifacts(executionID)
+	if err != nil {
+		if errors.Is(err, ErrExecutionNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "automation pack execution not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to load automation pack artifacts")
+		return
+	}
+
+	if stepID := strings.TrimSpace(r.URL.Query().Get("step_id")); stepID != "" {
+		artifacts = filterArtifactsByStep(artifacts, stepID)
+	}
+	if artifactType := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("type"))); artifactType != "" {
+		artifacts = filterArtifactsByType(artifacts, artifactType)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"execution_id": executionID,
+		"artifacts":    artifacts,
+	})
+}
+
+func filterTimelineByStep(timeline []ExecutionTimelineEvent, stepID string) []ExecutionTimelineEvent {
+	if stepID == "" || len(timeline) == 0 {
+		return timeline
+	}
+	filtered := make([]ExecutionTimelineEvent, 0, len(timeline))
+	for _, item := range timeline {
+		if strings.EqualFold(strings.TrimSpace(item.StepID), stepID) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func filterTimelineByType(timeline []ExecutionTimelineEvent, eventType string) []ExecutionTimelineEvent {
+	if eventType == "" || len(timeline) == 0 {
+		return timeline
+	}
+	filtered := make([]ExecutionTimelineEvent, 0, len(timeline))
+	for _, item := range timeline {
+		if strings.EqualFold(strings.TrimSpace(item.Type), eventType) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func filterArtifactsByStep(artifacts []ExecutionArtifact, stepID string) []ExecutionArtifact {
+	if stepID == "" || len(artifacts) == 0 {
+		return artifacts
+	}
+	filtered := make([]ExecutionArtifact, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		if strings.EqualFold(strings.TrimSpace(artifact.StepID), stepID) {
+			filtered = append(filtered, artifact)
+		}
+	}
+	return filtered
+}
+
+func filterArtifactsByType(artifacts []ExecutionArtifact, artifactType string) []ExecutionArtifact {
+	if artifactType == "" || len(artifacts) == 0 {
+		return artifacts
+	}
+	filtered := make([]ExecutionArtifact, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		if strings.EqualFold(strings.TrimSpace(artifact.Type), artifactType) {
+			filtered = append(filtered, artifact)
+		}
+	}
+	return filtered
+}
+
 func errorsAsValidation(err error) bool {
 	var validationErr *ValidationError
 	return errors.As(err, &validationErr)

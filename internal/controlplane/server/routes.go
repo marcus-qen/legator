@@ -250,6 +250,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/v1/automation-packs/dry-run", s.withPermission(auth.PermFleetWrite, s.automationPackHandlers.HandleDryRunDefinition))
 		mux.HandleFunc("POST /api/v1/automation-packs/{id}/executions", s.withPermission(auth.PermFleetWrite, s.automationPackHandlers.HandleStartExecution))
 		mux.HandleFunc("GET /api/v1/automation-packs/executions/{executionID}", s.withPermission(auth.PermFleetRead, s.automationPackHandlers.HandleGetExecution))
+		mux.HandleFunc("GET /api/v1/automation-packs/executions/{executionID}/timeline", s.withPermission(auth.PermFleetRead, s.automationPackHandlers.HandleGetExecutionTimeline))
+		mux.HandleFunc("GET /api/v1/automation-packs/executions/{executionID}/artifacts", s.withPermission(auth.PermFleetRead, s.automationPackHandlers.HandleGetExecutionArtifacts))
 	} else {
 		mux.HandleFunc("GET /api/v1/automation-packs", s.withPermission(auth.PermFleetRead, s.handleAutomationPacksUnavailable))
 		mux.HandleFunc("POST /api/v1/automation-packs", s.withPermission(auth.PermFleetWrite, s.handleAutomationPacksUnavailable))
@@ -257,6 +259,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/v1/automation-packs/dry-run", s.withPermission(auth.PermFleetWrite, s.handleAutomationPacksUnavailable))
 		mux.HandleFunc("POST /api/v1/automation-packs/{id}/executions", s.withPermission(auth.PermFleetWrite, s.handleAutomationPacksUnavailable))
 		mux.HandleFunc("GET /api/v1/automation-packs/executions/{executionID}", s.withPermission(auth.PermFleetRead, s.handleAutomationPacksUnavailable))
+		mux.HandleFunc("GET /api/v1/automation-packs/executions/{executionID}/timeline", s.withPermission(auth.PermFleetRead, s.handleAutomationPacksUnavailable))
+		mux.HandleFunc("GET /api/v1/automation-packs/executions/{executionID}/artifacts", s.withPermission(auth.PermFleetRead, s.handleAutomationPacksUnavailable))
 	}
 
 	// Kubeflow API (read endpoints + guarded mutations)
