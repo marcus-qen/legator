@@ -121,13 +121,13 @@ func TestPermissionsAdminCanAccessAllScopes(t *testing.T) {
 	}
 }
 
-func TestPermissionsCommandExecCannotDeleteProbe(t *testing.T) {
+func TestPermissionsCommandExecCannotMutateFleetRoutes(t *testing.T) {
 	srv := newAuthTestServer(t)
 	token := createAPIKey(t, srv, "command", auth.PermCommandExec)
 
 	dispatch := makeRequest(t, srv, http.MethodPost, "/api/v1/probes/probe-1/command", token, `{"command":"id"}`)
-	if dispatch.Code == http.StatusUnauthorized || dispatch.Code == http.StatusForbidden {
-		t.Fatalf("expected command dispatch to be allowed, got %d body=%s", dispatch.Code, dispatch.Body.String())
+	if dispatch.Code != http.StatusForbidden {
+		t.Fatalf("expected command dispatch to be forbidden without fleet:write, got %d body=%s", dispatch.Code, dispatch.Body.String())
 	}
 
 	deleteProbe := makeRequest(t, srv, http.MethodDelete, "/api/v1/probes/probe-1", token, "")

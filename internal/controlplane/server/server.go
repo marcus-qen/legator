@@ -19,9 +19,9 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/alerts"
 	"github.com/marcus-qen/legator/internal/controlplane/api"
 	"github.com/marcus-qen/legator/internal/controlplane/approval"
-	"github.com/marcus-qen/legator/internal/controlplane/automationpacks"
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
+	"github.com/marcus-qen/legator/internal/controlplane/automationpacks"
 	"github.com/marcus-qen/legator/internal/controlplane/chat"
 	"github.com/marcus-qen/legator/internal/controlplane/cloudconnectors"
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
@@ -75,11 +75,11 @@ type Server struct {
 	fleetStore      *fleet.Store
 	federationStore *fleet.FederationStore
 	tokenStore      *api.TokenStore
-	cmdTracker    *cmdtracker.Tracker
-	approvalQueue *approval.Queue
-	approvalCore  *coreapprovalpolicy.Service
-	dispatchCore  *corecommanddispatch.Service
-	hub           *cpws.Hub
+	cmdTracker      *cmdtracker.Tracker
+	approvalQueue   *approval.Queue
+	approvalCore    *coreapprovalpolicy.Service
+	dispatchCore    *corecommanddispatch.Service
+	hub             *cpws.Hub
 
 	// Persistence (nil = in-memory fallback)
 	auditLog   *audit.Log
@@ -153,7 +153,7 @@ type Server struct {
 	reliabilityTelemetry *reliability.RequestTelemetry
 
 	// Failure drills
-	drillRunner *reliability.DrillRunner
+	drillRunner   *reliability.DrillRunner
 	drillStore    *reliability.DrillStore
 	incidentStore *reliability.IncidentStore
 
@@ -270,6 +270,8 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.registerRoutes(mux)
 
 	var handler http.Handler = mux
+	// Apply body size limit before auth so oversized requests are rejected early.
+	handler = maxBodySizeMiddleware(handler)
 	if s.authStore != nil || s.sessionValidator != nil {
 		authMiddleware := auth.NewMiddleware(s.authStore, []string{
 			"/healthz",

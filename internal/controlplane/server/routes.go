@@ -49,18 +49,18 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/users/{id}", s.withPermission(auth.PermAdmin, s.handleDeleteUser))
 
 	// Fleet API
-	mux.HandleFunc("GET /api/v1/probes", s.handleListProbes)
-	mux.HandleFunc("GET /api/v1/probes/{id}", s.handleGetProbe)
-	mux.HandleFunc("GET /api/v1/probes/{id}/health", s.handleProbeHealth)
-	mux.HandleFunc("POST /api/v1/probes/{id}/command", s.handleDispatchCommand)
-	mux.HandleFunc("POST /api/v1/probes/{id}/rotate-key", s.handleRotateKey)
-	mux.HandleFunc("POST /api/v1/probes/{id}/update", s.handleProbeUpdate)
-	mux.HandleFunc("PUT /api/v1/probes/{id}/tags", s.handleSetTags)
-	mux.HandleFunc("POST /api/v1/probes/{id}/apply-policy/{policyId}", s.handleApplyPolicy)
-	mux.HandleFunc("POST /api/v1/probes/{id}/task", s.handleTask)
-	mux.HandleFunc("DELETE /api/v1/probes/{id}", s.handleDeleteProbe)
-	mux.HandleFunc("GET /api/v1/fleet/summary", s.handleFleetSummary)
-	mux.HandleFunc("GET /api/v1/reliability/scorecard", s.handleReliabilityScorecard)
+	mux.HandleFunc("GET /api/v1/probes", s.withPermission(auth.PermFleetRead, s.handleListProbes))
+	mux.HandleFunc("GET /api/v1/probes/{id}", s.withPermission(auth.PermFleetRead, s.handleGetProbe))
+	mux.HandleFunc("GET /api/v1/probes/{id}/health", s.withPermission(auth.PermFleetRead, s.handleProbeHealth))
+	mux.HandleFunc("POST /api/v1/probes/{id}/command", s.withPermission(auth.PermFleetWrite, s.handleDispatchCommand))
+	mux.HandleFunc("POST /api/v1/probes/{id}/rotate-key", s.withPermission(auth.PermFleetWrite, s.handleRotateKey))
+	mux.HandleFunc("POST /api/v1/probes/{id}/update", s.withPermission(auth.PermFleetWrite, s.handleProbeUpdate))
+	mux.HandleFunc("PUT /api/v1/probes/{id}/tags", s.withPermission(auth.PermFleetWrite, s.handleSetTags))
+	mux.HandleFunc("POST /api/v1/probes/{id}/apply-policy/{policyId}", s.withPermission(auth.PermFleetWrite, s.handleApplyPolicy))
+	mux.HandleFunc("POST /api/v1/probes/{id}/task", s.withPermission(auth.PermFleetWrite, s.handleTask))
+	mux.HandleFunc("DELETE /api/v1/probes/{id}", s.withPermission(auth.PermFleetWrite, s.handleDeleteProbe))
+	mux.HandleFunc("GET /api/v1/fleet/summary", s.withPermission(auth.PermFleetRead, s.handleFleetSummary))
+	mux.HandleFunc("GET /api/v1/reliability/scorecard", s.withPermission(auth.PermFleetRead, s.handleReliabilityScorecard))
 
 	// Failure drills
 	if s.drillRunner != nil {
@@ -91,13 +91,13 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/v1/reliability/incidents/{id}/timeline", s.withPermission(auth.PermFleetWrite, s.handleIncidentsUnavailable))
 		mux.HandleFunc("DELETE /api/v1/reliability/incidents/{id}", s.withPermission(auth.PermFleetWrite, s.handleIncidentsUnavailable))
 	}
-	mux.HandleFunc("GET /api/v1/fleet/inventory", s.handleFleetInventory)
-	mux.HandleFunc("GET /api/v1/federation/inventory", s.handleFederationInventory)
-	mux.HandleFunc("GET /api/v1/federation/summary", s.handleFederationSummary)
-	mux.HandleFunc("GET /api/v1/fleet/tags", s.handleFleetTags)
-	mux.HandleFunc("GET /api/v1/fleet/by-tag/{tag}", s.handleListByTag)
-	mux.HandleFunc("POST /api/v1/fleet/by-tag/{tag}/command", s.handleGroupCommand)
-	mux.HandleFunc("POST /api/v1/fleet/cleanup", s.handleFleetCleanup)
+	mux.HandleFunc("GET /api/v1/fleet/inventory", s.withPermission(auth.PermFleetRead, s.handleFleetInventory))
+	mux.HandleFunc("GET /api/v1/federation/inventory", s.withPermission(auth.PermFleetRead, s.handleFederationInventory))
+	mux.HandleFunc("GET /api/v1/federation/summary", s.withPermission(auth.PermFleetRead, s.handleFederationSummary))
+	mux.HandleFunc("GET /api/v1/fleet/tags", s.withPermission(auth.PermFleetRead, s.handleFleetTags))
+	mux.HandleFunc("GET /api/v1/fleet/by-tag/{tag}", s.withPermission(auth.PermFleetRead, s.handleListByTag))
+	mux.HandleFunc("POST /api/v1/fleet/by-tag/{tag}/command", s.withPermission(auth.PermFleetWrite, s.handleGroupCommand))
+	mux.HandleFunc("POST /api/v1/fleet/cleanup", s.withPermission(auth.PermFleetWrite, s.handleFleetCleanup))
 
 	// Registration
 	mux.HandleFunc("POST /api/v1/register", api.HandleRegisterWithAudit(s.tokenStore, s.fleetMgr, s.auditRecorder(), s.logger.Named("register")))
@@ -128,18 +128,18 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/metrics", s.withPermission(auth.PermFleetRead, metricsCollector.Handler()))
 
 	// Approvals
-	mux.HandleFunc("GET /api/v1/approvals", s.handleListApprovals)
-	mux.HandleFunc("GET /api/v1/approvals/{id}", s.handleGetApproval)
-	mux.HandleFunc("POST /api/v1/approvals/{id}/decide", s.handleDecideApproval)
+	mux.HandleFunc("GET /api/v1/approvals", s.withPermission(auth.PermApprovalRead, s.handleListApprovals))
+	mux.HandleFunc("GET /api/v1/approvals/{id}", s.withPermission(auth.PermApprovalRead, s.handleGetApproval))
+	mux.HandleFunc("POST /api/v1/approvals/{id}/decide", s.withPermission(auth.PermApprovalWrite, s.handleDecideApproval))
 
 	// Audit
-	mux.HandleFunc("GET /api/v1/audit", s.handleAuditLog)
-	mux.HandleFunc("GET /api/v1/audit/export", s.handleAuditExportJSONL)
-	mux.HandleFunc("GET /api/v1/audit/export/csv", s.handleAuditExportCSV)
-	mux.HandleFunc("DELETE /api/v1/audit/purge", s.handleAuditPurge)
+	mux.HandleFunc("GET /api/v1/audit", s.withPermission(auth.PermAuditRead, s.handleAuditLog))
+	mux.HandleFunc("GET /api/v1/audit/export", s.withPermission(auth.PermAuditRead, s.handleAuditExportJSONL))
+	mux.HandleFunc("GET /api/v1/audit/export/csv", s.withPermission(auth.PermAuditRead, s.handleAuditExportCSV))
+	mux.HandleFunc("DELETE /api/v1/audit/purge", s.withPermission(auth.PermAdmin, s.handleAuditPurge))
 
 	// Events SSE stream
-	mux.HandleFunc("GET /api/v1/events", s.handleEventsSSE)
+	mux.HandleFunc("GET /api/v1/events", s.withPermission(auth.PermFleetRead, s.handleEventsSSE))
 
 	if s.mcpServer != nil {
 		mux.Handle("GET /mcp", s.mcpServer.Handler())
@@ -147,14 +147,14 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	}
 
 	// Commands
-	mux.HandleFunc("GET /api/v1/commands/pending", s.handlePendingCommands)
-	mux.HandleFunc("GET /api/v1/commands/{requestId}/stream", s.handleSSEStream)
+	mux.HandleFunc("GET /api/v1/commands/pending", s.withPermission(auth.PermCommandExec, s.handlePendingCommands))
+	mux.HandleFunc("GET /api/v1/commands/{requestId}/stream", s.withPermission(auth.PermCommandExec, s.handleSSEStream))
 
 	// Policy templates
-	mux.HandleFunc("GET /api/v1/policies", s.handleListPolicies)
-	mux.HandleFunc("GET /api/v1/policies/{id}", s.handleGetPolicy)
-	mux.HandleFunc("POST /api/v1/policies", s.handleCreatePolicy)
-	mux.HandleFunc("DELETE /api/v1/policies/{id}", s.handleDeletePolicy)
+	mux.HandleFunc("GET /api/v1/policies", s.withPermission(auth.PermFleetRead, s.handleListPolicies))
+	mux.HandleFunc("GET /api/v1/policies/{id}", s.withPermission(auth.PermFleetRead, s.handleGetPolicy))
+	mux.HandleFunc("POST /api/v1/policies", s.withPermission(auth.PermFleetWrite, s.handleCreatePolicy))
+	mux.HandleFunc("DELETE /api/v1/policies/{id}", s.withPermission(auth.PermFleetWrite, s.handleDeletePolicy))
 
 	// Webhooks
 	mux.HandleFunc("GET /api/v1/webhooks", s.withPermission(auth.PermWebhookManage, s.webhookNotifier.ListWebhooks))
