@@ -31,6 +31,8 @@ GET /api/v1/commands/{requestId}/stream
 GET /api/v1/discovery/runs
 GET /api/v1/discovery/runs/{id}
 GET /api/v1/events
+GET /api/v1/federation/inventory
+GET /api/v1/federation/summary
 GET /api/v1/fleet/by-tag/{tag}
 GET /api/v1/fleet/chat
 GET /api/v1/fleet/inventory

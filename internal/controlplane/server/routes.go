@@ -61,6 +61,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/probes/{id}", s.handleDeleteProbe)
 	mux.HandleFunc("GET /api/v1/fleet/summary", s.handleFleetSummary)
 	mux.HandleFunc("GET /api/v1/fleet/inventory", s.handleFleetInventory)
+	mux.HandleFunc("GET /api/v1/federation/inventory", s.handleFederationInventory)
+	mux.HandleFunc("GET /api/v1/federation/summary", s.handleFederationSummary)
 	mux.HandleFunc("GET /api/v1/fleet/tags", s.handleFleetTags)
 	mux.HandleFunc("GET /api/v1/fleet/by-tag/{tag}", s.handleListByTag)
 	mux.HandleFunc("POST /api/v1/fleet/by-tag/{tag}/command", s.handleGroupCommand)
@@ -792,6 +794,47 @@ func (s *Server) handleFleetInventory(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(inv)
+}
+
+func (s *Server) handleFederationInventory(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
+	if s.federationStore == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "federation read model unavailable")
+		return
+	}
+
+	inv := s.federationStore.Inventory(r.Context(), federationFilterFromRequest(r))
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(inv)
+}
+
+func (s *Server) handleFederationSummary(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
+	if s.federationStore == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "federation read model unavailable")
+		return
+	}
+
+	summary := s.federationStore.Summary(r.Context(), federationFilterFromRequest(r))
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(summary)
+}
+
+func federationFilterFromRequest(r *http.Request) fleet.FederationFilter {
+	q := r.URL.Query()
+	return fleet.FederationFilter{
+		Tag:     q.Get("tag"),
+		Status:  q.Get("status"),
+		Source:  q.Get("source"),
+		Cluster: q.Get("cluster"),
+		Site:    q.Get("site"),
+	}
 }
 
 func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {

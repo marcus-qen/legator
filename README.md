@@ -120,6 +120,7 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 📖 **Full guide:** [docs/getting-started.md](docs/getting-started.md)
 📖 **Kubeflow adapter:** [docs/kubeflow-adapter.md](docs/kubeflow-adapter.md)
 📖 **Grafana adapter:** [docs/grafana-adapter.md](docs/grafana-adapter.md)
+📖 **Federation read model:** [docs/federation-read-model.md](docs/federation-read-model.md)
 
 ## Features
 
@@ -142,6 +143,7 @@ curl -sf http://localhost:8080/api/v1/fleet/summary | jq
 | Cloud connectors (AWS/GCP/Azure, agentless inventory ingestion) | ✅ |
 | Kubeflow adapter MVP (read-only status/inventory + guarded refresh action) | ✅ |
 | Grafana adapter Stage 2.1 (read-only status + capacity snapshot) | ✅ |
+| Federation read model Stage 3.7.1 (multi-source inventory aggregation + health rollups) | ✅ |
 | Capacity-aware policy decisions Stage 2.2 (allow/deny/queue + rationale payloads) | ✅ |
 | Operator explainability panel Stage 2.3 (approval UI rationale + capacity drivers) | ✅ |
 | Auto-discovery + registration assist (network/SSH scan + guided registration) | ✅ |
@@ -215,6 +217,7 @@ Compatibility/deprecation policy: `docs/api-mcp-compatibility.md`.
 50+ REST endpoints. Key groups:
 
 - **Fleet**: `GET /api/v1/probes`, `GET /api/v1/fleet/summary`, `POST /api/v1/probes/{id}/command`
+- **Federation (read-only)**: `GET /api/v1/federation/inventory`, `GET /api/v1/federation/summary`
 - **Jobs**: `GET/POST /api/v1/jobs`, `POST /api/v1/jobs/{id}/run`, `POST /api/v1/jobs/{id}/cancel`, `GET /api/v1/jobs/{id}/runs`, `POST /api/v1/jobs/{id}/runs/{runId}/cancel`, `POST /api/v1/jobs/{id}/runs/{runId}/retry`, `GET /api/v1/jobs/runs`
   - Optional per-job retry policy (additive):
     - `retry_policy.max_attempts`

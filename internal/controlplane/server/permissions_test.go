@@ -164,6 +164,16 @@ func TestPermissionsFleetReadCanAccessFleetInventoryAndChat(t *testing.T) {
 		t.Fatalf("expected fleet inventory access, got %d body=%s", inv.Code, inv.Body.String())
 	}
 
+	fedInv := makeRequest(t, srv, http.MethodGet, "/api/v1/federation/inventory", token, "")
+	if fedInv.Code == http.StatusUnauthorized || fedInv.Code == http.StatusForbidden {
+		t.Fatalf("expected federation inventory access, got %d body=%s", fedInv.Code, fedInv.Body.String())
+	}
+
+	fedSummary := makeRequest(t, srv, http.MethodGet, "/api/v1/federation/summary", token, "")
+	if fedSummary.Code == http.StatusUnauthorized || fedSummary.Code == http.StatusForbidden {
+		t.Fatalf("expected federation summary access, got %d body=%s", fedSummary.Code, fedSummary.Body.String())
+	}
+
 	history := makeRequest(t, srv, http.MethodGet, "/api/v1/fleet/chat", token, "")
 	if history.Code == http.StatusUnauthorized || history.Code == http.StatusForbidden {
 		t.Fatalf("expected fleet chat read access, got %d body=%s", history.Code, history.Body.String())
