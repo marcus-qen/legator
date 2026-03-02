@@ -10,7 +10,7 @@ IMAGE_TAG ?= $(VERSION)
 
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-.PHONY: build build-cp build-probe build-ctl build-all build-cp-all build-probe-all build-ctl-all release-build test architecture-guard preflight lint e2e \
+.PHONY: build build-cp build-probe build-ctl build-all build-cp-all build-probe-all build-ctl-all release-build test drills architecture-guard preflight lint e2e \
 	docker-cp docker-probe docker-ctl docker-all \
 	docker-push-cp docker-push-probe docker-push-ctl docker-push-all \
 	clean
@@ -53,6 +53,9 @@ release-build: build-all
 
 test:
 	$(GO) test ./... -count=1
+
+drills:
+	bash scripts/drills/run-failure-drills.sh
 
 architecture-guard:
 	$(GO) test ./internal/controlplane/compat -run 'TestBoundaryContract_(FileIntegrity|DependencyPolicyConsistency|OwnershipAssignments|ExceptionRegistry|ImportGraphEnforcement|ImportGraphBaselineLock)' -count=1
