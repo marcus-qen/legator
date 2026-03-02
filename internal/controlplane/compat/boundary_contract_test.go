@@ -533,4 +533,3 @@ func sortedPatterns(in map[string]struct{}) []string {
 	sort.Strings(out)
 	return out
 }
-

@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	defaultCommandTimeout       = 60 * time.Second
-	defaultAdmissionRetryDelay  = 30 * time.Second
+	defaultCommandTimeout      = 60 * time.Second
+	defaultAdmissionRetryDelay = 30 * time.Second
 )
 
 type JobAdmissionOutcome string
@@ -108,19 +108,19 @@ type Scheduler struct {
 	tracker trackable
 	logger  *zap.Logger
 
-	mu                 sync.Mutex
-	cancel             context.CancelFunc
-	ticker             *time.Ticker
-	inFlight           map[string]string // request_id -> run_id
-	runRequest         map[string]string // run_id -> request_id
-	requestTarget      map[string]string // request_id -> jobID::probeID
-	activeTargets      map[string]struct{}
-	pendingRetryCancel map[string]context.CancelFunc // jobID::probeID -> retry/admission retry cancel
-	defaultRetryPolicy RetryPolicy
-	lifecycleObserver  LifecycleObserver
-	admissionEvaluator JobAdmissionEvaluator
+	mu                  sync.Mutex
+	cancel              context.CancelFunc
+	ticker              *time.Ticker
+	inFlight            map[string]string // request_id -> run_id
+	runRequest          map[string]string // run_id -> request_id
+	requestTarget       map[string]string // request_id -> jobID::probeID
+	activeTargets       map[string]struct{}
+	pendingRetryCancel  map[string]context.CancelFunc // jobID::probeID -> retry/admission retry cancel
+	defaultRetryPolicy  RetryPolicy
+	lifecycleObserver   LifecycleObserver
+	admissionEvaluator  JobAdmissionEvaluator
 	admissionRetryDelay time.Duration
-	wg                 sync.WaitGroup
+	wg                  sync.WaitGroup
 }
 
 // NewScheduler creates a recurring job scheduler.
@@ -129,19 +129,19 @@ func NewScheduler(store *Store, hub sender, fleetMgr fleet.Fleet, tracker tracka
 		logger = zap.NewNop()
 	}
 	s := &Scheduler{
-		store:              store,
-		hub:                hub,
-		fleet:              fleetMgr,
-		tracker:            tracker,
-		logger:             logger,
-		inFlight:           make(map[string]string),
-		runRequest:         make(map[string]string),
-		requestTarget:      make(map[string]string),
-		activeTargets:      make(map[string]struct{}),
-		pendingRetryCancel: make(map[string]context.CancelFunc),
-		defaultRetryPolicy: RetryPolicy{},
-		lifecycleObserver:  noopLifecycleObserver{},
-		admissionEvaluator: JobAdmissionEvaluatorFunc(nil),
+		store:               store,
+		hub:                 hub,
+		fleet:               fleetMgr,
+		tracker:             tracker,
+		logger:              logger,
+		inFlight:            make(map[string]string),
+		runRequest:          make(map[string]string),
+		requestTarget:       make(map[string]string),
+		activeTargets:       make(map[string]struct{}),
+		pendingRetryCancel:  make(map[string]context.CancelFunc),
+		defaultRetryPolicy:  RetryPolicy{},
+		lifecycleObserver:   noopLifecycleObserver{},
+		admissionEvaluator:  JobAdmissionEvaluatorFunc(nil),
 		admissionRetryDelay: defaultAdmissionRetryDelay,
 	}
 	for _, opt := range opts {
@@ -390,33 +390,33 @@ func (s *Scheduler) handleAllowedAdmission(job Job, probeID, targetKey, executio
 	}
 
 	s.emitLifecycleEvent(LifecycleEvent{
-		Type:              EventJobRunAdmissionAllowed,
-		Actor:             "scheduler",
-		JobID:             run.JobID,
-		RunID:             run.ID,
-		ExecutionID:       run.ExecutionID,
-		ProbeID:           run.ProbeID,
-		Attempt:           run.Attempt,
-		MaxAttempts:       run.MaxAttempts,
-		RequestID:         run.RequestID,
-		AdmissionDecision: string(AdmissionOutcomeAllow),
-		AdmissionReason:   strings.TrimSpace(decision.Reason),
+		Type:               EventJobRunAdmissionAllowed,
+		Actor:              "scheduler",
+		JobID:              run.JobID,
+		RunID:              run.ID,
+		ExecutionID:        run.ExecutionID,
+		ProbeID:            run.ProbeID,
+		Attempt:            run.Attempt,
+		MaxAttempts:        run.MaxAttempts,
+		RequestID:          run.RequestID,
+		AdmissionDecision:  string(AdmissionOutcomeAllow),
+		AdmissionReason:    strings.TrimSpace(decision.Reason),
 		AdmissionRationale: decision.Rationale,
 	})
 
 	s.emitLifecycleEvent(LifecycleEvent{
-		Type:              EventJobRunQueued,
-		Actor:             "scheduler",
-		Timestamp:         run.StartedAt,
-		JobID:             run.JobID,
-		RunID:             run.ID,
-		ExecutionID:       run.ExecutionID,
-		ProbeID:           run.ProbeID,
-		Attempt:           run.Attempt,
-		MaxAttempts:       run.MaxAttempts,
-		RequestID:         run.RequestID,
-		AdmissionDecision: run.AdmissionDecision,
-		AdmissionReason:   run.AdmissionReason,
+		Type:               EventJobRunQueued,
+		Actor:              "scheduler",
+		Timestamp:          run.StartedAt,
+		JobID:              run.JobID,
+		RunID:              run.ID,
+		ExecutionID:        run.ExecutionID,
+		ProbeID:            run.ProbeID,
+		Attempt:            run.Attempt,
+		MaxAttempts:        run.MaxAttempts,
+		RequestID:          run.RequestID,
+		AdmissionDecision:  run.AdmissionDecision,
+		AdmissionReason:    run.AdmissionReason,
 		AdmissionRationale: run.admissionRationaleValue(),
 	})
 
@@ -429,17 +429,17 @@ func (s *Scheduler) handleAllowedAdmission(job Job, probeID, targetKey, executio
 	}
 
 	s.emitLifecycleEvent(LifecycleEvent{
-		Type:              EventJobRunStarted,
-		Actor:             "scheduler",
-		JobID:             run.JobID,
-		RunID:             run.ID,
-		ExecutionID:       run.ExecutionID,
-		ProbeID:           run.ProbeID,
-		Attempt:           run.Attempt,
-		MaxAttempts:       run.MaxAttempts,
-		RequestID:         run.RequestID,
-		AdmissionDecision: run.AdmissionDecision,
-		AdmissionReason:   run.AdmissionReason,
+		Type:               EventJobRunStarted,
+		Actor:              "scheduler",
+		JobID:              run.JobID,
+		RunID:              run.ID,
+		ExecutionID:        run.ExecutionID,
+		ProbeID:            run.ProbeID,
+		Attempt:            run.Attempt,
+		MaxAttempts:        run.MaxAttempts,
+		RequestID:          run.RequestID,
+		AdmissionDecision:  run.AdmissionDecision,
+		AdmissionReason:    run.AdmissionReason,
 		AdmissionRationale: run.admissionRationaleValue(),
 	})
 
@@ -503,20 +503,20 @@ func (s *Scheduler) handleQueuedAdmission(job Job, probeID, targetKey, execution
 	}
 
 	s.emitLifecycleEvent(LifecycleEvent{
-		Type:              EventJobRunAdmissionQueued,
-		Actor:             "scheduler",
-		Timestamp:         now.UTC(),
-		JobID:             run.JobID,
-		RunID:             run.ID,
-		ExecutionID:       run.ExecutionID,
-		ProbeID:           run.ProbeID,
-		Attempt:           run.Attempt,
-		MaxAttempts:       run.MaxAttempts,
-		RequestID:         run.RequestID,
-		AdmissionDecision: string(AdmissionOutcomeQueue),
-		AdmissionReason:   strings.TrimSpace(decision.Reason),
+		Type:               EventJobRunAdmissionQueued,
+		Actor:              "scheduler",
+		Timestamp:          now.UTC(),
+		JobID:              run.JobID,
+		RunID:              run.ID,
+		ExecutionID:        run.ExecutionID,
+		ProbeID:            run.ProbeID,
+		Attempt:            run.Attempt,
+		MaxAttempts:        run.MaxAttempts,
+		RequestID:          run.RequestID,
+		AdmissionDecision:  string(AdmissionOutcomeQueue),
+		AdmissionReason:    strings.TrimSpace(decision.Reason),
 		AdmissionRationale: decision.Rationale,
-		DeferredUntil:     &scheduledAt,
+		DeferredUntil:      &scheduledAt,
 	})
 
 	s.scheduleAdmissionRetry(job, probeID, targetKey, executionID, attempt, policy, scheduledAt, run.ID)
@@ -541,34 +541,34 @@ func (s *Scheduler) handleDeniedAdmission(job Job, probeID, targetKey, execution
 	}
 
 	s.emitLifecycleEvent(LifecycleEvent{
-		Type:              EventJobRunAdmissionDenied,
-		Actor:             "scheduler",
-		Timestamp:         now.UTC(),
-		JobID:             run.JobID,
-		RunID:             run.ID,
-		ExecutionID:       run.ExecutionID,
-		ProbeID:           run.ProbeID,
-		Attempt:           run.Attempt,
-		MaxAttempts:       run.MaxAttempts,
-		RequestID:         run.RequestID,
-		AdmissionDecision: string(AdmissionOutcomeDeny),
-		AdmissionReason:   reason,
+		Type:               EventJobRunAdmissionDenied,
+		Actor:              "scheduler",
+		Timestamp:          now.UTC(),
+		JobID:              run.JobID,
+		RunID:              run.ID,
+		ExecutionID:        run.ExecutionID,
+		ProbeID:            run.ProbeID,
+		Attempt:            run.Attempt,
+		MaxAttempts:        run.MaxAttempts,
+		RequestID:          run.RequestID,
+		AdmissionDecision:  string(AdmissionOutcomeDeny),
+		AdmissionReason:    reason,
 		AdmissionRationale: decision.Rationale,
 	})
 
 	s.emitLifecycleEvent(LifecycleEvent{
-		Type:              EventJobRunDenied,
-		Actor:             "scheduler",
-		Timestamp:         now.UTC(),
-		JobID:             run.JobID,
-		RunID:             run.ID,
-		ExecutionID:       run.ExecutionID,
-		ProbeID:           run.ProbeID,
-		Attempt:           run.Attempt,
-		MaxAttempts:       run.MaxAttempts,
-		RequestID:         run.RequestID,
-		AdmissionDecision: run.AdmissionDecision,
-		AdmissionReason:   run.AdmissionReason,
+		Type:               EventJobRunDenied,
+		Actor:              "scheduler",
+		Timestamp:          now.UTC(),
+		JobID:              run.JobID,
+		RunID:              run.ID,
+		ExecutionID:        run.ExecutionID,
+		ProbeID:            run.ProbeID,
+		Attempt:            run.Attempt,
+		MaxAttempts:        run.MaxAttempts,
+		RequestID:          run.RequestID,
+		AdmissionDecision:  run.AdmissionDecision,
+		AdmissionReason:    run.AdmissionReason,
 		AdmissionRationale: run.admissionRationaleValue(),
 	})
 
@@ -592,16 +592,16 @@ func (s *Scheduler) ensurePendingRun(job Job, probeID, executionID string, attem
 	}
 	requestID := fmt.Sprintf("job-%s-%s-attempt-%d-%d", job.ID, probeID, attempt, now.UnixNano())
 	run, err := s.store.RecordRunStart(JobRun{
-		JobID:             job.ID,
-		ProbeID:           probeID,
-		RequestID:         requestID,
-		ExecutionID:       executionID,
-		Attempt:           attempt,
-		MaxAttempts:       policy.MaxAttempts,
-		StartedAt:         now,
-		Status:            RunStatusPending,
-		AdmissionDecision: string(AdmissionOutcomeAllow),
-		AdmissionReason:   strings.TrimSpace(decision.Reason),
+		JobID:              job.ID,
+		ProbeID:            probeID,
+		RequestID:          requestID,
+		ExecutionID:        executionID,
+		Attempt:            attempt,
+		MaxAttempts:        policy.MaxAttempts,
+		StartedAt:          now,
+		Status:             RunStatusPending,
+		AdmissionDecision:  string(AdmissionOutcomeAllow),
+		AdmissionReason:    strings.TrimSpace(decision.Reason),
 		AdmissionRationale: rationaleRaw,
 	})
 	if err != nil {
@@ -621,17 +621,17 @@ func (s *Scheduler) ensureQueuedRun(job Job, probeID, executionID string, attemp
 	}
 	requestID := fmt.Sprintf("job-%s-%s-attempt-%d-%d", job.ID, probeID, attempt, now.UnixNano())
 	run, err := s.store.RecordRunStart(JobRun{
-		JobID:             job.ID,
-		ProbeID:           probeID,
-		RequestID:         requestID,
-		ExecutionID:       executionID,
-		Attempt:           attempt,
-		MaxAttempts:       policy.MaxAttempts,
-		StartedAt:         now,
-		Status:            RunStatusQueued,
-		RetryScheduledAt:  retryScheduledAt,
-		AdmissionDecision: string(AdmissionOutcomeQueue),
-		AdmissionReason:   strings.TrimSpace(decision.Reason),
+		JobID:              job.ID,
+		ProbeID:            probeID,
+		RequestID:          requestID,
+		ExecutionID:        executionID,
+		Attempt:            attempt,
+		MaxAttempts:        policy.MaxAttempts,
+		StartedAt:          now,
+		Status:             RunStatusQueued,
+		RetryScheduledAt:   retryScheduledAt,
+		AdmissionDecision:  string(AdmissionOutcomeQueue),
+		AdmissionReason:    strings.TrimSpace(decision.Reason),
 		AdmissionRationale: rationaleRaw,
 	})
 	if err != nil {
@@ -655,19 +655,19 @@ func (s *Scheduler) ensureDeniedRun(job Job, probeID, executionID string, attemp
 	endedAt := now.UTC()
 	requestID := fmt.Sprintf("job-%s-%s-attempt-%d-%d", job.ID, probeID, attempt, now.UnixNano())
 	run, err := s.store.RecordRunStart(JobRun{
-		JobID:             job.ID,
-		ProbeID:           probeID,
-		RequestID:         requestID,
-		ExecutionID:       executionID,
-		Attempt:           attempt,
-		MaxAttempts:       policy.MaxAttempts,
-		StartedAt:         now,
-		EndedAt:           &endedAt,
-		Status:            RunStatusDenied,
-		AdmissionDecision: string(AdmissionOutcomeDeny),
-		AdmissionReason:   strings.TrimSpace(reason),
+		JobID:              job.ID,
+		ProbeID:            probeID,
+		RequestID:          requestID,
+		ExecutionID:        executionID,
+		Attempt:            attempt,
+		MaxAttempts:        policy.MaxAttempts,
+		StartedAt:          now,
+		EndedAt:            &endedAt,
+		Status:             RunStatusDenied,
+		AdmissionDecision:  string(AdmissionOutcomeDeny),
+		AdmissionReason:    strings.TrimSpace(reason),
 		AdmissionRationale: rationaleRaw,
-		Output:            strings.TrimSpace(reason),
+		Output:             strings.TrimSpace(reason),
 	})
 	if err != nil {
 		return nil, err

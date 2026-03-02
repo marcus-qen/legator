@@ -801,10 +801,10 @@ func TestSchedulerAdmissionQueueReevaluatesAndDispatches(t *testing.T) {
 			admissionMu.Unlock()
 			if check == 1 {
 				return JobAdmissionDecision{
-					Outcome:   AdmissionOutcomeQueue,
-					Reason:    "capacity limited",
+					Outcome:    AdmissionOutcomeQueue,
+					Reason:     "capacity limited",
 					RetryAfter: 15 * time.Millisecond,
-					Rationale: map[string]any{"availability": "limited"},
+					Rationale:  map[string]any{"availability": "limited"},
 				}
 			}
 			return JobAdmissionDecision{

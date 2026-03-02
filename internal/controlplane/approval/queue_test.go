@@ -46,7 +46,7 @@ func TestSubmitWithPolicyDetails(t *testing.T) {
 	cmd := makeCmd("systemctl restart nginx", protocol.CapRemediate)
 
 	rationale := map[string]any{
-		"summary": "queue (high-risk command requires human approval)",
+		"summary":    "queue (high-risk command requires human approval)",
 		"indicators": []map[string]any{{"name": "command_risk", "drove_outcome": true}},
 	}
 	req, err := q.SubmitWithPolicyDetails("probe-1", cmd, "manual", "high", "api", "queue", rationale)

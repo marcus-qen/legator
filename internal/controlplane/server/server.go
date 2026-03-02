@@ -351,6 +351,11 @@ func (s *Server) Run(ctx context.Context) error {
 		s.asyncJobsScheduler.Start(ctx)
 	}
 
+	// Start background approval timeout checker
+	if s.asyncJobsManager != nil {
+		go s.runApprovalTimeoutChecker(ctx)
+	}
+
 	if s.auditStore != nil && strings.TrimSpace(s.cfg.AuditRetention) != "" {
 		retention, err := parseHumanDuration(s.cfg.AuditRetention)
 		if err != nil {

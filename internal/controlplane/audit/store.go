@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "modernc.org/sqlite"
 	"github.com/marcus-qen/legator/internal/controlplane/migration"
+	_ "modernc.org/sqlite"
 )
 
 // Store provides persistent audit log storage backed by SQLite.

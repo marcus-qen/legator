@@ -14,24 +14,24 @@ const (
 
 // RoutingPolicy defines how alerts are routed to owners/teams.
 type RoutingPolicy struct {
-	ID                 string           `json:"id"`
-	Name               string           `json:"name"`
-	Description        string           `json:"description,omitempty"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 	// Priority determines precedence among matching policies; higher wins.
-	Priority           int              `json:"priority"`
+	Priority int `json:"priority"`
 	// IsDefault marks this as the fallback policy when no matchers hit.
-	IsDefault          bool             `json:"is_default"`
+	IsDefault bool `json:"is_default"`
 	// Matchers are AND-ed together; empty slice = matches every alert.
-	Matchers           []RoutingMatcher `json:"matchers"`
+	Matchers []RoutingMatcher `json:"matchers"`
 	// Owner fields
-	OwnerLabel         string           `json:"owner_label"`
-	OwnerContact       string           `json:"owner_contact,omitempty"`
+	OwnerLabel   string `json:"owner_label"`
+	OwnerContact string `json:"owner_contact,omitempty"`
 	// Optional reference to an EscalationPolicy
-	EscalationPolicyID string           `json:"escalation_policy_id,omitempty"`
+	EscalationPolicyID string `json:"escalation_policy_id,omitempty"`
 	// Runbook URL for this ownership domain
-	RunbookURL         string           `json:"runbook_url,omitempty"`
-	CreatedAt          time.Time        `json:"created_at"`
-	UpdatedAt          time.Time        `json:"updated_at"`
+	RunbookURL string    `json:"runbook_url,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // RoutingMatcher is a single matching criterion for a routing policy.
@@ -56,13 +56,13 @@ type EscalationPolicy struct {
 // EscalationStep is one step in an escalation chain.
 type EscalationStep struct {
 	// Order is 1-based; steps are executed in ascending order.
-	Order       int    `json:"order"`
+	Order int `json:"order"`
 	// Target identifies who/what to notify.
-	Target      string `json:"target"`
+	Target string `json:"target"`
 	// TargetType: "email", "webhook", "team", "oncall"
-	TargetType  string `json:"target_type"`
+	TargetType string `json:"target_type"`
 	// DelayMin: minutes after alert fires before this step activates.
-	DelayMin    int    `json:"delay_minutes"`
+	DelayMin int `json:"delay_minutes"`
 	// RunbookURL overrides the policy-level runbook for this step.
 	RunbookURL  string `json:"runbook_url,omitempty"`
 	Description string `json:"description,omitempty"`
@@ -95,11 +95,11 @@ type RoutingOutcome struct {
 // RoutingExplain describes why a particular routing policy was selected.
 type RoutingExplain struct {
 	// MatchedBy describes which matcher/criterion caused selection.
-	MatchedBy    string `json:"matched_by"`
+	MatchedBy string `json:"matched_by"`
 	// FallbackUsed is true when the default policy was used.
-	FallbackUsed bool   `json:"fallback_used"`
+	FallbackUsed bool `json:"fallback_used"`
 	// Reason is a human-readable explanation.
-	Reason       string `json:"reason"`
+	Reason string `json:"reason"`
 }
 
 // DeliveredAlertEvent wraps an AlertEvent with resolved routing context.

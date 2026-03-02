@@ -9,9 +9,9 @@ import (
 func TestHealthScoreHealthy(t *testing.T) {
 	hb := &protocol.HeartbeatPayload{
 		Load:      [3]float64{0.5, 0.3, 0.2},
-		MemUsed:   2 * 1024 * 1024 * 1024, // 2 GB
-		MemTotal:  8 * 1024 * 1024 * 1024, // 8 GB = 25%
-		DiskUsed:  50 * 1024 * 1024 * 1024, // 50 GB
+		MemUsed:   2 * 1024 * 1024 * 1024,   // 2 GB
+		MemTotal:  8 * 1024 * 1024 * 1024,   // 8 GB = 25%
+		DiskUsed:  50 * 1024 * 1024 * 1024,  // 50 GB
 		DiskTotal: 200 * 1024 * 1024 * 1024, // 200 GB = 25%
 	}
 	inv := &protocol.InventoryPayload{CPUs: 4}
@@ -67,9 +67,9 @@ func TestHealthScoreCriticalDisk(t *testing.T) {
 func TestHealthScoreMultipleCritical(t *testing.T) {
 	hb := &protocol.HeartbeatPayload{
 		Load:      [3]float64{16.0, 12.0, 8.0}, // extreme load
-		MemUsed:   7800 * 1024 * 1024,           // 96% of 8 GB
+		MemUsed:   7800 * 1024 * 1024,          // 96% of 8 GB
 		MemTotal:  8 * 1024 * 1024 * 1024,
-		DiskUsed:  196 * 1024 * 1024 * 1024,     // 98%
+		DiskUsed:  196 * 1024 * 1024 * 1024, // 98%
 		DiskTotal: 200 * 1024 * 1024 * 1024,
 	}
 	inv := &protocol.InventoryPayload{CPUs: 2}

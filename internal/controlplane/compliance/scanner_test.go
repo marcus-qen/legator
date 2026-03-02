@@ -16,32 +16,32 @@ type mockFleet struct {
 	probes []*fleet.ProbeState
 }
 
-func (m *mockFleet) List() []*fleet.ProbeState { return m.probes }
+func (m *mockFleet) List() []*fleet.ProbeState                    { return m.probes }
 func (m *mockFleet) Register(_, _, _, _ string) *fleet.ProbeState { return nil }
 func (m *mockFleet) RegisterRemote(_ fleet.RemoteProbeRegistration) (*fleet.ProbeState, error) {
 	return nil, nil
 }
-func (m *mockFleet) Heartbeat(_ string, _ *protocol.HeartbeatPayload) error { return nil }
+func (m *mockFleet) Heartbeat(_ string, _ *protocol.HeartbeatPayload) error       { return nil }
 func (m *mockFleet) UpdateInventory(_ string, _ *protocol.InventoryPayload) error { return nil }
-func (m *mockFleet) Get(_ string) (*fleet.ProbeState, bool)                        { return nil, false }
-func (m *mockFleet) FindByHostname(_ string) (*fleet.ProbeState, bool)             { return nil, false }
-func (m *mockFleet) ListRemote() []*fleet.ProbeState                               { return nil }
+func (m *mockFleet) Get(_ string) (*fleet.ProbeState, bool)                       { return nil, false }
+func (m *mockFleet) FindByHostname(_ string) (*fleet.ProbeState, bool)            { return nil, false }
+func (m *mockFleet) ListRemote() []*fleet.ProbeState                              { return nil }
 func (m *mockFleet) Inventory(_ fleet.InventoryFilter) fleet.FleetInventory {
 	return fleet.FleetInventory{}
 }
 func (m *mockFleet) SetPolicy(_ string, _ protocol.CapabilityLevel) error { return nil }
-func (m *mockFleet) SetAPIKey(_, _ string) error                           { return nil }
-func (m *mockFleet) SetStatus(_, _ string) error                           { return nil }
-func (m *mockFleet) MarkOffline(_ time.Duration)                           {}
-func (m *mockFleet) SetOnline(_ string) error                              { return nil }
-func (m *mockFleet) Count() map[string]int                                 { return nil }
-func (m *mockFleet) SetTags(_ string, _ []string) error                    { return nil }
-func (m *mockFleet) ListByTag(_ string) []*fleet.ProbeState                { return nil }
-func (m *mockFleet) TagCounts() map[string]int                             { return nil }
-func (m *mockFleet) Delete(_ string) error                                 { return nil }
-func (m *mockFleet) CleanupOffline(_ time.Duration) []string               { return nil }
-func (m *mockFleet) SetTenantID(_, _ string) error                         { return nil }
-func (m *mockFleet) ListByTenant(_ string) []*fleet.ProbeState             { return nil }
+func (m *mockFleet) SetAPIKey(_, _ string) error                          { return nil }
+func (m *mockFleet) SetStatus(_, _ string) error                          { return nil }
+func (m *mockFleet) MarkOffline(_ time.Duration)                          {}
+func (m *mockFleet) SetOnline(_ string) error                             { return nil }
+func (m *mockFleet) Count() map[string]int                                { return nil }
+func (m *mockFleet) SetTags(_ string, _ []string) error                   { return nil }
+func (m *mockFleet) ListByTag(_ string) []*fleet.ProbeState               { return nil }
+func (m *mockFleet) TagCounts() map[string]int                            { return nil }
+func (m *mockFleet) Delete(_ string) error                                { return nil }
+func (m *mockFleet) CleanupOffline(_ time.Duration) []string              { return nil }
+func (m *mockFleet) SetTenantID(_, _ string) error                        { return nil }
+func (m *mockFleet) ListByTenant(_ string) []*fleet.ProbeState            { return nil }
 
 // Compile-time check.
 var _ fleet.Fleet = (*mockFleet)(nil)

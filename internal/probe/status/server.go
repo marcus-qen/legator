@@ -12,14 +12,14 @@ import (
 
 // Info represents the probe's current status.
 type Info struct {
-	ProbeID    string    `json:"probe_id"`
-	ServerURL  string    `json:"server_url"`
-	Connected  bool      `json:"connected"`
-	StartedAt  time.Time `json:"started_at"`
-	Uptime     string    `json:"uptime"`
-	GoVersion  string    `json:"go_version"`
-	NumGoroutine int    `json:"goroutines"`
-	MemAlloc   uint64    `json:"mem_alloc_bytes"`
+	ProbeID      string    `json:"probe_id"`
+	ServerURL    string    `json:"server_url"`
+	Connected    bool      `json:"connected"`
+	StartedAt    time.Time `json:"started_at"`
+	Uptime       string    `json:"uptime"`
+	GoVersion    string    `json:"go_version"`
+	NumGoroutine int       `json:"goroutines"`
+	MemAlloc     uint64    `json:"mem_alloc_bytes"`
 }
 
 // Server provides a local HTTP status endpoint.

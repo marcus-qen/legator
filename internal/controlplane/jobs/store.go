@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "modernc.org/sqlite"
 	"github.com/marcus-qen/legator/internal/controlplane/migration"
+	_ "modernc.org/sqlite"
 )
 
 const (
@@ -897,14 +897,14 @@ func scanJob(s scanner) (*Job, error) {
 
 func scanRun(s scanner) (*JobRun, error) {
 	var (
-		run               JobRun
-		startedAt         string
-		endedAt           sql.NullString
-		retryScheduledAt  sql.NullString
-		admissionDecision sql.NullString
-		admissionReason   sql.NullString
+		run                JobRun
+		startedAt          string
+		endedAt            sql.NullString
+		retryScheduledAt   sql.NullString
+		admissionDecision  sql.NullString
+		admissionReason    sql.NullString
 		admissionRationale sql.NullString
-		exitCode          sql.NullInt64
+		exitCode           sql.NullInt64
 	)
 
 	if err := s.Scan(

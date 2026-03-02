@@ -15,8 +15,8 @@ type RateLimiter struct {
 }
 
 type window struct {
-	count    int
-	resetAt  time.Time
+	count   int
+	resetAt time.Time
 }
 
 // NewRateLimiter creates a rate limiter.

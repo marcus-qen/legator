@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "modernc.org/sqlite"
-	"golang.org/x/crypto/bcrypt"
 	"github.com/marcus-qen/legator/internal/controlplane/migration"
+	"golang.org/x/crypto/bcrypt"
+	_ "modernc.org/sqlite"
 )
 
 // Permission defines what an API key can do.
@@ -33,8 +33,8 @@ const (
 type APIKey struct {
 	ID          string       `json:"id"`
 	Name        string       `json:"name"`
-	KeyHash     string       `json:"-"`           // never exposed
-	KeyPrefix   string       `json:"key_prefix"`  // first 8 chars for identification
+	KeyHash     string       `json:"-"`          // never exposed
+	KeyPrefix   string       `json:"key_prefix"` // first 8 chars for identification
 	Permissions []Permission `json:"permissions"`
 	CreatedAt   time.Time    `json:"created_at"`
 	LastUsedAt  *time.Time   `json:"last_used_at,omitempty"`
@@ -146,10 +146,10 @@ func (ks *KeyStore) Validate(plainKey string) (*APIKey, error) {
 	defer ks.mu.RUnlock()
 
 	var (
-		key                                               APIKey
-		permsJSON, createdAt                              string
-		lastUsed, expiresAt                               sql.NullString
-		enabled                                           int
+		key                  APIKey
+		permsJSON, createdAt string
+		lastUsed, expiresAt  sql.NullString
+		enabled              int
 	)
 
 	err := ks.db.QueryRow(`SELECT id, name, key_hash, key_prefix, permissions, created_at, last_used, expires_at, enabled
@@ -214,10 +214,10 @@ func (ks *KeyStore) List() []APIKey {
 	var keys []APIKey
 	for rows.Next() {
 		var (
-			key                      APIKey
-			permsJSON, createdAt     string
-			lastUsed, expiresAt      sql.NullString
-			enabled                  int
+			key                  APIKey
+			permsJSON, createdAt string
+			lastUsed, expiresAt  sql.NullString
+			enabled              int
 		)
 		if err := rows.Scan(&key.ID, &key.Name, &key.KeyPrefix, &permsJSON, &createdAt, &lastUsed, &expiresAt, &enabled); err != nil {
 			continue

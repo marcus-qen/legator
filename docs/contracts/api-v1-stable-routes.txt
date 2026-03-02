@@ -120,6 +120,8 @@ POST /api/v1/fleet/chat
 POST /api/v1/fleet/cleanup
 POST /api/v1/jobs
 POST /api/v1/jobs/{id}/cancel
+POST /api/v1/jobs/{id}/approve
+POST /api/v1/jobs/{id}/reject
 POST /api/v1/jobs/{id}/disable
 POST /api/v1/jobs/{id}/enable
 POST /api/v1/jobs/{id}/run

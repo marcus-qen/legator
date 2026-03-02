@@ -32,7 +32,7 @@ func TestRemoteScannerScanProbeSuccessUpdatesLifecycleAndInventory(t *testing.T)
 		"uname -r": {Stdout: "6.8.0\n", ExitCode: 0},
 		"getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 1": {Stdout: "2\n", ExitCode: 0},
 		"awk '/MemTotal/ {print $2*1024}' /proc/meminfo 2>/dev/null || echo 0": {Stdout: "2147483648\n", ExitCode: 0},
-		"df -B1 --total 2>/dev/null | awk '/total/ {print $2}' | tail -n1":   {Stdout: "4294967296\n", ExitCode: 0},
+		"df -B1 --total 2>/dev/null | awk '/total/ {print $2}' | tail -n1":     {Stdout: "4294967296\n", ExitCode: 0},
 	}}
 	executor := &RemoteExecutor{
 		runner:           runner,

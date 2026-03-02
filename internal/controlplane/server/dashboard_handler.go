@@ -54,8 +54,8 @@ type DashboardFleet struct {
 
 // DashboardIncidents holds incident counts broken down by severity.
 type DashboardIncidents struct {
-	Total      int `json:"total"`
-	Open       int `json:"open"`
+	Total      int            `json:"total"`
+	Open       int            `json:"open"`
 	BySeverity map[string]int `json:"by_severity"`
 }
 
@@ -78,26 +78,26 @@ type DashboardAlerts struct {
 
 // DashboardDrills holds recent drill execution history.
 type DashboardDrills struct {
-	Available bool               `json:"available"`
+	Available bool                   `json:"available"`
 	Recent    []DashboardDrillResult `json:"recent"`
-	LastPass  *time.Time         `json:"last_pass,omitempty"`
-	LastFail  *time.Time         `json:"last_fail,omitempty"`
+	LastPass  *time.Time             `json:"last_pass,omitempty"`
+	LastFail  *time.Time             `json:"last_fail,omitempty"`
 }
 
 // DashboardDrillResult is a summary of one drill execution.
 type DashboardDrillResult struct {
-	Scenario  string    `json:"scenario"`
-	Status    string    `json:"status"`
-	RunAt     time.Time `json:"run_at"`
-	DurationMs int64    `json:"duration_ms"`
+	Scenario   string    `json:"scenario"`
+	Status     string    `json:"status"`
+	RunAt      time.Time `json:"run_at"`
+	DurationMs int64     `json:"duration_ms"`
 }
 
 // DashboardProbeHealth is a brief health snapshot for one probe.
 type DashboardProbeHealth struct {
-	ID       string  `json:"id"`
-	Hostname string  `json:"hostname"`
-	Status   string  `json:"status"`
-	Score    int     `json:"score"`
+	ID           string `json:"id"`
+	Hostname     string `json:"hostname"`
+	Status       string `json:"status"`
+	Score        int    `json:"score"`
 	HealthStatus string `json:"health_status"`
 }
 

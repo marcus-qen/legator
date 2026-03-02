@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	_ "modernc.org/sqlite"
 	"github.com/marcus-qen/legator/internal/controlplane/migration"
+	_ "modernc.org/sqlite"
 )
 
 const DefaultSessionLifetime = 24 * time.Hour

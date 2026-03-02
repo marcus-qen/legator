@@ -155,3 +155,29 @@ func (m *AsyncManager) transitionByRequestID(requestID string, to AsyncJobState,
 	}
 	return m.store.TransitionAsyncJob(job.ID, to, opts)
 }
+
+// ApproveJob atomically transitions a waiting_approval job to running.
+// Uses an atomic UPDATE WHERE state=waiting_approval so concurrent calls return ErrAsyncJobConflict.
+func (m *AsyncManager) ApproveJob(jobID string) (*AsyncJob, error) {
+	if m == nil || m.store == nil {
+		return nil, fmt.Errorf("async manager unavailable")
+	}
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return nil, fmt.Errorf("job id required")
+	}
+	return m.store.ApproveAsyncJob(jobID)
+}
+
+// RejectJob atomically transitions a waiting_approval job to failed with the given reason.
+// Uses an atomic UPDATE WHERE state=waiting_approval so concurrent calls return ErrAsyncJobConflict.
+func (m *AsyncManager) RejectJob(jobID, reason string) (*AsyncJob, error) {
+	if m == nil || m.store == nil {
+		return nil, fmt.Errorf("async manager unavailable")
+	}
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return nil, fmt.Errorf("job id required")
+	}
+	return m.store.RejectAsyncJob(jobID, strings.TrimSpace(reason))
+}

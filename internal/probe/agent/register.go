@@ -123,5 +123,3 @@ func normalizeTags(tags []string) []string {
 	}
 	return result
 }
-
-

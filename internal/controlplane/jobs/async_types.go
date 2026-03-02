@@ -23,6 +23,7 @@ const (
 var (
 	ErrInvalidAsyncJobTransition = errors.New("invalid async job transition")
 	ErrAsyncQueueSaturated       = errors.New("async queue saturated")
+	ErrAsyncJobConflict          = errors.New("async job conflict: invalid state for operation")
 )
 
 // AsyncQueueSaturatedError indicates async admission was rejected because the
@@ -44,6 +45,32 @@ func (e *AsyncQueueSaturatedError) Error() string {
 
 func (e *AsyncQueueSaturatedError) Unwrap() error {
 	return ErrAsyncQueueSaturated
+}
+
+// AsyncJobConflictError is returned when an operation is invalid for the current job state.
+type AsyncJobConflictError struct {
+	JobID        string
+	CurrentState AsyncJobState
+	Operation    string
+}
+
+func (e *AsyncJobConflictError) Error() string {
+	if e == nil {
+		return ErrAsyncJobConflict.Error()
+	}
+	op := e.Operation
+	if op == "" {
+		op = "operation"
+	}
+	return fmt.Sprintf("job %s: %s not allowed in state %s", e.JobID, op, e.CurrentState)
+}
+
+func (e *AsyncJobConflictError) Unwrap() error {
+	return ErrAsyncJobConflict
+}
+
+func IsAsyncJobConflict(err error) bool {
+	return errors.Is(err, ErrAsyncJobConflict)
 }
 
 func IsAsyncQueueSaturated(err error) bool {
@@ -68,17 +95,27 @@ type AsyncJob struct {
 	StartedAt    *time.Time    `json:"started_at,omitempty"`
 	FinishedAt   *time.Time    `json:"finished_at,omitempty"`
 	ExpiresAt    *time.Time    `json:"expires_at,omitempty"`
+
+	// Approval metadata — set when a human explicitly approves or rejects.
+	ApprovedBy       string     `json:"approved_by,omitempty"`
+	RejectedBy       string     `json:"rejected_by,omitempty"`
+	RejectionReason  string     `json:"rejection_reason,omitempty"`
+	ApprovalDeadline *time.Time `json:"approval_deadline,omitempty"`
 }
 
 // AsyncJobTransitionOptions controls metadata persisted with a transition.
 type AsyncJobTransitionOptions struct {
-	StatusReason string
-	ApprovalID   string
-	ExitCode     *int
-	Output       string
-	StartedAt    *time.Time
-	FinishedAt   *time.Time
-	ExpiresAt    *time.Time
+	StatusReason     string
+	ApprovalID       string
+	ExitCode         *int
+	Output           string
+	StartedAt        *time.Time
+	FinishedAt       *time.Time
+	ExpiresAt        *time.Time
+	ApprovedBy       string
+	RejectedBy       string
+	RejectionReason  string
+	ApprovalDeadline *time.Time
 }
 
 func (s AsyncJobState) IsTerminal() bool {

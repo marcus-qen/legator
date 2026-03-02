@@ -146,13 +146,13 @@ func TestBuiltinChecksCount(t *testing.T) {
 
 	// Check for required IDs
 	required := map[string]bool{
-		"os-patching":          false,
-		"ssh-password-auth":    false,
-		"ssh-root-login":       false,
-		"firewall-active":      false,
-		"disk-encryption":      false,
+		"os-patching":           false,
+		"ssh-password-auth":     false,
+		"ssh-root-login":        false,
+		"firewall-active":       false,
+		"disk-encryption":       false,
 		"passwordless-accounts": false,
-		"unnecessary-services": false,
+		"unnecessary-services":  false,
 	}
 
 	for _, c := range checks {
