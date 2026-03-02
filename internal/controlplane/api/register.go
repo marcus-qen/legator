@@ -174,7 +174,8 @@ func HandleRegister(ts *TokenStore, fm fleet.Fleet, logger *zap.Logger) http.Han
 			return
 		}
 
-		if !ts.Consume(req.Token) {
+		valid, tenantID := ts.ConsumeGetTenant(req.Token)
+		if !valid {
 			http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
 			return
 		}
@@ -183,6 +184,9 @@ func HandleRegister(ts *TokenStore, fm fleet.Fleet, logger *zap.Logger) http.Han
 		if err != nil {
 			http.Error(w, `{"error":"failed to generate api key"}`, http.StatusInternalServerError)
 			return
+		}
+		if tenantID != "" {
+			_ = fm.SetTenantID(result.probeID, tenantID)
 		}
 
 		if result.reRegistered {
@@ -220,7 +224,8 @@ func HandleGenerateToken(ts *TokenStore, logger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		multiUse := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("multi_use")), "true")
 		noExpiry := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("no_expiry")), "true")
-		token := ts.GenerateWithOptions(GenerateOptions{MultiUse: multiUse, NoExpiry: noExpiry})
+		tenantID := strings.TrimSpace(r.URL.Query().Get("tenant_id"))
+		token := ts.GenerateWithOptions(GenerateOptions{MultiUse: multiUse, NoExpiry: noExpiry, TenantID: tenantID})
 		out := tokenWithInstallCommand(token, requestBaseURL(r))
 		logger.Info("token generated",
 			zap.String("expires", out.Expires.Format(time.RFC3339)),
@@ -260,7 +265,8 @@ func HandleRegisterWithAudit(ts *TokenStore, fm fleet.Fleet, al AuditRecorder, l
 			return
 		}
 
-		if !ts.Consume(req.Token) {
+		valid, tenantID := ts.ConsumeGetTenant(req.Token)
+		if !valid {
 			http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
 			return
 		}
@@ -269,6 +275,9 @@ func HandleRegisterWithAudit(ts *TokenStore, fm fleet.Fleet, al AuditRecorder, l
 		if err != nil {
 			http.Error(w, `{"error":"failed to generate api key"}`, http.StatusInternalServerError)
 			return
+		}
+		if tenantID != "" {
+			_ = fm.SetTenantID(result.probeID, tenantID)
 		}
 
 		summary := "Probe registered: " + req.Hostname
@@ -310,7 +319,8 @@ func HandleGenerateTokenWithAudit(ts *TokenStore, al AuditRecorder, logger *zap.
 	return func(w http.ResponseWriter, r *http.Request) {
 		multiUse := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("multi_use")), "true")
 		noExpiry := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("no_expiry")), "true")
-		token := ts.GenerateWithOptions(GenerateOptions{MultiUse: multiUse, NoExpiry: noExpiry})
+		tenantID := strings.TrimSpace(r.URL.Query().Get("tenant_id"))
+		token := ts.GenerateWithOptions(GenerateOptions{MultiUse: multiUse, NoExpiry: noExpiry, TenantID: tenantID})
 		out := tokenWithInstallCommand(token, requestBaseURL(r))
 		al.Emit(audit.EventTokenGenerated, "", "api", "Registration token generated")
 		logger.Info("token generated",

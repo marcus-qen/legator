@@ -79,6 +79,13 @@ func TestRoutesAuthCoverage(t *testing.T) {
 		{http.MethodGet, "/api/v1/users"},
 		{http.MethodPost, "/api/v1/users"},
 		{http.MethodDelete, "/api/v1/users/some-id"},
+		// Tenants
+		{http.MethodPost, "/api/v1/tenants"},
+		{http.MethodGet, "/api/v1/tenants"},
+		{http.MethodGet, "/api/v1/tenants/some-tenant"},
+		{http.MethodPatch, "/api/v1/tenants/some-tenant"},
+		{http.MethodDelete, "/api/v1/tenants/some-tenant"},
+		{http.MethodPut, "/api/v1/users/some-id/tenants"},
 		// Webhooks
 		{http.MethodGet, "/api/v1/webhooks"},
 		{http.MethodPost, "/api/v1/webhooks"},

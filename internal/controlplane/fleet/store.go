@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marcus-qen/legator/internal/controlplane/migration"
 	"github.com/marcus-qen/legator/internal/protocol"
 	"go.uber.org/zap"
 	_ "modernc.org/sqlite"
-	"github.com/marcus-qen/legator/internal/controlplane/migration"
 )
 
 // Store provides persistent fleet management backed by SQLite.
@@ -37,33 +37,48 @@ func NewStore(dbPath string, logger *zap.Logger) (*Store, error) {
 		return nil, fmt.Errorf("set busy_timeout: %w", err)
 	}
 
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS probes (
-		id           TEXT PRIMARY KEY,
-		hostname     TEXT NOT NULL DEFAULT '',
-		os           TEXT NOT NULL DEFAULT '',
-		arch         TEXT NOT NULL DEFAULT '',
-		status       TEXT NOT NULL DEFAULT 'pending',
-		policy_level TEXT NOT NULL DEFAULT 'observe',
-		api_key      TEXT NOT NULL DEFAULT '',
-		registered   TEXT NOT NULL,
-		last_seen    TEXT NOT NULL,
-		labels       TEXT NOT NULL DEFAULT '{}',
-		tags         TEXT NOT NULL DEFAULT '[]',
-		inventory    TEXT
-	)`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("create probes table: %w", err)
+	runner := migration.NewRunner("fleet", []migration.Migration{
+		{
+			Version:     1,
+			Description: "initial fleet schema",
+			Up: func(tx *sql.Tx) error {
+				if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS probes (
+					id           TEXT PRIMARY KEY,
+					hostname     TEXT NOT NULL DEFAULT '',
+					os           TEXT NOT NULL DEFAULT '',
+					arch         TEXT NOT NULL DEFAULT '',
+					status       TEXT NOT NULL DEFAULT 'pending',
+					policy_level TEXT NOT NULL DEFAULT 'observe',
+					api_key      TEXT NOT NULL DEFAULT '',
+					registered   TEXT NOT NULL,
+					last_seen    TEXT NOT NULL,
+					labels       TEXT NOT NULL DEFAULT '{}',
+					tags         TEXT NOT NULL DEFAULT '[]',
+					inventory    TEXT
+				)`); err != nil {
+					return err
+				}
+				_, _ = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_probes_status ON probes(status)`)
+				_, _ = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_probes_last_seen ON probes(last_seen)`)
+				return nil
+			},
+		},
+		{
+			Version:     2,
+			Description: "add tenant_id to probes",
+			Up: func(tx *sql.Tx) error {
+				_, err := tx.Exec(`ALTER TABLE probes ADD COLUMN tenant_id TEXT NOT NULL DEFAULT ''`)
+				if err != nil && strings.Contains(err.Error(), "duplicate column name") {
+					return nil // idempotent
+				}
+				return err
+			},
+		},
+	})
+	if err := runner.Migrate(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate fleet db: %w", err)
 	}
-
-	if _, err := db.Exec(`ALTER TABLE probes ADD COLUMN api_key TEXT NOT NULL DEFAULT ''`); err != nil {
-		if !strings.Contains(err.Error(), "duplicate column name: api_key") {
-			db.Close()
-			return nil, fmt.Errorf("add api_key column: %w", err)
-		}
-	}
-
-	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_probes_status ON probes(status)`)
-	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_probes_last_seen ON probes(last_seen)`)
 
 	s := &Store{db: db, mgr: NewManager(logger)}
 
@@ -72,15 +87,10 @@ func NewStore(dbPath string, logger *zap.Logger) (*Store, error) {
 		return nil, fmt.Errorf("load probes: %w", err)
 	}
 
-	if err := migration.EnsureVersion(db, 1); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("ensure schema version: %w", err)
-	}
 	return s, nil
 }
 
-// Manager returns the underlying in-memory Manager (for read-only callers
-// that already depend on the Manager type).
+// Manager returns the underlying in-memory Manager.
 func (s *Store) Manager() *Manager {
 	return s.mgr
 }
@@ -122,6 +132,7 @@ func (s *Store) Inventory(filter InventoryFilter) FleetInventory { return s.mgr.
 func (s *Store) Count() map[string]int                           { return s.mgr.Count() }
 func (s *Store) ListByTag(tag string) []*ProbeState              { return s.mgr.ListByTag(tag) }
 func (s *Store) TagCounts() map[string]int                       { return s.mgr.TagCounts() }
+func (s *Store) ListByTenant(tenantID string) []*ProbeState      { return s.mgr.ListByTenant(tenantID) }
 
 // ── Mutations (memory + disk) ───────────────────────────────
 
@@ -192,11 +203,18 @@ func (s *Store) SetTags(id string, tags []string) error {
 	return nil
 }
 
+// SetTenantID assigns a tenant to a probe, persisted to disk.
+func (s *Store) SetTenantID(id, tenantID string) error {
+	if err := s.mgr.SetTenantID(id, tenantID); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`UPDATE probes SET tenant_id = ? WHERE id = ?`, tenantID, id)
+	return err
+}
+
 // MarkOffline marks stale probes as offline and persists the change.
 func (s *Store) MarkOffline(threshold time.Duration) {
 	s.mgr.MarkOffline(threshold)
-
-	// Persist status changes
 	for _, ps := range s.mgr.List() {
 		if ps.Status == "offline" {
 			_ = s.updateStatus(ps.ID, "offline")
@@ -231,8 +249,8 @@ func (s *Store) upsertProbe(ps *ProbeState) error {
 		inv, _ = json.Marshal(ps.Inventory)
 	}
 
-	_, err := s.db.Exec(`INSERT INTO probes (id, hostname, os, arch, status, policy_level, api_key, registered, last_seen, labels, tags, inventory)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	_, err := s.db.Exec(`INSERT INTO probes (id, hostname, os, arch, status, policy_level, api_key, registered, last_seen, labels, tags, inventory, tenant_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			hostname     = excluded.hostname,
 			os           = excluded.os,
@@ -243,7 +261,8 @@ func (s *Store) upsertProbe(ps *ProbeState) error {
 			last_seen    = excluded.last_seen,
 			labels       = excluded.labels,
 			tags         = excluded.tags,
-			inventory    = excluded.inventory`,
+			inventory    = excluded.inventory,
+			tenant_id    = excluded.tenant_id`,
 		ps.ID,
 		ps.Hostname,
 		ps.OS,
@@ -256,6 +275,7 @@ func (s *Store) upsertProbe(ps *ProbeState) error {
 		string(labels),
 		string(tags),
 		nullableJSON(inv),
+		ps.TenantID,
 	)
 	return err
 }
@@ -272,7 +292,7 @@ func (s *Store) updateStatus(id, status string) error {
 }
 
 func (s *Store) loadAll() error {
-	rows, err := s.db.Query(`SELECT id, hostname, os, arch, status, policy_level, api_key, registered, last_seen, labels, tags, inventory FROM probes`)
+	rows, err := s.db.Query(`SELECT id, hostname, os, arch, status, policy_level, api_key, registered, last_seen, labels, tags, inventory, tenant_id FROM probes`)
 	if err != nil {
 		return err
 	}
@@ -284,8 +304,9 @@ func (s *Store) loadAll() error {
 			registered, lastSeen                                 string
 			labelsJSON, tagsJSON                                 string
 			invJSON                                              sql.NullString
+			tenantID                                             string
 		)
-		if err := rows.Scan(&id, &hostname, &os_, &arch, &status, &policyLevel, &apiKey, &registered, &lastSeen, &labelsJSON, &tagsJSON, &invJSON); err != nil {
+		if err := rows.Scan(&id, &hostname, &os_, &arch, &status, &policyLevel, &apiKey, &registered, &lastSeen, &labelsJSON, &tagsJSON, &invJSON, &tenantID); err != nil {
 			continue
 		}
 
@@ -297,6 +318,7 @@ func (s *Store) loadAll() error {
 			Status:      status,
 			PolicyLevel: protocol.CapabilityLevel(policyLevel),
 			APIKey:      apiKey,
+			TenantID:    tenantID,
 			Labels:      map[string]string{},
 			Tags:        []string{},
 		}

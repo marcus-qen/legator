@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "modernc.org/sqlite"
 	"github.com/marcus-qen/legator/internal/controlplane/migration"
+	_ "modernc.org/sqlite"
 )
 
 // Token represents a registration token.
@@ -23,6 +23,7 @@ type Token struct {
 	Expires        time.Time `json:"expires"`
 	Used           bool      `json:"used"`
 	MultiUse       bool      `json:"multi_use,omitempty"`
+	TenantID       string    `json:"tenant_id,omitempty"`
 	InstallCommand string    `json:"install_command,omitempty"`
 }
 
@@ -31,7 +32,7 @@ type TokenStore struct {
 	db        *sql.DB
 	tokens    map[string]*Token
 	secret    []byte
-	serverURL string // used to generate install commands
+	serverURL string
 	mu        sync.RWMutex
 }
 
@@ -39,9 +40,10 @@ type TokenStore struct {
 type GenerateOptions struct {
 	MultiUse bool
 	NoExpiry bool
+	TenantID string // optional: tenant assigned to probes registered with this token
 }
 
-// NewTokenStore opens (or creates) a SQLite-backed token store with a random HMAC secret.
+// NewTokenStore opens (or creates) a SQLite-backed token store.
 func NewTokenStore(dbPath string) (*TokenStore, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -57,16 +59,37 @@ func NewTokenStore(dbPath string) (*TokenStore, error) {
 		return nil, fmt.Errorf("set busy_timeout: %w", err)
 	}
 
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS tokens (
-		value           TEXT PRIMARY KEY,
-		created_at      TEXT NOT NULL,
-		expires_at      TEXT NOT NULL,
-		used            INTEGER NOT NULL DEFAULT 0,
-		multi_use       INTEGER NOT NULL DEFAULT 0,
-		install_command TEXT
-	)`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("create tokens table: %w", err)
+	runner := migration.NewRunner("tokens", []migration.Migration{
+		{
+			Version:     1,
+			Description: "initial tokens schema",
+			Up: func(tx *sql.Tx) error {
+				_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS tokens (
+					value           TEXT PRIMARY KEY,
+					created_at      TEXT NOT NULL,
+					expires_at      TEXT NOT NULL,
+					used            INTEGER NOT NULL DEFAULT 0,
+					multi_use       INTEGER NOT NULL DEFAULT 0,
+					install_command TEXT
+				)`)
+				return err
+			},
+		},
+		{
+			Version:     2,
+			Description: "add tenant_id to tokens",
+			Up: func(tx *sql.Tx) error {
+				_, err := tx.Exec(`ALTER TABLE tokens ADD COLUMN tenant_id TEXT NOT NULL DEFAULT ''`)
+				if err != nil && strings.Contains(err.Error(), "duplicate column name") {
+					return nil // idempotent
+				}
+				return err
+			},
+		},
+	})
+	if err := runner.Migrate(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate token db: %w", err)
 	}
 
 	secret := make([]byte, 32)
@@ -83,10 +106,6 @@ func NewTokenStore(dbPath string) (*TokenStore, error) {
 		return nil, fmt.Errorf("load tokens: %w", err)
 	}
 
-	if err := migration.EnsureVersion(db, 1); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("ensure schema version: %w", err)
-	}
 	return ts, nil
 }
 
@@ -124,6 +143,7 @@ func (ts *TokenStore) GenerateWithOptions(opts GenerateOptions) *Token {
 		Created:  now,
 		Expires:  expiry,
 		MultiUse: opts.MultiUse,
+		TenantID: opts.TenantID,
 	}
 
 	if ts.serverURL != "" {
@@ -136,25 +156,33 @@ func (ts *TokenStore) GenerateWithOptions(opts GenerateOptions) *Token {
 }
 
 // Consume validates and consumes a token. Returns false if invalid, expired, or already used.
+// Deprecated: prefer ConsumeGetTenant when tenant propagation is needed.
 func (ts *TokenStore) Consume(value string) bool {
+	valid, _ := ts.ConsumeGetTenant(value)
+	return valid
+}
+
+// ConsumeGetTenant validates and consumes a token, returning whether it was valid
+// and the tenant_id (if any) associated with the token.
+func (ts *TokenStore) ConsumeGetTenant(value string) (valid bool, tenantID string) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 
 	t, ok := ts.tokens[value]
 	if !ok {
-		return false
+		return false, ""
 	}
 	if time.Now().UTC().After(t.Expires) {
-		return false
+		return false, ""
 	}
 	if t.Used {
-		return false
+		return false, ""
 	}
 	if !t.MultiUse {
 		t.Used = true
 		_ = ts.updateUsed(t.Value, true)
 	}
-	return true
+	return true, t.TenantID
 }
 
 // ListActive returns all tokens that are still valid for registration.
@@ -172,7 +200,7 @@ func (ts *TokenStore) ListActive() []*Token {
 	return active
 }
 
-// Count returns the total number of tokens (active + used + expired).
+// Count returns the total number of tokens.
 func (ts *TokenStore) Count() int {
 	ts.mu.RLock()
 	defer ts.mu.RUnlock()
@@ -188,20 +216,22 @@ func (ts *TokenStore) Close() error {
 }
 
 func (ts *TokenStore) upsertToken(token *Token) error {
-	_, err := ts.db.Exec(`INSERT INTO tokens (value, created_at, expires_at, used, multi_use, install_command)
-		VALUES (?, ?, ?, ?, ?, ?)
+	_, err := ts.db.Exec(`INSERT INTO tokens (value, created_at, expires_at, used, multi_use, install_command, tenant_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(value) DO UPDATE SET
 			created_at = excluded.created_at,
 			expires_at = excluded.expires_at,
 			used = excluded.used,
 			multi_use = excluded.multi_use,
-			install_command = excluded.install_command`,
+			install_command = excluded.install_command,
+			tenant_id = excluded.tenant_id`,
 		token.Value,
 		token.Created.Format(time.RFC3339Nano),
 		token.Expires.Format(time.RFC3339Nano),
 		boolToInt(token.Used),
 		boolToInt(token.MultiUse),
 		nullableString(token.InstallCommand),
+		token.TenantID,
 	)
 	return err
 }
@@ -212,7 +242,7 @@ func (ts *TokenStore) updateUsed(value string, used bool) error {
 }
 
 func (ts *TokenStore) loadAll() error {
-	rows, err := ts.db.Query(`SELECT value, created_at, expires_at, used, multi_use, install_command FROM tokens`)
+	rows, err := ts.db.Query(`SELECT value, created_at, expires_at, used, multi_use, install_command, tenant_id FROM tokens`)
 	if err != nil {
 		return err
 	}
@@ -223,8 +253,9 @@ func (ts *TokenStore) loadAll() error {
 			value, createdAt, expiresAt string
 			used, multiUse              int
 			installCommand              sql.NullString
+			tenantID                    string
 		)
-		if err := rows.Scan(&value, &createdAt, &expiresAt, &used, &multiUse, &installCommand); err != nil {
+		if err := rows.Scan(&value, &createdAt, &expiresAt, &used, &multiUse, &installCommand, &tenantID); err != nil {
 			continue
 		}
 
@@ -243,6 +274,7 @@ func (ts *TokenStore) loadAll() error {
 			Expires:  expires,
 			Used:     used == 1,
 			MultiUse: multiUse == 1,
+			TenantID: tenantID,
 		}
 		if installCommand.Valid {
 			t.InstallCommand = installCommand.String

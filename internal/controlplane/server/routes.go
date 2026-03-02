@@ -21,6 +21,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/metrics"
 	"github.com/marcus-qen/legator/internal/controlplane/modeldock"
+	"github.com/marcus-qen/legator/internal/controlplane/tenant"
 	"github.com/marcus-qen/legator/internal/protocol"
 	"go.uber.org/zap"
 )
@@ -51,8 +52,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/users/{id}", s.withPermission(auth.PermAdmin, s.handleDeleteUser))
 
 	// Fleet API
-	mux.HandleFunc("GET /api/v1/probes", s.withPermission(auth.PermFleetRead, s.handleListProbes))
-	mux.HandleFunc("GET /api/v1/probes/{id}", s.withPermission(auth.PermFleetRead, s.handleGetProbe))
+	mux.HandleFunc("GET /api/v1/probes", s.withPermission(auth.PermFleetRead, s.withTenantScope(s.handleListProbes)))
+	mux.HandleFunc("GET /api/v1/probes/{id}", s.withPermission(auth.PermFleetRead, s.withTenantScope(s.handleGetProbe)))
 	mux.HandleFunc("GET /api/v1/probes/{id}/health", s.withPermission(auth.PermFleetRead, s.handleProbeHealth))
 	mux.HandleFunc("POST /api/v1/probes/{id}/command", s.withPermission(auth.PermFleetWrite, s.handleDispatchCommand))
 	mux.HandleFunc("POST /api/v1/probes/{id}/rotate-key", s.withPermission(auth.PermFleetWrite, s.handleRotateKey))
@@ -242,6 +243,14 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// User role assignment (admin only)
 	mux.HandleFunc("GET /api/v1/users/{id}/role", s.withPermission(auth.PermAdmin, s.handleGetUserRole))
 	mux.HandleFunc("PUT /api/v1/users/{id}/role", s.withPermission(auth.PermAdmin, s.handlePutUserRole))
+
+	// Multi-tenant management
+	mux.HandleFunc("POST /api/v1/tenants", s.withPermission(auth.PermAdmin, s.handleCreateTenant))
+	mux.HandleFunc("GET /api/v1/tenants", s.withPermission(auth.PermFleetRead, s.withTenantScope(s.handleListTenants)))
+	mux.HandleFunc("GET /api/v1/tenants/{id}", s.withPermission(auth.PermFleetRead, s.handleGetTenant))
+	mux.HandleFunc("PATCH /api/v1/tenants/{id}", s.withPermission(auth.PermAdmin, s.handleUpdateTenant))
+	mux.HandleFunc("DELETE /api/v1/tenants/{id}", s.withPermission(auth.PermAdmin, s.handleDeleteTenant))
+	mux.HandleFunc("PUT /api/v1/users/{id}/tenants", s.withPermission(auth.PermAdmin, s.handleAssignUserTenants))
 
 	// Auth (optional)
 	if s.authStore != nil {
@@ -562,7 +571,7 @@ func (s *Server) handleListProbes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(s.fleetMgr.List())
+	_ = json.NewEncoder(w).Encode(s.probesForRequest(r))
 }
 
 func (s *Server) handleGetProbe(w http.ResponseWriter, r *http.Request) {
@@ -570,7 +579,7 @@ func (s *Server) handleGetProbe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	ps, ok := s.fleetMgr.Get(id)
+	ps, ok := s.probeForRequest(r, id)
 	if !ok {
 		writeJSONError(w, http.StatusNotFound, "not_found", "probe not found")
 		return
@@ -584,7 +593,7 @@ func (s *Server) handleProbeHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	ps, ok := s.fleetMgr.Get(id)
+	ps, ok := s.probeForRequest(r, id)
 	if !ok {
 		writeJSONError(w, http.StatusNotFound, "not_found", "probe not found")
 		return
@@ -869,13 +878,101 @@ func (s *Server) handleFleetInventory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inv := s.fleetMgr.Inventory(fleet.InventoryFilter{
+	inv := buildInventoryFromProbes(s.probesForRequest(r), fleet.InventoryFilter{
 		Tag:    r.URL.Query().Get("tag"),
 		Status: r.URL.Query().Get("status"),
 	})
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(inv)
+}
+
+func buildInventoryFromProbes(probes []*fleet.ProbeState, filter fleet.InventoryFilter) fleet.FleetInventory {
+	statusFilter := strings.ToLower(strings.TrimSpace(filter.Status))
+	tagFilter := strings.ToLower(strings.TrimSpace(filter.Tag))
+
+	result := fleet.FleetInventory{
+		Probes: make([]fleet.ProbeInventorySummary, 0, len(probes)),
+		Aggregates: fleet.FleetAggregates{
+			ProbesByOS:      map[string]int{},
+			TagDistribution: map[string]int{},
+		},
+	}
+
+	for _, ps := range probes {
+		if statusFilter != "" && strings.ToLower(ps.Status) != statusFilter {
+			continue
+		}
+		if tagFilter != "" {
+			ok := false
+			for _, tag := range ps.Tags {
+				if strings.EqualFold(tag, tagFilter) {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				continue
+			}
+		}
+
+		summary := fleet.ProbeInventorySummary{
+			ID:          ps.ID,
+			Hostname:    ps.Hostname,
+			Status:      ps.Status,
+			OS:          ps.OS,
+			Arch:        ps.Arch,
+			PolicyLevel: ps.PolicyLevel,
+			Tags:        append([]string(nil), ps.Tags...),
+			LastSeen:    ps.LastSeen,
+		}
+		if ps.Inventory != nil {
+			if summary.Hostname == "" {
+				summary.Hostname = ps.Inventory.Hostname
+			}
+			if ps.Inventory.OS != "" {
+				summary.OS = ps.Inventory.OS
+			}
+			if ps.Inventory.Arch != "" {
+				summary.Arch = ps.Inventory.Arch
+			}
+			summary.Kernel = ps.Inventory.Kernel
+			summary.CollectedAt = ps.Inventory.CollectedAt
+			summary.CPUs = ps.Inventory.CPUs
+			summary.RAMBytes = ps.Inventory.MemTotal
+			summary.DiskBytes = ps.Inventory.DiskTotal
+		}
+		result.Probes = append(result.Probes, summary)
+
+		result.Aggregates.TotalProbes++
+		if strings.EqualFold(summary.Status, "online") {
+			result.Aggregates.Online++
+		}
+		result.Aggregates.TotalCPUs += summary.CPUs
+		result.Aggregates.TotalRAMBytes += summary.RAMBytes
+		osKey := strings.ToLower(strings.TrimSpace(summary.OS))
+		if osKey == "" {
+			osKey = "unknown"
+		}
+		result.Aggregates.ProbesByOS[osKey]++
+		for _, tag := range summary.Tags {
+			result.Aggregates.TagDistribution[tag]++
+		}
+	}
+
+	sort.Slice(result.Probes, func(i, j int) bool {
+		lhs := strings.ToLower(strings.TrimSpace(result.Probes[i].Hostname))
+		rhs := strings.ToLower(strings.TrimSpace(result.Probes[j].Hostname))
+		if lhs == "" {
+			lhs = result.Probes[i].ID
+		}
+		if rhs == "" {
+			rhs = result.Probes[j].ID
+		}
+		return lhs < rhs
+	})
+
+	return result
 }
 
 func (s *Server) handleFederationInventory(w http.ResponseWriter, r *http.Request) {
@@ -948,10 +1045,14 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	scorecard := s.buildReliabilityScorecard(reliabilityDefaultWindow)
+	counts := map[string]int{}
+	for _, ps := range s.probesForRequest(r) {
+		counts[ps.Status]++
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"counts":            s.fleetMgr.Count(),
-		"connected":         s.hub.Connected(),
+		"counts":            counts,
+		"connected":         counts["online"],
 		"pending_approvals": s.approvalQueue.PendingCount(),
 		"reliability":       scorecard,
 	})
@@ -961,8 +1062,14 @@ func (s *Server) handleFleetTags(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(w, r, auth.PermFleetRead) {
 		return
 	}
+	tags := map[string]int{}
+	for _, ps := range s.probesForRequest(r) {
+		for _, t := range ps.Tags {
+			tags[t]++
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"tags": s.fleetMgr.TagCounts()})
+	_ = json.NewEncoder(w).Encode(map[string]any{"tags": tags})
 }
 
 func (s *Server) handleListByTag(w http.ResponseWriter, r *http.Request) {
@@ -970,8 +1077,21 @@ func (s *Server) handleListByTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tag := r.PathValue("tag")
+	all := s.fleetMgr.ListByTag(tag)
+	// Filter by tenant scope.
+	scoped := s.probesForRequest(r)
+	scopedSet := make(map[string]bool, len(scoped))
+	for _, ps := range scoped {
+		scopedSet[ps.ID] = true
+	}
+	out := make([]*fleet.ProbeState, 0, len(all))
+	for _, ps := range all {
+		if scopedSet[ps.ID] {
+			out = append(out, ps)
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(s.fleetMgr.ListByTag(tag))
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 func (s *Server) handleGroupCommand(w http.ResponseWriter, r *http.Request) {
@@ -979,7 +1099,18 @@ func (s *Server) handleGroupCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tag := r.PathValue("tag")
-	probes := s.fleetMgr.ListByTag(tag)
+	byTag := s.fleetMgr.ListByTag(tag)
+	// Apply tenant scope.
+	scopedSet := make(map[string]bool, len(s.probesForRequest(r)))
+	for _, ps := range s.probesForRequest(r) {
+		scopedSet[ps.ID] = true
+	}
+	probes := make([]*fleet.ProbeState, 0, len(byTag))
+	for _, ps := range byTag {
+		if scopedSet[ps.ID] {
+			probes = append(probes, ps)
+		}
+	}
 	if len(probes) == 0 {
 		writeJSONError(w, http.StatusNotFound, "not_found", "no probes with that tag")
 		return
@@ -1895,4 +2026,202 @@ func (s *Server) handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
+}
+
+// ── Tenant API handlers ──────────────────────────────────────────────────────
+
+// handleCreateTenant creates a new tenant (admin only).
+//
+// POST /api/v1/tenants
+func (s *Server) handleCreateTenant(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermAdmin) {
+		return
+	}
+	if s.tenantStore == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "multi-tenancy not enabled")
+		return
+	}
+	var req struct {
+		Name         string `json:"name"`
+		Slug         string `json:"slug"`
+		ContactEmail string `json:"contact_email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	t, err := s.tenantStore.Create(req.Name, req.Slug, req.ContactEmail)
+	if err != nil {
+		if errors.Is(err, tenant.ErrSlugConflict) {
+			writeJSONError(w, http.StatusConflict, "slug_conflict", "tenant slug already exists")
+			return
+		}
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(t)
+}
+
+// handleListTenants returns all tenants the current user can see.
+//
+// GET /api/v1/tenants
+func (s *Server) handleListTenants(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
+	if s.tenantStore == nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"tenants": []any{}})
+		return
+	}
+	all, err := s.tenantStore.List()
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "failed to list tenants")
+		return
+	}
+	// Filter by scope for non-admin users.
+	scope := s.resolveTenantScope(r.Context())
+	var visible []*tenant.Tenant
+	if scope.IsAdmin {
+		visible = all
+	} else {
+		for _, t := range all {
+			if scope.AllowsTenant(t.ID) {
+				visible = append(visible, t)
+			}
+		}
+	}
+	if visible == nil {
+		visible = []*tenant.Tenant{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"tenants": visible})
+}
+
+// handleGetTenant returns a single tenant by ID.
+//
+// GET /api/v1/tenants/{id}
+func (s *Server) handleGetTenant(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
+	if s.tenantStore == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "multi-tenancy not enabled")
+		return
+	}
+	id := r.PathValue("id")
+	t, err := s.tenantStore.Get(id)
+	if err != nil {
+		if errors.Is(err, tenant.ErrTenantNotFound) {
+			writeJSONError(w, http.StatusNotFound, "not_found", "tenant not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "failed to get tenant")
+		return
+	}
+	// Non-admin users may only view their own tenants.
+	scope := s.resolveTenantScope(r.Context())
+	if !scope.IsAdmin && !scope.AllowsTenant(t.ID) {
+		writeJSONError(w, http.StatusForbidden, "forbidden", "access denied")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(t)
+}
+
+// handleUpdateTenant updates a tenant's mutable fields (admin only).
+//
+// PATCH /api/v1/tenants/{id}
+func (s *Server) handleUpdateTenant(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermAdmin) {
+		return
+	}
+	if s.tenantStore == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "multi-tenancy not enabled")
+		return
+	}
+	id := r.PathValue("id")
+	var req struct {
+		Name         string `json:"name"`
+		ContactEmail string `json:"contact_email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	updated, err := s.tenantStore.Update(id, req.Name, req.ContactEmail)
+	if err != nil {
+		if errors.Is(err, tenant.ErrTenantNotFound) {
+			writeJSONError(w, http.StatusNotFound, "not_found", "tenant not found")
+			return
+		}
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(updated)
+}
+
+// handleDeleteTenant deletes a tenant (admin only, only if no probes are assigned).
+//
+// DELETE /api/v1/tenants/{id}
+func (s *Server) handleDeleteTenant(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermAdmin) {
+		return
+	}
+	if s.tenantStore == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "multi-tenancy not enabled")
+		return
+	}
+	id := r.PathValue("id")
+
+	// Guard: refuse if any probes are assigned to this tenant.
+	for _, ps := range s.fleetMgr.ListByTenant(id) {
+		if ps != nil {
+			writeJSONError(w, http.StatusConflict, "has_probes", "tenant has active probes; re-assign or delete them first")
+			return
+		}
+	}
+
+	if err := s.tenantStore.Delete(id); err != nil {
+		if errors.Is(err, tenant.ErrTenantNotFound) {
+			writeJSONError(w, http.StatusNotFound, "not_found", "tenant not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "failed to delete tenant")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleAssignUserTenants replaces the tenant memberships for a user (admin only).
+//
+// PUT /api/v1/users/{id}/tenants
+func (s *Server) handleAssignUserTenants(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermAdmin) {
+		return
+	}
+	if s.tenantStore == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "multi-tenancy not enabled")
+		return
+	}
+	userID := r.PathValue("id")
+	var req struct {
+		TenantIDs []string `json:"tenant_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	if req.TenantIDs == nil {
+		req.TenantIDs = []string{}
+	}
+	if err := s.tenantStore.SetUserTenants(userID, req.TenantIDs); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "failed to assign tenants")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"user_id": userID, "tenant_ids": req.TenantIDs})
 }

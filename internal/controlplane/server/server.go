@@ -43,6 +43,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/policy"
 	"github.com/marcus-qen/legator/internal/controlplane/reliability"
 	"github.com/marcus-qen/legator/internal/controlplane/session"
+	"github.com/marcus-qen/legator/internal/controlplane/tenant"
 	"github.com/marcus-qen/legator/internal/controlplane/users"
 	"github.com/marcus-qen/legator/internal/controlplane/webhook"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
@@ -144,6 +145,9 @@ type Server struct {
 	discoveryStore    *discovery.Store
 	discoveryHandlers *discovery.Handler
 
+	// Multi-tenant isolation
+	tenantStore *tenant.Store
+
 	// MCP
 	mcpServer *mcpserver.MCPServer
 
@@ -208,6 +212,10 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.logger.Info("token store opened", zap.String("path", tokensDBPath))
 	if s.cfg.ExternalURL != "" {
 		s.tokenStore.SetServerURL(s.cfg.ExternalURL)
+	}
+
+	if err := s.initTenants(); err != nil {
+		return nil, err
 	}
 
 	s.cmdTracker = cmdtracker.New(2 * time.Minute)
@@ -408,6 +416,9 @@ func (s *Server) Close() {
 	}
 	if s.customRoleStore != nil {
 		s.customRoleStore.Close()
+	}
+	if s.tenantStore != nil {
+		s.tenantStore.Close()
 	}
 	if s.policyPersistent != nil {
 		s.policyPersistent.Close()
@@ -1363,4 +1374,90 @@ type hubConnectedAdapter struct {
 
 func (a *hubConnectedAdapter) Connected() int {
 	return len(a.hub.Connected())
+}
+
+// initTenants opens the tenant store (best-effort; nil if data dir is missing).
+func (s *Server) initTenants() error {
+	tenantDBPath := filepath.Join(s.cfg.DataDir, "tenants.db")
+	store, err := tenant.NewStore(tenantDBPath)
+	if err != nil {
+		s.logger.Warn("cannot open tenant database, multi-tenancy disabled",
+			zap.String("path", tenantDBPath), zap.Error(err))
+		return nil // non-fatal: single-tenant mode
+	}
+	s.tenantStore = store
+	s.logger.Info("tenant store opened", zap.String("path", tenantDBPath))
+	return nil
+}
+
+func (s *Server) resolveTenantScope(ctx context.Context) tenant.Scope {
+	if s.tenantStore == nil {
+		return tenant.Scope{IsAdmin: true}
+	}
+	if auth.UserFromContext(ctx) == nil {
+		// API-key auth or auth disabled.
+		return tenant.Scope{IsAdmin: true}
+	}
+	scope := tenant.Scope{IsAdmin: auth.HasPermissionFromContext(ctx, auth.PermAdmin)}
+	if scope.IsAdmin {
+		return scope
+	}
+	user := auth.UserFromContext(ctx)
+	if user == nil {
+		return scope
+	}
+	tenantIDs, err := s.tenantStore.GetUserTenants(user.ID)
+	if err == nil {
+		scope.TenantIDs = tenantIDs
+	}
+	return scope
+}
+
+// withTenantScope is middleware that resolves the tenant scope for the
+// authenticated user and injects it into the request context.
+// When tenantStore is nil (single-tenant mode) or the user is authenticated
+// via API key, the request is passed through unchanged.
+func (s *Server) withTenantScope(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scope := s.resolveTenantScope(r.Context())
+		ctx := tenant.WithScope(r.Context(), scope)
+		next(w, r.WithContext(ctx))
+	}
+}
+
+// probesForRequest returns the probes visible to the current request's tenant
+// scope. Falls back to all probes when tenantStore is nil.
+func (s *Server) probesForRequest(r *http.Request) []*fleet.ProbeState {
+	all := s.fleetMgr.List()
+	scope := tenant.ScopeFromContext(r.Context())
+	if !scope.IsAdmin && len(scope.TenantIDs) == 0 {
+		scope = s.resolveTenantScope(r.Context())
+	}
+	if scope.IsAdmin {
+		return all
+	}
+	out := make([]*fleet.ProbeState, 0, len(all))
+	for _, ps := range all {
+		if scope.AllowsTenant(ps.TenantID) {
+			out = append(out, ps)
+		}
+	}
+	return out
+}
+
+// probeForRequest returns the probe by ID if visible to the current request's
+// tenant scope.
+func (s *Server) probeForRequest(r *http.Request, id string) (*fleet.ProbeState, bool) {
+	ps, ok := s.fleetMgr.Get(id)
+	if !ok {
+		return nil, false
+	}
+	scope := tenant.ScopeFromContext(r.Context())
+	if !scope.IsAdmin && len(scope.TenantIDs) == 0 {
+		scope = s.resolveTenantScope(r.Context())
+	}
+	if scope.AllowsTenant(ps.TenantID) {
+		return ps, true
+	}
+	return nil, false
 }

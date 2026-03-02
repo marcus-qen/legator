@@ -26,6 +26,8 @@ type Fleet interface {
 	TagCounts() map[string]int
 	Delete(id string) error
 	CleanupOffline(olderThan time.Duration) []string
+	SetTenantID(id, tenantID string) error
+	ListByTenant(tenantID string) []*ProbeState
 }
 
 // compile-time interface checks

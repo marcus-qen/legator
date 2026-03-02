@@ -26,6 +26,7 @@ type ProbeState struct {
 	Labels      map[string]string          `json:"labels,omitempty"`
 	Tags        []string                   `json:"tags,omitempty"`
 	Health      *HealthScore               `json:"health,omitempty"`
+	TenantID    string                     `json:"tenant_id,omitempty"`
 	lastHB      *protocol.HeartbeatPayload
 }
 
@@ -352,4 +353,30 @@ func (m *Manager) CleanupOffline(olderThan time.Duration) []string {
 // LastHeartbeat returns the last heartbeat payload for external consumers.
 func (ps *ProbeState) LastHeartbeat() *protocol.HeartbeatPayload {
 	return ps.lastHB
+}
+
+// SetTenantID assigns a tenant to a probe in memory.
+func (m *Manager) SetTenantID(id, tenantID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ps, ok := m.probes[id]
+	if !ok {
+		return fmt.Errorf("unknown probe: %s", id)
+	}
+	ps.TenantID = tenantID
+	return nil
+}
+
+// ListByTenant returns all probes belonging to tenantID.
+// An empty tenantID returns probes with no tenant assigned.
+func (m *Manager) ListByTenant(tenantID string) []*ProbeState {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*ProbeState, 0)
+	for _, ps := range m.probes {
+		if ps.TenantID == tenantID {
+			out = append(out, ps)
+		}
+	}
+	return out
 }
