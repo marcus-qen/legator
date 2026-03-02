@@ -96,12 +96,22 @@ type GrafanaConfig struct {
 	OrgID          int    `json:"org_id,omitempty"`
 }
 
-// JobsConfig controls scheduler defaults for retry behavior.
+// JobsConfig controls scheduler defaults for retry behavior and async worker bounds.
 type JobsConfig struct {
 	RetryMaxAttempts    int     `json:"retry_max_attempts,omitempty"`
 	RetryInitialBackoff string  `json:"retry_initial_backoff,omitempty"`
 	RetryMultiplier     float64 `json:"retry_multiplier,omitempty"`
 	RetryMaxBackoff     string  `json:"retry_max_backoff,omitempty"`
+
+	AsyncMaxInFlight         int    `json:"async_max_in_flight,omitempty"`
+	AsyncPerProbeMaxInFlight int    `json:"async_per_probe_max_in_flight,omitempty"`
+	AsyncMaxQueueDepth       int    `json:"async_max_queue_depth,omitempty"`
+	AsyncPollInterval        string `json:"async_poll_interval,omitempty"`
+	AsyncFetchBatchSize      int    `json:"async_fetch_batch_size,omitempty"`
+
+	StreamMaxEventsPerRequest int    `json:"stream_max_events_per_request,omitempty"`
+	StreamMaxEventsTotal      int    `json:"stream_max_events_total,omitempty"`
+	StreamRetention           string `json:"stream_retention,omitempty"`
 }
 
 func (k KubeflowConfig) NamespaceOrDefault() string {
@@ -145,6 +155,30 @@ func (g GrafanaConfig) DashboardLimitOrDefault() int {
 	return g.DashboardLimit
 }
 
+func (j JobsConfig) AsyncPollIntervalDuration() time.Duration {
+	raw := strings.TrimSpace(j.AsyncPollInterval)
+	if raw == "" {
+		return 200 * time.Millisecond
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 200 * time.Millisecond
+	}
+	return d
+}
+
+func (j JobsConfig) StreamRetentionDuration() time.Duration {
+	raw := strings.TrimSpace(j.StreamRetention)
+	if raw == "" {
+		return 24 * time.Hour
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 24 * time.Hour
+	}
+	return d
+}
+
 // Default returns configuration with sensible defaults.
 func Default() Config {
 	return Config{
@@ -166,6 +200,15 @@ func Default() Config {
 			Enabled:        false,
 			Timeout:        "10s",
 			DashboardLimit: 10,
+		},
+		Jobs: JobsConfig{
+			AsyncMaxInFlight:          8,
+			AsyncMaxQueueDepth:        500,
+			AsyncPollInterval:         "200ms",
+			AsyncFetchBatchSize:       64,
+			StreamMaxEventsPerRequest: 2000,
+			StreamMaxEventsTotal:      100000,
+			StreamRetention:           "24h",
 		},
 	}
 }
@@ -291,6 +334,42 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("LEGATOR_JOBS_RETRY_MAX_BACKOFF"); v != "" {
 		cfg.Jobs.RetryMaxBackoff = v
+	}
+	if v := os.Getenv("LEGATOR_JOBS_ASYNC_MAX_IN_FLIGHT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Jobs.AsyncMaxInFlight = n
+		}
+	}
+	if v := os.Getenv("LEGATOR_JOBS_ASYNC_PER_PROBE_MAX_IN_FLIGHT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Jobs.AsyncPerProbeMaxInFlight = n
+		}
+	}
+	if v := os.Getenv("LEGATOR_JOBS_ASYNC_MAX_QUEUE_DEPTH"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Jobs.AsyncMaxQueueDepth = n
+		}
+	}
+	if v := os.Getenv("LEGATOR_JOBS_ASYNC_POLL_INTERVAL"); v != "" {
+		cfg.Jobs.AsyncPollInterval = v
+	}
+	if v := os.Getenv("LEGATOR_JOBS_ASYNC_FETCH_BATCH_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Jobs.AsyncFetchBatchSize = n
+		}
+	}
+	if v := os.Getenv("LEGATOR_JOBS_STREAM_MAX_EVENTS_PER_REQUEST"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Jobs.StreamMaxEventsPerRequest = n
+		}
+	}
+	if v := os.Getenv("LEGATOR_JOBS_STREAM_MAX_EVENTS_TOTAL"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Jobs.StreamMaxEventsTotal = n
+		}
+	}
+	if v := os.Getenv("LEGATOR_JOBS_STREAM_RETENTION"); v != "" {
+		cfg.Jobs.StreamRetention = v
 	}
 	if v := os.Getenv("LEGATOR_MCP_ENABLED"); v != "" {
 		cfg.MCPEnabled = v == "true" || v == "1"

@@ -177,6 +177,90 @@ func TestSubmitCommandApprovalWithContext_GrafanaUnavailableFallback(t *testing.
 	}
 }
 
+func TestSubmitCommandApprovalWithContext_UnknownMutationBlocked(t *testing.T) {
+	svc, queue, fleetMgr, _ := newServiceForTest()
+	fleetMgr.Register("probe-a", "host", "linux", "amd64")
+
+	cmd := &protocol.CommandPayload{RequestID: "req-unknown", Command: "my-custom-script", Args: []string{"--apply"}, Level: protocol.CapRemediate}
+	result, err := svc.SubmitCommandApprovalWithContext(context.Background(), "probe-a", cmd, protocol.CapObserve, "manual", "api")
+	if err != nil {
+		t.Fatalf("SubmitCommandApprovalWithContext returned error: %v", err)
+	}
+	if result.Decision.Outcome != CommandPolicyDecisionDeny {
+		t.Fatalf("expected deny decision, got %s", result.Decision.Outcome)
+	}
+	if result.Decision.GateOutcome != CommandPolicyGateBlocked {
+		t.Fatalf("expected blocked gate outcome, got %s", result.Decision.GateOutcome)
+	}
+	if result.Decision.ReasonCode != "policy.lane_unmapped" {
+		t.Fatalf("expected policy.lane_unmapped reason, got %s", result.Decision.ReasonCode)
+	}
+	if queue.PendingCount() != 0 {
+		t.Fatalf("expected no pending approvals, got %d", queue.PendingCount())
+	}
+}
+
+func TestEvaluateCommandPolicyForProbe_UsesAppliedBreakglassPolicy(t *testing.T) {
+	svc, _, fleetMgr, policies := newServiceForTest()
+	fleetMgr.Register("probe-a", "host", "linux", "amd64")
+
+	tpl := policies.Create(
+		"Breakglass",
+		"breakglass direct for emergencies",
+		protocol.CapObserve,
+		nil,
+		nil,
+		nil,
+		policy.TemplateOptions{
+			ExecutionClassRequired: protocol.ExecBreakglassDirect,
+			ApprovalMode:           protocol.ApprovalMutationGate,
+			Breakglass: protocol.BreakglassPolicy{
+				Enabled:                  true,
+				AllowedReasons:           []string{"incident_response"},
+				RequireTypedConfirmation: true,
+			},
+		},
+	)
+	if _, err := svc.ApplyPolicyTemplate("probe-a", tpl.ID, nil); err != nil {
+		t.Fatalf("apply policy template: %v", err)
+	}
+
+	decision := svc.EvaluateCommandPolicyForProbe(context.Background(), "probe-a", &protocol.CommandPayload{Command: "systemctl restart nginx"}, protocol.CapRemediate)
+	if decision.Lane != protocol.ExecBreakglassDirect {
+		t.Fatalf("expected breakglass lane, got %s", decision.Lane)
+	}
+	if decision.Outcome != CommandPolicyDecisionQueue {
+		t.Fatalf("expected queued decision for breakglass mutation, got %s", decision.Outcome)
+	}
+	if decision.ReasonCode != "approval.breakglass_required" {
+		t.Fatalf("expected breakglass reason code, got %s", decision.ReasonCode)
+	}
+	if decision.Policy.PolicyID != tpl.ID {
+		t.Fatalf("expected policy id %q, got %q", tpl.ID, decision.Policy.PolicyID)
+	}
+}
+
+func TestEvaluateCommandPolicyPreview_Override(t *testing.T) {
+	svc, _, fleetMgr, _ := newServiceForTest()
+	fleetMgr.Register("probe-a", "host", "linux", "amd64")
+
+	override := &CommandPolicyProfile{
+		ExecutionClassRequired: protocol.ExecObserveDirect,
+		SandboxRequired:        false,
+		ApprovalMode:           protocol.ApprovalEveryAction,
+	}
+	decision := svc.EvaluateCommandPolicyPreview(context.Background(), "probe-a", &protocol.CommandPayload{Command: "ls"}, protocol.CapObserve, override)
+	if decision.Outcome != CommandPolicyDecisionQueue {
+		t.Fatalf("expected queued decision, got %s", decision.Outcome)
+	}
+	if decision.GateOutcome != CommandPolicyGatePendingApproval {
+		t.Fatalf("expected pending gate outcome, got %s", decision.GateOutcome)
+	}
+	if decision.ReasonCode != "approval.required.every_action" {
+		t.Fatalf("expected every_action reason code, got %s", decision.ReasonCode)
+	}
+}
+
 func TestWaitForDecision(t *testing.T) {
 	svc, queue, _, _ := newServiceForTest()
 

@@ -521,6 +521,82 @@ func TestHandleDispatchCommand_PendingApproval(t *testing.T) {
 	}
 }
 
+func TestHandleDispatchCommand_UnknownMutationBlocked(t *testing.T) {
+	srv := newTestServer(t)
+	srv.fleetMgr.Register("probe-unknown", "host", "linux", "amd64")
+
+	body := map[string]any{
+		"request_id": "req-unknown",
+		"command":    "my-custom-script",
+		"args":       []string{"--apply"},
+		"level":      string(protocol.CapRemediate),
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/probes/probe-unknown/command", bytes.NewReader(data))
+	req.SetPathValue("id", "probe-unknown")
+	rr := httptest.NewRecorder()
+
+	srv.handleDispatchCommand(rr, req)
+
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("X-Legator-Reason-Code"); got != "policy.lane_unmapped" {
+		t.Fatalf("expected reason header policy.lane_unmapped, got %q", got)
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode policy deny response: %v", err)
+	}
+	if payload["reason_code"] != "policy.lane_unmapped" {
+		t.Fatalf("expected reason_code policy.lane_unmapped, got %v", payload["reason_code"])
+	}
+	if payload["gate_outcome"] != "blocked" {
+		t.Fatalf("expected gate_outcome=blocked, got %v", payload["gate_outcome"])
+	}
+	if srv.approvalQueue.PendingCount() != 0 {
+		t.Fatalf("expected no queued approvals, got %d", srv.approvalQueue.PendingCount())
+	}
+}
+
+func TestHandleSimulateCommandPolicy(t *testing.T) {
+	srv := newTestServer(t)
+	srv.fleetMgr.Register("probe-sim", "host", "linux", "amd64")
+
+	body := map[string]any{
+		"command": "systemctl restart nginx",
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/probes/probe-sim/command/simulate", bytes.NewReader(data))
+	req.SetPathValue("id", "probe-sim")
+	rr := httptest.NewRecorder()
+
+	srv.handleSimulateCommandPolicy(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode simulation response: %v", err)
+	}
+	decision, ok := payload["decision"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected decision object, got %#v", payload["decision"])
+	}
+	if decision["lane"] != "remediate_sandbox" {
+		t.Fatalf("expected lane remediate_sandbox, got %v", decision["lane"])
+	}
+	if decision["gate_outcome"] != "pending_approval" {
+		t.Fatalf("expected gate_outcome pending_approval, got %v", decision["gate_outcome"])
+	}
+	if decision["reason_code"] == "" {
+		t.Fatalf("expected reason code in simulation decision, got %v", decision["reason_code"])
+	}
+}
+
 func TestHandleDispatchCommand_CapacityDenied(t *testing.T) {
 	srv := newTestServer(t)
 	srv.fleetMgr.Register("probe-capacity", "host", "linux", "amd64")
@@ -1433,7 +1509,7 @@ func TestPolicyHandlers_ListCreateDelete(t *testing.T) {
 		t.Fatalf("expected built-in policies, got %d", len(listed))
 	}
 
-	createBody := `{"name":"Staging","description":"staging policy","level":"diagnose","allowed":["ls"],"blocked":["rm"],"paths":["/tmp"]}`
+	createBody := `{"name":"Staging","description":"staging policy","level":"diagnose","allowed":["ls"],"blocked":["rm"],"paths":["/tmp"],"execution_class_required":"diagnose_sandbox","sandbox_required":true,"approval_mode":"mutation_gate","breakglass":{"enabled":true,"allowed_reasons":["incident_response"],"require_typed_confirmation":true},"max_runtime_sec":120,"allowed_scopes":["fleet.read","command.exec"]}`
 	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/policies", strings.NewReader(createBody))
 	createRR := httptest.NewRecorder()
 	srv.handleCreatePolicy(createRR, createReq)
@@ -1448,6 +1524,15 @@ func TestPolicyHandlers_ListCreateDelete(t *testing.T) {
 	}
 	if created.ID == "" || created.Name != "Staging" {
 		t.Fatalf("unexpected created policy: %+v", created)
+	}
+	if created.ExecutionClassRequired != protocol.ExecDiagnoseSandbox || !created.SandboxRequired || created.ApprovalMode != protocol.ApprovalMutationGate {
+		t.Fatalf("expected v2 fields in created policy: %+v", created)
+	}
+	if !created.Breakglass.Enabled || len(created.Breakglass.AllowedReasons) != 1 {
+		t.Fatalf("expected breakglass in created policy: %+v", created.Breakglass)
+	}
+	if created.MaxRuntimeSec != 120 || len(created.AllowedScopes) != 2 {
+		t.Fatalf("expected runtime/scopes in created policy: %+v", created)
 	}
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/policies/"+created.ID, nil)
@@ -1468,6 +1553,83 @@ func TestPolicyHandlers_ListCreateDelete(t *testing.T) {
 	srv.handleDeletePolicy(missingRR, missingReq)
 	if missingRR.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 deleting missing policy, got %d", missingRR.Code)
+	}
+}
+
+func TestPolicyHandlers_CreateRejectsInvalidExecutionClass(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/policies", strings.NewReader(`{"name":"Bad","level":"observe","execution_class_required":"not_real"}`))
+	rr := httptest.NewRecorder()
+
+	srv.handleCreatePolicy(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var apiErr APIError
+	if err := json.NewDecoder(rr.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if apiErr.Code != "invalid_request" || !strings.Contains(apiErr.Error, "execution_class_required") {
+		t.Fatalf("unexpected error payload: %+v", apiErr)
+	}
+}
+
+func TestPolicyHandlers_CreateRejectsInvalidApprovalMode(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/policies", strings.NewReader(`{"name":"Bad","level":"observe","approval_mode":"sometimes"}`))
+	rr := httptest.NewRecorder()
+
+	srv.handleCreatePolicy(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var apiErr APIError
+	if err := json.NewDecoder(rr.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if apiErr.Code != "invalid_request" || !strings.Contains(apiErr.Error, "approval_mode") {
+		t.Fatalf("unexpected error payload: %+v", apiErr)
+	}
+}
+
+func TestPolicyHandlers_CreateRejectsInvalidBreakglassReason(t *testing.T) {
+	srv := newTestServer(t)
+	body := `{"name":"Bad","level":"observe","breakglass":{"enabled":true,"allowed_reasons":["something_weird"],"require_typed_confirmation":true}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/policies", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	srv.handleCreatePolicy(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var apiErr APIError
+	if err := json.NewDecoder(rr.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if apiErr.Code != "invalid_request" || !strings.Contains(apiErr.Error, "breakglass") {
+		t.Fatalf("unexpected error payload: %+v", apiErr)
+	}
+}
+
+func TestPolicyHandlers_CreateRejectsOutOfBoundsRuntime(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/policies", strings.NewReader(`{"name":"Bad","level":"observe","max_runtime_sec":999999}`))
+	rr := httptest.NewRecorder()
+
+	srv.handleCreatePolicy(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var apiErr APIError
+	if err := json.NewDecoder(rr.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if apiErr.Code != "invalid_request" || !strings.Contains(apiErr.Error, "max_runtime_sec") {
+		t.Fatalf("unexpected error payload: %+v", apiErr)
 	}
 }
 

@@ -117,6 +117,90 @@ func TestCapabilityLevelValues(t *testing.T) {
 	}
 }
 
+func TestExecutionClassValues(t *testing.T) {
+	tests := []struct {
+		name string
+		got  ExecutionClass
+		want ExecutionClass
+	}{
+		{"ExecObserveDirect", ExecObserveDirect, "observe_direct"},
+		{"ExecDiagnoseSandbox", ExecDiagnoseSandbox, "diagnose_sandbox"},
+		{"ExecRemediateSandbox", ExecRemediateSandbox, "remediate_sandbox"},
+		{"ExecBreakglassDirect", ExecBreakglassDirect, "breakglass_direct"},
+	}
+
+	for _, tc := range tests {
+		if tc.got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
+func TestApprovalModeValues(t *testing.T) {
+	tests := []struct {
+		name string
+		got  ApprovalMode
+		want ApprovalMode
+	}{
+		{"ApprovalNone", ApprovalNone, "none"},
+		{"ApprovalMutationGate", ApprovalMutationGate, "mutation_gate"},
+		{"ApprovalPlanFirst", ApprovalPlanFirst, "plan_first"},
+		{"ApprovalEveryAction", ApprovalEveryAction, "every_action"},
+		{"ApprovalTwoPerson", ApprovalTwoPerson, "two_person"},
+	}
+
+	for _, tc := range tests {
+		if tc.got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
+func TestPolicyUpdatePayloadJSONRoundTripV2Fields(t *testing.T) {
+	payload := PolicyUpdatePayload{
+		PolicyID:               "policy-v2",
+		Level:                  CapDiagnose,
+		Allowed:                []string{"ls", "cat"},
+		Blocked:                []string{"rm"},
+		Paths:                  []string{"/etc"},
+		ExecutionClassRequired: ExecDiagnoseSandbox,
+		SandboxRequired:        true,
+		ApprovalMode:           ApprovalMutationGate,
+		Breakglass:             BreakglassPolicy{Enabled: true, AllowedReasons: []string{"incident_response"}, RequireTypedConfirmation: true},
+		MaxRuntimeSec:          900,
+		AllowedScopes:          []string{"fleet.read", "command.exec"},
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal policy update payload: %v", err)
+	}
+
+	var decoded PolicyUpdatePayload
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal policy update payload: %v", err)
+	}
+
+	if decoded.ExecutionClassRequired != payload.ExecutionClassRequired {
+		t.Fatalf("execution_class_required mismatch: got %q want %q", decoded.ExecutionClassRequired, payload.ExecutionClassRequired)
+	}
+	if decoded.SandboxRequired != payload.SandboxRequired {
+		t.Fatalf("sandbox_required mismatch: got %v want %v", decoded.SandboxRequired, payload.SandboxRequired)
+	}
+	if decoded.ApprovalMode != payload.ApprovalMode {
+		t.Fatalf("approval_mode mismatch: got %q want %q", decoded.ApprovalMode, payload.ApprovalMode)
+	}
+	if decoded.Breakglass.RequireTypedConfirmation != payload.Breakglass.RequireTypedConfirmation || len(decoded.Breakglass.AllowedReasons) != 1 || decoded.Breakglass.AllowedReasons[0] != "incident_response" {
+		t.Fatalf("breakglass mismatch: got %+v want %+v", decoded.Breakglass, payload.Breakglass)
+	}
+	if decoded.MaxRuntimeSec != payload.MaxRuntimeSec {
+		t.Fatalf("max_runtime_sec mismatch: got %d want %d", decoded.MaxRuntimeSec, payload.MaxRuntimeSec)
+	}
+	if len(decoded.AllowedScopes) != 2 || decoded.AllowedScopes[0] != "fleet.read" {
+		t.Fatalf("allowed_scopes mismatch: got %v", decoded.AllowedScopes)
+	}
+}
+
 func TestKeyRotationPayloadJSON(t *testing.T) {
 	payload := KeyRotationPayload{
 		NewKey:    "lgk_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd",

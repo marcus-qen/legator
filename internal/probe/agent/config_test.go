@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/marcus-qen/legator/internal/protocol"
 	"go.uber.org/zap"
 )
 
@@ -29,6 +30,17 @@ func TestConfigSaveAndLoadRoundTrip(t *testing.T) {
 		ProbeID:   "probe-1",
 		APIKey:    "api-key",
 		PolicyID:  "policy-1",
+
+		PolicyExecutionClassRequired: protocol.ExecDiagnoseSandbox,
+		PolicySandboxRequired:        true,
+		PolicyApprovalMode:           protocol.ApprovalMutationGate,
+		PolicyBreakglass: protocol.BreakglassPolicy{
+			Enabled:                  true,
+			AllowedReasons:           []string{"incident_response"},
+			RequireTypedConfirmation: true,
+		},
+		PolicyMaxRuntimeSec: 300,
+		PolicyAllowedScopes: []string{"fleet.read", "command.exec"},
 	}
 
 	if err := expected.Save(dir); err != nil {
@@ -45,6 +57,18 @@ func TestConfigSaveAndLoadRoundTrip(t *testing.T) {
 	}
 	if got.ServerURL != expected.ServerURL || got.ProbeID != expected.ProbeID || got.APIKey != expected.APIKey || got.PolicyID != expected.PolicyID {
 		t.Fatalf("config mismatch: expected %+v, got %+v", expected, got)
+	}
+	if got.PolicyExecutionClassRequired != expected.PolicyExecutionClassRequired ||
+		got.PolicySandboxRequired != expected.PolicySandboxRequired ||
+		got.PolicyApprovalMode != expected.PolicyApprovalMode ||
+		got.PolicyMaxRuntimeSec != expected.PolicyMaxRuntimeSec {
+		t.Fatalf("policy v2 scalar mismatch: expected %+v, got %+v", expected, got)
+	}
+	if len(got.PolicyBreakglass.AllowedReasons) != 1 || got.PolicyBreakglass.AllowedReasons[0] != "incident_response" || !got.PolicyBreakglass.RequireTypedConfirmation {
+		t.Fatalf("policy breakglass mismatch: expected %+v, got %+v", expected.PolicyBreakglass, got.PolicyBreakglass)
+	}
+	if len(got.PolicyAllowedScopes) != 2 || got.PolicyAllowedScopes[0] != "fleet.read" || got.PolicyAllowedScopes[1] != "command.exec" {
+		t.Fatalf("policy scopes mismatch: got %v", got.PolicyAllowedScopes)
 	}
 }
 

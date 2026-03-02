@@ -319,7 +319,7 @@ func TestNotifier_HTTPHandlers_DeliveryHistoryEndpoint(t *testing.T) {
 
 func TestNotifier_MetricsObserver_RecordsWebhookDelivery(t *testing.T) {
 	n := NewNotifier()
-	collector := metrics.NewCollector(&metricsTestFleet{}, &metricsTestHub{}, &metricsTestApprovals{}, &metricsTestAudit{})
+	collector := metrics.NewCollector(&metricsTestFleet{}, &metricsTestHub{}, &metricsTestApprovals{}, &metricsTestAudit{}, nil)
 	n.SetDeliveryObserver(collector)
 
 	received := make(chan struct{}, 1)

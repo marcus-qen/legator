@@ -18,7 +18,6 @@ import (
 
 	"github.com/marcus-qen/legator/internal/controlplane/alerts"
 	"github.com/marcus-qen/legator/internal/controlplane/api"
-	"github.com/marcus-qen/legator/internal/controlplane/compliance"
 	"github.com/marcus-qen/legator/internal/controlplane/approval"
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
@@ -26,6 +25,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/chat"
 	"github.com/marcus-qen/legator/internal/controlplane/cloudconnectors"
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
+	"github.com/marcus-qen/legator/internal/controlplane/compliance"
 	"github.com/marcus-qen/legator/internal/controlplane/config"
 	coreapprovalpolicy "github.com/marcus-qen/legator/internal/controlplane/core/approvalpolicy"
 	corecommanddispatch "github.com/marcus-qen/legator/internal/controlplane/core/commanddispatch"
@@ -80,6 +80,7 @@ type Server struct {
 	remoteScanner   *fleet.RemoteScanner
 	tokenStore      *api.TokenStore
 	cmdTracker      *cmdtracker.Tracker
+	commandStreams  *cmdtracker.StreamRecorder
 	approvalQueue   *approval.Queue
 	approvalCore    *coreapprovalpolicy.Service
 	dispatchCore    *corecommanddispatch.Service
@@ -116,10 +117,12 @@ type Server struct {
 	alertStore   *alerts.Store
 	routingStore *alerts.RoutingStore
 
-	// Scheduled jobs
-	jobsStore     *jobs.Store
-	jobsScheduler *jobs.Scheduler
-	jobsHandler   *jobs.Handler
+	// Scheduled + async jobs
+	jobsStore          *jobs.Store
+	jobsScheduler      *jobs.Scheduler
+	jobsHandler        *jobs.Handler
+	asyncJobsManager   *jobs.AsyncManager
+	asyncJobsScheduler *jobs.AsyncWorkerScheduler
 
 	// Events
 	eventBus *events.Bus
@@ -227,6 +230,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	}
 
 	s.cmdTracker = cmdtracker.New(2 * time.Minute)
+	s.initCommandStreams()
 	s.initAudit()
 	s.initApprovals()
 	s.initWebhooks()
@@ -343,6 +347,9 @@ func (s *Server) Run(ctx context.Context) error {
 	if s.jobsScheduler != nil {
 		s.jobsScheduler.Start(ctx)
 	}
+	if s.asyncJobsScheduler != nil {
+		s.asyncJobsScheduler.Start(ctx)
+	}
 
 	if s.auditStore != nil && strings.TrimSpace(s.cfg.AuditRetention) != "" {
 		retention, err := parseHumanDuration(s.cfg.AuditRetention)
@@ -403,6 +410,9 @@ func (s *Server) Close() {
 	if s.auditStore != nil {
 		s.auditStore.Close()
 	}
+	if s.commandStreams != nil {
+		s.commandStreams.Close()
+	}
 	if s.chatStore != nil {
 		s.chatStore.Close()
 	}
@@ -411,6 +421,9 @@ func (s *Server) Close() {
 	}
 	if s.jobsScheduler != nil {
 		s.jobsScheduler.Stop()
+	}
+	if s.asyncJobsScheduler != nil {
+		s.asyncJobsScheduler.Stop()
 	}
 	if s.alertStore != nil {
 		s.alertStore.Close()
@@ -508,6 +521,26 @@ func (s *Server) initRemoteProbes() {
 	s.remoteScanner = fleet.NewRemoteScanner(s.fleetMgr, s.remoteExecutor, s.logger.Named("remote-scan"), 2*time.Minute)
 }
 
+func (s *Server) initCommandStreams() {
+	streamDBPath := filepath.Join(s.cfg.DataDir, "command-stream.db")
+	if err := os.MkdirAll(s.cfg.DataDir, 0750); err != nil {
+		s.logger.Warn("cannot create data dir, command stream replay disabled", zap.String("dir", s.cfg.DataDir), zap.Error(err))
+		return
+	}
+	recorder, err := cmdtracker.NewStreamRecorder(streamDBPath, cmdtracker.StreamRetention{
+		MaxEventsPerRequest: s.cfg.Jobs.StreamMaxEventsPerRequest,
+		MaxEventsTotal:      s.cfg.Jobs.StreamMaxEventsTotal,
+		MaxAge:              s.cfg.Jobs.StreamRetentionDuration(),
+	})
+	if err != nil {
+		s.logger.Warn("cannot open command stream database; stream replay disabled",
+			zap.String("path", streamDBPath), zap.Error(err))
+		return
+	}
+	s.commandStreams = recorder
+	s.logger.Info("command stream store opened", zap.String("path", streamDBPath))
+}
+
 func (s *Server) initAudit() {
 	auditDBPath := filepath.Join(s.cfg.DataDir, "audit.db")
 	if err := os.MkdirAll(s.cfg.DataDir, 0750); err != nil {
@@ -596,6 +629,27 @@ func (s *Server) initJobs() {
 	}
 
 	s.jobsStore = store
+	s.asyncJobsManager = jobs.NewAsyncManager(store, jobs.WithAsyncMaxQueueDepth(s.cfg.Jobs.AsyncMaxQueueDepth))
+	if runningExpired, approvalsExpired, err := s.asyncJobsManager.ExpireStale(time.Now().UTC()); err != nil {
+		s.logger.Warn("failed to recover async jobs", zap.Error(err))
+	} else if runningExpired > 0 || approvalsExpired > 0 {
+		s.logger.Info("recovered stale async jobs",
+			zap.Int("running_expired", runningExpired),
+			zap.Int("waiting_approval_expired", approvalsExpired),
+		)
+	}
+	s.asyncJobsScheduler = jobs.NewAsyncWorkerScheduler(
+		store,
+		jobs.AsyncJobDispatcherFunc(s.dispatchQueuedAsyncJob),
+		s.logger.Named("async-jobs"),
+		jobs.AsyncWorkerConfig{
+			MaxInFlight:    s.cfg.Jobs.AsyncMaxInFlight,
+			MaxPerProbe:    s.cfg.Jobs.AsyncPerProbeMaxInFlight,
+			PollInterval:   s.cfg.Jobs.AsyncPollIntervalDuration(),
+			FetchBatchSize: s.cfg.Jobs.AsyncFetchBatchSize,
+		},
+	)
+
 	retryPolicy := jobs.RetryPolicy{
 		MaxAttempts:    s.cfg.Jobs.RetryMaxAttempts,
 		InitialBackoff: s.cfg.Jobs.RetryInitialBackoff,
@@ -616,6 +670,10 @@ func (s *Server) initJobs() {
 		store,
 		s.jobsScheduler,
 		jobs.WithHandlerLifecycleObserver(jobs.LifecycleObserverFunc(s.handleJobLifecycleEvent)),
+		jobs.WithAsyncManager(s.asyncJobsManager),
+		jobs.WithAsyncCanceler(func(requestID string) {
+			s.cmdTracker.Cancel(requestID)
+		}),
 	)
 	s.logger.Info("jobs scheduler initialized", zap.String("path", jobsDBPath))
 }
@@ -658,9 +716,24 @@ func (s *Server) initApprovalCore() {
 				return nil
 			}
 			req := result.Request
+			commandText := ""
+			requestID := ""
+			if req.Command != nil {
+				commandText = req.Command.Command
+				requestID = req.Command.RequestID
+			}
 			s.emitAudit(audit.EventApprovalDecided, req.ProbeID, req.DecidedBy,
-				fmt.Sprintf("Approval %s for: %s", req.Decision, req.Command.Command))
-			s.publishEvent(events.ApprovalDecided, req.ProbeID, fmt.Sprintf("Approval %s: %s", req.Decision, req.Command.Command), nil)
+				fmt.Sprintf("Approval %s for: %s", req.Decision, commandText))
+			s.publishEvent(events.ApprovalDecided, req.ProbeID, fmt.Sprintf("Approval %s: %s", req.Decision, commandText), nil)
+			s.appendCommandStreamMarker(requestID, cmdtracker.StreamEventApproval, "approval_decided", map[string]any{
+				"approval_id": req.ID,
+				"decision":    req.Decision,
+				"decided_by":  req.DecidedBy,
+				"probe_id":    req.ProbeID,
+			})
+			if req.Decision == approval.DecisionDenied {
+				s.failAsyncJobByRequestID(requestID, "approval denied", "", nil)
+			}
 			return nil
 		},
 		OnApprovedDispatchFn: func(result *coreapprovalpolicy.ApprovalDecisionResult) error {
@@ -668,8 +741,21 @@ func (s *Server) initApprovalCore() {
 				return nil
 			}
 			req := result.Request
+			commandText := ""
+			requestID := ""
+			if req.Command != nil {
+				commandText = req.Command.Command
+				requestID = req.Command.RequestID
+			}
+			s.markAsyncJobRunningByRequestID(requestID)
+			s.appendCommandStreamMarker(requestID, cmdtracker.StreamEventDispatch, "approval_dispatch", map[string]any{
+				"approval_id": req.ID,
+				"probe_id":    req.ProbeID,
+				"decided_by":  req.DecidedBy,
+				"command":     commandText,
+			})
 			s.emitAudit(audit.EventCommandSent, req.ProbeID, req.DecidedBy,
-				fmt.Sprintf("Approved command dispatched: %s", req.Command.Command))
+				fmt.Sprintf("Approved command dispatched: %s", commandText))
 			return nil
 		},
 	}
@@ -937,7 +1023,7 @@ func (s *Server) initLLM() {
 			if result != nil {
 				switch result.Decision.Outcome {
 				case coreapprovalpolicy.CommandPolicyDecisionDeny:
-					return nil, fmt.Errorf("command denied by capacity policy: %s", result.Decision.Rationale.Summary)
+					return nil, fmt.Errorf("command denied by policy (%s): %s", result.Decision.ReasonCode, result.Decision.Rationale.Summary)
 				case coreapprovalpolicy.CommandPolicyDecisionQueue:
 					req := result.Request
 					if req == nil {

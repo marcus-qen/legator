@@ -3,6 +3,7 @@ package approvalpolicy
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/marcus-qen/legator/internal/controlplane/approval"
@@ -109,6 +110,11 @@ type noopDecisionHooks struct{}
 func (noopDecisionHooks) OnDecisionRecorded(*ApprovalDecisionResult) error { return nil }
 func (noopDecisionHooks) OnApprovedDispatch(*ApprovalDecisionResult) error { return nil }
 
+type appliedPolicyContext struct {
+	PolicyID string
+	Options  policy.TemplateOptions
+}
+
 // Service orchestrates command approvals and policy application.
 type Service struct {
 	approvals            approvalQueue
@@ -117,6 +123,9 @@ type Service struct {
 	decisionHooks        DecisionHooks
 	capacitySignalSource CapacitySignalProvider
 	capacityThresholds   CapacityThresholds
+
+	appliedPolicyMu sync.RWMutex
+	appliedPolicy   map[string]appliedPolicyContext
 }
 
 type Option func(*Service)
@@ -148,6 +157,7 @@ func NewService(approvals approvalQueue, fleet fleetStore, policies policyStore,
 		policies:           policies,
 		decisionHooks:      noopDecisionHooks{},
 		capacityThresholds: DefaultCapacityThresholds(),
+		appliedPolicy:      map[string]appliedPolicyContext{},
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -158,7 +168,7 @@ func NewService(approvals approvalQueue, fleet fleetStore, policies policyStore,
 }
 
 type SubmitCommandApprovalResult struct {
-	Request  *approval.Request    `json:"request,omitempty"`
+	Request  *approval.Request     `json:"request,omitempty"`
 	Decision CommandPolicyDecision `json:"decision"`
 }
 
@@ -174,7 +184,7 @@ func (s *Service) SubmitCommandApproval(probeID string, cmd *protocol.CommandPay
 }
 
 func (s *Service) SubmitCommandApprovalWithContext(ctx context.Context, probeID string, cmd *protocol.CommandPayload, probeLevel protocol.CapabilityLevel, reason, requester string) (*SubmitCommandApprovalResult, error) {
-	decision := s.EvaluateCommandPolicy(ctx, cmd, probeLevel)
+	decision := s.EvaluateCommandPolicyForProbe(ctx, probeID, cmd, probeLevel)
 	result := &SubmitCommandApprovalResult{Decision: decision}
 	if decision.Outcome != CommandPolicyDecisionQueue {
 		return result, nil
@@ -268,6 +278,7 @@ func (s *Service) ApplyPolicyTemplate(probeID, policyID string, push func(probeI
 	}
 
 	_ = s.fleet.SetPolicy(probeID, tpl.Level)
+	s.rememberAppliedPolicy(probeID, tpl)
 
 	if push != nil {
 		if err := push(probeID, tpl.ToPolicy()); err != nil {
@@ -276,4 +287,34 @@ func (s *Service) ApplyPolicyTemplate(probeID, policyID string, push func(probeI
 	}
 
 	return &PolicyApplyResult{Template: tpl, Pushed: true}, nil
+}
+
+func (s *Service) rememberAppliedPolicy(probeID string, tpl *policy.Template) {
+	if s == nil || probeID == "" || tpl == nil {
+		return
+	}
+	ctx := appliedPolicyContext{
+		PolicyID: tpl.ID,
+		Options: policy.TemplateOptions{
+			ExecutionClassRequired: tpl.ExecutionClassRequired,
+			SandboxRequired:        tpl.SandboxRequired,
+			ApprovalMode:           tpl.ApprovalMode,
+			Breakglass:             tpl.Breakglass,
+			MaxRuntimeSec:          tpl.MaxRuntimeSec,
+			AllowedScopes:          append([]string(nil), tpl.AllowedScopes...),
+		},
+	}
+	s.appliedPolicyMu.Lock()
+	s.appliedPolicy[probeID] = ctx
+	s.appliedPolicyMu.Unlock()
+}
+
+func (s *Service) appliedPolicyForProbe(probeID string) (appliedPolicyContext, bool) {
+	if s == nil || probeID == "" {
+		return appliedPolicyContext{}, false
+	}
+	s.appliedPolicyMu.RLock()
+	defer s.appliedPolicyMu.RUnlock()
+	ctx, ok := s.appliedPolicy[probeID]
+	return ctx, ok
 }

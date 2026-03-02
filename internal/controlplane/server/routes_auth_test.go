@@ -67,6 +67,7 @@ func TestRoutesAuthCoverage(t *testing.T) {
 		// Commands
 		{http.MethodGet, "/api/v1/commands/pending"},
 		{http.MethodGet, "/api/v1/commands/some-request/stream"},
+		{http.MethodGet, "/api/v1/commands/some-request/replay"},
 		// Policies
 		{http.MethodGet, "/api/v1/policies"},
 		{http.MethodGet, "/api/v1/policies/some-id"},

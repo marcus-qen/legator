@@ -36,6 +36,13 @@ type AuditCounter interface {
 	Count() int
 }
 
+// AsyncJobMetricsSource provides async worker queue/state metrics.
+type AsyncJobMetricsSource interface {
+	AsyncJobStateCounts() map[string]int
+	AsyncJobQueueLatency() (bucketUpperBounds []float64, cumulativeCounts []uint64, sum float64, count uint64)
+	AsyncJobDispatchLatency() (bucketUpperBounds []float64, cumulativeCounts []uint64, sum float64, count uint64)
+}
+
 type webhookHistogram struct {
 	BucketCounts []uint64
 	Count        uint64
@@ -48,6 +55,7 @@ type Collector struct {
 	hub       HubStats
 	approvals ApprovalCounter
 	audit     AuditCounter
+	asyncJobs AsyncJobMetricsSource
 	startTime time.Time
 
 	mu              sync.RWMutex
@@ -57,12 +65,13 @@ type Collector struct {
 }
 
 // NewCollector creates a metrics collector.
-func NewCollector(fleet FleetCounter, hub HubStats, approvals ApprovalCounter, audit AuditCounter) *Collector {
+func NewCollector(fleet FleetCounter, hub HubStats, approvals ApprovalCounter, audit AuditCounter, asyncJobs AsyncJobMetricsSource) *Collector {
 	return &Collector{
 		fleet:           fleet,
 		hub:             hub,
 		approvals:       approvals,
 		audit:           audit,
+		asyncJobs:       asyncJobs,
 		startTime:       time.Now(),
 		webhookSent:     make(map[string]map[string]uint64),
 		webhookErrors:   make(map[string]map[string]uint64),
@@ -165,6 +174,7 @@ func (c *Collector) Handler() http.HandlerFunc {
 		}
 
 		c.renderWebhookMetrics(&b)
+		c.renderAsyncJobMetrics(&b)
 
 		// Uptime
 		b.WriteString("# HELP legator_uptime_seconds Control plane uptime in seconds.\n")
@@ -207,6 +217,44 @@ func (c *Collector) renderWebhookMetrics(b *strings.Builder) {
 		fmt.Fprintf(b, "legator_webhook_duration_seconds_sum{event_type=%q} %g\n", eventType, hist.Sum)
 		fmt.Fprintf(b, "legator_webhook_duration_seconds_count{event_type=%q} %d\n", eventType, hist.Count)
 	}
+}
+
+func (c *Collector) renderAsyncJobMetrics(b *strings.Builder) {
+	if c.asyncJobs == nil {
+		return
+	}
+
+	counts := c.asyncJobs.AsyncJobStateCounts()
+	states := []string{"queued", "running", "succeeded", "failed", "cancelled", "waiting_approval", "expired"}
+	b.WriteString("# HELP legator_async_jobs_total Total async jobs by lifecycle state.\n")
+	b.WriteString("# TYPE legator_async_jobs_total gauge\n")
+	for _, state := range states {
+		fmt.Fprintf(b, "legator_async_jobs_total{state=%q} %d\n", state, counts[state])
+	}
+
+	queueBounds, queueCounts, queueSum, queueCount := c.asyncJobs.AsyncJobQueueLatency()
+	renderDurationHistogramMetric(b, "legator_async_scheduler_queue_latency_seconds", "Async scheduler queue wait latency in seconds.", queueBounds, queueCounts, queueSum, queueCount)
+
+	dispatchBounds, dispatchCounts, dispatchSum, dispatchCount := c.asyncJobs.AsyncJobDispatchLatency()
+	renderDurationHistogramMetric(b, "legator_async_dispatch_latency_seconds", "Async dispatch latency in seconds.", dispatchBounds, dispatchCounts, dispatchSum, dispatchCount)
+}
+
+func renderDurationHistogramMetric(b *strings.Builder, metricName, help string, bounds []float64, counts []uint64, sum float64, count uint64) {
+	if len(bounds) == 0 || len(counts) == 0 {
+		return
+	}
+	if len(counts) != len(bounds)+1 {
+		return
+	}
+
+	b.WriteString("# HELP " + metricName + " " + help + "\n")
+	b.WriteString("# TYPE " + metricName + " histogram\n")
+	for i, bound := range bounds {
+		fmt.Fprintf(b, "%s_bucket{le=%q} %d\n", metricName, strconv.FormatFloat(bound, 'f', -1, 64), counts[i])
+	}
+	fmt.Fprintf(b, "%s_bucket{le=\"+Inf\"} %d\n", metricName, counts[len(counts)-1])
+	fmt.Fprintf(b, "%s_sum %g\n", metricName, sum)
+	fmt.Fprintf(b, "%s_count %d\n", metricName, count)
 }
 
 func (c *Collector) snapshotWebhookMetrics() (map[string]map[string]uint64, map[string]map[string]uint64, map[string]webhookHistogram) {

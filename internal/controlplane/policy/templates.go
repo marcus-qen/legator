@@ -18,16 +18,34 @@ type Template struct {
 	Allowed     []string                 `json:"allowed,omitempty"`
 	Blocked     []string                 `json:"blocked,omitempty"`
 	Paths       []string                 `json:"paths,omitempty"`
-	CreatedAt   time.Time                `json:"created_at"`
-	UpdatedAt   time.Time                `json:"updated_at"`
+
+	ExecutionClassRequired protocol.ExecutionClass   `json:"execution_class_required,omitempty"`
+	SandboxRequired        bool                      `json:"sandbox_required"`
+	ApprovalMode           protocol.ApprovalMode     `json:"approval_mode,omitempty"`
+	Breakglass             protocol.BreakglassPolicy `json:"breakglass,omitempty"`
+	MaxRuntimeSec          int                       `json:"max_runtime_sec,omitempty"`
+	AllowedScopes          []string                  `json:"allowed_scopes,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// TemplateOptions contains additive policy v2 fields.
+type TemplateOptions struct {
+	ExecutionClassRequired protocol.ExecutionClass
+	SandboxRequired        bool
+	ApprovalMode           protocol.ApprovalMode
+	Breakglass             protocol.BreakglassPolicy
+	MaxRuntimeSec          int
+	AllowedScopes          []string
 }
 
 // PolicyManager is the interface used by handlers for policy CRUD.
 type PolicyManager interface {
 	List() []*Template
 	Get(id string) (*Template, bool)
-	Create(name, description string, level protocol.CapabilityLevel, allowed, blocked, paths []string) *Template
-	Update(id string, name, description string, level protocol.CapabilityLevel, allowed, blocked, paths []string) (*Template, error)
+	Create(name, description string, level protocol.CapabilityLevel, allowed, blocked, paths []string, opts TemplateOptions) *Template
+	Update(id string, name, description string, level protocol.CapabilityLevel, allowed, blocked, paths []string, opts TemplateOptions) (*Template, error)
 	Delete(id string) error
 }
 
@@ -55,6 +73,12 @@ func NewStore() *Store {
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
+	s.applyOptions(s.templates["observe-only"], TemplateOptions{
+		ExecutionClassRequired: protocol.ExecObserveDirect,
+		SandboxRequired:        false,
+		ApprovalMode:           protocol.ApprovalNone,
+	})
+
 	s.templates["diagnose"] = &Template{
 		ID:          "diagnose",
 		Name:        "Diagnose",
@@ -64,6 +88,12 @@ func NewStore() *Store {
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
+	s.applyOptions(s.templates["diagnose"], TemplateOptions{
+		ExecutionClassRequired: protocol.ExecDiagnoseSandbox,
+		SandboxRequired:        true,
+		ApprovalMode:           protocol.ApprovalMutationGate,
+	})
+
 	s.templates["full-remediate"] = &Template{
 		ID:          "full-remediate",
 		Name:        "Full Remediate",
@@ -73,6 +103,11 @@ func NewStore() *Store {
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
+	s.applyOptions(s.templates["full-remediate"], TemplateOptions{
+		ExecutionClassRequired: protocol.ExecRemediateSandbox,
+		SandboxRequired:        true,
+		ApprovalMode:           protocol.ApprovalMutationGate,
+	})
 	return s
 }
 
@@ -97,7 +132,7 @@ func (s *Store) Get(id string) (*Template, bool) {
 }
 
 // Create adds a new template.
-func (s *Store) Create(name, description string, level protocol.CapabilityLevel, allowed, blocked, paths []string) *Template {
+func (s *Store) Create(name, description string, level protocol.CapabilityLevel, allowed, blocked, paths []string, opts TemplateOptions) *Template {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -115,12 +150,13 @@ func (s *Store) Create(name, description string, level protocol.CapabilityLevel,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
+	s.applyOptions(t, opts)
 	s.templates[id] = t
 	return t
 }
 
 // Update modifies an existing template.
-func (s *Store) Update(id string, name, description string, level protocol.CapabilityLevel, allowed, blocked, paths []string) (*Template, error) {
+func (s *Store) Update(id string, name, description string, level protocol.CapabilityLevel, allowed, blocked, paths []string, opts TemplateOptions) (*Template, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -134,6 +170,7 @@ func (s *Store) Update(id string, name, description string, level protocol.Capab
 	t.Allowed = allowed
 	t.Blocked = blocked
 	t.Paths = paths
+	s.applyOptions(t, opts)
 	t.UpdatedAt = time.Now().UTC()
 	return t, nil
 }
@@ -153,10 +190,31 @@ func (s *Store) Delete(id string) error {
 // ToPolicy converts a template to a PolicyUpdatePayload for sending to a probe.
 func (t *Template) ToPolicy() *protocol.PolicyUpdatePayload {
 	return &protocol.PolicyUpdatePayload{
-		PolicyID: t.ID,
-		Level:    t.Level,
-		Allowed:  t.Allowed,
-		Blocked:  t.Blocked,
-		Paths:    t.Paths,
+		PolicyID:               t.ID,
+		Level:                  t.Level,
+		Allowed:                t.Allowed,
+		Blocked:                t.Blocked,
+		Paths:                  t.Paths,
+		ExecutionClassRequired: t.ExecutionClassRequired,
+		SandboxRequired:        t.SandboxRequired,
+		ApprovalMode:           t.ApprovalMode,
+		Breakglass:             t.Breakglass,
+		MaxRuntimeSec:          t.MaxRuntimeSec,
+		AllowedScopes:          append([]string(nil), t.AllowedScopes...),
 	}
+}
+
+func (s *Store) applyOptions(tpl *Template, opts TemplateOptions) {
+	if tpl == nil {
+		return
+	}
+
+	opts = MergeTemplateOptions(DefaultTemplateOptionsForLevel(tpl.Level), opts)
+	opts = NormalizeTemplateOptions(opts)
+	tpl.ExecutionClassRequired = opts.ExecutionClassRequired
+	tpl.SandboxRequired = opts.SandboxRequired
+	tpl.ApprovalMode = opts.ApprovalMode
+	tpl.Breakglass = opts.Breakglass
+	tpl.MaxRuntimeSec = opts.MaxRuntimeSec
+	tpl.AllowedScopes = append([]string(nil), opts.AllowedScopes...)
 }

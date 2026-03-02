@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -13,6 +14,8 @@ import (
 type Handler struct {
 	store             *Store
 	scheduler         *Scheduler
+	asyncManager      *AsyncManager
+	asyncCanceler     func(requestID string)
 	lifecycleObserver LifecycleObserver
 }
 
@@ -29,6 +32,20 @@ func WithHandlerLifecycleObserver(observer LifecycleObserver) HandlerOption {
 	}
 }
 
+// WithAsyncManager enables async command-job CRUD on the same HTTP surface.
+func WithAsyncManager(manager *AsyncManager) HandlerOption {
+	return func(h *Handler) {
+		h.asyncManager = manager
+	}
+}
+
+// WithAsyncCanceler wires cancellation for in-flight request IDs.
+func WithAsyncCanceler(cancelFn func(requestID string)) HandlerOption {
+	return func(h *Handler) {
+		h.asyncCanceler = cancelFn
+	}
+}
+
 // NewHandler creates a jobs API handler.
 func NewHandler(store *Store, scheduler *Scheduler, opts ...HandlerOption) *Handler {
 	h := &Handler{store: store, scheduler: scheduler, lifecycleObserver: noopLifecycleObserver{}}
@@ -41,7 +58,30 @@ func NewHandler(store *Store, scheduler *Scheduler, opts ...HandlerOption) *Hand
 }
 
 // HandleListJobs serves GET /api/v1/jobs.
-func (h *Handler) HandleListJobs(w http.ResponseWriter, _ *http.Request) {
+func (h *Handler) HandleListJobs(w http.ResponseWriter, r *http.Request) {
+	if isAsyncKindRequested(r) {
+		if h.asyncManager == nil {
+			writeError(w, http.StatusServiceUnavailable, "service_unavailable", "async jobs unavailable")
+			return
+		}
+		limit := 0
+		if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed <= 0 {
+				writeError(w, http.StatusBadRequest, "invalid_request", "limit must be a positive integer")
+				return
+			}
+			limit = parsed
+		}
+		jobs, err := h.asyncManager.ListJobs(limit)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, jobs)
+		return
+	}
+
 	jobs, err := h.store.ListJobs()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
@@ -53,17 +93,50 @@ func (h *Handler) HandleListJobs(w http.ResponseWriter, _ *http.Request) {
 // HandleCreateJob serves POST /api/v1/jobs.
 func (h *Handler) HandleCreateJob(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		// scheduled-job payload
 		Name        string       `json:"name"`
 		Command     string       `json:"command"`
 		Schedule    string       `json:"schedule"`
 		Target      Target       `json:"target"`
 		RetryPolicy *RetryPolicy `json:"retry_policy"`
 		Enabled     *bool        `json:"enabled"`
+
+		// async command-job payload
+		ProbeID   string   `json:"probe_id"`
+		RequestID string   `json:"request_id"`
+		Args      []string `json:"args"`
+		Level     string   `json:"level"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
 		return
 	}
+
+	if strings.TrimSpace(req.ProbeID) != "" || isAsyncKindRequested(r) {
+		if h.asyncManager == nil {
+			writeError(w, http.StatusServiceUnavailable, "service_unavailable", "async jobs unavailable")
+			return
+		}
+		created, err := h.asyncManager.CreateJob(AsyncJob{
+			ProbeID:   strings.TrimSpace(req.ProbeID),
+			RequestID: strings.TrimSpace(req.RequestID),
+			Command:   strings.TrimSpace(req.Command),
+			Args:      append([]string(nil), req.Args...),
+			Level:     strings.TrimSpace(req.Level),
+		})
+		if err != nil {
+			if IsAsyncQueueSaturated(err) {
+				writeError(w, http.StatusTooManyRequests, "queue_saturated", err.Error())
+				return
+			}
+			writeError(w, http.StatusBadRequest, "invalid_job", err.Error())
+			return
+		}
+		h.emitLifecycleEvent(LifecycleEvent{Type: EventJobCreated, Actor: "api", JobID: created.ID, ProbeID: created.ProbeID, RequestID: created.RequestID})
+		writeJSON(w, http.StatusCreated, created)
+		return
+	}
+
 	if err := validateSchedule(req.Schedule); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_schedule", err.Error())
 		return
@@ -101,17 +174,47 @@ func (h *Handler) HandleGetJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := h.store.GetJob(id)
-	if err != nil {
-		if IsNotFound(err) {
-			writeError(w, http.StatusNotFound, "not_found", "job not found")
+	if isAsyncKindRequested(r) {
+		if h.asyncManager == nil {
+			writeError(w, http.StatusServiceUnavailable, "service_unavailable", "async jobs unavailable")
 			return
 		}
+		job, err := h.asyncManager.GetJob(id)
+		if err != nil {
+			if IsNotFound(err) {
+				writeError(w, http.StatusNotFound, "not_found", "job not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, job)
+		return
+	}
+
+	job, err := h.store.GetJob(id)
+	if err == nil {
+		writeJSON(w, http.StatusOK, job)
+		return
+	}
+	if !IsNotFound(err) {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, job)
+	if h.asyncManager != nil {
+		asyncJob, asyncErr := h.asyncManager.GetJob(id)
+		if asyncErr == nil {
+			writeJSON(w, http.StatusOK, asyncJob)
+			return
+		}
+		if !IsNotFound(asyncErr) {
+			writeError(w, http.StatusInternalServerError, "internal_error", asyncErr.Error())
+			return
+		}
+	}
+
+	writeError(w, http.StatusNotFound, "not_found", "job not found")
 }
 
 // HandleUpdateJob serves PUT /api/v1/jobs/{id}.
@@ -236,8 +339,18 @@ func (h *Handler) HandleCancelJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "missing job id")
 		return
 	}
+
+	if isAsyncKindRequested(r) {
+		h.handleCancelAsyncJob(w, id)
+		return
+	}
+
 	if _, err := h.store.GetJob(id); err != nil {
 		if IsNotFound(err) {
+			if h.asyncManager != nil {
+				h.handleCancelAsyncJob(w, id)
+				return
+			}
 			writeError(w, http.StatusNotFound, "not_found", "job not found")
 			return
 		}
@@ -450,6 +563,38 @@ func handleToggleJob(w http.ResponseWriter, r *http.Request, handler *Handler, e
 	}
 	handler.emitLifecycleEvent(LifecycleEvent{Type: EventJobUpdated, Actor: "api", JobID: job.ID})
 	writeJSON(w, http.StatusOK, job)
+}
+
+func (h *Handler) handleCancelAsyncJob(w http.ResponseWriter, id string) {
+	if h.asyncManager == nil {
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "async jobs unavailable")
+		return
+	}
+	job, err := h.asyncManager.CancelJob(id, "cancelled via API")
+	if err != nil {
+		switch {
+		case IsNotFound(err):
+			writeError(w, http.StatusNotFound, "not_found", "job not found")
+		case IsInvalidRunTransition(err), errors.Is(err, ErrInvalidAsyncJobTransition):
+			writeError(w, http.StatusConflict, "invalid_transition", err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		}
+		return
+	}
+	if h.asyncCanceler != nil && strings.TrimSpace(job.RequestID) != "" {
+		h.asyncCanceler(job.RequestID)
+	}
+	h.emitLifecycleEvent(LifecycleEvent{Type: EventJobRunCanceled, Actor: "api", JobID: job.ID, ProbeID: job.ProbeID, RequestID: job.RequestID})
+	writeJSON(w, http.StatusOK, job)
+}
+
+func isAsyncKindRequested(r *http.Request) bool {
+	if r == nil || r.URL == nil {
+		return false
+	}
+	kind := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("kind")))
+	return kind == "async"
 }
 
 type runSummary struct {

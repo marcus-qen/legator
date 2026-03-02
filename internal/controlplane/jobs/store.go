@@ -132,6 +132,10 @@ func NewStore(dbPath string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("ensure schema version: %w", err)
 	}
+	if err := migrateAsyncJobs(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate async jobs schema: %w", err)
+	}
 	return s, nil
 }
 

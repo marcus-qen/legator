@@ -30,6 +30,13 @@ type Config struct {
 	PolicyBlocked []string                 `yaml:"policy_blocked,omitempty"`
 	PolicyPaths   []string                 `yaml:"policy_paths,omitempty"`
 
+	PolicyExecutionClassRequired protocol.ExecutionClass   `yaml:"policy_execution_class_required,omitempty"`
+	PolicySandboxRequired        bool                      `yaml:"policy_sandbox_required,omitempty"`
+	PolicyApprovalMode           protocol.ApprovalMode     `yaml:"policy_approval_mode,omitempty"`
+	PolicyBreakglass             protocol.BreakglassPolicy `yaml:"policy_breakglass,omitempty"`
+	PolicyMaxRuntimeSec          int                       `yaml:"policy_max_runtime_sec,omitempty"`
+	PolicyAllowedScopes          []string                  `yaml:"policy_allowed_scopes,omitempty"`
+
 	ConfigDir string `yaml:"-"` // not persisted
 }
 

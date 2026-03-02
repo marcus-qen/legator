@@ -3,9 +3,11 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
+	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/protocol"
 	"go.uber.org/zap"
@@ -71,6 +73,18 @@ func (s *Server) handleProbeMessage(probeID string, env protocol.Envelope) {
 		}
 		s.publishEvent(evtType, probeID, fmt.Sprintf("Command %s exit=%d", result.RequestID, result.ExitCode),
 			map[string]any{"request_id": result.RequestID, "exit_code": result.ExitCode})
+		s.appendCommandStreamMarker(result.RequestID, cmdtracker.StreamEventResult, "command_result", map[string]any{
+			"probe_id":    probeID,
+			"exit_code":   result.ExitCode,
+			"duration_ms": result.Duration,
+			"truncated":   result.Truncated,
+		})
+
+		output := result.Stdout
+		if strings.TrimSpace(output) == "" {
+			output = result.Stderr
+		}
+		s.completeAsyncJobByRequestID(result.RequestID, result.ExitCode, output)
 
 	case protocol.MsgOutputChunk:
 		data, _ := json.Marshal(env.Payload)
@@ -79,8 +93,12 @@ func (s *Server) handleProbeMessage(probeID string, env protocol.Envelope) {
 			s.logger.Warn("bad output chunk", zap.String("probe", probeID), zap.Error(err))
 			return
 		}
-		s.hub.DispatchChunk(chunk)
+		s.recordCommandOutputChunk(chunk, true)
 		if chunk.Final {
+			s.appendCommandStreamMarker(chunk.RequestID, cmdtracker.StreamEventResult, "stream_final", map[string]any{
+				"probe_id":  probeID,
+				"exit_code": chunk.ExitCode,
+			})
 			s.logger.Info("streaming command completed",
 				zap.String("probe", probeID),
 				zap.String("request_id", chunk.RequestID),
@@ -90,6 +108,7 @@ func (s *Server) handleProbeMessage(probeID string, env protocol.Envelope) {
 				RequestID: chunk.RequestID,
 				ExitCode:  chunk.ExitCode,
 			})
+			s.completeAsyncJobByRequestID(chunk.RequestID, chunk.ExitCode, chunk.Data)
 		}
 
 	default:
