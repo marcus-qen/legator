@@ -116,10 +116,11 @@ type Server struct {
 	alertStore   *alerts.Store
 	routingStore *alerts.RoutingStore
 
-	// Scheduled jobs
-	jobsStore     *jobs.Store
-	jobsScheduler *jobs.Scheduler
-	jobsHandler   *jobs.Handler
+	// Scheduled + async jobs
+	jobsStore        *jobs.Store
+	jobsScheduler    *jobs.Scheduler
+	jobsHandler      *jobs.Handler
+	asyncJobsManager *jobs.AsyncManager
 
 	// Events
 	eventBus *events.Bus
@@ -596,6 +597,16 @@ func (s *Server) initJobs() {
 	}
 
 	s.jobsStore = store
+	s.asyncJobsManager = jobs.NewAsyncManager(store)
+	if runningExpired, approvalsExpired, err := s.asyncJobsManager.ExpireStale(time.Now().UTC()); err != nil {
+		s.logger.Warn("failed to recover async jobs", zap.Error(err))
+	} else if runningExpired > 0 || approvalsExpired > 0 {
+		s.logger.Info("recovered stale async jobs",
+			zap.Int("running_expired", runningExpired),
+			zap.Int("waiting_approval_expired", approvalsExpired),
+		)
+	}
+
 	retryPolicy := jobs.RetryPolicy{
 		MaxAttempts:    s.cfg.Jobs.RetryMaxAttempts,
 		InitialBackoff: s.cfg.Jobs.RetryInitialBackoff,
@@ -616,6 +627,10 @@ func (s *Server) initJobs() {
 		store,
 		s.jobsScheduler,
 		jobs.WithHandlerLifecycleObserver(jobs.LifecycleObserverFunc(s.handleJobLifecycleEvent)),
+		jobs.WithAsyncManager(s.asyncJobsManager),
+		jobs.WithAsyncCanceler(func(requestID string) {
+			s.cmdTracker.Cancel(requestID)
+		}),
 	)
 	s.logger.Info("jobs scheduler initialized", zap.String("path", jobsDBPath))
 }
@@ -658,9 +673,18 @@ func (s *Server) initApprovalCore() {
 				return nil
 			}
 			req := result.Request
+			commandText := ""
+			requestID := ""
+			if req.Command != nil {
+				commandText = req.Command.Command
+				requestID = req.Command.RequestID
+			}
 			s.emitAudit(audit.EventApprovalDecided, req.ProbeID, req.DecidedBy,
-				fmt.Sprintf("Approval %s for: %s", req.Decision, req.Command.Command))
-			s.publishEvent(events.ApprovalDecided, req.ProbeID, fmt.Sprintf("Approval %s: %s", req.Decision, req.Command.Command), nil)
+				fmt.Sprintf("Approval %s for: %s", req.Decision, commandText))
+			s.publishEvent(events.ApprovalDecided, req.ProbeID, fmt.Sprintf("Approval %s: %s", req.Decision, commandText), nil)
+			if req.Decision == approval.DecisionDenied {
+				s.failAsyncJobByRequestID(requestID, "approval denied", "", nil)
+			}
 			return nil
 		},
 		OnApprovedDispatchFn: func(result *coreapprovalpolicy.ApprovalDecisionResult) error {
@@ -668,8 +692,15 @@ func (s *Server) initApprovalCore() {
 				return nil
 			}
 			req := result.Request
+			commandText := ""
+			requestID := ""
+			if req.Command != nil {
+				commandText = req.Command.Command
+				requestID = req.Command.RequestID
+			}
+			s.markAsyncJobRunningByRequestID(requestID)
 			s.emitAudit(audit.EventCommandSent, req.ProbeID, req.DecidedBy,
-				fmt.Sprintf("Approved command dispatched: %s", req.Command.Command))
+				fmt.Sprintf("Approved command dispatched: %s", commandText))
 			return nil
 		},
 	}

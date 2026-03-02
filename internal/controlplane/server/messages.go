@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
@@ -72,6 +73,12 @@ func (s *Server) handleProbeMessage(probeID string, env protocol.Envelope) {
 		s.publishEvent(evtType, probeID, fmt.Sprintf("Command %s exit=%d", result.RequestID, result.ExitCode),
 			map[string]any{"request_id": result.RequestID, "exit_code": result.ExitCode})
 
+		output := result.Stdout
+		if strings.TrimSpace(output) == "" {
+			output = result.Stderr
+		}
+		s.completeAsyncJobByRequestID(result.RequestID, result.ExitCode, output)
+
 	case protocol.MsgOutputChunk:
 		data, _ := json.Marshal(env.Payload)
 		var chunk protocol.OutputChunkPayload
@@ -90,6 +97,7 @@ func (s *Server) handleProbeMessage(probeID string, env protocol.Envelope) {
 				RequestID: chunk.RequestID,
 				ExitCode:  chunk.ExitCode,
 			})
+			s.completeAsyncJobByRequestID(chunk.RequestID, chunk.ExitCode, chunk.Data)
 		}
 
 	default:

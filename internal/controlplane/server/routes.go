@@ -760,8 +760,14 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	cmd = invokeInput.Command
 
+	asyncJob := s.createAsyncCommandJob(id, cmd)
+	if asyncJob != nil {
+		w.Header().Set("X-Legator-Job-ID", asyncJob.ID)
+	}
+
 	policyResult, err := s.approvalCore.SubmitCommandApprovalWithContext(r.Context(), id, &cmd, ps.PolicyLevel, "Manual command dispatch", "api")
 	if err != nil {
+		s.failAsyncJobByRequestID(cmd.RequestID, fmt.Sprintf("approval queue: %s", err.Error()), "", nil)
 		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", fmt.Sprintf("approval queue: %s", err.Error()))
 		return
 	}
@@ -774,6 +780,7 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 
 		switch policyResult.Decision.Outcome {
 		case coreapprovalpolicy.CommandPolicyDecisionDeny:
+			s.failAsyncJobByRequestID(cmd.RequestID, fmt.Sprintf("command denied by policy: %s", policyResult.Decision.ReasonCode), "", nil)
 			s.emitAudit(audit.EventAuthorizationDenied, id, "api", fmt.Sprintf("Command denied by policy: %s (%s)", cmd.Command, policyResult.Decision.ReasonCode))
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -792,8 +799,12 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 		case coreapprovalpolicy.CommandPolicyDecisionQueue:
 			req := policyResult.Request
 			if req == nil {
+				s.failAsyncJobByRequestID(cmd.RequestID, "approval queue unavailable", "", nil)
 				writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "approval queue unavailable")
 				return
+			}
+			if asyncJob != nil {
+				s.markAsyncJobWaitingApproval(asyncJob.ID, req.ID, &req.ExpiresAt, "command waiting for approval")
 			}
 			s.emitAudit(audit.EventApprovalRequest, id, "api",
 				fmt.Sprintf("Approval required for: %s (risk: %s, lane: %s)", cmd.Command, req.RiskLevel, policyResult.Decision.Lane))
@@ -816,12 +827,22 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if asyncJob != nil {
+		s.markAsyncJobRunning(asyncJob.ID)
+	}
+
 	if strings.EqualFold(ps.Type, fleet.ProbeTypeRemote) {
 		projection := s.invokeRemoteCommand(r.Context(), ps, cmd, wantWait, wantStream)
 		if projection != nil && projection.Envelope != nil && projection.Envelope.Dispatched {
 			s.emitAudit(audit.EventCommandSent, id, "api", fmt.Sprintf("Command dispatched (remote): %s", cmd.Command))
 			s.publishEvent(events.CommandDispatched, id, fmt.Sprintf("Remote command dispatched: %s", cmd.Command),
 				map[string]string{"request_id": projection.RequestID, "command": cmd.Command})
+		} else {
+			message := "remote command dispatch failed"
+			if projection != nil && projection.Envelope != nil && projection.Envelope.Err != nil {
+				message = projection.Envelope.Err.Error()
+			}
+			s.failAsyncJobByRequestID(cmd.RequestID, message, "", nil)
 		}
 		renderDispatchCommandHTTP(w, projection)
 		return
@@ -832,6 +853,25 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 		s.emitAudit(audit.EventCommandSent, id, "api", fmt.Sprintf("Command dispatched: %s", cmd.Command))
 		s.publishEvent(events.CommandDispatched, id, fmt.Sprintf("Command dispatched: %s", cmd.Command),
 			map[string]string{"request_id": projection.RequestID, "command": cmd.Command})
+	} else {
+		message := "command dispatch failed"
+		if projection != nil && projection.Envelope != nil && projection.Envelope.Err != nil {
+			message = projection.Envelope.Err.Error()
+		}
+		s.failAsyncJobByRequestID(cmd.RequestID, message, "", nil)
+	}
+
+	if wantWait && projection != nil && projection.Envelope != nil {
+		if projection.Envelope.Result != nil {
+			result := projection.Envelope.Result
+			output := strings.TrimSpace(result.Stdout)
+			if output == "" {
+				output = strings.TrimSpace(result.Stderr)
+			}
+			s.completeAsyncJobByRequestID(result.RequestID, result.ExitCode, output)
+		} else if projection.Envelope.Err != nil {
+			s.failAsyncJobByRequestID(cmd.RequestID, projection.Envelope.Err.Error(), "", nil)
+		}
 	}
 
 	renderDispatchCommandHTTP(w, projection)
@@ -943,6 +983,7 @@ func (s *Server) invokeRemoteCommand(ctx context.Context, ps *fleet.ProbeState, 
 			if errors.Is(err, context.DeadlineExceeded) {
 				err = corecommanddispatch.ErrTimeout
 			}
+			s.failAsyncJobByRequestID(cmd.RequestID, err.Error(), "", nil)
 			return &corecommanddispatch.CommandResultEnvelope{
 				RequestID:  cmd.RequestID,
 				Dispatched: true,
@@ -963,6 +1004,12 @@ func (s *Server) invokeRemoteCommand(ctx context.Context, ps *fleet.ProbeState, 
 		}
 		s.publishEvent(evtType, ps.ID, fmt.Sprintf("Command %s exit=%d", cmd.RequestID, result.ExitCode),
 			map[string]any{"request_id": cmd.RequestID, "exit_code": result.ExitCode})
+
+		output := strings.TrimSpace(result.Stdout)
+		if output == "" {
+			output = strings.TrimSpace(result.Stderr)
+		}
+		s.completeAsyncJobByRequestID(cmd.RequestID, result.ExitCode, output)
 
 		return &corecommanddispatch.CommandResultEnvelope{
 			RequestID:  cmd.RequestID,
