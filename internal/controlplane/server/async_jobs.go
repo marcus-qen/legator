@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -8,14 +9,17 @@ import (
 	"time"
 
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
+	corecommanddispatch "github.com/marcus-qen/legator/internal/controlplane/core/commanddispatch"
+	"github.com/marcus-qen/legator/internal/controlplane/events"
+	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/jobs"
 	"github.com/marcus-qen/legator/internal/protocol"
 	"go.uber.org/zap"
 )
 
-func (s *Server) createAsyncCommandJob(probeID string, cmd protocol.CommandPayload) *jobs.AsyncJob {
+func (s *Server) createAsyncCommandJob(probeID string, cmd protocol.CommandPayload) (*jobs.AsyncJob, error) {
 	if s == nil || s.asyncJobsManager == nil {
-		return nil
+		return nil, nil
 	}
 	job, err := s.asyncJobsManager.CreateForCommand(probeID, cmd)
 	if err != nil {
@@ -24,7 +28,7 @@ func (s *Server) createAsyncCommandJob(probeID string, cmd protocol.CommandPaylo
 			zap.String("request_id", cmd.RequestID),
 			zap.Error(err),
 		)
-		return nil
+		return nil, err
 	}
 	s.recordAudit(audit.Event{
 		Type:    audit.EventJobCreated,
@@ -37,7 +41,58 @@ func (s *Server) createAsyncCommandJob(probeID string, cmd protocol.CommandPaylo
 			"command":    job.Command,
 		},
 	})
-	return job
+	return job, nil
+}
+
+func (s *Server) dispatchQueuedAsyncJob(ctx context.Context, job jobs.AsyncJob) error {
+	if s == nil || s.dispatchCore == nil {
+		return fmt.Errorf("dispatch core unavailable")
+	}
+	ps, ok := s.fleetMgr.Get(job.ProbeID)
+	if !ok {
+		return fmt.Errorf("probe not found")
+	}
+
+	cmd := protocol.CommandPayload{
+		RequestID: strings.TrimSpace(job.RequestID),
+		Command:   strings.TrimSpace(job.Command),
+		Args:      append([]string(nil), job.Args...),
+		Level:     protocol.CapabilityLevel(strings.TrimSpace(job.Level)),
+	}
+	if cmd.RequestID == "" {
+		cmd.RequestID = corecommanddispatch.NextCommandRequestID()
+	}
+
+	if strings.EqualFold(ps.Type, fleet.ProbeTypeRemote) {
+		projection := s.invokeRemoteCommand(ctx, ps, cmd, false, false)
+		if projection == nil || projection.Envelope == nil || !projection.Envelope.Dispatched {
+			if projection != nil && projection.Envelope != nil && projection.Envelope.Err != nil {
+				return projection.Envelope.Err
+			}
+			return fmt.Errorf("remote command dispatch failed")
+		}
+	} else {
+		envelope := s.dispatchCore.DispatchWithPolicy(ctx, ps.ID, cmd, corecommanddispatch.DispatchOnlyPolicy(false))
+		if envelope == nil || !envelope.Dispatched {
+			if envelope != nil && envelope.Err != nil {
+				return envelope.Err
+			}
+			return fmt.Errorf("command dispatch failed")
+		}
+	}
+
+	s.recordAudit(audit.Event{
+		Type:    audit.EventJobRunStarted,
+		ProbeID: ps.ID,
+		Actor:   "scheduler",
+		Summary: fmt.Sprintf("Async job started: %s", job.ID),
+		Detail:  map[string]any{"job_id": job.ID, "request_id": cmd.RequestID},
+	})
+	s.emitAudit(audit.EventCommandSent, ps.ID, "api", fmt.Sprintf("Command dispatched: %s", cmd.Command))
+	s.publishEvent(events.CommandDispatched, ps.ID, fmt.Sprintf("Command dispatched: %s", cmd.Command),
+		map[string]string{"request_id": cmd.RequestID, "command": cmd.Command})
+
+	return nil
 }
 
 func (s *Server) markAsyncJobRunning(jobID string) {

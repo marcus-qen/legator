@@ -125,6 +125,10 @@ func (h *Handler) HandleCreateJob(w http.ResponseWriter, r *http.Request) {
 			Level:     strings.TrimSpace(req.Level),
 		})
 		if err != nil {
+			if IsAsyncQueueSaturated(err) {
+				writeError(w, http.StatusTooManyRequests, "queue_saturated", err.Error())
+				return
+			}
 			writeError(w, http.StatusBadRequest, "invalid_job", err.Error())
 			return
 		}

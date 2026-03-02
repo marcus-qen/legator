@@ -54,6 +54,14 @@ func migrateAsyncJobs(db *sql.DB) error {
 				return nil
 			},
 		},
+		{
+			Version:     3,
+			Description: "add async queue scheduling index",
+			Up: func(tx *sql.Tx) error {
+				_, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_async_jobs_state_created ON async_jobs(state, created_at ASC)`)
+				return err
+			},
+		},
 	})
 	return runner.Migrate(db)
 }
@@ -150,6 +158,126 @@ func (s *Store) ListAsyncJobs(limit int) ([]AsyncJob, error) {
 		out = append(out, *job)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) ListAsyncJobsByState(state AsyncJobState, limit int) ([]AsyncJob, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("store unavailable")
+	}
+	state = normalizeAsyncJobState(state)
+	if !isKnownAsyncJobState(state) {
+		return nil, fmt.Errorf("invalid async job state: %s", state)
+	}
+	limit = normalizeAsyncJobLimit(limit)
+	rows, err := s.db.Query(`SELECT
+		id, probe_id, request_id, command, args_json, level, state, status_reason, approval_id,
+		exit_code, output, created_at, updated_at, started_at, finished_at, expires_at
+		FROM async_jobs
+		WHERE state = ?
+		ORDER BY created_at ASC
+		LIMIT ?`, string(state), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]AsyncJob, 0, limit)
+	for rows.Next() {
+		job, err := scanAsyncJob(rows)
+		if err != nil {
+			continue
+		}
+		out = append(out, *job)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) CountAsyncJobsByState(states ...AsyncJobState) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, fmt.Errorf("store unavailable")
+	}
+	normalized := make([]string, 0, len(states))
+	for _, state := range states {
+		state = normalizeAsyncJobState(state)
+		if !isKnownAsyncJobState(state) {
+			continue
+		}
+		normalized = append(normalized, string(state))
+	}
+	if len(normalized) == 0 {
+		return 0, nil
+	}
+
+	placeholders := strings.Repeat("?,", len(normalized))
+	placeholders = strings.TrimSuffix(placeholders, ",")
+	query := `SELECT COUNT(*) FROM async_jobs WHERE state IN (` + placeholders + `)`
+	args := make([]any, 0, len(normalized))
+	for _, state := range normalized {
+		args = append(args, state)
+	}
+
+	var count int
+	if err := s.db.QueryRow(query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (s *Store) AsyncJobStateCounts() (map[AsyncJobState]int, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("store unavailable")
+	}
+	rows, err := s.db.Query(`SELECT state, COUNT(*) FROM async_jobs GROUP BY state`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := map[AsyncJobState]int{}
+	for rows.Next() {
+		var (
+			state string
+			count int
+		)
+		if err := rows.Scan(&state, &count); err != nil {
+			return nil, err
+		}
+		normalized := normalizeAsyncJobState(AsyncJobState(state))
+		if isKnownAsyncJobState(normalized) {
+			counts[normalized] = count
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return counts, nil
+}
+
+func (s *Store) RunningAsyncJobsByProbe() (map[string]int, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("store unavailable")
+	}
+	rows, err := s.db.Query(`SELECT probe_id, COUNT(*) FROM async_jobs WHERE state = ? GROUP BY probe_id`, string(AsyncJobStateRunning))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := map[string]int{}
+	for rows.Next() {
+		var (
+			probeID string
+			count   int
+		)
+		if err := rows.Scan(&probeID, &count); err != nil {
+			return nil, err
+		}
+		counts[strings.TrimSpace(probeID)] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return counts, nil
 }
 
 func (s *Store) GetAsyncJob(id string) (*AsyncJob, error) {

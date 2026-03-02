@@ -21,6 +21,7 @@ import (
 	corecommanddispatch "github.com/marcus-qen/legator/internal/controlplane/core/commanddispatch"
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
+	"github.com/marcus-qen/legator/internal/controlplane/jobs"
 	"github.com/marcus-qen/legator/internal/controlplane/metrics"
 	"github.com/marcus-qen/legator/internal/controlplane/modeldock"
 	controlpolicy "github.com/marcus-qen/legator/internal/controlplane/policy"
@@ -144,6 +145,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		&hubConnectedAdapter{hub: s.hub},
 		s.approvalQueue,
 		s.metricsAuditCounter(),
+		s.asyncJobsScheduler,
 	)
 	s.webhookNotifier.SetDeliveryObserver(metricsCollector)
 	mux.HandleFunc("GET /api/v1/metrics", s.withPermission(auth.PermFleetRead, metricsCollector.Handler()))
@@ -760,9 +762,13 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	cmd = invokeInput.Command
 
-	asyncJob := s.createAsyncCommandJob(id, cmd)
+	asyncJob, asyncJobErr := s.createAsyncCommandJob(id, cmd)
 	if asyncJob != nil {
 		w.Header().Set("X-Legator-Job-ID", asyncJob.ID)
+	}
+	if asyncJobErr != nil && jobs.IsAsyncQueueSaturated(asyncJobErr) {
+		writeJSONError(w, http.StatusTooManyRequests, "queue_saturated", asyncJobErr.Error())
+		return
 	}
 
 	policyResult, err := s.approvalCore.SubmitCommandApprovalWithContext(r.Context(), id, &cmd, ps.PolicyLevel, "Manual command dispatch", "api")
@@ -825,6 +831,37 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+	}
+
+	if asyncJob != nil && !wantWait && s.asyncJobsScheduler != nil {
+		dispatchResult, dispatchErr := s.asyncJobsScheduler.DispatchNow(asyncJob.ID)
+		if dispatchErr != nil {
+			s.failAsyncJobByRequestID(cmd.RequestID, dispatchErr.Error(), "", nil)
+			writeJSONError(w, http.StatusBadGateway, "bad_gateway", dispatchErr.Error())
+			return
+		}
+		if dispatchResult.Outcome == jobs.AsyncDispatchOutcomeQueued {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":     "queued",
+				"request_id": cmd.RequestID,
+				"job_id":     asyncJob.ID,
+				"reason":     dispatchResult.Reason,
+			})
+			return
+		}
+		renderDispatchCommandHTTP(w, &corecommanddispatch.CommandInvokeProjection{
+			Surface:       corecommanddispatch.ProjectionDispatchSurfaceHTTP,
+			RequestID:     cmd.RequestID,
+			WaitForResult: false,
+			Envelope: &corecommanddispatch.CommandResultEnvelope{
+				RequestID:  cmd.RequestID,
+				State:      corecommanddispatch.ResultStateDispatched,
+				Dispatched: true,
+			},
+		})
+		return
 	}
 
 	if asyncJob != nil {

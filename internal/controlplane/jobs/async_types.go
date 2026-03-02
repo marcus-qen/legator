@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -19,7 +20,35 @@ const (
 	AsyncJobStateCancelled       AsyncJobState = "cancelled"
 )
 
-var ErrInvalidAsyncJobTransition = errors.New("invalid async job transition")
+var (
+	ErrInvalidAsyncJobTransition = errors.New("invalid async job transition")
+	ErrAsyncQueueSaturated       = errors.New("async queue saturated")
+)
+
+// AsyncQueueSaturatedError indicates async admission was rejected because the
+// queued depth reached the configured limit.
+type AsyncQueueSaturatedError struct {
+	Queued   int
+	MaxDepth int
+}
+
+func (e *AsyncQueueSaturatedError) Error() string {
+	if e == nil {
+		return ErrAsyncQueueSaturated.Error()
+	}
+	if e.MaxDepth > 0 {
+		return fmt.Sprintf("async queue saturated: queued=%d max_depth=%d", e.Queued, e.MaxDepth)
+	}
+	return "async queue saturated"
+}
+
+func (e *AsyncQueueSaturatedError) Unwrap() error {
+	return ErrAsyncQueueSaturated
+}
+
+func IsAsyncQueueSaturated(err error) bool {
+	return errors.Is(err, ErrAsyncQueueSaturated)
+}
 
 // AsyncJob is a durable command execution record.
 type AsyncJob struct {

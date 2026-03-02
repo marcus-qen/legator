@@ -3,18 +3,40 @@ package jobs
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/marcus-qen/legator/internal/protocol"
 )
 
+type AsyncManagerOption func(*AsyncManager)
+
+// WithAsyncMaxQueueDepth rejects new queued async jobs when the queued depth is
+// already at or above the configured maximum.
+func WithAsyncMaxQueueDepth(maxDepth int) AsyncManagerOption {
+	return func(m *AsyncManager) {
+		if maxDepth > 0 {
+			m.maxQueueDepth = maxDepth
+		}
+	}
+}
+
 // AsyncManager orchestrates async job lifecycle updates on top of Store.
 type AsyncManager struct {
 	store *Store
+
+	mu            sync.Mutex
+	maxQueueDepth int
 }
 
-func NewAsyncManager(store *Store) *AsyncManager {
-	return &AsyncManager{store: store}
+func NewAsyncManager(store *Store, opts ...AsyncManagerOption) *AsyncManager {
+	m := &AsyncManager{store: store}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(m)
+		}
+	}
+	return m
 }
 
 func (m *AsyncManager) CreateJob(job AsyncJob) (*AsyncJob, error) {
@@ -22,6 +44,20 @@ func (m *AsyncManager) CreateJob(job AsyncJob) (*AsyncJob, error) {
 		return nil, fmt.Errorf("async manager unavailable")
 	}
 	job.State = AsyncJobStateQueued
+
+	if m.maxQueueDepth > 0 {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+
+		queued, err := m.store.CountAsyncJobsByState(AsyncJobStateQueued)
+		if err != nil {
+			return nil, err
+		}
+		if queued >= m.maxQueueDepth {
+			return nil, &AsyncQueueSaturatedError{Queued: queued, MaxDepth: m.maxQueueDepth}
+		}
+	}
+
 	return m.store.CreateAsyncJob(job)
 }
 

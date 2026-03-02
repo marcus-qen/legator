@@ -117,10 +117,11 @@ type Server struct {
 	routingStore *alerts.RoutingStore
 
 	// Scheduled + async jobs
-	jobsStore        *jobs.Store
-	jobsScheduler    *jobs.Scheduler
-	jobsHandler      *jobs.Handler
-	asyncJobsManager *jobs.AsyncManager
+	jobsStore          *jobs.Store
+	jobsScheduler      *jobs.Scheduler
+	jobsHandler        *jobs.Handler
+	asyncJobsManager   *jobs.AsyncManager
+	asyncJobsScheduler *jobs.AsyncWorkerScheduler
 
 	// Events
 	eventBus *events.Bus
@@ -344,6 +345,9 @@ func (s *Server) Run(ctx context.Context) error {
 	if s.jobsScheduler != nil {
 		s.jobsScheduler.Start(ctx)
 	}
+	if s.asyncJobsScheduler != nil {
+		s.asyncJobsScheduler.Start(ctx)
+	}
 
 	if s.auditStore != nil && strings.TrimSpace(s.cfg.AuditRetention) != "" {
 		retention, err := parseHumanDuration(s.cfg.AuditRetention)
@@ -412,6 +416,9 @@ func (s *Server) Close() {
 	}
 	if s.jobsScheduler != nil {
 		s.jobsScheduler.Stop()
+	}
+	if s.asyncJobsScheduler != nil {
+		s.asyncJobsScheduler.Stop()
 	}
 	if s.alertStore != nil {
 		s.alertStore.Close()
@@ -597,7 +604,7 @@ func (s *Server) initJobs() {
 	}
 
 	s.jobsStore = store
-	s.asyncJobsManager = jobs.NewAsyncManager(store)
+	s.asyncJobsManager = jobs.NewAsyncManager(store, jobs.WithAsyncMaxQueueDepth(s.cfg.Jobs.AsyncMaxQueueDepth))
 	if runningExpired, approvalsExpired, err := s.asyncJobsManager.ExpireStale(time.Now().UTC()); err != nil {
 		s.logger.Warn("failed to recover async jobs", zap.Error(err))
 	} else if runningExpired > 0 || approvalsExpired > 0 {
@@ -606,6 +613,17 @@ func (s *Server) initJobs() {
 			zap.Int("waiting_approval_expired", approvalsExpired),
 		)
 	}
+	s.asyncJobsScheduler = jobs.NewAsyncWorkerScheduler(
+		store,
+		jobs.AsyncJobDispatcherFunc(s.dispatchQueuedAsyncJob),
+		s.logger.Named("async-jobs"),
+		jobs.AsyncWorkerConfig{
+			MaxInFlight:    s.cfg.Jobs.AsyncMaxInFlight,
+			MaxPerProbe:    s.cfg.Jobs.AsyncPerProbeMaxInFlight,
+			PollInterval:   s.cfg.Jobs.AsyncPollIntervalDuration(),
+			FetchBatchSize: s.cfg.Jobs.AsyncFetchBatchSize,
+		},
+	)
 
 	retryPolicy := jobs.RetryPolicy{
 		MaxAttempts:    s.cfg.Jobs.RetryMaxAttempts,

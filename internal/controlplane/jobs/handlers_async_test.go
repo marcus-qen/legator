@@ -71,3 +71,25 @@ func TestAsyncJobHTTPContracts(t *testing.T) {
 		t.Fatalf("expected canceller to receive req-api-1, got %q", canceledRequestID)
 	}
 }
+
+func TestAsyncJobCreateRejectsWhenQueueSaturated(t *testing.T) {
+	store := newTestStore(t)
+	h := NewHandler(store, nil, WithAsyncManager(NewAsyncManager(store, WithAsyncMaxQueueDepth(1))))
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/api/v1/jobs?kind=async", strings.NewReader(`{"probe_id":"probe-1","request_id":"req-1","command":"hostname"}`))
+	firstRR := httptest.NewRecorder()
+	h.HandleCreateJob(firstRR, firstReq)
+	if firstRR.Code != http.StatusCreated {
+		t.Fatalf("expected first async create to succeed, got %d body=%s", firstRR.Code, firstRR.Body.String())
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/api/v1/jobs?kind=async", strings.NewReader(`{"probe_id":"probe-1","request_id":"req-2","command":"hostname"}`))
+	secondRR := httptest.NewRecorder()
+	h.HandleCreateJob(secondRR, secondReq)
+	if secondRR.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected queue saturation 429, got %d body=%s", secondRR.Code, secondRR.Body.String())
+	}
+	if !strings.Contains(secondRR.Body.String(), "queue saturated") {
+		t.Fatalf("expected queue saturation message, got %s", secondRR.Body.String())
+	}
+}

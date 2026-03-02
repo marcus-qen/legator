@@ -291,6 +291,11 @@ func TestJobsRetryEnvOverrides(t *testing.T) {
 	t.Setenv("LEGATOR_JOBS_RETRY_INITIAL_BACKOFF", "3s")
 	t.Setenv("LEGATOR_JOBS_RETRY_MULTIPLIER", "2.5")
 	t.Setenv("LEGATOR_JOBS_RETRY_MAX_BACKOFF", "30s")
+	t.Setenv("LEGATOR_JOBS_ASYNC_MAX_IN_FLIGHT", "12")
+	t.Setenv("LEGATOR_JOBS_ASYNC_PER_PROBE_MAX_IN_FLIGHT", "2")
+	t.Setenv("LEGATOR_JOBS_ASYNC_MAX_QUEUE_DEPTH", "250")
+	t.Setenv("LEGATOR_JOBS_ASYNC_POLL_INTERVAL", "150ms")
+	t.Setenv("LEGATOR_JOBS_ASYNC_FETCH_BATCH_SIZE", "40")
 
 	cfg := LoadFromEnv()
 	if cfg.Jobs.RetryMaxAttempts != 4 {
@@ -304,6 +309,24 @@ func TestJobsRetryEnvOverrides(t *testing.T) {
 	}
 	if cfg.Jobs.RetryMaxBackoff != "30s" {
 		t.Fatalf("expected max backoff 30s, got %s", cfg.Jobs.RetryMaxBackoff)
+	}
+	if cfg.Jobs.AsyncMaxInFlight != 12 {
+		t.Fatalf("expected async max in-flight 12, got %d", cfg.Jobs.AsyncMaxInFlight)
+	}
+	if cfg.Jobs.AsyncPerProbeMaxInFlight != 2 {
+		t.Fatalf("expected async per-probe max in-flight 2, got %d", cfg.Jobs.AsyncPerProbeMaxInFlight)
+	}
+	if cfg.Jobs.AsyncMaxQueueDepth != 250 {
+		t.Fatalf("expected async max queue depth 250, got %d", cfg.Jobs.AsyncMaxQueueDepth)
+	}
+	if cfg.Jobs.AsyncPollInterval != "150ms" {
+		t.Fatalf("expected async poll interval 150ms, got %s", cfg.Jobs.AsyncPollInterval)
+	}
+	if cfg.Jobs.AsyncPollIntervalDuration() != 150*time.Millisecond {
+		t.Fatalf("expected parsed async poll interval 150ms, got %s", cfg.Jobs.AsyncPollIntervalDuration())
+	}
+	if cfg.Jobs.AsyncFetchBatchSize != 40 {
+		t.Fatalf("expected async fetch batch size 40, got %d", cfg.Jobs.AsyncFetchBatchSize)
 	}
 }
 
