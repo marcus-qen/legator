@@ -141,6 +141,7 @@ POST /api/v1/probes
 POST /api/v1/probes/{id}/apply-policy/{policyId}
 POST /api/v1/probes/{id}/chat
 POST /api/v1/probes/{id}/command
+POST /api/v1/probes/{id}/command/simulate
 POST /api/v1/probes/{id}/rotate-key
 POST /api/v1/probes/{id}/task
 POST /api/v1/probes/{id}/update

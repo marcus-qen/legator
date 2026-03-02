@@ -60,6 +60,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/probes/{id}", s.withPermission(auth.PermFleetRead, s.withTenantScope(s.handleGetProbe)))
 	mux.HandleFunc("GET /api/v1/probes/{id}/health", s.withPermission(auth.PermFleetRead, s.handleProbeHealth))
 	mux.HandleFunc("POST /api/v1/probes/{id}/command", s.withPermission(auth.PermFleetWrite, s.handleDispatchCommand))
+	mux.HandleFunc("POST /api/v1/probes/{id}/command/simulate", s.withPermission(auth.PermFleetWrite, s.handleSimulateCommandPolicy))
 	mux.HandleFunc("POST /api/v1/probes/{id}/rotate-key", s.withPermission(auth.PermFleetWrite, s.handleRotateKey))
 	mux.HandleFunc("POST /api/v1/probes/{id}/update", s.withPermission(auth.PermFleetWrite, s.handleProbeUpdate))
 	mux.HandleFunc("PUT /api/v1/probes/{id}/tags", s.withPermission(auth.PermFleetWrite, s.handleSetTags))
@@ -766,17 +767,26 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	if policyResult != nil {
 		w.Header().Set("X-Legator-Policy-Decision", string(policyResult.Decision.Outcome))
+		w.Header().Set("X-Legator-Execution-Lane", string(policyResult.Decision.Lane))
+		w.Header().Set("X-Legator-Gate-Outcome", string(policyResult.Decision.GateOutcome))
+		w.Header().Set("X-Legator-Reason-Code", policyResult.Decision.ReasonCode)
+		w.Header().Set("X-Legator-Risk-Tier", strconv.Itoa(policyResult.Decision.RiskTier))
+
 		switch policyResult.Decision.Outcome {
 		case coreapprovalpolicy.CommandPolicyDecisionDeny:
-			s.emitAudit(audit.EventAuthorizationDenied, id, "api", fmt.Sprintf("Command denied by capacity policy: %s", cmd.Command))
+			s.emitAudit(audit.EventAuthorizationDenied, id, "api", fmt.Sprintf("Command denied by policy: %s (%s)", cmd.Command, policyResult.Decision.ReasonCode))
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusTooManyRequests)
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"status":           "denied",
 				"policy_decision":  policyResult.Decision.Outcome,
+				"gate_outcome":     policyResult.Decision.GateOutcome,
+				"lane":             policyResult.Decision.Lane,
 				"risk_level":       policyResult.Decision.RiskLevel,
+				"risk_tier":        policyResult.Decision.RiskTier,
+				"reason_code":      policyResult.Decision.ReasonCode,
 				"policy_rationale": policyResult.Decision.Rationale,
-				"message":          "Command denied by capacity policy.",
+				"message":          "Command denied by policy.",
 			})
 			return
 		case coreapprovalpolicy.CommandPolicyDecisionQueue:
@@ -786,13 +796,17 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			s.emitAudit(audit.EventApprovalRequest, id, "api",
-				fmt.Sprintf("Approval required for: %s (risk: %s)", cmd.Command, req.RiskLevel))
+				fmt.Sprintf("Approval required for: %s (risk: %s, lane: %s)", cmd.Command, req.RiskLevel, policyResult.Decision.Lane))
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusAccepted)
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"status":           "pending_approval",
 				"approval_id":      req.ID,
 				"risk_level":       req.RiskLevel,
+				"risk_tier":        policyResult.Decision.RiskTier,
+				"lane":             policyResult.Decision.Lane,
+				"gate_outcome":     policyResult.Decision.GateOutcome,
+				"reason_code":      policyResult.Decision.ReasonCode,
 				"expires_at":       req.ExpiresAt,
 				"policy_decision":  policyResult.Decision.Outcome,
 				"policy_rationale": policyResult.Decision.Rationale,
@@ -821,6 +835,86 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 	}
 
 	renderDispatchCommandHTTP(w, projection)
+}
+
+func (s *Server) handleSimulateCommandPolicy(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermCommandExec) {
+		return
+	}
+	id := r.PathValue("id")
+	ps, ok := s.fleetMgr.Get(id)
+	if !ok {
+		writeJSONError(w, http.StatusNotFound, "not_found", "probe not found")
+		return
+	}
+
+	var body struct {
+		RequestID string                   `json:"request_id"`
+		Command   string                   `json:"command"`
+		Args      []string                 `json:"args"`
+		Level     protocol.CapabilityLevel `json:"level"`
+		PolicyID  string                   `json:"policy_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request")
+		return
+	}
+	body.Command = strings.TrimSpace(body.Command)
+	if body.Command == "" {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "command is required")
+		return
+	}
+
+	cmd := protocol.CommandPayload{
+		RequestID: body.RequestID,
+		Command:   body.Command,
+		Args:      append([]string(nil), body.Args...),
+		Level:     body.Level,
+	}
+
+	override := (*coreapprovalpolicy.CommandPolicyProfile)(nil)
+	if strings.TrimSpace(body.PolicyID) != "" {
+		tpl, found := s.policyStore.Get(strings.TrimSpace(body.PolicyID))
+		if !found {
+			writeJSONError(w, http.StatusNotFound, "not_found", "policy template not found")
+			return
+		}
+		override = &coreapprovalpolicy.CommandPolicyProfile{
+			PolicyID:               tpl.ID,
+			ExecutionClassRequired: tpl.ExecutionClassRequired,
+			SandboxRequired:        tpl.SandboxRequired,
+			ApprovalMode:           tpl.ApprovalMode,
+			Breakglass:             tpl.Breakglass,
+		}
+	}
+
+	decision := s.approvalCore.EvaluateCommandPolicyPreview(r.Context(), id, &cmd, ps.PolicyLevel, override)
+
+	type previewCommand struct {
+		RequestID string                   `json:"request_id,omitempty"`
+		Command   string                   `json:"command"`
+		Args      []string                 `json:"args,omitempty"`
+		Level     protocol.CapabilityLevel `json:"level,omitempty"`
+	}
+	type previewResponse struct {
+		ProbeID  string                                   `json:"probe_id"`
+		Command  previewCommand                           `json:"command"`
+		Decision coreapprovalpolicy.CommandPolicyDecision `json:"decision"`
+	}
+
+	resp := previewResponse{
+		ProbeID: id,
+		Command: previewCommand{
+			RequestID: strings.TrimSpace(cmd.RequestID),
+			Command:   cmd.Command,
+			Args:      cmd.Args,
+			Level:     cmd.Level,
+		},
+		Decision: decision,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) invokeRemoteCommand(ctx context.Context, ps *fleet.ProbeState, cmd protocol.CommandPayload, waitForResult, stream bool) *corecommanddispatch.CommandInvokeProjection {

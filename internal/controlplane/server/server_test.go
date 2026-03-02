@@ -521,6 +521,82 @@ func TestHandleDispatchCommand_PendingApproval(t *testing.T) {
 	}
 }
 
+func TestHandleDispatchCommand_UnknownMutationBlocked(t *testing.T) {
+	srv := newTestServer(t)
+	srv.fleetMgr.Register("probe-unknown", "host", "linux", "amd64")
+
+	body := map[string]any{
+		"request_id": "req-unknown",
+		"command":    "my-custom-script",
+		"args":       []string{"--apply"},
+		"level":      string(protocol.CapRemediate),
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/probes/probe-unknown/command", bytes.NewReader(data))
+	req.SetPathValue("id", "probe-unknown")
+	rr := httptest.NewRecorder()
+
+	srv.handleDispatchCommand(rr, req)
+
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("X-Legator-Reason-Code"); got != "policy.lane_unmapped" {
+		t.Fatalf("expected reason header policy.lane_unmapped, got %q", got)
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode policy deny response: %v", err)
+	}
+	if payload["reason_code"] != "policy.lane_unmapped" {
+		t.Fatalf("expected reason_code policy.lane_unmapped, got %v", payload["reason_code"])
+	}
+	if payload["gate_outcome"] != "blocked" {
+		t.Fatalf("expected gate_outcome=blocked, got %v", payload["gate_outcome"])
+	}
+	if srv.approvalQueue.PendingCount() != 0 {
+		t.Fatalf("expected no queued approvals, got %d", srv.approvalQueue.PendingCount())
+	}
+}
+
+func TestHandleSimulateCommandPolicy(t *testing.T) {
+	srv := newTestServer(t)
+	srv.fleetMgr.Register("probe-sim", "host", "linux", "amd64")
+
+	body := map[string]any{
+		"command": "systemctl restart nginx",
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/probes/probe-sim/command/simulate", bytes.NewReader(data))
+	req.SetPathValue("id", "probe-sim")
+	rr := httptest.NewRecorder()
+
+	srv.handleSimulateCommandPolicy(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode simulation response: %v", err)
+	}
+	decision, ok := payload["decision"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected decision object, got %#v", payload["decision"])
+	}
+	if decision["lane"] != "remediate_sandbox" {
+		t.Fatalf("expected lane remediate_sandbox, got %v", decision["lane"])
+	}
+	if decision["gate_outcome"] != "pending_approval" {
+		t.Fatalf("expected gate_outcome pending_approval, got %v", decision["gate_outcome"])
+	}
+	if decision["reason_code"] == "" {
+		t.Fatalf("expected reason code in simulation decision, got %v", decision["reason_code"])
+	}
+}
+
 func TestHandleDispatchCommand_CapacityDenied(t *testing.T) {
 	srv := newTestServer(t)
 	srv.fleetMgr.Register("probe-capacity", "host", "linux", "amd64")

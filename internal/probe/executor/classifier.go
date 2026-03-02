@@ -34,9 +34,10 @@ var diagnoseCommands = []string{
 
 // diagnosePrefixes are command prefixes that are diagnose-level.
 var diagnosePrefixes = []string{
-	"curl", "wget",   // read-only network access
-	"fdisk -l",       // list partitions (read-only)
-	"mount",          // bare 'mount' lists mounts (handled specially)
+	"curl", "wget", // read-only network access
+	"fdisk -l", // list partitions (read-only)
+	"mount",    // bare 'mount' lists mounts (handled specially)
+	"kubeflow submit",
 }
 
 // remediatePrefixes are command prefixes always classified as remediate.
@@ -56,29 +57,48 @@ var remediatePrefixes = []string{
 	"useradd", "userdel", "usermod", "groupadd", "groupdel",
 	"passwd ", "chpasswd",
 	"crontab ",
+	"kubeflow cancel",
+}
+
+// CommandClassification is a deterministic classification result for a command line.
+type CommandClassification struct {
+	Level          protocol.CapabilityLevel `json:"level"`
+	Category       string                   `json:"category"`
+	SignatureKnown bool                     `json:"signature_known"`
+	ReasonCode     string                   `json:"reason_code"`
 }
 
 // ClassifyCommand determines the minimum capability level required to run a command.
 // It is conservative: unknown commands default to remediate.
 func ClassifyCommand(command string, args []string) protocol.CapabilityLevel {
-	fullCmd := command
-	if len(args) > 0 {
-		fullCmd = command + " " + strings.Join(args, " ")
-	}
-	fullLower := strings.ToLower(strings.TrimSpace(fullCmd))
-	baseLower := strings.ToLower(strings.TrimSpace(command))
+	return ClassifyCommandWithMetadata(command, args).Level
+}
+
+// ClassifyCommandWithMetadata classifies command capability and whether the mutation signature is known.
+func ClassifyCommandWithMetadata(command string, args []string) CommandClassification {
+	fullLower, baseLower := normalizedCommand(command, args)
 
 	// Check remediate prefixes first (highest priority)
 	for _, p := range remediatePrefixes {
 		if strings.HasPrefix(fullLower, p) || strings.HasPrefix(baseLower, p) {
-			return protocol.CapRemediate
+			return CommandClassification{
+				Level:          protocol.CapRemediate,
+				Category:       "mutation",
+				SignatureKnown: true,
+				ReasonCode:     "classifier.remediate_prefix",
+			}
 		}
 	}
 
 	// Check observe prefixes
 	for _, p := range observePrefixes {
 		if strings.HasPrefix(fullLower, p) {
-			return protocol.CapObserve
+			return CommandClassification{
+				Level:          protocol.CapObserve,
+				Category:       "observe",
+				SignatureKnown: true,
+				ReasonCode:     "classifier.observe_prefix",
+			}
 		}
 	}
 
@@ -87,30 +107,76 @@ func ClassifyCommand(command string, args []string) protocol.CapabilityLevel {
 		if baseLower == cmd {
 			// Special case: find with -exec or -delete is remediate
 			if baseLower == "find" && (strings.Contains(fullLower, "-exec") || strings.Contains(fullLower, "-delete")) {
-				return protocol.CapRemediate
+				return CommandClassification{
+					Level:          protocol.CapRemediate,
+					Category:       "mutation",
+					SignatureKnown: true,
+					ReasonCode:     "classifier.find_mutation_flags",
+				}
 			}
-			return protocol.CapObserve
+			return CommandClassification{
+				Level:          protocol.CapObserve,
+				Category:       "observe",
+				SignatureKnown: true,
+				ReasonCode:     "classifier.observe_command",
+			}
 		}
 	}
 
 	// Check diagnose prefixes
 	for _, p := range diagnosePrefixes {
 		if strings.HasPrefix(fullLower, p) {
-			// wget with -O (output file) is remediate
-			if strings.HasPrefix(baseLower, "wget") && strings.Contains(fullLower, " -o") {
-				return protocol.CapRemediate
+			// wget with -O/-o (output file) is remediate
+			if strings.HasPrefix(baseLower, "wget") && (strings.Contains(fullLower, " -o") || strings.Contains(fullLower, " -o ")) {
+				return CommandClassification{
+					Level:          protocol.CapRemediate,
+					Category:       "mutation",
+					SignatureKnown: true,
+					ReasonCode:     "classifier.wget_output_file",
+				}
 			}
-			return protocol.CapDiagnose
+			return CommandClassification{
+				Level:          protocol.CapDiagnose,
+				Category:       "diagnose",
+				SignatureKnown: true,
+				ReasonCode:     "classifier.diagnose_prefix",
+			}
 		}
 	}
 
 	// Check diagnose base commands
 	for _, cmd := range diagnoseCommands {
 		if baseLower == cmd {
-			return protocol.CapDiagnose
+			return CommandClassification{
+				Level:          protocol.CapDiagnose,
+				Category:       "diagnose",
+				SignatureKnown: true,
+				ReasonCode:     "classifier.diagnose_command",
+			}
 		}
 	}
 
-	// Unknown commands default to remediate (conservative)
-	return protocol.CapRemediate
+	// Unknown commands default to remediate (conservative).
+	return CommandClassification{
+		Level:          protocol.CapRemediate,
+		Category:       "mutation",
+		SignatureKnown: false,
+		ReasonCode:     "classifier.unknown_mutation_signature",
+	}
+}
+
+func normalizedCommand(command string, args []string) (string, string) {
+	trimmedCommand := strings.TrimSpace(command)
+	fullCmd := trimmedCommand
+	if len(args) > 0 {
+		fullCmd = trimmedCommand + " " + strings.Join(args, " ")
+	}
+	fullLower := strings.ToLower(strings.TrimSpace(fullCmd))
+
+	baseCommand := trimmedCommand
+	if idx := strings.IndexAny(baseCommand, " \t"); idx > 0 {
+		baseCommand = baseCommand[:idx]
+	}
+	baseLower := strings.ToLower(strings.TrimSpace(baseCommand))
+	return fullLower, baseLower
 }

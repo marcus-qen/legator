@@ -20,6 +20,7 @@ func TestClassifyCommand(t *testing.T) {
 		{"df -h", "df", []string{"-h"}, protocol.CapObserve},
 		{"uptime", "uptime", nil, protocol.CapObserve},
 		{"hostname", "hostname", nil, protocol.CapObserve},
+		{"full command line observe", "uname -a", nil, protocol.CapObserve},
 		{"journalctl", "journalctl", []string{"-u", "nginx"}, protocol.CapObserve},
 		{"systemctl status", "systemctl", []string{"status", "nginx"}, protocol.CapObserve},
 		{"ip addr", "ip", []string{"addr", "show"}, protocol.CapObserve},
@@ -35,6 +36,7 @@ func TestClassifyCommand(t *testing.T) {
 		{"strace", "strace", []string{"-p", "1234"}, protocol.CapDiagnose},
 		{"nmap", "nmap", []string{"-sP", "192.168.1.0/24"}, protocol.CapDiagnose},
 		{"dmesg", "dmesg", nil, protocol.CapDiagnose},
+		{"kubeflow submit", "kubeflow submit run/my-job", nil, protocol.CapDiagnose},
 
 		// Remediate
 		{"rm", "rm", []string{"-rf", "/tmp/test"}, protocol.CapRemediate},
@@ -49,6 +51,7 @@ func TestClassifyCommand(t *testing.T) {
 		{"unknown command", "my-custom-script", []string{"--flag"}, protocol.CapRemediate},
 		{"sed -i", "sed", []string{"-i", "s/old/new/", "/etc/config"}, protocol.CapRemediate},
 		{"useradd", "useradd", []string{"newuser"}, protocol.CapRemediate},
+		{"kubeflow cancel", "kubeflow cancel run/my-job", nil, protocol.CapRemediate},
 	}
 
 	for _, tt := range tests {
@@ -59,4 +62,32 @@ func TestClassifyCommand(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestClassifyCommandWithMetadata(t *testing.T) {
+	t.Run("known mutation signature", func(t *testing.T) {
+		got := ClassifyCommandWithMetadata("systemctl", []string{"restart", "nginx"})
+		if got.Level != protocol.CapRemediate {
+			t.Fatalf("expected remediate, got %s", got.Level)
+		}
+		if !got.SignatureKnown {
+			t.Fatal("expected signature_known=true for explicit mutation command")
+		}
+		if got.ReasonCode == "" {
+			t.Fatal("expected reason code")
+		}
+	})
+
+	t.Run("unknown mutation signature", func(t *testing.T) {
+		got := ClassifyCommandWithMetadata("my-custom-script", []string{"--force"})
+		if got.Level != protocol.CapRemediate {
+			t.Fatalf("expected remediate fallback, got %s", got.Level)
+		}
+		if got.SignatureKnown {
+			t.Fatal("expected signature_known=false for unknown mutation fallback")
+		}
+		if got.ReasonCode != "classifier.unknown_mutation_signature" {
+			t.Fatalf("unexpected reason code: %s", got.ReasonCode)
+		}
+	})
 }

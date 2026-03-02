@@ -18,7 +18,6 @@ import (
 
 	"github.com/marcus-qen/legator/internal/controlplane/alerts"
 	"github.com/marcus-qen/legator/internal/controlplane/api"
-	"github.com/marcus-qen/legator/internal/controlplane/compliance"
 	"github.com/marcus-qen/legator/internal/controlplane/approval"
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
@@ -26,6 +25,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/chat"
 	"github.com/marcus-qen/legator/internal/controlplane/cloudconnectors"
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
+	"github.com/marcus-qen/legator/internal/controlplane/compliance"
 	"github.com/marcus-qen/legator/internal/controlplane/config"
 	coreapprovalpolicy "github.com/marcus-qen/legator/internal/controlplane/core/approvalpolicy"
 	corecommanddispatch "github.com/marcus-qen/legator/internal/controlplane/core/commanddispatch"
@@ -937,7 +937,7 @@ func (s *Server) initLLM() {
 			if result != nil {
 				switch result.Decision.Outcome {
 				case coreapprovalpolicy.CommandPolicyDecisionDeny:
-					return nil, fmt.Errorf("command denied by capacity policy: %s", result.Decision.Rationale.Summary)
+					return nil, fmt.Errorf("command denied by policy (%s): %s", result.Decision.ReasonCode, result.Decision.Rationale.Summary)
 				case coreapprovalpolicy.CommandPolicyDecisionQueue:
 					req := result.Request
 					if req == nil {
