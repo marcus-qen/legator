@@ -42,6 +42,15 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Grafana.DashboardLimitOrDefault() != 10 {
 		t.Errorf("expected grafana dashboard limit default 10, got %d", cfg.Grafana.DashboardLimitOrDefault())
 	}
+	if cfg.Jobs.StreamMaxEventsPerRequest != 2000 {
+		t.Fatalf("expected stream max events per request 2000, got %d", cfg.Jobs.StreamMaxEventsPerRequest)
+	}
+	if cfg.Jobs.StreamMaxEventsTotal != 100000 {
+		t.Fatalf("expected stream max events total 100000, got %d", cfg.Jobs.StreamMaxEventsTotal)
+	}
+	if cfg.Jobs.StreamRetentionDuration() != 24*time.Hour {
+		t.Fatalf("expected stream retention 24h, got %s", cfg.Jobs.StreamRetentionDuration())
+	}
 }
 
 func TestLoadFromFile(t *testing.T) {
@@ -296,6 +305,9 @@ func TestJobsRetryEnvOverrides(t *testing.T) {
 	t.Setenv("LEGATOR_JOBS_ASYNC_MAX_QUEUE_DEPTH", "250")
 	t.Setenv("LEGATOR_JOBS_ASYNC_POLL_INTERVAL", "150ms")
 	t.Setenv("LEGATOR_JOBS_ASYNC_FETCH_BATCH_SIZE", "40")
+	t.Setenv("LEGATOR_JOBS_STREAM_MAX_EVENTS_PER_REQUEST", "333")
+	t.Setenv("LEGATOR_JOBS_STREAM_MAX_EVENTS_TOTAL", "4444")
+	t.Setenv("LEGATOR_JOBS_STREAM_RETENTION", "36h")
 
 	cfg := LoadFromEnv()
 	if cfg.Jobs.RetryMaxAttempts != 4 {
@@ -327,6 +339,18 @@ func TestJobsRetryEnvOverrides(t *testing.T) {
 	}
 	if cfg.Jobs.AsyncFetchBatchSize != 40 {
 		t.Fatalf("expected async fetch batch size 40, got %d", cfg.Jobs.AsyncFetchBatchSize)
+	}
+	if cfg.Jobs.StreamMaxEventsPerRequest != 333 {
+		t.Fatalf("expected stream max events per request 333, got %d", cfg.Jobs.StreamMaxEventsPerRequest)
+	}
+	if cfg.Jobs.StreamMaxEventsTotal != 4444 {
+		t.Fatalf("expected stream max events total 4444, got %d", cfg.Jobs.StreamMaxEventsTotal)
+	}
+	if cfg.Jobs.StreamRetention != "36h" {
+		t.Fatalf("expected stream retention 36h, got %s", cfg.Jobs.StreamRetention)
+	}
+	if cfg.Jobs.StreamRetentionDuration() != 36*time.Hour {
+		t.Fatalf("expected parsed stream retention 36h, got %s", cfg.Jobs.StreamRetentionDuration())
 	}
 }
 

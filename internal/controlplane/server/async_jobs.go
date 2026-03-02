@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
+	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
 	corecommanddispatch "github.com/marcus-qen/legator/internal/controlplane/core/commanddispatch"
 	"github.com/marcus-qen/legator/internal/controlplane/events"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
@@ -40,6 +41,10 @@ func (s *Server) createAsyncCommandJob(probeID string, cmd protocol.CommandPaylo
 			"request_id": job.RequestID,
 			"command":    job.Command,
 		},
+	})
+	s.appendCommandStreamMarker(job.RequestID, cmdtracker.StreamEventJob, "async_job_created", map[string]any{
+		"job_id":   job.ID,
+		"probe_id": probeID,
 	})
 	return job, nil
 }
@@ -91,6 +96,11 @@ func (s *Server) dispatchQueuedAsyncJob(ctx context.Context, job jobs.AsyncJob) 
 	s.emitAudit(audit.EventCommandSent, ps.ID, "api", fmt.Sprintf("Command dispatched: %s", cmd.Command))
 	s.publishEvent(events.CommandDispatched, ps.ID, fmt.Sprintf("Command dispatched: %s", cmd.Command),
 		map[string]string{"request_id": cmd.RequestID, "command": cmd.Command})
+	s.appendCommandStreamMarker(cmd.RequestID, cmdtracker.StreamEventDispatch, "command_dispatched", map[string]any{
+		"probe_id": ps.ID,
+		"job_id":   job.ID,
+		"command":  cmd.Command,
+	})
 
 	return nil
 }
@@ -135,6 +145,10 @@ func (s *Server) markAsyncJobRunningByRequestID(requestID string) {
 		Summary: fmt.Sprintf("Async job started after approval: %s", job.ID),
 		Detail:  map[string]any{"job_id": job.ID, "request_id": job.RequestID},
 	})
+	s.appendCommandStreamMarker(job.RequestID, cmdtracker.StreamEventApproval, "approval_granted", map[string]any{
+		"job_id":   job.ID,
+		"probe_id": job.ProbeID,
+	})
 }
 
 func (s *Server) markAsyncJobWaitingApproval(jobID, approvalID string, expiresAt *time.Time, reason string) {
@@ -156,6 +170,12 @@ func (s *Server) markAsyncJobWaitingApproval(jobID, approvalID string, expiresAt
 		Summary: fmt.Sprintf("Async job waiting approval: %s", job.ID),
 		Detail:  map[string]any{"job_id": job.ID, "request_id": job.RequestID, "approval_id": approvalID},
 	})
+	s.appendCommandStreamMarker(job.RequestID, cmdtracker.StreamEventApproval, "pending_approval", map[string]any{
+		"job_id":      job.ID,
+		"probe_id":    job.ProbeID,
+		"approval_id": approvalID,
+		"expires_at":  job.ExpiresAt,
+	})
 }
 
 func (s *Server) failAsyncJobByRequestID(requestID, reason, output string, exitCode *int) {
@@ -176,6 +196,12 @@ func (s *Server) failAsyncJobByRequestID(requestID, reason, output string, exitC
 		Actor:   "system",
 		Summary: fmt.Sprintf("Async job failed: %s", job.ID),
 		Detail:  map[string]any{"job_id": job.ID, "request_id": job.RequestID, "reason": reason},
+	})
+	s.appendCommandStreamMarker(job.RequestID, cmdtracker.StreamEventResult, "job_failed", map[string]any{
+		"job_id":    job.ID,
+		"probe_id":  job.ProbeID,
+		"reason":    reason,
+		"exit_code": exitCode,
 	})
 }
 
@@ -201,5 +227,10 @@ func (s *Server) completeAsyncJobByRequestID(requestID string, exitCode int, out
 		Actor:   "system",
 		Summary: fmt.Sprintf("Async job succeeded: %s", job.ID),
 		Detail:  map[string]any{"job_id": job.ID, "request_id": job.RequestID},
+	})
+	s.appendCommandStreamMarker(job.RequestID, cmdtracker.StreamEventResult, "job_succeeded", map[string]any{
+		"job_id":    job.ID,
+		"probe_id":  job.ProbeID,
+		"exit_code": exitCode,
 	})
 }

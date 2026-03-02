@@ -17,6 +17,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/api"
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
+	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
 	coreapprovalpolicy "github.com/marcus-qen/legator/internal/controlplane/core/approvalpolicy"
 	corecommanddispatch "github.com/marcus-qen/legator/internal/controlplane/core/commanddispatch"
 	"github.com/marcus-qen/legator/internal/controlplane/events"
@@ -172,6 +173,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Commands
 	mux.HandleFunc("GET /api/v1/commands/pending", s.withPermission(auth.PermCommandExec, s.handlePendingCommands))
 	mux.HandleFunc("GET /api/v1/commands/{requestId}/stream", s.withPermission(auth.PermCommandExec, s.handleSSEStream))
+	mux.HandleFunc("GET /api/v1/commands/{requestId}/replay", s.withPermission(auth.PermCommandExec, s.handleCommandReplay))
 
 	// Policy templates
 	mux.HandleFunc("GET /api/v1/policies", s.withPermission(auth.PermFleetRead, s.handleListPolicies))
@@ -783,6 +785,14 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Legator-Gate-Outcome", string(policyResult.Decision.GateOutcome))
 		w.Header().Set("X-Legator-Reason-Code", policyResult.Decision.ReasonCode)
 		w.Header().Set("X-Legator-Risk-Tier", strconv.Itoa(policyResult.Decision.RiskTier))
+		s.appendCommandStreamMarker(cmd.RequestID, cmdtracker.StreamEventPolicy, "policy_decision", map[string]any{
+			"outcome":      policyResult.Decision.Outcome,
+			"lane":         policyResult.Decision.Lane,
+			"gate_outcome": policyResult.Decision.GateOutcome,
+			"reason_code":  policyResult.Decision.ReasonCode,
+			"risk_tier":    policyResult.Decision.RiskTier,
+			"risk_level":   policyResult.Decision.RiskLevel,
+		})
 
 		switch policyResult.Decision.Outcome {
 		case coreapprovalpolicy.CommandPolicyDecisionDeny:
@@ -812,6 +822,12 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 			if asyncJob != nil {
 				s.markAsyncJobWaitingApproval(asyncJob.ID, req.ID, &req.ExpiresAt, "command waiting for approval")
 			}
+			s.appendCommandStreamMarker(cmd.RequestID, cmdtracker.StreamEventApproval, "pending_approval", map[string]any{
+				"approval_id": req.ID,
+				"risk_level":  req.RiskLevel,
+				"expires_at":  req.ExpiresAt,
+				"lane":        policyResult.Decision.Lane,
+			})
 			s.emitAudit(audit.EventApprovalRequest, id, "api",
 				fmt.Sprintf("Approval required for: %s (risk: %s, lane: %s)", cmd.Command, req.RiskLevel, policyResult.Decision.Lane))
 			w.Header().Set("Content-Type", "application/json")
@@ -874,6 +890,10 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 			s.emitAudit(audit.EventCommandSent, id, "api", fmt.Sprintf("Command dispatched (remote): %s", cmd.Command))
 			s.publishEvent(events.CommandDispatched, id, fmt.Sprintf("Remote command dispatched: %s", cmd.Command),
 				map[string]string{"request_id": projection.RequestID, "command": cmd.Command})
+			s.appendCommandStreamMarker(cmd.RequestID, cmdtracker.StreamEventDispatch, "command_dispatched", map[string]any{
+				"probe_id": id,
+				"command":  cmd.Command,
+			})
 		} else {
 			message := "remote command dispatch failed"
 			if projection != nil && projection.Envelope != nil && projection.Envelope.Err != nil {
@@ -890,6 +910,10 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 		s.emitAudit(audit.EventCommandSent, id, "api", fmt.Sprintf("Command dispatched: %s", cmd.Command))
 		s.publishEvent(events.CommandDispatched, id, fmt.Sprintf("Command dispatched: %s", cmd.Command),
 			map[string]string{"request_id": projection.RequestID, "command": cmd.Command})
+		s.appendCommandStreamMarker(cmd.RequestID, cmdtracker.StreamEventDispatch, "command_dispatched", map[string]any{
+			"probe_id": id,
+			"command":  cmd.Command,
+		})
 	} else {
 		message := "command dispatch failed"
 		if projection != nil && projection.Envelope != nil && projection.Envelope.Err != nil {
@@ -1012,9 +1036,7 @@ func (s *Server) invokeRemoteCommand(ctx context.Context, ps *fleet.ProbeState, 
 
 	run := func(execCtx context.Context) *corecommanddispatch.CommandResultEnvelope {
 		result, err := s.remoteExecutor.Execute(execCtx, ps, cmd, func(chunk protocol.OutputChunkPayload) {
-			if stream {
-				s.hub.DispatchChunk(chunk)
-			}
+			s.recordCommandOutputChunk(chunk, stream)
 		})
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
@@ -1041,6 +1063,12 @@ func (s *Server) invokeRemoteCommand(ctx context.Context, ps *fleet.ProbeState, 
 		}
 		s.publishEvent(evtType, ps.ID, fmt.Sprintf("Command %s exit=%d", cmd.RequestID, result.ExitCode),
 			map[string]any{"request_id": cmd.RequestID, "exit_code": result.ExitCode})
+		s.appendCommandStreamMarker(cmd.RequestID, cmdtracker.StreamEventResult, "command_result", map[string]any{
+			"probe_id":    ps.ID,
+			"exit_code":   result.ExitCode,
+			"duration_ms": result.Duration,
+			"truncated":   result.Truncated,
+		})
 
 		output := strings.TrimSpace(result.Stdout)
 		if output == "" {
@@ -1779,9 +1807,15 @@ func (s *Server) handleSSEStream(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(w, r, auth.PermCommandExec) {
 		return
 	}
-	requestID := r.PathValue("requestId")
+	requestID := strings.TrimSpace(r.PathValue("requestId"))
 	if requestID == "" {
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", "request_id required")
+		return
+	}
+
+	query, err := commandReplayQueryFromRequest(r, requestID)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 
@@ -1796,22 +1830,164 @@ func (s *Server) handleSSEStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	sub, cleanup := s.hub.SubscribeStream(requestID, 256)
+	if s.commandStreams == nil {
+		sub, cleanup := s.hub.SubscribeStream(requestID, 256)
+		defer cleanup()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case chunk := <-sub.Ch:
+				data, _ := json.Marshal(chunk)
+				fmt.Fprintf(w, "data: %s\n\n", data)
+				flusher.Flush()
+				if chunk.Final {
+					return
+				}
+			}
+		}
+	}
+
+	replay, sub, cleanup, err := s.commandStreams.ReplayAndSubscribe(requestID, query, 256)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
 	defer cleanup()
+
+	meta, _ := json.Marshal(map[string]any{
+		"request_id":      requestID,
+		"earliest_seq":    replay.EarliestSeq,
+		"latest_seq":      replay.LatestSeq,
+		"next_seq":        replay.NextSeq,
+		"resume_token":    replay.ResumeToken,
+		"has_more":        replay.HasMore,
+		"truncated":       replay.Truncated,
+		"missed_from_seq": replay.MissedFromSeq,
+		"missed_to_seq":   replay.MissedToSeq,
+	})
+	fmt.Fprintf(w, "event: replay.meta\ndata: %s\n\n", meta)
+	flusher.Flush()
+
+	for _, evt := range replay.Events {
+		if !writeCommandStreamSSEEvent(w, flusher, evt) {
+			return
+		}
+		if evt.Kind == cmdtracker.StreamEventOutput && evt.Final {
+			return
+		}
+	}
 
 	for {
 		select {
 		case <-r.Context().Done():
 			return
-		case chunk := <-sub.Ch:
-			data, _ := json.Marshal(chunk)
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
-			if chunk.Final {
+		case evt := <-sub.Ch:
+			if !writeCommandStreamSSEEvent(w, flusher, evt) {
+				return
+			}
+			if evt.Kind == cmdtracker.StreamEventOutput && evt.Final {
 				return
 			}
 		}
 	}
+}
+
+func (s *Server) handleCommandReplay(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermCommandExec) {
+		return
+	}
+	requestID := strings.TrimSpace(r.PathValue("requestId"))
+	if requestID == "" {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "request_id required")
+		return
+	}
+	if s.commandStreams == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "command stream replay unavailable")
+		return
+	}
+
+	query, err := commandReplayQueryFromRequest(r, requestID)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	replay, err := s.commandStreams.Replay(requestID, query)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"request_id": requestID,
+		"replay":     replay,
+	})
+}
+
+func commandReplayQueryFromRequest(r *http.Request, requestID string) (cmdtracker.StreamReplayQuery, error) {
+	query := cmdtracker.StreamReplayQuery{}
+	if r == nil || r.URL == nil {
+		return query, nil
+	}
+	if rawToken := strings.TrimSpace(r.URL.Query().Get("resume_token")); rawToken != "" {
+		query.ResumeToken = rawToken
+	}
+	if rawToken := strings.TrimSpace(r.URL.Query().Get("cursor")); rawToken != "" && query.ResumeToken == "" {
+		query.ResumeToken = rawToken
+	}
+	if rawSeq := strings.TrimSpace(r.URL.Query().Get("last_seq")); rawSeq != "" {
+		seq, err := strconv.ParseInt(rawSeq, 10, 64)
+		if err != nil || seq < 0 {
+			return cmdtracker.StreamReplayQuery{}, fmt.Errorf("last_seq must be a non-negative integer")
+		}
+		query.LastSeq = seq
+	}
+	if rawSeq := strings.TrimSpace(r.Header.Get("Last-Event-ID")); rawSeq != "" {
+		seq, err := strconv.ParseInt(rawSeq, 10, 64)
+		if err == nil && seq > query.LastSeq {
+			query.LastSeq = seq
+		}
+	}
+	if rawSince := strings.TrimSpace(r.URL.Query().Get("since")); rawSince != "" {
+		since, err := parseRFC3339(rawSince)
+		if err != nil {
+			return cmdtracker.StreamReplayQuery{}, fmt.Errorf("invalid since timestamp")
+		}
+		query.Since = &since
+	}
+	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+		limit, err := strconv.Atoi(rawLimit)
+		if err != nil || limit <= 0 {
+			return cmdtracker.StreamReplayQuery{}, fmt.Errorf("limit must be a positive integer")
+		}
+		query.Limit = limit
+	} else {
+		query.Limit = 2000
+	}
+	if _, _, err := cmdtracker.DecodeResumeToken(query.ResumeToken); query.ResumeToken != "" && err != nil {
+		return cmdtracker.StreamReplayQuery{}, err
+	}
+	if query.ResumeToken != "" {
+		tokenReqID, _, _ := cmdtracker.DecodeResumeToken(query.ResumeToken)
+		if tokenReqID != "" && tokenReqID != requestID {
+			return cmdtracker.StreamReplayQuery{}, fmt.Errorf("resume token request_id mismatch")
+		}
+	}
+	return query, nil
+}
+
+func writeCommandStreamSSEEvent(w http.ResponseWriter, flusher http.Flusher, evt cmdtracker.StreamEvent) bool {
+	payload, err := json.Marshal(evt)
+	if err != nil {
+		return false
+	}
+	eventName := string(evt.Kind)
+	if eventName == "" {
+		eventName = "message"
+	}
+	fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", evt.Seq, eventName, payload)
+	flusher.Flush()
+	return true
 }
 
 // ── Events SSE ───────────────────────────────────────────────

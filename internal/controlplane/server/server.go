@@ -80,6 +80,7 @@ type Server struct {
 	remoteScanner   *fleet.RemoteScanner
 	tokenStore      *api.TokenStore
 	cmdTracker      *cmdtracker.Tracker
+	commandStreams  *cmdtracker.StreamRecorder
 	approvalQueue   *approval.Queue
 	approvalCore    *coreapprovalpolicy.Service
 	dispatchCore    *corecommanddispatch.Service
@@ -229,6 +230,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	}
 
 	s.cmdTracker = cmdtracker.New(2 * time.Minute)
+	s.initCommandStreams()
 	s.initAudit()
 	s.initApprovals()
 	s.initWebhooks()
@@ -408,6 +410,9 @@ func (s *Server) Close() {
 	if s.auditStore != nil {
 		s.auditStore.Close()
 	}
+	if s.commandStreams != nil {
+		s.commandStreams.Close()
+	}
 	if s.chatStore != nil {
 		s.chatStore.Close()
 	}
@@ -514,6 +519,26 @@ func (s *Server) initFederation() {
 func (s *Server) initRemoteProbes() {
 	s.remoteExecutor = fleet.NewRemoteExecutor()
 	s.remoteScanner = fleet.NewRemoteScanner(s.fleetMgr, s.remoteExecutor, s.logger.Named("remote-scan"), 2*time.Minute)
+}
+
+func (s *Server) initCommandStreams() {
+	streamDBPath := filepath.Join(s.cfg.DataDir, "command-stream.db")
+	if err := os.MkdirAll(s.cfg.DataDir, 0750); err != nil {
+		s.logger.Warn("cannot create data dir, command stream replay disabled", zap.String("dir", s.cfg.DataDir), zap.Error(err))
+		return
+	}
+	recorder, err := cmdtracker.NewStreamRecorder(streamDBPath, cmdtracker.StreamRetention{
+		MaxEventsPerRequest: s.cfg.Jobs.StreamMaxEventsPerRequest,
+		MaxEventsTotal:      s.cfg.Jobs.StreamMaxEventsTotal,
+		MaxAge:              s.cfg.Jobs.StreamRetentionDuration(),
+	})
+	if err != nil {
+		s.logger.Warn("cannot open command stream database; stream replay disabled",
+			zap.String("path", streamDBPath), zap.Error(err))
+		return
+	}
+	s.commandStreams = recorder
+	s.logger.Info("command stream store opened", zap.String("path", streamDBPath))
 }
 
 func (s *Server) initAudit() {
@@ -700,6 +725,12 @@ func (s *Server) initApprovalCore() {
 			s.emitAudit(audit.EventApprovalDecided, req.ProbeID, req.DecidedBy,
 				fmt.Sprintf("Approval %s for: %s", req.Decision, commandText))
 			s.publishEvent(events.ApprovalDecided, req.ProbeID, fmt.Sprintf("Approval %s: %s", req.Decision, commandText), nil)
+			s.appendCommandStreamMarker(requestID, cmdtracker.StreamEventApproval, "approval_decided", map[string]any{
+				"approval_id": req.ID,
+				"decision":    req.Decision,
+				"decided_by":  req.DecidedBy,
+				"probe_id":    req.ProbeID,
+			})
 			if req.Decision == approval.DecisionDenied {
 				s.failAsyncJobByRequestID(requestID, "approval denied", "", nil)
 			}
@@ -717,6 +748,12 @@ func (s *Server) initApprovalCore() {
 				requestID = req.Command.RequestID
 			}
 			s.markAsyncJobRunningByRequestID(requestID)
+			s.appendCommandStreamMarker(requestID, cmdtracker.StreamEventDispatch, "approval_dispatch", map[string]any{
+				"approval_id": req.ID,
+				"probe_id":    req.ProbeID,
+				"decided_by":  req.DecidedBy,
+				"command":     commandText,
+			})
 			s.emitAudit(audit.EventCommandSent, req.ProbeID, req.DecidedBy,
 				fmt.Sprintf("Approved command dispatched: %s", commandText))
 			return nil

@@ -2,6 +2,7 @@
 
 ### Added
 - [compat:additive] Added public OpenAPI spec endpoint `GET /api/v1/openapi.yaml` and hand-written `docs/openapi.yaml` OpenAPI 3.1 document covering all stable API routes.
+- [compat:additive] Added command stream replay route `GET /api/v1/commands/{requestId}/replay` with resume cursor support (`resume_token`, `last_seq`, `since`) and explicit truncated/missed-range metadata.
 
 ---
 

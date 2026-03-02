@@ -108,6 +108,10 @@ type JobsConfig struct {
 	AsyncMaxQueueDepth       int    `json:"async_max_queue_depth,omitempty"`
 	AsyncPollInterval        string `json:"async_poll_interval,omitempty"`
 	AsyncFetchBatchSize      int    `json:"async_fetch_batch_size,omitempty"`
+
+	StreamMaxEventsPerRequest int    `json:"stream_max_events_per_request,omitempty"`
+	StreamMaxEventsTotal      int    `json:"stream_max_events_total,omitempty"`
+	StreamRetention           string `json:"stream_retention,omitempty"`
 }
 
 func (k KubeflowConfig) NamespaceOrDefault() string {
@@ -163,6 +167,18 @@ func (j JobsConfig) AsyncPollIntervalDuration() time.Duration {
 	return d
 }
 
+func (j JobsConfig) StreamRetentionDuration() time.Duration {
+	raw := strings.TrimSpace(j.StreamRetention)
+	if raw == "" {
+		return 24 * time.Hour
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 24 * time.Hour
+	}
+	return d
+}
+
 // Default returns configuration with sensible defaults.
 func Default() Config {
 	return Config{
@@ -186,10 +202,13 @@ func Default() Config {
 			DashboardLimit: 10,
 		},
 		Jobs: JobsConfig{
-			AsyncMaxInFlight:    8,
-			AsyncMaxQueueDepth:  500,
-			AsyncPollInterval:   "200ms",
-			AsyncFetchBatchSize: 64,
+			AsyncMaxInFlight:          8,
+			AsyncMaxQueueDepth:        500,
+			AsyncPollInterval:         "200ms",
+			AsyncFetchBatchSize:       64,
+			StreamMaxEventsPerRequest: 2000,
+			StreamMaxEventsTotal:      100000,
+			StreamRetention:           "24h",
 		},
 	}
 }
@@ -338,6 +357,19 @@ func Load(path string) (Config, error) {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.Jobs.AsyncFetchBatchSize = n
 		}
+	}
+	if v := os.Getenv("LEGATOR_JOBS_STREAM_MAX_EVENTS_PER_REQUEST"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Jobs.StreamMaxEventsPerRequest = n
+		}
+	}
+	if v := os.Getenv("LEGATOR_JOBS_STREAM_MAX_EVENTS_TOTAL"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Jobs.StreamMaxEventsTotal = n
+		}
+	}
+	if v := os.Getenv("LEGATOR_JOBS_STREAM_RETENTION"); v != "" {
+		cfg.Jobs.StreamRetention = v
 	}
 	if v := os.Getenv("LEGATOR_MCP_ENABLED"); v != "" {
 		cfg.MCPEnabled = v == "true" || v == "1"
