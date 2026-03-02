@@ -134,11 +134,24 @@ func connectProbeWS(t *testing.T, srv *Server, probeID string) (*websocket.Conn,
 		t.Fatalf("dial probe ws: %v", err)
 	}
 
-	cleanup := func() {
-		_ = conn.Close()
-		ts.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		for _, id := range srv.hub.Connected() {
+			if id == probeID {
+				cleanup := func() {
+					_ = conn.Close()
+					ts.Close()
+				}
+				return conn, cleanup
+			}
+		}
+		if time.Now().After(deadline) {
+			_ = conn.Close()
+			ts.Close()
+			t.Fatalf("probe websocket did not register as connected: %s", probeID)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	return conn, cleanup
 }
 
 func TestNew_InitializesCoreComponents(t *testing.T) {

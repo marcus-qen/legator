@@ -6,6 +6,7 @@
 - [compat:additive] Added public OpenAPI spec endpoint `GET /api/v1/openapi.yaml` and hand-written `docs/openapi.yaml` OpenAPI 3.1 document covering all stable API routes.
 - [compat:additive] Added command stream replay route `GET /api/v1/commands/{requestId}/replay` with resume cursor support (`resume_token`, `last_seq`, `since`) and explicit truncated/missed-range metadata.
 - [compat:additive] Added runner manager lifecycle contract: `POST /api/v1/runners`, `POST /api/v1/runners/{id}/start`, `POST /api/v1/runners/{id}/stop`, `DELETE /api/v1/runners/{id}`, plus `POST /api/v1/runs` to issue short-lived session-bound run tokens with TTL + single-use enforcement.
+- [compat:additive] Added rootless sandbox runner execution backend for disposable runs: `backend=sandbox` contracts now execute via rootless container runtime (default `podman`) with deterministic stop/teardown cleanup on stop, destroy, command failure, and timeout. Added session-scoped `runner_id` + `job_id` run-token binding, runner teardown/error audit markers (`runner.teardown`, `runner.error`), and sandbox backend config defaults (`LEGATOR_JOBS_RUNNER_SANDBOX_RUNTIME_COMMAND`, `LEGATOR_JOBS_RUNNER_SANDBOX_IMAGE`, `LEGATOR_JOBS_RUNNER_SANDBOX_TIMEOUT`).
 
 ---
 

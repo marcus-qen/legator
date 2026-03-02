@@ -119,12 +119,13 @@ type Server struct {
 	routingStore *alerts.RoutingStore
 
 	// Scheduled + async jobs
-	jobsStore          *jobs.Store
-	jobsScheduler      *jobs.Scheduler
-	jobsHandler        *jobs.Handler
-	asyncJobsManager   *jobs.AsyncManager
-	asyncJobsScheduler *jobs.AsyncWorkerScheduler
-	runnerManager      *runner.Manager
+	jobsStore              *jobs.Store
+	jobsScheduler          *jobs.Scheduler
+	jobsHandler            *jobs.Handler
+	asyncJobsManager       *jobs.AsyncManager
+	asyncJobsScheduler     *jobs.AsyncWorkerScheduler
+	runnerManager          *runner.Manager
+	runnerExecutionBackend runner.ExecutionBackend
 
 	// Events
 	eventBus *events.Bus
@@ -687,8 +688,20 @@ func (s *Server) initJobs() {
 }
 
 func (s *Server) initRunnerManager() {
+	s.runnerExecutionBackend = runner.NewContainerBackend(runner.ContainerBackendConfig{
+		RuntimeCommand: s.cfg.Jobs.RunnerSandboxRuntimeCommand,
+		DefaultImage:   s.cfg.Jobs.RunnerSandboxImage,
+		DefaultTimeout: s.cfg.Jobs.RunnerSandboxTimeoutDuration(),
+		EventSink:      s.recordRunnerBackendEvent,
+	})
 	s.runnerManager = runner.NewManager(runner.Config{RunTokenTTL: s.cfg.Jobs.RunTokenTTLDuration()})
-	s.logger.Info("runner manager initialized", zap.Duration("run_token_ttl", s.cfg.Jobs.RunTokenTTLDuration()))
+	s.logger.Info(
+		"runner manager initialized",
+		zap.Duration("run_token_ttl", s.cfg.Jobs.RunTokenTTLDuration()),
+		zap.String("runner_sandbox_runtime", strings.TrimSpace(s.cfg.Jobs.RunnerSandboxRuntimeCommand)),
+		zap.String("runner_sandbox_image", strings.TrimSpace(s.cfg.Jobs.RunnerSandboxImage)),
+		zap.Duration("runner_sandbox_timeout", s.cfg.Jobs.RunnerSandboxTimeoutDuration()),
+	)
 }
 
 func (s *Server) initChat() {

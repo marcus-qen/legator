@@ -44,6 +44,8 @@ const (
 	EventRunnerStopped          EventType = "runner.stopped"
 	EventRunnerDestroyed        EventType = "runner.destroyed"
 	EventRunnerRunTokenIssued   EventType = "runner.run_token_issued"
+	EventRunnerTeardown         EventType = "runner.teardown"
+	EventRunnerError            EventType = "runner.error"
 )
 
 // Event is a single audit log entry.
