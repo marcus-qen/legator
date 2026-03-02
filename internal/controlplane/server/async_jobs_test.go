@@ -58,6 +58,22 @@ func waitForAsyncJobState(t *testing.T, srv *Server, jobID string, allowed ...jo
 	return nil
 }
 
+func hasApprovalTimeoutAudit(events []audit.Event, jobID, behavior, action string) bool {
+	for _, evt := range events {
+		detail, ok := evt.Detail.(map[string]any)
+		if !ok {
+			continue
+		}
+		if detail["job_id"] != jobID {
+			continue
+		}
+		if detail["timeout_behavior"] == behavior && detail["timeout_action"] == action {
+			return true
+		}
+	}
+	return false
+}
+
 func createPendingApprovalAsyncJob(t *testing.T, srv *Server, probeID, requestID string) *jobs.AsyncJob {
 	t.Helper()
 	registerRemoteProbe(t, srv, probeID)
@@ -125,6 +141,28 @@ func TestHandleDispatchCommand_PendingApprovalMarksAsyncJobWaiting(t *testing.T)
 	_ = createPendingApprovalAsyncJob(t, srv, "remote-2", "req-remote-approval")
 }
 
+func TestHandleDispatchCommand_PendingApprovalHaltsAsyncDispatch(t *testing.T) {
+	srv := newTestServer(t)
+	registerRemoteProbe(t, srv, "remote-halt")
+	exec := &fakeRemoteExecutor{}
+	srv.remoteExecutor = exec
+
+	payload := protocol.CommandPayload{RequestID: "req-remote-halt", Command: "systemctl", Args: []string{"restart", "nginx"}, Level: protocol.CapRemediate}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/probes/remote-halt/command", bytes.NewReader(body))
+	req.SetPathValue("id", "remote-halt")
+	rr := httptest.NewRecorder()
+
+	srv.handleDispatchCommand(rr, req)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 pending approval, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	time.Sleep(100 * time.Millisecond)
+	if got := len(exec.executed); got != 0 {
+		t.Fatalf("expected no dispatch while pending approval, got %d executions", got)
+	}
+}
+
 func TestHandleApproveAsyncJob_ResumesAndDispatches(t *testing.T) {
 	srv := newTestServer(t)
 	job := createPendingApprovalAsyncJob(t, srv, "remote-approve", "req-remote-approve")
@@ -141,6 +179,9 @@ func TestHandleApproveAsyncJob_ResumesAndDispatches(t *testing.T) {
 	updated := waitForAsyncJobState(t, srv, job.ID, jobs.AsyncJobStateRunning, jobs.AsyncJobStateSucceeded)
 	if updated.State == jobs.AsyncJobStateWaitingApproval {
 		t.Fatalf("job should have resumed from waiting_approval")
+	}
+	if updated.ID != job.ID {
+		t.Fatalf("expected same async job id after approve, got %s want %s", updated.ID, job.ID)
 	}
 
 	replay, err := srv.commandStreams.Replay(updated.RequestID, cmdtracker.StreamReplayQuery{Limit: 200})
@@ -229,6 +270,51 @@ func TestProcessTimedOutApprovalJobs_CancelBehavior(t *testing.T) {
 	if updated.State != jobs.AsyncJobStateCancelled {
 		t.Fatalf("expected cancelled state after timeout cancel, got %s", updated.State)
 	}
+
+	events := srv.queryAudit(audit.Filter{Limit: 100})
+	if !hasApprovalTimeoutAudit(events, job.ID, "cancel", "cancelled") {
+		t.Fatalf("expected cancel timeout audit event for job %s", job.ID)
+	}
+}
+
+func TestProcessTimedOutApprovalJobs_ReadsOnlyAutoResumesReadLevelJobs(t *testing.T) {
+	srv := newTestServer(t)
+	srv.cfg.Jobs.ApprovalTimeoutBehavior = "reads_only"
+
+	registerRemoteProbe(t, srv, "probe-timeout-reads")
+	srv.remoteExecutor = &fakeRemoteExecutor{execResult: &protocol.CommandResultPayload{RequestID: "req-timeout-reads", ExitCode: 0, Stdout: "ok"}}
+
+	job, err := srv.asyncJobsManager.CreateForCommand("probe-timeout-reads", protocol.CommandPayload{RequestID: "req-timeout-reads", Command: "ls", Args: []string{"-la"}, Level: protocol.CapObserve})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	approvalReq, err := srv.approvalQueue.Submit("probe-timeout-reads", &protocol.CommandPayload{RequestID: job.RequestID, Command: job.Command, Args: job.Args, Level: protocol.CapObserve}, "timeout test", "low", "tester")
+	if err != nil {
+		t.Fatalf("submit approval request: %v", err)
+	}
+	expiresAt := time.Now().UTC().Add(-time.Second)
+	if _, err := srv.asyncJobsManager.MarkWaitingApproval(job.ID, approvalReq.ID, "waiting", &expiresAt); err != nil {
+		t.Fatalf("mark waiting approval: %v", err)
+	}
+
+	processed, err := srv.processTimedOutApprovalJobs(time.Now().UTC())
+	if err != nil {
+		t.Fatalf("process timeout jobs: %v", err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected 1 processed timeout job, got %d", processed)
+	}
+
+	updated := waitForAsyncJobState(t, srv, job.ID, jobs.AsyncJobStateRunning, jobs.AsyncJobStateSucceeded)
+	if updated.ID != job.ID {
+		t.Fatalf("expected same job id after reads_only resume, got %s want %s", updated.ID, job.ID)
+	}
+
+	events := srv.queryAudit(audit.Filter{Limit: 100})
+	if !hasApprovalTimeoutAudit(events, job.ID, "reads_only", "auto_approved") {
+		t.Fatalf("expected reads_only auto-approve audit event for job %s", job.ID)
+	}
 }
 
 func TestProcessTimedOutApprovalJobs_EscalateBehavior(t *testing.T) {
@@ -260,15 +346,8 @@ func TestProcessTimedOutApprovalJobs_EscalateBehavior(t *testing.T) {
 	}
 
 	events := srv.queryAudit(audit.Filter{Limit: 100})
-	foundEscalation := false
-	for _, evt := range events {
-		if evt.Type == audit.EventApprovalRequest && evt.ProbeID == updated.ProbeID {
-			foundEscalation = true
-			break
-		}
-	}
-	if !foundEscalation {
-		t.Fatalf("expected escalation audit event")
+	if !hasApprovalTimeoutAudit(events, job.ID, "escalate", "extended") {
+		t.Fatalf("expected escalation timeout audit event for job %s", job.ID)
 	}
 }
 
