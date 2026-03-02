@@ -770,6 +770,16 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cmd := body.CommandPayload
+	if cmd.Breakglass == nil && (strings.TrimSpace(body.BreakglassReason) != "" || strings.TrimSpace(body.BreakglassToken) != "") {
+		cmd.Breakglass = &protocol.BreakglassInvocation{
+			Reason:            strings.TrimSpace(body.BreakglassReason),
+			TypedConfirmation: strings.TrimSpace(body.BreakglassToken),
+			RequestedAt:       time.Now().UTC(),
+		}
+	}
+	if cmd.Breakglass != nil && cmd.Breakglass.RequestedAt.IsZero() {
+		cmd.Breakglass.RequestedAt = time.Now().UTC()
+	}
 	wantWait := r.URL.Query().Get("wait") == "true" || r.URL.Query().Get("wait") == "1"
 	wantStream := r.URL.Query().Get("stream") == "true" || r.URL.Query().Get("stream") == "1"
 
@@ -781,6 +791,8 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 	cmd = invokeInput.Command
 
 	decision := s.approvalCore.EvaluateCommandPolicyForProbe(r.Context(), id, &cmd, ps.PolicyLevel)
+	cmd.ExecutionClass = decision.Lane
+	invokeInput.Command = cmd
 	w.Header().Set("X-Legator-Policy-Decision", string(decision.Outcome))
 	w.Header().Set("X-Legator-Execution-Lane", string(decision.Lane))
 	w.Header().Set("X-Legator-Gate-Outcome", string(decision.GateOutcome))
@@ -795,10 +807,9 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 		"risk_level":   decision.RiskLevel,
 	})
 
-	breakglass := controlpolicy.ResolveBreakglassConfirmation(body.BreakglassReason, body.BreakglassToken)
 	requiresBreakglass := controlpolicy.RequiresBreakglassConfirmation(decision.Classification.Category, decision.Lane)
 	if s.cfg.SandboxEnforcement && requiresBreakglass {
-		if !breakglass.Confirmed {
+		if cmd.Breakglass == nil {
 			reasonCode := "sandbox_enforcement.breakglass_required"
 			w.Header().Set("X-Legator-Reason-Code", reasonCode)
 			w.Header().Set("Content-Type", "application/json")
@@ -808,11 +819,13 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 				"code":        "sandbox_enforcement",
 				"reason_code": reasonCode,
 				"lane":        decision.Lane,
-				"message":     "Sandbox enforcement blocked host-direct mutation dispatch. Supply breakglass_reason or breakglass_token.",
+				"message":     "Sandbox enforcement blocked host-direct mutation dispatch. Supply breakglass.reason and typed confirmation.",
 			})
 			return
 		}
-		if breakglass.Method == controlpolicy.BreakglassConfirmReasonField && !controlpolicy.BreakglassReasonAllowed(breakglass.Reason, decision.Policy.Breakglass.AllowedReasons) {
+
+		reason := strings.TrimSpace(cmd.Breakglass.Reason)
+		if !controlpolicy.BreakglassReasonAllowed(reason, decision.Policy.Breakglass.AllowedReasons) {
 			reasonCode := "sandbox_enforcement.breakglass_reason_not_allowed"
 			w.Header().Set("X-Legator-Reason-Code", reasonCode)
 			w.Header().Set("Content-Type", "application/json")
@@ -827,19 +840,24 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		actor := "api"
-		if user := auth.UserFromContext(r.Context()); user != nil {
-			if user.Username != "" {
-				actor = user.Username
-			} else if user.ID != "" {
-				actor = user.ID
-			}
-		} else if key := auth.FromContext(r.Context()); key != nil {
-			if key.Name != "" {
-				actor = key.Name
-			} else if key.ID != "" {
-				actor = key.ID
-			}
+		if decision.Policy.Breakglass.RequireTypedConfirmation && strings.TrimSpace(cmd.Breakglass.TypedConfirmation) != protocol.BreakglassTypedConfirmationPhrase {
+			reasonCode := "sandbox_enforcement.breakglass_confirmation_required"
+			w.Header().Set("X-Legator-Reason-Code", reasonCode)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":      "blocked",
+				"code":        "sandbox_enforcement",
+				"reason_code": reasonCode,
+				"lane":        decision.Lane,
+				"message":     "Breakglass typed confirmation did not match the required phrase.",
+			})
+			return
+		}
+
+		actor := actorFromAuthContext(r.Context())
+		if actor == "anonymous" {
+			actor = "api"
 		}
 
 		s.recordAudit(audit.Event{
@@ -848,17 +866,17 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 			Actor:   actor,
 			Summary: fmt.Sprintf("Breakglass confirmed for command: %s", cmd.Command),
 			Detail: map[string]any{
-				"request_id": cmd.RequestID,
-				"command":    cmd.Command,
-				"lane":       decision.Lane,
-				"reason":     breakglass.Reason,
-				"method":     breakglass.Method,
+				"request_id":                 cmd.RequestID,
+				"command":                    cmd.Command,
+				"lane":                       decision.Lane,
+				"reason":                     reason,
+				"typed_confirmation_present": strings.TrimSpace(cmd.Breakglass.TypedConfirmation) != "",
+				"requested_at":               cmd.Breakglass.RequestedAt,
 			},
 		})
 		s.appendCommandStreamMarker(cmd.RequestID, cmdtracker.StreamEventPolicy, "breakglass_confirmed", map[string]any{
 			"lane":   decision.Lane,
-			"reason": breakglass.Reason,
-			"method": breakglass.Method,
+			"reason": reason,
 		})
 	}
 
@@ -891,7 +909,7 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	case coreapprovalpolicy.CommandPolicyDecisionQueue:
 		approvalReason := "Manual command dispatch"
-		if breakglass.Confirmed {
+		if cmd.Breakglass != nil {
 			approvalReason = fmt.Sprintf("%s (breakglass)", approvalReason)
 		}
 		req, err := s.approvalQueue.SubmitWithPolicyDetails(

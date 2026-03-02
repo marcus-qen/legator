@@ -633,6 +633,62 @@ func TestSandboxEnforcementBlocksHostDirectMutationWithoutBreakglass(t *testing.
 	}
 }
 
+func TestSandboxEnforcementRejectsInvalidBreakglassConfirmation(t *testing.T) {
+	srv := newTestServer(t)
+	srv.cfg.SandboxEnforcement = true
+	srv.fleetMgr.Register("probe-breakglass-invalid", "host", "linux", "amd64")
+
+	tpl := srv.policyStore.Create(
+		"Breakglass lane",
+		"host-direct breakglass policy",
+		protocol.CapObserve,
+		nil,
+		nil,
+		nil,
+		policy.TemplateOptions{
+			ExecutionClassRequired: protocol.ExecBreakglassDirect,
+			ApprovalMode:           protocol.ApprovalMutationGate,
+			Breakglass: protocol.BreakglassPolicy{
+				Enabled:                  true,
+				AllowedReasons:           []string{"incident_response"},
+				RequireTypedConfirmation: true,
+			},
+		},
+	)
+	if _, err := srv.approvalCore.ApplyPolicyTemplate("probe-breakglass-invalid", tpl.ID, nil); err != nil {
+		t.Fatalf("apply breakglass policy: %v", err)
+	}
+
+	body := map[string]any{
+		"request_id": "req-breakglass-invalid",
+		"command":    "systemctl restart nginx",
+		"level":      string(protocol.CapRemediate),
+		"breakglass": map[string]any{
+			"reason":             "incident_response",
+			"typed_confirmation": "definitely not the phrase",
+		},
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/probes/probe-breakglass-invalid/command", bytes.NewReader(data))
+	req.SetPathValue("id", "probe-breakglass-invalid")
+	rr := httptest.NewRecorder()
+
+	srv.handleDispatchCommand(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("X-Legator-Reason-Code"); got != "sandbox_enforcement.breakglass_confirmation_required" {
+		t.Fatalf("expected reason header sandbox_enforcement.breakglass_confirmation_required, got %q", got)
+	}
+	if srv.approvalQueue.PendingCount() != 0 {
+		t.Fatalf("expected no queued approvals, got %d", srv.approvalQueue.PendingCount())
+	}
+	if events := srv.queryAudit(audit.Filter{Type: audit.EventBreakglassCommand}); len(events) != 0 {
+		t.Fatalf("expected no breakglass audit events, got %d", len(events))
+	}
+}
+
 func TestBreakglassConfirmationAllowsHostDirectMutationAndAudits(t *testing.T) {
 	srv := newTestServer(t)
 	srv.cfg.SandboxEnforcement = true
@@ -660,10 +716,13 @@ func TestBreakglassConfirmationAllowsHostDirectMutationAndAudits(t *testing.T) {
 	}
 
 	body := map[string]any{
-		"request_id":        "req-breakglass-allowed",
-		"command":           "systemctl restart nginx",
-		"level":             string(protocol.CapRemediate),
-		"breakglass_reason": "incident_response",
+		"request_id": "req-breakglass-allowed",
+		"command":    "systemctl restart nginx",
+		"level":      string(protocol.CapRemediate),
+		"breakglass": map[string]any{
+			"reason":             "incident_response",
+			"typed_confirmation": protocol.BreakglassTypedConfirmationPhrase,
+		},
 	}
 	data, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/probes/probe-breakglass-ok/command", bytes.NewReader(data))

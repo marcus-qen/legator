@@ -811,6 +811,7 @@ func (s *Server) initApprovalCore() {
 		s.policyStore,
 		coreapprovalpolicy.WithDecisionHooks(hooks),
 		coreapprovalpolicy.WithCapacitySignalProvider(capacityProvider),
+		coreapprovalpolicy.WithSandboxMutationLaneEnforcement(s.cfg.SandboxEnforcement),
 	)
 }
 

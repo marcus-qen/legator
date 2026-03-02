@@ -46,10 +46,13 @@ func New(cfg *Config, logger *zap.Logger) *Agent {
 		policyLevel = protocol.CapObserve
 	}
 	policy := executor.Policy{
-		Level:   policyLevel,
-		Allowed: append([]string(nil), cfg.PolicyAllowed...),
-		Blocked: append([]string(nil), cfg.PolicyBlocked...),
-		Paths:   append([]string(nil), cfg.PolicyPaths...),
+		Level:                  policyLevel,
+		Allowed:                append([]string(nil), cfg.PolicyAllowed...),
+		Blocked:                append([]string(nil), cfg.PolicyBlocked...),
+		Paths:                  append([]string(nil), cfg.PolicyPaths...),
+		ExecutionClassRequired: cfg.PolicyExecutionClassRequired,
+		SandboxRequired:        cfg.PolicySandboxRequired,
+		Breakglass:             cfg.PolicyBreakglass,
 	}
 	exec := executor.New(policy, logger.Named("exec"))
 
@@ -168,10 +171,13 @@ func (a *Agent) handleMessage(env protocol.Envelope) {
 
 		// Update executor policy
 		a.executor = executor.New(executor.Policy{
-			Level:   policy.Level,
-			Allowed: policy.Allowed,
-			Blocked: policy.Blocked,
-			Paths:   policy.Paths,
+			Level:                  policy.Level,
+			Allowed:                policy.Allowed,
+			Blocked:                policy.Blocked,
+			Paths:                  policy.Paths,
+			ExecutionClassRequired: policy.ExecutionClassRequired,
+			SandboxRequired:        policy.SandboxRequired,
+			Breakglass:             policy.Breakglass,
 		}, a.logger.Named("exec"))
 
 		// Persist policy to config for restart safety.

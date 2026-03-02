@@ -117,12 +117,13 @@ type appliedPolicyContext struct {
 
 // Service orchestrates command approvals and policy application.
 type Service struct {
-	approvals            approvalQueue
-	fleet                fleetStore
-	policies             policyStore
-	decisionHooks        DecisionHooks
-	capacitySignalSource CapacitySignalProvider
-	capacityThresholds   CapacityThresholds
+	approvals                      approvalQueue
+	fleet                          fleetStore
+	policies                       policyStore
+	decisionHooks                  DecisionHooks
+	capacitySignalSource           CapacitySignalProvider
+	capacityThresholds             CapacityThresholds
+	sandboxMutationLaneEnforcement bool
 
 	appliedPolicyMu sync.RWMutex
 	appliedPolicy   map[string]appliedPolicyContext
@@ -150,14 +151,21 @@ func WithCapacityThresholds(thresholds CapacityThresholds) Option {
 	}
 }
 
+func WithSandboxMutationLaneEnforcement(enabled bool) Option {
+	return func(s *Service) {
+		s.sandboxMutationLaneEnforcement = enabled
+	}
+}
+
 func NewService(approvals approvalQueue, fleet fleetStore, policies policyStore, opts ...Option) *Service {
 	svc := &Service{
-		approvals:          approvals,
-		fleet:              fleet,
-		policies:           policies,
-		decisionHooks:      noopDecisionHooks{},
-		capacityThresholds: DefaultCapacityThresholds(),
-		appliedPolicy:      map[string]appliedPolicyContext{},
+		approvals:                      approvals,
+		fleet:                          fleet,
+		policies:                       policies,
+		decisionHooks:                  noopDecisionHooks{},
+		capacityThresholds:             DefaultCapacityThresholds(),
+		sandboxMutationLaneEnforcement: true,
+		appliedPolicy:                  map[string]appliedPolicyContext{},
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -185,6 +193,13 @@ func (s *Service) SubmitCommandApproval(probeID string, cmd *protocol.CommandPay
 
 func (s *Service) SubmitCommandApprovalWithContext(ctx context.Context, probeID string, cmd *protocol.CommandPayload, probeLevel protocol.CapabilityLevel, reason, requester string) (*SubmitCommandApprovalResult, error) {
 	decision := s.EvaluateCommandPolicyForProbe(ctx, probeID, cmd, probeLevel)
+	if cmd != nil {
+		cmd.ExecutionClass = decision.Lane
+	}
+	if s.sandboxMutationLaneEnforcement {
+		decision = enforceSandboxLaneForMutation(decision, cmd)
+	}
+
 	result := &SubmitCommandApprovalResult{Decision: decision}
 	if decision.Outcome != CommandPolicyDecisionQueue {
 		return result, nil

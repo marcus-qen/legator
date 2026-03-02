@@ -20,10 +20,13 @@ const (
 
 // Policy defines what the executor is allowed to do.
 type Policy struct {
-	Level   protocol.CapabilityLevel
-	Allowed []string // command prefixes allowed (empty = all at level)
-	Blocked []string // command prefixes always blocked
-	Paths   []string // protected paths (no writes)
+	Level                  protocol.CapabilityLevel
+	Allowed                []string // command prefixes allowed (empty = all at level)
+	Blocked                []string // command prefixes always blocked
+	Paths                  []string // protected paths (no writes)
+	ExecutionClassRequired protocol.ExecutionClass
+	SandboxRequired        bool
+	Breakglass             protocol.BreakglassPolicy
 }
 
 // Executor runs commands with policy enforcement.
@@ -77,6 +80,18 @@ func (e *Executor) Execute(ctx context.Context, cmd *protocol.CommandPayload) *p
 			zap.String("classified_level", string(requiredLevel)),
 			zap.String("declared_level", string(cmd.Level)),
 			zap.String("probe_level", string(e.policy.Level)),
+			zap.String("command", cmd.Command),
+		)
+		return result
+	}
+
+	if violation := e.validateSandboxMutationLane(cmd, requiredLevel); violation != "" {
+		result.ExitCode = -1
+		result.Stderr = violation
+		e.logger.Warn("command blocked by sandbox lane policy",
+			zap.String("request_id", cmd.RequestID),
+			zap.String("execution_class", string(cmd.ExecutionClass)),
+			zap.String("classified_level", string(requiredLevel)),
 			zap.String("command", cmd.Command),
 		)
 		return result
@@ -182,6 +197,50 @@ func (e *Executor) isAllowed(cmd string) bool {
 		}
 	}
 	return false
+}
+
+func (e *Executor) validateSandboxMutationLane(cmd *protocol.CommandPayload, requiredLevel protocol.CapabilityLevel) string {
+	if cmd == nil || requiredLevel != protocol.CapRemediate {
+		return ""
+	}
+
+	lane := strings.TrimSpace(string(cmd.ExecutionClass))
+	if lane == "" {
+		lane = string(protocol.ExecRemediateSandbox)
+	}
+
+	switch protocol.ExecutionClass(lane) {
+	case protocol.ExecObserveDirect:
+		return "policy violation: mutation command cannot execute in host_direct lane"
+	case protocol.ExecBreakglassDirect:
+		if !e.policy.Breakglass.Enabled {
+			return "policy violation: breakglass is disabled"
+		}
+		if cmd.Breakglass == nil {
+			return "policy violation: breakglass confirmation is required"
+		}
+		reason := strings.TrimSpace(cmd.Breakglass.Reason)
+		if reason == "" {
+			return "policy violation: breakglass reason is required"
+		}
+		if len(e.policy.Breakglass.AllowedReasons) > 0 {
+			allowed := false
+			for _, candidate := range e.policy.Breakglass.AllowedReasons {
+				if strings.EqualFold(strings.TrimSpace(candidate), reason) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return "policy violation: breakglass reason is not allowed"
+			}
+		}
+		if e.policy.Breakglass.RequireTypedConfirmation && strings.TrimSpace(cmd.Breakglass.TypedConfirmation) != protocol.BreakglassTypedConfirmationPhrase {
+			return "policy violation: invalid breakglass typed confirmation"
+		}
+	}
+
+	return ""
 }
 
 func truncate(s string, max int) string {

@@ -240,6 +240,148 @@ func TestEvaluateCommandPolicyForProbe_UsesAppliedBreakglassPolicy(t *testing.T)
 	}
 }
 
+func TestSubmitCommandApprovalWithContext_BreakglassMissingDenied(t *testing.T) {
+	svc, queue, fleetMgr, policies := newServiceForTest()
+	fleetMgr.Register("probe-a", "host", "linux", "amd64")
+
+	tpl := policies.Create(
+		"Breakglass",
+		"breakglass direct for emergencies",
+		protocol.CapObserve,
+		nil,
+		nil,
+		nil,
+		policy.TemplateOptions{
+			ExecutionClassRequired: protocol.ExecBreakglassDirect,
+			ApprovalMode:           protocol.ApprovalMutationGate,
+			Breakglass: protocol.BreakglassPolicy{
+				Enabled:                  true,
+				AllowedReasons:           []string{"incident_response"},
+				RequireTypedConfirmation: true,
+			},
+		},
+	)
+	if _, err := svc.ApplyPolicyTemplate("probe-a", tpl.ID, nil); err != nil {
+		t.Fatalf("apply policy template: %v", err)
+	}
+
+	cmd := &protocol.CommandPayload{RequestID: "req-breakglass-missing", Command: "systemctl restart nginx", Level: protocol.CapRemediate}
+	result, err := svc.SubmitCommandApprovalWithContext(context.Background(), "probe-a", cmd, protocol.CapObserve, "manual", "api")
+	if err != nil {
+		t.Fatalf("SubmitCommandApprovalWithContext returned error: %v", err)
+	}
+	if result.Decision.Outcome != CommandPolicyDecisionDeny {
+		t.Fatalf("expected deny decision, got %s", result.Decision.Outcome)
+	}
+	if result.Decision.ReasonCode != "policy.breakglass_required" {
+		t.Fatalf("expected policy.breakglass_required reason, got %s", result.Decision.ReasonCode)
+	}
+	if cmd.ExecutionClass != protocol.ExecBreakglassDirect {
+		t.Fatalf("expected execution class breakglass_direct, got %s", cmd.ExecutionClass)
+	}
+	if queue.PendingCount() != 0 {
+		t.Fatalf("expected no pending approvals, got %d", queue.PendingCount())
+	}
+}
+
+func TestSubmitCommandApprovalWithContext_BreakglassInvalidConfirmationDenied(t *testing.T) {
+	svc, queue, fleetMgr, policies := newServiceForTest()
+	fleetMgr.Register("probe-a", "host", "linux", "amd64")
+
+	tpl := policies.Create(
+		"Breakglass",
+		"breakglass direct for emergencies",
+		protocol.CapObserve,
+		nil,
+		nil,
+		nil,
+		policy.TemplateOptions{
+			ExecutionClassRequired: protocol.ExecBreakglassDirect,
+			ApprovalMode:           protocol.ApprovalMutationGate,
+			Breakglass: protocol.BreakglassPolicy{
+				Enabled:                  true,
+				AllowedReasons:           []string{"incident_response"},
+				RequireTypedConfirmation: true,
+			},
+		},
+	)
+	if _, err := svc.ApplyPolicyTemplate("probe-a", tpl.ID, nil); err != nil {
+		t.Fatalf("apply policy template: %v", err)
+	}
+
+	cmd := &protocol.CommandPayload{
+		RequestID: "req-breakglass-invalid",
+		Command:   "systemctl restart nginx",
+		Level:     protocol.CapRemediate,
+		Breakglass: &protocol.BreakglassInvocation{
+			Reason:            "incident_response",
+			TypedConfirmation: "I pinky promise",
+		},
+	}
+	result, err := svc.SubmitCommandApprovalWithContext(context.Background(), "probe-a", cmd, protocol.CapObserve, "manual", "api")
+	if err != nil {
+		t.Fatalf("SubmitCommandApprovalWithContext returned error: %v", err)
+	}
+	if result.Decision.Outcome != CommandPolicyDecisionDeny {
+		t.Fatalf("expected deny decision, got %s", result.Decision.Outcome)
+	}
+	if result.Decision.ReasonCode != "policy.breakglass_confirmation_required" {
+		t.Fatalf("expected policy.breakglass_confirmation_required reason, got %s", result.Decision.ReasonCode)
+	}
+	if queue.PendingCount() != 0 {
+		t.Fatalf("expected no pending approvals, got %d", queue.PendingCount())
+	}
+}
+
+func TestSubmitCommandApprovalWithContext_BreakglassValidQueues(t *testing.T) {
+	svc, queue, fleetMgr, policies := newServiceForTest()
+	fleetMgr.Register("probe-a", "host", "linux", "amd64")
+
+	tpl := policies.Create(
+		"Breakglass",
+		"breakglass direct for emergencies",
+		protocol.CapObserve,
+		nil,
+		nil,
+		nil,
+		policy.TemplateOptions{
+			ExecutionClassRequired: protocol.ExecBreakglassDirect,
+			ApprovalMode:           protocol.ApprovalMutationGate,
+			Breakglass: protocol.BreakglassPolicy{
+				Enabled:                  true,
+				AllowedReasons:           []string{"incident_response"},
+				RequireTypedConfirmation: true,
+			},
+		},
+	)
+	if _, err := svc.ApplyPolicyTemplate("probe-a", tpl.ID, nil); err != nil {
+		t.Fatalf("apply policy template: %v", err)
+	}
+
+	cmd := &protocol.CommandPayload{
+		RequestID: "req-breakglass-valid",
+		Command:   "systemctl restart nginx",
+		Level:     protocol.CapRemediate,
+		Breakglass: &protocol.BreakglassInvocation{
+			Reason:            "incident_response",
+			TypedConfirmation: protocol.BreakglassTypedConfirmationPhrase,
+		},
+	}
+	result, err := svc.SubmitCommandApprovalWithContext(context.Background(), "probe-a", cmd, protocol.CapObserve, "manual", "api")
+	if err != nil {
+		t.Fatalf("SubmitCommandApprovalWithContext returned error: %v", err)
+	}
+	if result.Decision.Outcome != CommandPolicyDecisionQueue {
+		t.Fatalf("expected queue decision, got %s", result.Decision.Outcome)
+	}
+	if result.Request == nil {
+		t.Fatal("expected queued approval request")
+	}
+	if queue.PendingCount() != 1 {
+		t.Fatalf("expected pending approvals=1, got %d", queue.PendingCount())
+	}
+}
+
 func TestEvaluateCommandPolicyPreview_Override(t *testing.T) {
 	svc, _, fleetMgr, _ := newServiceForTest()
 	fleetMgr.Register("probe-a", "host", "linux", "amd64")

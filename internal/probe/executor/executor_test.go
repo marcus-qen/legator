@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -171,5 +172,88 @@ func TestExecute_ClassifierAllowsLegitObserve(t *testing.T) {
 	result := e.Execute(context.Background(), cmd)
 	if result.ExitCode != 0 {
 		t.Errorf("expected exit 0, got %d: %s", result.ExitCode, result.Stderr)
+	}
+}
+
+func TestExecute_BlocksHostDirectMutationBypass(t *testing.T) {
+	e := New(Policy{Level: protocol.CapRemediate}, testLogger())
+
+	cmd := &protocol.CommandPayload{
+		RequestID:      "test-host-direct-bypass",
+		Command:        "touch",
+		Args:           []string{t.TempDir() + "/blocked"},
+		Level:          protocol.CapObserve,
+		ExecutionClass: protocol.ExecObserveDirect,
+	}
+
+	result := e.Execute(context.Background(), cmd)
+	if result.ExitCode != -1 {
+		t.Fatalf("expected blocked command, got exit %d", result.ExitCode)
+	}
+	if !strings.Contains(result.Stderr, "host_direct lane") {
+		t.Fatalf("expected host_direct lane policy violation, got %q", result.Stderr)
+	}
+}
+
+func TestExecute_BlocksBreakglassWithoutTypedConfirmation(t *testing.T) {
+	e := New(Policy{
+		Level: protocol.CapRemediate,
+		Breakglass: protocol.BreakglassPolicy{
+			Enabled:                  true,
+			AllowedReasons:           []string{"incident_response"},
+			RequireTypedConfirmation: true,
+		},
+	}, testLogger())
+
+	cmd := &protocol.CommandPayload{
+		RequestID:      "test-breakglass-missing-confirmation",
+		Command:        "touch",
+		Args:           []string{t.TempDir() + "/blocked"},
+		Level:          protocol.CapObserve,
+		ExecutionClass: protocol.ExecBreakglassDirect,
+		Breakglass: &protocol.BreakglassInvocation{
+			Reason: "incident_response",
+		},
+	}
+
+	result := e.Execute(context.Background(), cmd)
+	if result.ExitCode != -1 {
+		t.Fatalf("expected blocked command, got exit %d", result.ExitCode)
+	}
+	if !strings.Contains(result.Stderr, "typed confirmation") {
+		t.Fatalf("expected typed confirmation policy violation, got %q", result.Stderr)
+	}
+}
+
+func TestExecute_AllowsBreakglassWithTypedConfirmation(t *testing.T) {
+	e := New(Policy{
+		Level: protocol.CapRemediate,
+		Breakglass: protocol.BreakglassPolicy{
+			Enabled:                  true,
+			AllowedReasons:           []string{"incident_response"},
+			RequireTypedConfirmation: true,
+		},
+	}, testLogger())
+
+	tmpFile := t.TempDir() + "/created-by-breakglass"
+	cmd := &protocol.CommandPayload{
+		RequestID:      "test-breakglass-valid",
+		Command:        "touch",
+		Args:           []string{tmpFile},
+		Level:          protocol.CapObserve,
+		ExecutionClass: protocol.ExecBreakglassDirect,
+		Breakglass: &protocol.BreakglassInvocation{
+			Reason:            "incident_response",
+			TypedConfirmation: protocol.BreakglassTypedConfirmationPhrase,
+		},
+		Timeout: 5 * time.Second,
+	}
+
+	result := e.Execute(context.Background(), cmd)
+	if result.ExitCode != 0 {
+		t.Fatalf("expected breakglass command to succeed, got exit %d stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if _, err := os.Stat(tmpFile); err != nil {
+		t.Fatalf("expected touched file to exist: %v", err)
 	}
 }

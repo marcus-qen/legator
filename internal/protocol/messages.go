@@ -4,6 +4,11 @@ package protocol
 
 import "time"
 
+const (
+	// BreakglassTypedConfirmationPhrase is the exact phrase required for host-direct mutation bypass.
+	BreakglassTypedConfirmationPhrase = "I understand this bypasses sandbox isolation"
+)
+
 // MessageType identifies the kind of message on the WebSocket wire.
 type MessageType string
 
@@ -102,14 +107,23 @@ type BreakglassPolicy struct {
 	RequireTypedConfirmation bool     `json:"require_typed_confirmation"`
 }
 
+// BreakglassInvocation carries explicit host-direct mutation bypass confirmation.
+type BreakglassInvocation struct {
+	Reason            string    `json:"reason,omitempty"`
+	TypedConfirmation string    `json:"typed_confirmation,omitempty"`
+	RequestedAt       time.Time `json:"requested_at,omitempty"`
+}
+
 // CommandPayload is sent from the control plane to execute on the probe.
 type CommandPayload struct {
-	RequestID string          `json:"request_id"`
-	Command   string          `json:"command"`
-	Args      []string        `json:"args,omitempty"`
-	Timeout   time.Duration   `json:"timeout"`
-	Level     CapabilityLevel `json:"level"`  // Required capability level
-	Stream    bool            `json:"stream"` // Stream output vs wait for completion
+	RequestID      string                `json:"request_id"`
+	Command        string                `json:"command"`
+	Args           []string              `json:"args,omitempty"`
+	Timeout        time.Duration         `json:"timeout"`
+	Level          CapabilityLevel       `json:"level"` // Required capability level
+	Stream         bool                  `json:"stream"`
+	ExecutionClass ExecutionClass        `json:"execution_class,omitempty"`
+	Breakglass     *BreakglassInvocation `json:"breakglass,omitempty"`
 }
 
 // CommandResultPayload is the probe's response to a command.
