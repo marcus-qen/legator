@@ -68,6 +68,43 @@ type fakeFederationSourceAdapter struct {
 	filters []fleet.InventoryFilter
 }
 
+type fakeRemoteExecutor struct {
+	execResult      *protocol.CommandResultPayload
+	execErr         error
+	inventoryResult *protocol.InventoryPayload
+	inventoryErr    error
+	executed        []protocol.CommandPayload
+}
+
+func (f *fakeRemoteExecutor) Execute(_ context.Context, _ *fleet.ProbeState, cmd protocol.CommandPayload, onChunk func(protocol.OutputChunkPayload)) (*protocol.CommandResultPayload, error) {
+	f.executed = append(f.executed, cmd)
+	if onChunk != nil {
+		onChunk(protocol.OutputChunkPayload{RequestID: cmd.RequestID, Stream: "stdout", Data: "remote-output", Seq: 1})
+	}
+	if f.execErr != nil {
+		return nil, f.execErr
+	}
+	if f.execResult != nil {
+		copy := *f.execResult
+		if copy.RequestID == "" {
+			copy.RequestID = cmd.RequestID
+		}
+		return &copy, nil
+	}
+	return &protocol.CommandResultPayload{RequestID: cmd.RequestID, ExitCode: 0, Stdout: "ok", Duration: 12}, nil
+}
+
+func (f *fakeRemoteExecutor) CollectInventory(_ context.Context, _ *fleet.ProbeState) (*protocol.InventoryPayload, error) {
+	if f.inventoryErr != nil {
+		return nil, f.inventoryErr
+	}
+	if f.inventoryResult != nil {
+		copy := *f.inventoryResult
+		return &copy, nil
+	}
+	return &protocol.InventoryPayload{Hostname: "remote-host", OS: "linux", Arch: "amd64", CollectedAt: time.Now().UTC()}, nil
+}
+
 func (f *fakeFederationSourceAdapter) Source() fleet.FederationSourceDescriptor {
 	return f.source
 }
@@ -326,6 +363,93 @@ func TestHandleProbeHealth_DefaultAndNotFound(t *testing.T) {
 
 	if rrMissing.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for missing probe, got %d", rrMissing.Code)
+	}
+}
+
+func TestHandleCreateProbe_Remote(t *testing.T) {
+	srv := newTestServer(t)
+	srv.remoteExecutor = &fakeRemoteExecutor{inventoryResult: &protocol.InventoryPayload{
+		Hostname:    "edge-01",
+		OS:          "linux",
+		Arch:        "amd64",
+		CollectedAt: time.Now().UTC(),
+	}}
+
+	body := `{"type":"remote","hostname":"edge-01","tags":["edge"],"remote":{"host":"10.10.0.5","port":22,"username":"root","password":"secret"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/probes", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	srv.handleCreateProbe(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var got fleet.ProbeState
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Type != fleet.ProbeTypeRemote {
+		t.Fatalf("expected remote type, got %s", got.Type)
+	}
+	if got.Remote == nil || got.Remote.Host != "10.10.0.5" {
+		t.Fatalf("expected remote host in response, got %+v", got.Remote)
+	}
+	if got.ID == "" {
+		t.Fatal("expected generated probe id")
+	}
+
+	stored, ok := srv.fleetMgr.Get(got.ID)
+	if !ok {
+		t.Fatalf("expected probe %s in fleet manager", got.ID)
+	}
+	if stored.RemoteCredentials == nil || stored.RemoteCredentials.Password == "" {
+		t.Fatalf("expected credentials persisted for remote probe")
+	}
+}
+
+func TestHandleDispatchCommand_RemoteProbeUsesSSHExecutor(t *testing.T) {
+	srv := newTestServer(t)
+	created, err := srv.fleetMgr.RegisterRemote(fleet.RemoteProbeRegistration{
+		ID:       "rpr-cmd",
+		Hostname: "edge-cmd",
+		Remote: fleet.RemoteProbeConfig{
+			Host:     "10.10.0.6",
+			Port:     22,
+			Username: "root",
+		},
+		Credentials: fleet.RemoteProbeCredentials{Password: "secret"},
+	})
+	if err != nil {
+		t.Fatalf("register remote probe: %v", err)
+	}
+	fakeExec := &fakeRemoteExecutor{execResult: &protocol.CommandResultPayload{ExitCode: 0, Stdout: "remote-ok", Duration: 10}}
+	srv.remoteExecutor = fakeExec
+
+	body := protocol.CommandPayload{RequestID: "req-remote", Command: "uname -a", Level: protocol.CapObserve}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/probes/rpr-cmd/command?wait=true&stream=true", bytes.NewReader(data))
+	req.SetPathValue("id", created.ID)
+	rr := httptest.NewRecorder()
+
+	srv.handleDispatchCommand(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if len(fakeExec.executed) != 1 {
+		t.Fatalf("expected remote executor to be invoked once, got %d", len(fakeExec.executed))
+	}
+	if fakeExec.executed[0].Command != "uname -a" {
+		t.Fatalf("unexpected dispatched command: %+v", fakeExec.executed[0])
+	}
+
+	var got protocol.CommandResultPayload
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode remote command response: %v", err)
+	}
+	if got.Stdout != "remote-ok" || got.RequestID != "req-remote" {
+		t.Fatalf("unexpected command result payload: %+v", got)
 	}
 }
 

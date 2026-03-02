@@ -244,6 +244,49 @@ func TestSetAPIKey(t *testing.T) {
 	}
 }
 
+func TestRegisterRemoteProbe(t *testing.T) {
+	m := NewManager(testLogger())
+	ps, err := m.RegisterRemote(RemoteProbeRegistration{
+		ID:       "rpr-1",
+		Hostname: "edge-router",
+		Remote: RemoteProbeConfig{
+			Host:     "192.168.1.10",
+			Port:     2222,
+			Username: "admin",
+		},
+		Credentials: RemoteProbeCredentials{Password: "secret"},
+		Tags:        []string{"edge", "prod"},
+	})
+	if err != nil {
+		t.Fatalf("register remote probe: %v", err)
+	}
+	if ps.Type != ProbeTypeRemote {
+		t.Fatalf("expected type remote, got %s", ps.Type)
+	}
+	if ps.Status != "pending" {
+		t.Fatalf("expected pending status, got %s", ps.Status)
+	}
+	if ps.Remote == nil || ps.Remote.Host != "192.168.1.10" || ps.Remote.Port != 2222 {
+		t.Fatalf("unexpected remote config: %+v", ps.Remote)
+	}
+	if ps.RemoteCredentials == nil || ps.RemoteCredentials.Password == "" {
+		t.Fatalf("expected remote credentials to be persisted in manager")
+	}
+
+	remote := m.ListRemote()
+	if len(remote) != 1 || remote[0].ID != "rpr-1" {
+		t.Fatalf("expected one remote probe, got %#v", remote)
+	}
+
+	if err := m.SetStatus("rpr-1", "online"); err != nil {
+		t.Fatalf("set status: %v", err)
+	}
+	updated, _ := m.Get("rpr-1")
+	if updated.Status != "online" {
+		t.Fatalf("expected online status, got %s", updated.Status)
+	}
+}
+
 func TestInventoryAggregatesAndFilters(t *testing.T) {
 	m := NewManager(testLogger())
 

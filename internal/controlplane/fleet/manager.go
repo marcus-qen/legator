@@ -13,21 +13,24 @@ import (
 
 // ProbeState represents the control plane view of a probe.
 type ProbeState struct {
-	ID          string                     `json:"id"`
-	Hostname    string                     `json:"hostname"`
-	OS          string                     `json:"os"`
-	Arch        string                     `json:"arch"`
-	Status      string                     `json:"status"` // pending, online, offline, degraded
-	PolicyLevel protocol.CapabilityLevel   `json:"policy_level"`
-	APIKey      string                     `json:"-"`
-	Registered  time.Time                  `json:"registered"`
-	LastSeen    time.Time                  `json:"last_seen"`
-	Inventory   *protocol.InventoryPayload `json:"inventory,omitempty"`
-	Labels      map[string]string          `json:"labels,omitempty"`
-	Tags        []string                   `json:"tags,omitempty"`
-	Health      *HealthScore               `json:"health,omitempty"`
-	TenantID    string                     `json:"tenant_id,omitempty"`
-	lastHB      *protocol.HeartbeatPayload
+	ID                string                     `json:"id"`
+	Hostname          string                     `json:"hostname"`
+	OS                string                     `json:"os"`
+	Arch              string                     `json:"arch"`
+	Status            string                     `json:"status"` // pending, online, offline, degraded
+	Type              string                     `json:"type,omitempty"`
+	PolicyLevel       protocol.CapabilityLevel   `json:"policy_level"`
+	APIKey            string                     `json:"-"`
+	Registered        time.Time                  `json:"registered"`
+	LastSeen          time.Time                  `json:"last_seen"`
+	Inventory         *protocol.InventoryPayload `json:"inventory,omitempty"`
+	Labels            map[string]string          `json:"labels,omitempty"`
+	Tags              []string                   `json:"tags,omitempty"`
+	Health            *HealthScore               `json:"health,omitempty"`
+	TenantID          string                     `json:"tenant_id,omitempty"`
+	Remote            *RemoteProbeConfig         `json:"remote,omitempty"`
+	RemoteCredentials *RemoteProbeCredentials    `json:"-"`
+	lastHB            *protocol.HeartbeatPayload
 }
 
 // Manager tracks all probes in the fleet.
@@ -57,6 +60,7 @@ func (m *Manager) Register(id, hostname, os, arch string) *ProbeState {
 		OS:          os,
 		Arch:        arch,
 		Status:      "online",
+		Type:        ProbeTypeAgent,
 		PolicyLevel: protocol.CapObserve, // default: read-only
 		Registered:  now,
 		LastSeen:    now,

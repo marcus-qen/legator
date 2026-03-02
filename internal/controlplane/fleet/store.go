@@ -74,6 +74,22 @@ func NewStore(dbPath string, logger *zap.Logger) (*Store, error) {
 				return err
 			},
 		},
+		{
+			Version:     3,
+			Description: "add remote probe metadata",
+			Up: func(tx *sql.Tx) error {
+				if _, err := tx.Exec(`ALTER TABLE probes ADD COLUMN probe_type TEXT NOT NULL DEFAULT 'agent'`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+					return err
+				}
+				if _, err := tx.Exec(`ALTER TABLE probes ADD COLUMN remote TEXT`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+					return err
+				}
+				if _, err := tx.Exec(`ALTER TABLE probes ADD COLUMN remote_credentials TEXT`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+					return err
+				}
+				return nil
+			},
+		},
 	})
 	if err := runner.Migrate(db); err != nil {
 		_ = db.Close()
@@ -128,6 +144,7 @@ func (s *Store) FindByHostname(hostname string) (*ProbeState, bool) {
 }
 
 func (s *Store) List() []*ProbeState                             { return s.mgr.List() }
+func (s *Store) ListRemote() []*ProbeState                       { return s.mgr.ListRemote() }
 func (s *Store) Inventory(filter InventoryFilter) FleetInventory { return s.mgr.Inventory(filter) }
 func (s *Store) Count() map[string]int                           { return s.mgr.Count() }
 func (s *Store) ListByTag(tag string) []*ProbeState              { return s.mgr.ListByTag(tag) }
@@ -141,6 +158,16 @@ func (s *Store) Register(id, hostname, os_, arch string) *ProbeState {
 	ps := s.mgr.Register(id, hostname, os_, arch)
 	_ = s.upsertProbe(ps)
 	return ps
+}
+
+// RegisterRemote adds an SSH-backed remote probe.
+func (s *Store) RegisterRemote(spec RemoteProbeRegistration) (*ProbeState, error) {
+	ps, err := s.mgr.RegisterRemote(spec)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.upsertProbe(ps)
+	return ps, nil
 }
 
 // Heartbeat updates the probe last-seen time.
@@ -212,6 +239,18 @@ func (s *Store) SetTenantID(id, tenantID string) error {
 	return err
 }
 
+// SetStatus updates probe status and persists the change.
+func (s *Store) SetStatus(id, status string) error {
+	if err := s.mgr.SetStatus(id, status); err != nil {
+		return err
+	}
+	ps, ok := s.mgr.Get(id)
+	if !ok {
+		return fmt.Errorf("unknown probe: %s", id)
+	}
+	return s.upsertProbe(ps)
+}
+
 // MarkOffline marks stale probes as offline and persists the change.
 func (s *Store) MarkOffline(threshold time.Duration) {
 	s.mgr.MarkOffline(threshold)
@@ -244,30 +283,48 @@ func (s *Store) Close() error {
 func (s *Store) upsertProbe(ps *ProbeState) error {
 	labels, _ := json.Marshal(ps.Labels)
 	tags, _ := json.Marshal(ps.Tags)
+
+	probeType := normalizeProbeType(ps.Type)
+	if probeType == "" {
+		probeType = ProbeTypeAgent
+	}
+
 	var inv []byte
 	if ps.Inventory != nil {
 		inv, _ = json.Marshal(ps.Inventory)
 	}
+	var remoteJSON []byte
+	if ps.Remote != nil {
+		remoteJSON, _ = json.Marshal(ps.Remote)
+	}
+	var credsJSON []byte
+	if ps.RemoteCredentials != nil {
+		credsJSON, _ = json.Marshal(ps.RemoteCredentials)
+	}
 
-	_, err := s.db.Exec(`INSERT INTO probes (id, hostname, os, arch, status, policy_level, api_key, registered, last_seen, labels, tags, inventory, tenant_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	_, err := s.db.Exec(`INSERT INTO probes (id, hostname, os, arch, status, probe_type, policy_level, api_key, registered, last_seen, labels, tags, inventory, tenant_id, remote, remote_credentials)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
-			hostname     = excluded.hostname,
-			os           = excluded.os,
-			arch         = excluded.arch,
-			status       = excluded.status,
-			policy_level = excluded.policy_level,
-			api_key      = excluded.api_key,
-			last_seen    = excluded.last_seen,
-			labels       = excluded.labels,
-			tags         = excluded.tags,
-			inventory    = excluded.inventory,
-			tenant_id    = excluded.tenant_id`,
+			hostname           = excluded.hostname,
+			os                 = excluded.os,
+			arch               = excluded.arch,
+			status             = excluded.status,
+			probe_type         = excluded.probe_type,
+			policy_level       = excluded.policy_level,
+			api_key            = excluded.api_key,
+			last_seen          = excluded.last_seen,
+			labels             = excluded.labels,
+			tags               = excluded.tags,
+			inventory          = excluded.inventory,
+			tenant_id          = excluded.tenant_id,
+			remote             = excluded.remote,
+			remote_credentials = excluded.remote_credentials`,
 		ps.ID,
 		ps.Hostname,
 		ps.OS,
 		ps.Arch,
 		ps.Status,
+		probeType,
 		string(ps.PolicyLevel),
 		ps.APIKey,
 		ps.Registered.Format(time.RFC3339Nano),
@@ -276,6 +333,8 @@ func (s *Store) upsertProbe(ps *ProbeState) error {
 		string(tags),
 		nullableJSON(inv),
 		ps.TenantID,
+		nullableJSON(remoteJSON),
+		nullableJSON(credsJSON),
 	)
 	return err
 }
@@ -292,7 +351,7 @@ func (s *Store) updateStatus(id, status string) error {
 }
 
 func (s *Store) loadAll() error {
-	rows, err := s.db.Query(`SELECT id, hostname, os, arch, status, policy_level, api_key, registered, last_seen, labels, tags, inventory, tenant_id FROM probes`)
+	rows, err := s.db.Query(`SELECT id, hostname, os, arch, status, probe_type, policy_level, api_key, registered, last_seen, labels, tags, inventory, tenant_id, remote, remote_credentials FROM probes`)
 	if err != nil {
 		return err
 	}
@@ -300,13 +359,15 @@ func (s *Store) loadAll() error {
 
 	for rows.Next() {
 		var (
-			id, hostname, os_, arch, status, policyLevel, apiKey string
-			registered, lastSeen                                 string
-			labelsJSON, tagsJSON                                 string
-			invJSON                                              sql.NullString
-			tenantID                                             string
+			id, hostname, os_, arch, status, probeType, policyLevel, apiKey string
+			registered, lastSeen                                            string
+			labelsJSON, tagsJSON                                            string
+			invJSON                                                         sql.NullString
+			tenantID                                                        string
+			remoteJSON                                                      sql.NullString
+			credsJSON                                                       sql.NullString
 		)
-		if err := rows.Scan(&id, &hostname, &os_, &arch, &status, &policyLevel, &apiKey, &registered, &lastSeen, &labelsJSON, &tagsJSON, &invJSON, &tenantID); err != nil {
+		if err := rows.Scan(&id, &hostname, &os_, &arch, &status, &probeType, &policyLevel, &apiKey, &registered, &lastSeen, &labelsJSON, &tagsJSON, &invJSON, &tenantID, &remoteJSON, &credsJSON); err != nil {
 			continue
 		}
 
@@ -316,6 +377,7 @@ func (s *Store) loadAll() error {
 			OS:          os_,
 			Arch:        arch,
 			Status:      status,
+			Type:        normalizeProbeType(probeType),
 			PolicyLevel: protocol.CapabilityLevel(policyLevel),
 			APIKey:      apiKey,
 			TenantID:    tenantID,
@@ -335,6 +397,18 @@ func (s *Store) loadAll() error {
 			var inv protocol.InventoryPayload
 			if err := json.Unmarshal([]byte(invJSON.String), &inv); err == nil {
 				ps.Inventory = &inv
+			}
+		}
+		if remoteJSON.Valid && strings.TrimSpace(remoteJSON.String) != "" {
+			var remote RemoteProbeConfig
+			if err := json.Unmarshal([]byte(remoteJSON.String), &remote); err == nil {
+				ps.Remote = &remote
+			}
+		}
+		if credsJSON.Valid && strings.TrimSpace(credsJSON.String) != "" {
+			var creds RemoteProbeCredentials
+			if err := json.Unmarshal([]byte(credsJSON.String), &creds); err == nil {
+				ps.RemoteCredentials = &creds
 			}
 		}
 

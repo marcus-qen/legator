@@ -10,14 +10,17 @@ import (
 // Both Manager (in-memory) and Store (SQLite-backed) implement this.
 type Fleet interface {
 	Register(id, hostname, os_, arch string) *ProbeState
+	RegisterRemote(spec RemoteProbeRegistration) (*ProbeState, error)
 	Heartbeat(id string, hb *protocol.HeartbeatPayload) error
 	UpdateInventory(id string, inv *protocol.InventoryPayload) error
 	Get(id string) (*ProbeState, bool)
 	FindByHostname(hostname string) (*ProbeState, bool)
 	List() []*ProbeState
+	ListRemote() []*ProbeState
 	Inventory(filter InventoryFilter) FleetInventory
 	SetPolicy(id string, level protocol.CapabilityLevel) error
 	SetAPIKey(id, apiKey string) error
+	SetStatus(id, status string) error
 	MarkOffline(threshold time.Duration)
 	SetOnline(id string) error
 	Count() map[string]int

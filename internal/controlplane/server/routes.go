@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/marcus-qen/legator/internal/controlplane/api"
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
@@ -52,6 +54,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/users/{id}", s.withPermission(auth.PermAdmin, s.handleDeleteUser))
 
 	// Fleet API
+	mux.HandleFunc("POST /api/v1/probes", s.withPermission(auth.PermFleetWrite, s.withTenantScope(s.handleCreateProbe)))
 	mux.HandleFunc("GET /api/v1/probes", s.withPermission(auth.PermFleetRead, s.withTenantScope(s.handleListProbes)))
 	mux.HandleFunc("GET /api/v1/probes/{id}", s.withPermission(auth.PermFleetRead, s.withTenantScope(s.handleGetProbe)))
 	mux.HandleFunc("GET /api/v1/probes/{id}/health", s.withPermission(auth.PermFleetRead, s.handleProbeHealth))
@@ -600,6 +603,80 @@ func (s *Server) handleGetProbe(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(ps)
 }
 
+func (s *Server) handleCreateProbe(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetWrite) {
+		return
+	}
+
+	var body struct {
+		ID       string   `json:"id"`
+		Type     string   `json:"type"`
+		Hostname string   `json:"hostname"`
+		OS       string   `json:"os"`
+		Arch     string   `json:"arch"`
+		Tags     []string `json:"tags"`
+		Remote   struct {
+			Host       string `json:"host"`
+			Port       int    `json:"port"`
+			Username   string `json:"username"`
+			AuthMode   string `json:"auth_mode"`
+			Password   string `json:"password"`
+			PrivateKey string `json:"private_key"`
+		} `json:"remote"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request")
+		return
+	}
+
+	if !strings.EqualFold(strings.TrimSpace(body.Type), fleet.ProbeTypeRemote) {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "only type=remote is supported on this endpoint")
+		return
+	}
+
+	probeID := strings.TrimSpace(body.ID)
+	if probeID == "" {
+		probeID = "rpr-" + uuid.New().String()[:8]
+	}
+
+	spec := fleet.RemoteProbeRegistration{
+		ID:       probeID,
+		Hostname: strings.TrimSpace(body.Hostname),
+		OS:       strings.TrimSpace(body.OS),
+		Arch:     strings.TrimSpace(body.Arch),
+		Tags:     body.Tags,
+		Remote: fleet.RemoteProbeConfig{
+			Host:     strings.TrimSpace(body.Remote.Host),
+			Port:     body.Remote.Port,
+			Username: strings.TrimSpace(body.Remote.Username),
+			AuthMode: strings.TrimSpace(body.Remote.AuthMode),
+		},
+		Credentials: fleet.RemoteProbeCredentials{
+			Password:   strings.TrimSpace(body.Remote.Password),
+			PrivateKey: strings.TrimSpace(body.Remote.PrivateKey),
+		},
+	}
+
+	if scope := tenant.ScopeFromContext(r.Context()); !scope.IsAdmin && len(scope.TenantIDs) == 1 {
+		spec.TenantID = scope.TenantIDs[0]
+	}
+
+	ps, err := s.fleetMgr.RegisterRemote(spec)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	s.emitAudit(audit.EventProbeRegistered, ps.ID, "api", fmt.Sprintf("Remote probe registered: %s", ps.Hostname))
+	if s.remoteScanner != nil {
+		go s.remoteScanner.ScanProbe(context.Background(), ps.ID)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(ps)
+}
+
 func (s *Server) handleProbeHealth(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(w, r, auth.PermFleetRead) {
 		return
@@ -687,6 +764,17 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if strings.EqualFold(ps.Type, fleet.ProbeTypeRemote) {
+		projection := s.invokeRemoteCommand(r.Context(), ps, cmd, wantWait, wantStream)
+		if projection != nil && projection.Envelope != nil && projection.Envelope.Dispatched {
+			s.emitAudit(audit.EventCommandSent, id, "api", fmt.Sprintf("Command dispatched (remote): %s", cmd.Command))
+			s.publishEvent(events.CommandDispatched, id, fmt.Sprintf("Remote command dispatched: %s", cmd.Command),
+				map[string]string{"request_id": projection.RequestID, "command": cmd.Command})
+		}
+		renderDispatchCommandHTTP(w, projection)
+		return
+	}
+
 	projection := corecommanddispatch.InvokeCommandForSurface(r.Context(), invokeInput, s.dispatchCore)
 	if projection != nil && projection.Envelope != nil && projection.Envelope.Dispatched {
 		s.emitAudit(audit.EventCommandSent, id, "api", fmt.Sprintf("Command dispatched: %s", cmd.Command))
@@ -695,6 +783,71 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 	}
 
 	renderDispatchCommandHTTP(w, projection)
+}
+
+func (s *Server) invokeRemoteCommand(ctx context.Context, ps *fleet.ProbeState, cmd protocol.CommandPayload, waitForResult, stream bool) *corecommanddispatch.CommandInvokeProjection {
+	projection := &corecommanddispatch.CommandInvokeProjection{
+		Surface:       corecommanddispatch.ProjectionDispatchSurfaceHTTP,
+		RequestID:     cmd.RequestID,
+		WaitForResult: waitForResult,
+		Envelope: &corecommanddispatch.CommandResultEnvelope{
+			RequestID:  cmd.RequestID,
+			Dispatched: true,
+		},
+	}
+	if s.remoteExecutor == nil {
+		projection.Envelope.Dispatched = false
+		projection.Envelope.Err = fmt.Errorf("remote executor unavailable")
+		return projection
+	}
+
+	run := func(execCtx context.Context) *corecommanddispatch.CommandResultEnvelope {
+		result, err := s.remoteExecutor.Execute(execCtx, ps, cmd, func(chunk protocol.OutputChunkPayload) {
+			if stream {
+				s.hub.DispatchChunk(chunk)
+			}
+		})
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				err = corecommanddispatch.ErrTimeout
+			}
+			return &corecommanddispatch.CommandResultEnvelope{
+				RequestID:  cmd.RequestID,
+				Dispatched: true,
+				Err:        err,
+			}
+		}
+
+		s.recordAudit(audit.Event{
+			Type:    audit.EventCommandResult,
+			ProbeID: ps.ID,
+			Actor:   "remote-probe",
+			Summary: "Remote command completed: " + cmd.RequestID,
+			Detail:  map[string]any{"exit_code": result.ExitCode, "duration_ms": result.Duration},
+		})
+		evtType := events.CommandCompleted
+		if result.ExitCode != 0 {
+			evtType = events.CommandFailed
+		}
+		s.publishEvent(evtType, ps.ID, fmt.Sprintf("Command %s exit=%d", cmd.RequestID, result.ExitCode),
+			map[string]any{"request_id": cmd.RequestID, "exit_code": result.ExitCode})
+
+		return &corecommanddispatch.CommandResultEnvelope{
+			RequestID:  cmd.RequestID,
+			Dispatched: true,
+			Result:     result,
+		}
+	}
+
+	if waitForResult {
+		projection.Envelope = run(ctx)
+		return projection
+	}
+
+	go func() {
+		_ = run(context.Background())
+	}()
+	return projection
 }
 
 func (s *Server) handleRotateKey(w http.ResponseWriter, r *http.Request) {

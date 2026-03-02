@@ -75,6 +75,8 @@ type Server struct {
 	fleetMgr        fleet.Fleet
 	fleetStore      *fleet.Store
 	federationStore *fleet.FederationStore
+	remoteExecutor  fleet.RemoteProbeExecutor
+	remoteScanner   *fleet.RemoteScanner
 	tokenStore      *api.TokenStore
 	cmdTracker      *cmdtracker.Tracker
 	approvalQueue   *approval.Queue
@@ -203,6 +205,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 		return nil, err
 	}
 	s.initFederation()
+	s.initRemoteProbes()
 	tokensDBPath := filepath.Join(s.cfg.DataDir, "tokens.db")
 	tokenStore, err := api.NewTokenStore(tokensDBPath)
 	if err != nil {
@@ -323,6 +326,10 @@ func (s *Server) Run(ctx context.Context) error {
 
 	// Start offline checker
 	go s.offlineChecker(ctx)
+
+	if s.remoteScanner != nil {
+		go s.remoteScanner.Run(ctx)
+	}
 
 	// Forward event bus events to webhooks
 	go s.webhookForwarder(ctx)
@@ -485,6 +492,11 @@ func (s *Server) initFederation() {
 			Site:    "local",
 		}),
 	)
+}
+
+func (s *Server) initRemoteProbes() {
+	s.remoteExecutor = fleet.NewRemoteExecutor()
+	s.remoteScanner = fleet.NewRemoteScanner(s.fleetMgr, s.remoteExecutor, s.logger.Named("remote-scan"), 2*time.Minute)
 }
 
 func (s *Server) initAudit() {

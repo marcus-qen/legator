@@ -287,6 +287,59 @@ func TestStoreDBFileCreated(t *testing.T) {
 	}
 }
 
+func TestStoreRegisterRemotePersists(t *testing.T) {
+	dbPath := tempDBPath(t)
+
+	s1, err := NewStore(dbPath, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s1.RegisterRemote(RemoteProbeRegistration{
+		ID:       "rpr-persist",
+		Hostname: "remote-persist",
+		Remote: RemoteProbeConfig{
+			Host:     "10.0.0.22",
+			Port:     22,
+			Username: "root",
+		},
+		Credentials: RemoteProbeCredentials{Password: "secret"},
+	})
+	if err != nil {
+		t.Fatalf("register remote probe: %v", err)
+	}
+	if err := s1.SetStatus("rpr-persist", "online"); err != nil {
+		t.Fatalf("set status: %v", err)
+	}
+	s1.Close()
+
+	s2, err := NewStore(dbPath, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+
+	ps, ok := s2.Get("rpr-persist")
+	if !ok {
+		t.Fatal("expected remote probe after reopen")
+	}
+	if ps.Type != ProbeTypeRemote {
+		t.Fatalf("expected type remote, got %s", ps.Type)
+	}
+	if ps.Status != "online" {
+		t.Fatalf("expected online status, got %s", ps.Status)
+	}
+	if ps.Remote == nil || ps.Remote.Host != "10.0.0.22" {
+		t.Fatalf("unexpected remote config after reopen: %+v", ps.Remote)
+	}
+	if ps.RemoteCredentials == nil || ps.RemoteCredentials.Password != "secret" {
+		t.Fatalf("expected credentials restored after reopen")
+	}
+
+	if remotes := s2.ListRemote(); len(remotes) != 1 || remotes[0].ID != "rpr-persist" {
+		t.Fatalf("expected one remote probe from ListRemote, got %#v", remotes)
+	}
+}
+
 func TestStoreSetAPIKeyPersists(t *testing.T) {
 	dbPath := tempDBPath(t)
 
