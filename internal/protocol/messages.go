@@ -74,6 +74,34 @@ const (
 	CapRemediate CapabilityLevel = "remediate"
 )
 
+// ExecutionClass describes the execution lane required by policy v2.
+type ExecutionClass string
+
+const (
+	ExecObserveDirect    ExecutionClass = "observe_direct"
+	ExecDiagnoseSandbox  ExecutionClass = "diagnose_sandbox"
+	ExecRemediateSandbox ExecutionClass = "remediate_sandbox"
+	ExecBreakglassDirect ExecutionClass = "breakglass_direct"
+)
+
+// ApprovalMode defines what human approval is required for execution.
+type ApprovalMode string
+
+const (
+	ApprovalNone         ApprovalMode = "none"
+	ApprovalMutationGate ApprovalMode = "mutation_gate"
+	ApprovalPlanFirst    ApprovalMode = "plan_first"
+	ApprovalEveryAction  ApprovalMode = "every_action"
+	ApprovalTwoPerson    ApprovalMode = "two_person"
+)
+
+// BreakglassPolicy defines emergency override constraints.
+type BreakglassPolicy struct {
+	Enabled                  bool     `json:"enabled"`
+	AllowedReasons           []string `json:"allowed_reasons,omitempty"`
+	RequireTypedConfirmation bool     `json:"require_typed_confirmation"`
+}
+
 // CommandPayload is sent from the control plane to execute on the probe.
 type CommandPayload struct {
 	RequestID string          `json:"request_id"`
@@ -168,6 +196,13 @@ type PolicyUpdatePayload struct {
 	Allowed  []string        `json:"allowed,omitempty"` // Command allowlist
 	Blocked  []string        `json:"blocked,omitempty"` // Command blocklist
 	Paths    []string        `json:"paths,omitempty"`   // Protected paths
+
+	ExecutionClassRequired ExecutionClass   `json:"execution_class_required,omitempty"`
+	SandboxRequired        bool             `json:"sandbox_required,omitempty"`
+	ApprovalMode           ApprovalMode     `json:"approval_mode,omitempty"`
+	Breakglass             BreakglassPolicy `json:"breakglass,omitempty"`
+	MaxRuntimeSec          int              `json:"max_runtime_sec,omitempty"`
+	AllowedScopes          []string         `json:"allowed_scopes,omitempty"`
 }
 
 // KeyRotationPayload pushes a replacement API key to a probe.

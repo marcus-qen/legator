@@ -23,6 +23,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/metrics"
 	"github.com/marcus-qen/legator/internal/controlplane/modeldock"
+	controlpolicy "github.com/marcus-qen/legator/internal/controlplane/policy"
 	"github.com/marcus-qen/legator/internal/controlplane/tenant"
 	"github.com/marcus-qen/legator/internal/protocol"
 	"go.uber.org/zap"
@@ -1709,6 +1710,13 @@ func (s *Server) handleCreatePolicy(w http.ResponseWriter, r *http.Request) {
 		Allowed     []string                 `json:"allowed"`
 		Blocked     []string                 `json:"blocked"`
 		Paths       []string                 `json:"paths"`
+
+		ExecutionClassRequired protocol.ExecutionClass   `json:"execution_class_required"`
+		SandboxRequired        *bool                     `json:"sandbox_required"`
+		ApprovalMode           protocol.ApprovalMode     `json:"approval_mode"`
+		Breakglass             protocol.BreakglassPolicy `json:"breakglass"`
+		MaxRuntimeSec          int                       `json:"max_runtime_sec"`
+		AllowedScopes          []string                  `json:"allowed_scopes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request")
@@ -1718,7 +1726,50 @@ func (s *Server) handleCreatePolicy(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", "name required")
 		return
 	}
-	tpl := s.policyStore.Create(body.Name, body.Description, body.Level, body.Allowed, body.Blocked, body.Paths)
+
+	opts := controlpolicy.DefaultTemplateOptionsForLevel(body.Level)
+	if body.ExecutionClassRequired != "" {
+		opts.ExecutionClassRequired = body.ExecutionClassRequired
+	}
+	if body.SandboxRequired != nil {
+		opts.SandboxRequired = *body.SandboxRequired
+	}
+	if body.ApprovalMode != "" {
+		opts.ApprovalMode = body.ApprovalMode
+	}
+	if body.Breakglass.Enabled || body.Breakglass.RequireTypedConfirmation || len(body.Breakglass.AllowedReasons) > 0 {
+		opts.Breakglass = body.Breakglass
+	}
+	if body.MaxRuntimeSec != 0 {
+		opts.MaxRuntimeSec = body.MaxRuntimeSec
+	}
+	if body.AllowedScopes != nil {
+		opts.AllowedScopes = body.AllowedScopes
+	}
+	opts = controlpolicy.NormalizeTemplateOptions(opts)
+
+	if err := controlpolicy.ValidateExecutionClass(opts.ExecutionClassRequired); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if err := controlpolicy.ValidateApprovalMode(opts.ApprovalMode); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if opts.MaxRuntimeSec < 0 || opts.MaxRuntimeSec > controlpolicy.MaxPolicyRuntimeSec {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("max_runtime_sec must be between 0 and %d", controlpolicy.MaxPolicyRuntimeSec))
+		return
+	}
+	if err := controlpolicy.ValidateBreakglass(opts.Breakglass); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if err := controlpolicy.ValidateAllowedScopes(opts.AllowedScopes); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	tpl := s.policyStore.Create(body.Name, body.Description, body.Level, body.Allowed, body.Blocked, body.Paths, opts)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(tpl)

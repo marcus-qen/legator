@@ -180,6 +180,12 @@ func (a *Agent) handleMessage(env protocol.Envelope) {
 		a.config.PolicyAllowed = append([]string(nil), policy.Allowed...)
 		a.config.PolicyBlocked = append([]string(nil), policy.Blocked...)
 		a.config.PolicyPaths = append([]string(nil), policy.Paths...)
+		a.config.PolicyExecutionClassRequired = policy.ExecutionClassRequired
+		a.config.PolicySandboxRequired = policy.SandboxRequired
+		a.config.PolicyApprovalMode = policy.ApprovalMode
+		a.config.PolicyBreakglass = policy.Breakglass
+		a.config.PolicyMaxRuntimeSec = policy.MaxRuntimeSec
+		a.config.PolicyAllowedScopes = append([]string(nil), policy.AllowedScopes...)
 		if err := a.config.Save(a.config.ConfigDir); err != nil {
 			a.logger.Error("failed to persist policy update", zap.Error(err))
 		}
