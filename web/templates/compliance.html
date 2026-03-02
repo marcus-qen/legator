@@ -1,0 +1,350 @@
+{{define "title"}}Compliance — Legator{{end}}
+
+{{define "header"}}
+<div>
+  <h1 class="page-title">Compliance</h1>
+  <span class="page-meta">Fleet-wide security posture checks</span>
+</div>
+<div class="header-actions">
+  <button class="btn btn-primary" id="compliance-scan-btn" type="button">Run Scan</button>
+</div>
+{{end}}
+
+{{define "content"}}
+<section class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Fleet Score</h2>
+    <span class="panel-sub" id="compliance-last-scan">No scan run yet</span>
+  </div>
+  <div class="compliance-score-row" id="compliance-score-row">
+    <div class="compliance-score-box">
+      <span class="compliance-score-value" id="compliance-score-pct">—</span>
+      <span class="compliance-score-label">Overall Score</span>
+    </div>
+    <div class="compliance-stat-grid" id="compliance-stat-grid">
+      <div class="compliance-stat pass">
+        <span class="compliance-stat-value" id="stat-pass">—</span>
+        <span class="compliance-stat-label">Passing</span>
+      </div>
+      <div class="compliance-stat fail">
+        <span class="compliance-stat-value" id="stat-fail">—</span>
+        <span class="compliance-stat-label">Failing</span>
+      </div>
+      <div class="compliance-stat warning">
+        <span class="compliance-stat-value" id="stat-warn">—</span>
+        <span class="compliance-stat-label">Warning</span>
+      </div>
+      <div class="compliance-stat unknown">
+        <span class="compliance-stat-value" id="stat-unknown">—</span>
+        <span class="compliance-stat-label">Unknown</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Results</h2>
+    <div class="panel-filters">
+      <select class="input input-small" id="filter-status">
+        <option value="">All statuses</option>
+        <option value="pass">Pass</option>
+        <option value="fail">Fail</option>
+        <option value="warning">Warning</option>
+        <option value="unknown">Unknown</option>
+        <option value="skipped">Skipped</option>
+      </select>
+      <select class="input input-small" id="filter-category">
+        <option value="">All categories</option>
+        <option value="patching">Patching</option>
+        <option value="ssh">SSH</option>
+        <option value="firewall">Firewall</option>
+        <option value="storage">Storage</option>
+        <option value="accounts">Accounts</option>
+        <option value="services">Services</option>
+      </select>
+      <input class="input input-small" id="filter-probe" placeholder="Filter by probe ID…">
+      <button class="btn" id="compliance-refresh-btn" type="button">Refresh</button>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Check</th>
+          <th>Category</th>
+          <th>Severity</th>
+          <th>Probe</th>
+          <th>Status</th>
+          <th>Evidence</th>
+          <th>Checked At</th>
+        </tr>
+      </thead>
+      <tbody id="compliance-results-body">
+        <tr><td colspan="7" class="empty-state">Run a scan to see results.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Available Checks</h2>
+    <span class="panel-sub" id="checks-count">loading…</span>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Name</th>
+          <th>Category</th>
+          <th>Severity</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody id="compliance-checks-body">
+        <tr><td colspan="5" class="empty-state">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{{end}}
+
+{{define "scripts"}}
+<script>
+(() => {
+  const canWrite = {{if hasPermission .CurrentUser "fleet:write"}}true{{else}}false{{end}};
+
+  const scanBtn = document.getElementById('compliance-scan-btn');
+  const refreshBtn = document.getElementById('compliance-refresh-btn');
+  const filterStatus = document.getElementById('filter-status');
+  const filterCategory = document.getElementById('filter-category');
+  const filterProbe = document.getElementById('filter-probe');
+
+  const scorePct = document.getElementById('compliance-score-pct');
+  const statPass = document.getElementById('stat-pass');
+  const statFail = document.getElementById('stat-fail');
+  const statWarn = document.getElementById('stat-warn');
+  const statUnknown = document.getElementById('stat-unknown');
+  const lastScanEl = document.getElementById('compliance-last-scan');
+
+  const resultsBody = document.getElementById('compliance-results-body');
+  const checksBody = document.getElementById('compliance-checks-body');
+  const checksCount = document.getElementById('checks-count');
+
+  function toast(message, kind) {
+    if (window.LegatorUI?.showToast) {
+      window.LegatorUI.showToast(message, kind || 'info');
+    }
+  }
+
+  function esc(value) {
+    return String(value || '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  function fmtTime(value) {
+    if (!value) return '—';
+    const dt = new Date(value);
+    if (Number.isNaN(dt.getTime())) return value;
+    return dt.toLocaleString();
+  }
+
+  function statusTag(status) {
+    const v = String(status || '').toLowerCase();
+    const cls = {
+      pass: 'tag-online',
+      fail: 'tag-offline',
+      warning: 'tag-degraded',
+      warning: 'tag-degraded',
+      unknown: 'tag-pending',
+      skipped: '',
+    }[v] || '';
+    return `<span class="tag ${cls}">${esc(v)}</span>`;
+  }
+
+  function severityTag(severity) {
+    const v = String(severity || '').toLowerCase();
+    const cls = {
+      critical: 'tag-offline',
+      high: 'tag-degraded',
+      medium: 'tag-pending',
+      low: '',
+      info: '',
+    }[v] || '';
+    return `<span class="tag ${cls}">${esc(v)}</span>`;
+  }
+
+  async function requestJSON(url, options) {
+    const response = await fetch(url, {
+      credentials: 'include',
+      cache: 'no-store',
+      ...options,
+    });
+    let payload = null;
+    try { payload = await response.json(); } catch {}
+    if (!response.ok) {
+      const msg = payload?.message || payload?.error || response.statusText;
+      throw new Error(msg);
+    }
+    return payload;
+  }
+
+  function renderResults(results) {
+    const list = Array.isArray(results) ? results : [];
+    if (!list.length) {
+      resultsBody.innerHTML = '<tr><td colspan="7" class="empty-state">No results match your filters.</td></tr>';
+      return;
+    }
+    resultsBody.innerHTML = list.map(r => `
+      <tr>
+        <td><strong>${esc(r.check_name || r.check_id)}</strong></td>
+        <td><span class="tag">${esc(r.category)}</span></td>
+        <td>${severityTag(r.severity)}</td>
+        <td class="id-text">${esc(r.probe_id)}</td>
+        <td>${statusTag(r.status)}</td>
+        <td class="evidence-cell" title="${esc(r.evidence)}">${esc(r.evidence)}</td>
+        <td class="muted">${fmtTime(r.timestamp)}</td>
+      </tr>
+    `).join('');
+  }
+
+  function renderSummary(summary) {
+    if (!summary) return;
+    const pct = typeof summary.score_pct === 'number' ? summary.score_pct.toFixed(1) : '0.0';
+    scorePct.textContent = pct + '%';
+
+    const colour = summary.score_pct >= 80 ? '#22c55e' : summary.score_pct >= 50 ? '#f59e0b' : '#ef4444';
+    scorePct.style.color = colour;
+
+    statPass.textContent = summary.passing ?? '—';
+    statFail.textContent = summary.failing ?? '—';
+    statWarn.textContent = summary.warning ?? '—';
+    statUnknown.textContent = summary.unknown ?? '—';
+  }
+
+  async function loadSummary() {
+    try {
+      const summary = await requestJSON('/api/v1/compliance/summary');
+      renderSummary(summary);
+    } catch (err) {
+      scorePct.textContent = '—';
+    }
+  }
+
+  async function loadResults() {
+    const params = new URLSearchParams();
+    const status = filterStatus.value;
+    const category = filterCategory.value;
+    const probe = filterProbe.value.trim();
+    if (status) params.set('status', status);
+    if (category) params.set('category', category);
+    if (probe) params.set('probe_id', probe);
+    params.set('limit', '200');
+
+    try {
+      const payload = await requestJSON('/api/v1/compliance/results?' + params.toString());
+      renderResults(payload?.results || []);
+    } catch (err) {
+      resultsBody.innerHTML = `<tr><td colspan="7" class="empty-state">Failed to load results: ${esc(err.message)}</td></tr>`;
+    }
+  }
+
+  async function loadChecks() {
+    try {
+      const payload = await requestJSON('/api/v1/compliance/checks');
+      const checks = Array.isArray(payload?.checks) ? payload.checks : [];
+      checksCount.textContent = `${checks.length} check${checks.length === 1 ? '' : 's'}`;
+      if (!checks.length) {
+        checksBody.innerHTML = '<tr><td colspan="5" class="empty-state">No checks available.</td></tr>';
+        return;
+      }
+      checksBody.innerHTML = checks.map(c => `
+        <tr>
+          <td class="id-text">${esc(c.id)}</td>
+          <td>${esc(c.name)}</td>
+          <td><span class="tag">${esc(c.category)}</span></td>
+          <td>${severityTag(c.severity)}</td>
+          <td class="muted">${esc(c.description)}</td>
+        </tr>
+      `).join('');
+    } catch (err) {
+      checksBody.innerHTML = `<tr><td colspan="5" class="empty-state">Failed to load checks: ${esc(err.message)}</td></tr>`;
+    }
+  }
+
+  async function runScan() {
+    if (!canWrite) {
+      toast('fleet:write permission required to trigger a scan', 'warning');
+      return;
+    }
+
+    scanBtn.disabled = true;
+    scanBtn.textContent = 'Scanning…';
+    lastScanEl.textContent = 'Scan in progress…';
+
+    try {
+      const payload = await requestJSON('/api/v1/compliance/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+
+      lastScanEl.textContent = `Last scan: ${fmtTime(payload?.ended_at)} · ${payload?.results?.length ?? 0} checks`;
+      renderSummary(payload?.summary);
+      renderResults(payload?.results || []);
+      toast('Compliance scan complete', 'success');
+    } catch (err) {
+      toast(`Scan failed: ${err.message}`, 'error');
+      lastScanEl.textContent = 'Scan failed';
+    } finally {
+      scanBtn.disabled = false;
+      scanBtn.textContent = 'Run Scan';
+    }
+  }
+
+  if (!canWrite) {
+    scanBtn.setAttribute('disabled', 'disabled');
+  }
+
+  scanBtn.addEventListener('click', runScan);
+  refreshBtn.addEventListener('click', () => { loadResults(); loadSummary(); });
+
+  filterStatus.addEventListener('change', loadResults);
+  filterCategory.addEventListener('change', loadResults);
+  filterProbe.addEventListener('input', () => {
+    clearTimeout(filterProbe._t);
+    filterProbe._t = setTimeout(loadResults, 300);
+  });
+
+  // Initial load
+  loadSummary();
+  loadResults();
+  loadChecks();
+})();
+</script>
+
+<style>
+.header-actions { display: flex; align-items: center; gap: 0.75rem; }
+.compliance-score-row { display: flex; align-items: center; gap: 2rem; padding: 1rem 0; flex-wrap: wrap; }
+.compliance-score-box { display: flex; flex-direction: column; align-items: center; min-width: 120px; }
+.compliance-score-value { font-size: 3rem; font-weight: 700; line-height: 1; }
+.compliance-score-label { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem; }
+.compliance-stat-grid { display: grid; grid-template-columns: repeat(4, auto); gap: 1.5rem; }
+.compliance-stat { display: flex; flex-direction: column; align-items: center; }
+.compliance-stat-value { font-size: 1.5rem; font-weight: 600; }
+.compliance-stat-label { font-size: 0.75rem; color: var(--text-muted); }
+.compliance-stat.pass .compliance-stat-value { color: var(--status-online, #22c55e); }
+.compliance-stat.fail .compliance-stat-value { color: var(--status-offline, #ef4444); }
+.compliance-stat.warning .compliance-stat-value { color: var(--status-degraded, #f59e0b); }
+.compliance-stat.unknown .compliance-stat-value { color: var(--text-muted); }
+.panel-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-left: auto; }
+.input-small { padding: 0.3rem 0.6rem; font-size: 0.85rem; min-width: 120px; }
+.evidence-cell { max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+{{end}}

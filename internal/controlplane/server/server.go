@@ -18,6 +18,7 @@ import (
 
 	"github.com/marcus-qen/legator/internal/controlplane/alerts"
 	"github.com/marcus-qen/legator/internal/controlplane/api"
+	"github.com/marcus-qen/legator/internal/controlplane/compliance"
 	"github.com/marcus-qen/legator/internal/controlplane/approval"
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
@@ -147,6 +148,10 @@ type Server struct {
 	discoveryStore    *discovery.Store
 	discoveryHandlers *discovery.Handler
 
+	// Compliance
+	complianceStore    *compliance.Store
+	complianceHandlers *compliance.Handler
+
 	// Multi-tenant isolation
 	tenantStore *tenant.Store
 
@@ -236,6 +241,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initKubeflow()
 	s.initGrafana()
 	s.initDiscovery()
+	s.initCompliance()
 	s.initDrills()
 	s.initIncidents()
 	s.initLLM()
@@ -444,6 +450,9 @@ func (s *Server) Close() {
 	}
 	if s.discoveryStore != nil {
 		s.discoveryStore.Close()
+	}
+	if s.complianceStore != nil {
+		s.complianceStore.Close()
 	}
 	if s.incidentStore != nil {
 		s.incidentStore.Close()
@@ -869,6 +878,25 @@ func (s *Server) initDiscovery() {
 	s.logger.Info("discovery store opened", zap.String("path", discoveryDBPath))
 }
 
+func (s *Server) initCompliance() {
+	complianceDBPath := filepath.Join(s.cfg.DataDir, "compliance.db")
+	store, err := compliance.NewStore(complianceDBPath)
+	if err != nil {
+		s.logger.Warn("cannot open compliance database, falling back to in-memory",
+			zap.String("path", complianceDBPath), zap.Error(err))
+		store, err = compliance.NewStore(":memory:")
+		if err != nil {
+			s.logger.Error("cannot initialize compliance store", zap.Error(err))
+			return
+		}
+	}
+	s.complianceStore = store
+
+	scanner := compliance.NewScanner(s.fleetMgr, s.remoteExecutor, store, s.logger.Named("compliance"))
+	s.complianceHandlers = compliance.NewHandler(scanner, store)
+	s.logger.Info("compliance store opened", zap.String("path", complianceDBPath))
+}
+
 func (s *Server) initLLM() {
 	if s.modelProviderMgr == nil {
 		s.modelProviderMgr = modeldock.NewProviderManager(llm.ProviderConfig{
@@ -1175,7 +1203,7 @@ func (s *Server) loadTemplates() {
 	tmplDir := filepath.Join("web", "templates")
 	pt := &pageTemplates{templates: make(map[string]pageTemplate)}
 
-	pages := []string{"fleet", "federation", "probe-detail", "chat", "fleet-chat", "approvals", "audit", "alerts", "model-dock", "cloud-connectors", "network-devices", "discovery", "jobs"}
+	pages := []string{"fleet", "federation", "probe-detail", "chat", "fleet-chat", "approvals", "audit", "alerts", "model-dock", "cloud-connectors", "network-devices", "discovery", "jobs", "compliance"}
 	for _, page := range pages {
 		t, err := template.New("").Funcs(templateFuncs()).ParseFiles(
 			filepath.Join(tmplDir, "_base.html"),

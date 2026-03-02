@@ -49,6 +49,10 @@
           <svg class="icon" viewBox="0 0 24 24"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0" fill="none" stroke="currentColor" stroke-width="2"/></svg>
           Alerts
         </a>
+        <a href="/compliance" class="nav-link{{if eq .ActiveNav "compliance"}} active{{end}}">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+          Compliance
+        </a>
         {{end}}
         {{if hasPermission .CurrentUser "approval:read"}}
         <a href="/approvals" class="nav-link{{if eq .ActiveNav "approvals"}} active{{end}}">

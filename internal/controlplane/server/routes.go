@@ -123,6 +123,19 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/v1/discovery/install-token", s.withPermission(auth.PermFleetWrite, s.handleDiscoveryUnavailable))
 	}
 
+	// Compliance
+	if s.complianceHandlers != nil {
+		mux.HandleFunc("POST /api/v1/compliance/scan", s.withPermission(auth.PermFleetWrite, s.complianceHandlers.HandleScan))
+		mux.HandleFunc("GET /api/v1/compliance/results", s.withPermission(auth.PermFleetRead, s.complianceHandlers.HandleResults))
+		mux.HandleFunc("GET /api/v1/compliance/summary", s.withPermission(auth.PermFleetRead, s.complianceHandlers.HandleSummary))
+		mux.HandleFunc("GET /api/v1/compliance/checks", s.withPermission(auth.PermFleetRead, s.complianceHandlers.HandleChecks))
+	} else {
+		mux.HandleFunc("POST /api/v1/compliance/scan", s.withPermission(auth.PermFleetWrite, s.handleComplianceUnavailable))
+		mux.HandleFunc("GET /api/v1/compliance/results", s.withPermission(auth.PermFleetRead, s.handleComplianceUnavailable))
+		mux.HandleFunc("GET /api/v1/compliance/summary", s.withPermission(auth.PermFleetRead, s.handleComplianceUnavailable))
+		mux.HandleFunc("GET /api/v1/compliance/checks", s.withPermission(auth.PermFleetRead, s.handleComplianceUnavailable))
+	}
+
 	// Metrics
 	metricsCollector := metrics.NewCollector(
 		s.fleetMgr,
@@ -416,6 +429,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /network-devices", s.handleNetworkDevicesPage)
 	mux.HandleFunc("GET /discovery", s.handleDiscoveryPage)
 	mux.HandleFunc("GET /jobs", s.handleJobsPage)
+	mux.HandleFunc("GET /compliance", s.handleCompliancePage)
 
 	// WebSocket for probes
 	mux.HandleFunc("GET /ws/probe", s.hub.HandleProbeWS)
@@ -2177,6 +2191,30 @@ func (s *Server) handleGrafanaUnavailable(w http.ResponseWriter, r *http.Request
 
 func (s *Server) handleDiscoveryUnavailable(w http.ResponseWriter, r *http.Request) {
 	writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "discovery unavailable")
+}
+
+func (s *Server) handleComplianceUnavailable(w http.ResponseWriter, r *http.Request) {
+	writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "compliance engine unavailable")
+}
+
+func (s *Server) handleCompliancePage(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
+	if s.pages == nil {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, "<h1>Compliance</h1><p>Template not loaded</p>")
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data := BasePage{
+		CurrentUser: s.currentTemplateUser(r),
+		Version:     Version,
+		ActiveNav:   "compliance",
+	}
+	if err := s.pages.Render(w, "compliance", data); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
+	}
 }
 
 // handleOpenAPISpec serves the OpenAPI 3.1 specification from docs/openapi.yaml.
