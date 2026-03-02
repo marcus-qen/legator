@@ -142,3 +142,4 @@ PUT /api/v1/model-profiles/{id}
 PUT /api/v1/network/devices/{id}
 PUT /api/v1/probes/{id}/tags
 # Stable REST API routes (v1 + health/version + MCP transport)
+GET /api/v1/openapi.yaml

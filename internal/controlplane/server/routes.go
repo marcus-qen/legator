@@ -29,6 +29,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Health + version
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /version", s.handleVersion)
+	// OpenAPI spec (public, no auth required)
+	mux.HandleFunc("GET /api/v1/openapi.yaml", s.handleOpenAPISpec)
 
 	// Login/session
 	loginOpts := auth.LoginPageOptions{}
@@ -1867,4 +1869,18 @@ func (s *Server) handleGrafanaUnavailable(w http.ResponseWriter, r *http.Request
 
 func (s *Server) handleDiscoveryUnavailable(w http.ResponseWriter, r *http.Request) {
 	writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "discovery unavailable")
+}
+
+// handleOpenAPISpec serves the OpenAPI 3.1 specification from docs/openapi.yaml.
+// No authentication is required — the spec is public API documentation.
+func (s *Server) handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
+	specPath := filepath.Join("docs", "openapi.yaml")
+	data, err := os.ReadFile(specPath)
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, "not_found", "OpenAPI spec not available")
+		return
+	}
+	w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }

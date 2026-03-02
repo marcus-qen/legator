@@ -1,0 +1,4973 @@
+openapi: "3.1.0"
+
+info:
+  title: Legator API
+  version: 1.0.0-beta.1
+  description: |
+    Legator is a fleet management control plane for distributed probe agents.
+    It exposes REST endpoints for probe lifecycle, command dispatch, reliability
+    engineering, alerting, scheduling, and multi-tenant federation.
+
+    **Authentication:** Include `Authorization: Bearer lgk_<64hex>` on every
+    `/api/v1/*` request, or send the `legator_session` cookie obtained via
+    `POST /login`.
+
+    All API responses are `application/json`. Request bodies for POST/PUT/PATCH
+    must be JSON (max 1 MB). Errors use the shape:
+    ```json
+    {"error": "not_found", "message": "probe not found"}
+    ```
+  contact:
+    name: Legator Project
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:9080
+    description: Default local instance
+
+tags:
+  - name: System
+    description: Health and version endpoints
+  - name: Auth
+    description: Login, logout, OIDC, and current user
+  - name: Admin
+    description: User and API key management (requires admin permission)
+  - name: Tokens
+    description: Registration token management
+  - name: Fleet
+    description: Probe fleet management and aggregate views
+  - name: Probes
+    description: Per-probe operations and commands
+  - name: Reliability
+    description: Scorecards, failure drills, and incident management
+  - name: Alerts
+    description: Alert rules, routing policies, and escalation policies
+  - name: Approvals
+    description: Human-in-the-loop command approval queue
+  - name: Audit
+    description: Audit log access and export
+  - name: Commands
+    description: Command tracking and SSE streaming
+  - name: Discovery
+    description: Network discovery scans and agentless inventory
+  - name: Jobs
+    description: Scheduled job management and run lifecycle
+  - name: Webhooks
+    description: Outbound webhook endpoint management
+  - name: Policies
+    description: Policy template management
+  - name: Chat
+    description: LLM-powered probe and fleet chat
+  - name: Events
+    description: Server-Sent Events platform event stream
+  - name: Metrics
+    description: Prometheus-compatible metrics snapshot
+  - name: ModelDock
+    description: LLM model profile management
+  - name: CloudConnectors
+    description: Cloud provider connectors and agentless asset discovery
+  - name: AutomationPacks
+    description: Automation pack definitions and executions
+  - name: Kubeflow
+    description: Kubeflow adapter (optional, requires LEGATOR_KUBEFLOW_ENABLED=true)
+  - name: Grafana
+    description: Grafana adapter (optional, requires LEGATOR_GRAFANA_ENABLED=true)
+  - name: NetworkDevices
+    description: Managed network device inventory (SNMP/SSH)
+
+security:
+  - bearerAuth: []
+  - sessionCookie: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: "lgk_<64hex>"
+      description: >
+        API key with Bearer prefix. Obtain via POST /api/v1/auth/keys (admin)
+        or POST /api/v1/tokens (fleet:write).
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: legator_session
+      description: Session cookie obtained via POST /login.
+
+  parameters:
+    idParam:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Resource identifier.
+
+  responses:
+    BadRequest:
+      description: Invalid request body or parameters.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Authentication required.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Insufficient permissions.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    BadGateway:
+      description: Probe not reachable or upstream error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ServiceUnavailable:
+      description: Feature not enabled or dependency unavailable.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          example: not_found
+        message:
+          type: string
+          example: probe not found
+
+    ProbeState:
+      type: object
+      properties:
+        id:
+          type: string
+          example: prb-a1b2c3d4
+        hostname:
+          type: string
+          example: web-01
+        status:
+          type: string
+          enum: [online, offline, degraded]
+        os:
+          type: string
+          example: linux
+        arch:
+          type: string
+          example: amd64
+        version:
+          type: string
+          example: 1.0.0
+        tags:
+          type: array
+          items:
+            type: string
+        policy_level:
+          type: string
+          enum: [observe, diagnose, remediate]
+        last_seen:
+          type: string
+          format: date-time
+        registered:
+          type: string
+          format: date-time
+
+    HealthScore:
+      type: object
+      properties:
+        score:
+          type: number
+          example: 92
+        status:
+          type: string
+          enum: [healthy, warning, critical, unknown]
+        warnings:
+          type: array
+          items:
+            type: string
+
+    FleetCounts:
+      type: object
+      properties:
+        online:
+          type: integer
+        offline:
+          type: integer
+        degraded:
+          type: integer
+
+    ReliabilityScorecardBand:
+      type: object
+      properties:
+        score:
+          type: number
+        status:
+          type: string
+          enum: [healthy, warning, critical, unknown]
+        slo:
+          type: object
+          properties:
+            target:
+              type: number
+            warning:
+              type: number
+            critical:
+              type: number
+            comparator:
+              type: string
+            window:
+              type: string
+        sli:
+          type: object
+          properties:
+            value:
+              type: number
+            unit:
+              type: string
+            sample_size:
+              type: integer
+            rationale:
+              type: string
+
+    ReliabilityScorecard:
+      type: object
+      properties:
+        overall:
+          $ref: "#/components/schemas/ReliabilityScorecardBand"
+        control_plane:
+          $ref: "#/components/schemas/ReliabilityScorecardBand"
+        probe_fleet:
+          $ref: "#/components/schemas/ReliabilityScorecardBand"
+
+    FleetSummary:
+      type: object
+      properties:
+        counts:
+          $ref: "#/components/schemas/FleetCounts"
+        connected:
+          type: integer
+        pending_approvals:
+          type: integer
+        reliability:
+          $ref: "#/components/schemas/ReliabilityScorecard"
+
+    AggregateInventory:
+      type: object
+      properties:
+        total_cpus:
+          type: integer
+        total_ram_bytes:
+          type: integer
+          format: int64
+
+    FleetInventory:
+      type: object
+      properties:
+        probes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProbeState"
+        aggregates:
+          $ref: "#/components/schemas/AggregateInventory"
+
+    FederationConsistency:
+      type: object
+      properties:
+        freshness:
+          type: number
+        completeness:
+          type: number
+        partial_results:
+          type: boolean
+
+    FederationSourceDescriptor:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        tenant_id:
+          type: string
+        org_id:
+          type: string
+        scope_id:
+          type: string
+
+    FederationInventory:
+      type: object
+      properties:
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/FederationSourceDescriptor"
+        probes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProbeState"
+        consistency:
+          $ref: "#/components/schemas/FederationConsistency"
+
+    FederationAggregates:
+      type: object
+      properties:
+        total_probes:
+          type: integer
+        online:
+          type: integer
+
+    FederationSummary:
+      type: object
+      properties:
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/FederationSourceDescriptor"
+        aggregates:
+          $ref: "#/components/schemas/FederationAggregates"
+        consistency:
+          $ref: "#/components/schemas/FederationConsistency"
+
+    TimelineEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        note:
+          type: string
+        actor:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    Incident:
+      type: object
+      properties:
+        id:
+          type: string
+          example: inc-xyz
+        title:
+          type: string
+        severity:
+          type: string
+          enum: [P1, P2, P3, P4, P5]
+        status:
+          type: string
+          enum: [open, investigating, resolved]
+        description:
+          type: string
+        affected_probes:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+        timeline:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimelineEntry"
+
+    DrillInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        last_run:
+          type: string
+          format: date-time
+
+    DrillResult:
+      type: object
+      properties:
+        drill:
+          type: string
+        status:
+          type: string
+        run_id:
+          type: string
+
+    DrillHistoryEntry:
+      type: object
+      properties:
+        run_id:
+          type: string
+        drill:
+          type: string
+        status:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+
+    AlertRule:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        condition:
+          type: string
+        severity:
+          type: string
+          enum: [info, warning, critical]
+        probe_ids:
+          type: array
+          items:
+            type: string
+        tags:
+          type: array
+          items:
+            type: string
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    ActiveAlert:
+      type: object
+      properties:
+        rule_id:
+          type: string
+        rule_name:
+          type: string
+        severity:
+          type: string
+        fired_at:
+          type: string
+          format: date-time
+        probe_ids:
+          type: array
+          items:
+            type: string
+
+    AlertHistoryEntry:
+      type: object
+      properties:
+        rule_id:
+          type: string
+        fired_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+        duration_seconds:
+          type: integer
+
+    RoutingMatcher:
+      type: object
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+
+    RoutingPolicy:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        matchers:
+          type: array
+          items:
+            $ref: "#/components/schemas/RoutingMatcher"
+        receivers:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+
+    EscalationStep:
+      type: object
+      properties:
+        delay:
+          type: string
+        notify:
+          type: array
+          items:
+            type: string
+
+    EscalationPolicy:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/EscalationStep"
+        created_at:
+          type: string
+          format: date-time
+
+    PolicyRationale:
+      type: object
+      properties:
+        summary:
+          type: string
+        drove_outcome:
+          type: boolean
+
+    ApprovalRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        probe_id:
+          type: string
+        command:
+          type: string
+        risk_level:
+          type: string
+          enum: [low, elevated, high, destructive]
+        expires_at:
+          type: string
+          format: date-time
+        policy_decision:
+          type: string
+          enum: [allow, queue, deny]
+        policy_rationale:
+          $ref: "#/components/schemas/PolicyRationale"
+        status:
+          type: string
+          enum: [pending, approved, denied, expired]
+        decided_by:
+          type: string
+        decided_at:
+          type: string
+          format: date-time
+
+    CommandPayload:
+      type: object
+      required: [command]
+      properties:
+        command:
+          type: string
+          example: df -h
+        request_id:
+          type: string
+
+    CommandDispatchResult:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [dispatched, pending_approval, denied]
+        request_id:
+          type: string
+
+    PolicyTemplate:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        level:
+          type: string
+          enum: [observe, diagnose, remediate]
+        allowed:
+          type: array
+          items:
+            type: string
+        blocked:
+          type: array
+          items:
+            type: string
+        paths:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+
+    Token:
+      type: object
+      properties:
+        token:
+          type: string
+        expires:
+          type: string
+          format: date-time
+        multi_use:
+          type: boolean
+        install_command:
+          type: string
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        display_name:
+          type: string
+        role:
+          type: string
+          enum: [admin, operator, viewer]
+
+    AuthKey:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        key:
+          type: string
+          description: Only returned on creation.
+
+    AuditEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        type:
+          type: string
+        probe_id:
+          type: string
+        actor:
+          type: string
+        summary:
+          type: string
+        detail:
+          type: object
+          additionalProperties: true
+
+    Webhook:
+      type: object
+      properties:
+        id:
+          type: string
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            type: string
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    WebhookDelivery:
+      type: object
+      properties:
+        id:
+          type: string
+        webhook_id:
+          type: string
+        event:
+          type: string
+        status:
+          type: string
+          enum: [delivered, failed, pending]
+        attempted_at:
+          type: string
+          format: date-time
+        response_status:
+          type: integer
+
+    DiscoveryRun:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [running, completed, failed]
+        cidr:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        hosts_found:
+          type: array
+          items:
+            type: string
+
+    RetryPolicy:
+      type: object
+      properties:
+        max_attempts:
+          type: integer
+        initial_backoff:
+          type: string
+        multiplier:
+          type: number
+        max_backoff:
+          type: string
+
+    Job:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        schedule:
+          type: string
+        command:
+          type: string
+        probe_ids:
+          type: array
+          items:
+            type: string
+        enabled:
+          type: boolean
+        retry_policy:
+          $ref: "#/components/schemas/RetryPolicy"
+        created_at:
+          type: string
+          format: date-time
+
+    JobRun:
+      type: object
+      properties:
+        run_id:
+          type: string
+        job_id:
+          type: string
+        execution_id:
+          type: string
+        attempt:
+          type: integer
+        status:
+          type: string
+          enum: [queued, running, succeeded, failed, canceled, denied]
+        admission_decision:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+
+    ModelProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        provider:
+          type: string
+        model:
+          type: string
+        api_key_env:
+          type: string
+        max_tokens:
+          type: integer
+        active:
+          type: boolean
+
+    ModelUsage:
+      type: object
+      properties:
+        profile_id:
+          type: string
+        tokens_in:
+          type: integer
+          format: int64
+        tokens_out:
+          type: integer
+          format: int64
+        requests:
+          type: integer
+        period:
+          type: string
+
+    CloudConnector:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        provider:
+          type: string
+          enum: [aws, gcp, azure, hcloud]
+        region:
+          type: string
+        enabled:
+          type: boolean
+        last_scan:
+          type: string
+          format: date-time
+
+    CloudAsset:
+      type: object
+      properties:
+        id:
+          type: string
+        connector_id:
+          type: string
+        type:
+          type: string
+        name:
+          type: string
+        region:
+          type: string
+        tags:
+          type: object
+          additionalProperties:
+            type: string
+        discovered_at:
+          type: string
+          format: date-time
+
+    AutomationPack:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        description:
+          type: string
+        steps:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+
+    AutomationExecution:
+      type: object
+      properties:
+        execution_id:
+          type: string
+        pack_id:
+          type: string
+        status:
+          type: string
+          enum: [running, completed, failed, canceled]
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+
+    AutomationArtifact:
+      type: object
+      properties:
+        id:
+          type: string
+        execution_id:
+          type: string
+        name:
+          type: string
+        content_type:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+
+    NetworkDevice:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        host:
+          type: string
+        protocol:
+          type: string
+          enum: [snmp, ssh]
+        community:
+          type: string
+        enabled:
+          type: boolean
+        last_poll:
+          type: string
+          format: date-time
+
+    Metrics:
+      type: object
+      properties:
+        probes_total:
+          type: integer
+        probes_online:
+          type: integer
+        probes_offline:
+          type: integer
+        commands_dispatched_total:
+          type: integer
+          format: int64
+        approvals_pending:
+          type: integer
+        audit_events_total:
+          type: integer
+          format: int64
+        webhook_deliveries_total:
+          type: integer
+          format: int64
+        webhook_delivery_failures_total:
+          type: integer
+          format: int64
+
+    ChatMessage:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+paths:
+
+  # ── System ───────────────────────────────────────────────────────────────────
+
+  /healthz:
+    get:
+      tags: [System]
+      operationId: healthz
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: Service healthy.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: ok
+
+  /version:
+    get:
+      tags: [System]
+      operationId: getVersion
+      summary: Get server version
+      security: []
+      responses:
+        "200":
+          description: Build info.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+                  commit:
+                    type: string
+                  date:
+                    type: string
+
+  /api/v1/openapi.yaml:
+    get:
+      tags: [System]
+      operationId: getOpenAPISpec
+      summary: OpenAPI 3.1 specification
+      description: Returns this OpenAPI specification as YAML. No authentication required.
+      security: []
+      responses:
+        "200":
+          description: OpenAPI 3.1 YAML document.
+          content:
+            application/yaml:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Auth ─────────────────────────────────────────────────────────────────────
+
+  /login:
+    get:
+      tags: [Auth]
+      operationId: getLoginPage
+      summary: Render HTML login page
+      security: []
+      responses:
+        "200":
+          description: HTML login form.
+          content:
+            text/html:
+              schema:
+                type: string
+    post:
+      tags: [Auth]
+      operationId: postLogin
+      summary: Authenticate with username and password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                  format: password
+      responses:
+        "302":
+          description: Redirect to / on success, or back to login on failure.
+
+  /logout:
+    post:
+      tags: [Auth]
+      operationId: postLogout
+      summary: Invalidate session
+      responses:
+        "200":
+          description: Logged out.
+        "302":
+          description: Redirect variant.
+
+  /auth/oidc/login:
+    get:
+      tags: [Auth]
+      operationId: oidcLogin
+      summary: Initiate OIDC login
+      description: Begins OIDC authorization code + PKCE flow. Only available when OIDC is configured.
+      security: []
+      responses:
+        "302":
+          description: Redirect to identity provider.
+
+  /auth/oidc/callback:
+    get:
+      tags: [Auth]
+      operationId: oidcCallback
+      summary: OIDC callback
+      description: Validates state, nonce, and ID token. Creates Legator session on success.
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Redirect on success or failure.
+
+  /api/v1/me:
+    get:
+      tags: [Auth]
+      operationId: getMe
+      summary: Get current authenticated user
+      responses:
+        "200":
+          description: Current user.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  username:
+                    type: string
+                  role:
+                    type: string
+                  permissions:
+                    type: array
+                    items:
+                      type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ── Admin ────────────────────────────────────────────────────────────────────
+
+  /api/v1/users:
+    get:
+      tags: [Admin]
+      operationId: listUsers
+      summary: List users
+      responses:
+        "200":
+          description: User list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/User"
+                  total:
+                    type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Admin]
+      operationId: createUser
+      summary: Create a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password, role]
+              properties:
+                username:
+                  type: string
+                display_name:
+                  type: string
+                password:
+                  type: string
+                  format: password
+                role:
+                  type: string
+                  enum: [admin, operator, viewer]
+      responses:
+        "201":
+          description: User created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Username already exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/users/{id}:
+    delete:
+      tags: [Admin]
+      operationId: deleteUser
+      summary: Delete a user
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: User deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/auth/keys:
+    get:
+      tags: [Admin]
+      operationId: listAuthKeys
+      summary: List API keys
+      responses:
+        "200":
+          description: Key list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AuthKey"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Admin]
+      operationId: createAuthKey
+      summary: Create an API key
+      description: The `key` field is only present in the creation response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, permissions]
+              properties:
+                name:
+                  type: string
+                permissions:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "201":
+          description: Key created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthKey"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/auth/keys/{id}:
+    delete:
+      tags: [Admin]
+      operationId: deleteAuthKey
+      summary: Delete an API key
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Key revoked.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Tokens ───────────────────────────────────────────────────────────────────
+
+  /api/v1/register:
+    post:
+      tags: [Tokens]
+      operationId: registerProbe
+      summary: Register a probe agent
+      description: Token-authenticated. Returns probe ID and API key for the probe.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, hostname, os, arch]
+              properties:
+                token:
+                  type: string
+                hostname:
+                  type: string
+                os:
+                  type: string
+                arch:
+                  type: string
+                version:
+                  type: string
+                tags:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "201":
+          description: Probe registered.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  probe_id:
+                    type: string
+                  api_key:
+                    type: string
+                  policy_id:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/tokens:
+    get:
+      tags: [Tokens]
+      operationId: listTokens
+      summary: List registration tokens
+      responses:
+        "200":
+          description: Token list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tokens:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Token"
+                  count:
+                    type: integer
+                  total:
+                    type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Tokens]
+      operationId: generateToken
+      summary: Generate a registration token
+      parameters:
+        - name: multi_use
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: no_expiry
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Token generated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Token"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ── Fleet ────────────────────────────────────────────────────────────────────
+
+  /api/v1/probes:
+    get:
+      tags: [Fleet]
+      operationId: listProbes
+      summary: List all probes
+      responses:
+        "200":
+          description: Probe array.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProbeState"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/probes/{id}:
+    get:
+      tags: [Fleet]
+      operationId: getProbe
+      summary: Get a probe
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Probe state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProbeState"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Fleet]
+      operationId: deleteProbe
+      summary: Delete and deregister a probe
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Probe deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/probes/{id}/health:
+    get:
+      tags: [Fleet]
+      operationId: getProbeHealth
+      summary: Get probe health score
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Health score.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthScore"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/probes/{id}/command:
+    post:
+      tags: [Probes]
+      operationId: dispatchCommand
+      summary: Dispatch a command to a probe
+      description: >
+        Sends a shell command. May require approval based on policy level.
+        Use ?wait=true for synchronous response, ?stream=true for SSE output.
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+        - name: wait
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: stream
+          in: query
+          schema:
+            type: boolean
+            default: false
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommandPayload"
+      responses:
+        "200":
+          description: Command dispatched.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommandDispatchResult"
+        "202":
+          description: Command queued for approval.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: pending_approval
+                  approval_id:
+                    type: string
+                  risk_level:
+                    type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+                  policy_decision:
+                    type: string
+                  policy_rationale:
+                    $ref: "#/components/schemas/PolicyRationale"
+                  message:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          description: Command denied by capacity policy.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: denied
+                  policy_decision:
+                    type: string
+                  risk_level:
+                    type: string
+                  policy_rationale:
+                    $ref: "#/components/schemas/PolicyRationale"
+                  message:
+                    type: string
+
+  /api/v1/probes/{id}/rotate-key:
+    post:
+      tags: [Probes]
+      operationId: rotateProbeKey
+      summary: Rotate probe API key
+      description: Generates new API key and pushes it via WebSocket.
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Key rotated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  probe_id:
+                    type: string
+                  new_key:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /api/v1/probes/{id}/update:
+    post:
+      tags: [Probes]
+      operationId: dispatchUpdate
+      summary: Dispatch a self-update to a probe
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url:
+                  type: string
+                  format: uri
+                version:
+                  type: string
+                sha256:
+                  type: string
+      responses:
+        "200":
+          description: Update dispatched.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  version:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /api/v1/probes/{id}/tags:
+    put:
+      tags: [Probes]
+      operationId: setTags
+      summary: Set probe tags
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tags]
+              properties:
+                tags:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: Tags updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  probe_id:
+                    type: string
+                  tags:
+                    type: array
+                    items:
+                      type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/probes/{id}/apply-policy/{policyId}:
+    post:
+      tags: [Probes]
+      operationId: applyPolicy
+      summary: Apply a policy template to a probe
+      description: Pushes immediately if online; saves for next connection otherwise.
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+        - name: policyId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Policy applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [applied, applied_locally]
+                  probe_id:
+                    type: string
+                  policy_id:
+                    type: string
+                  level:
+                    type: string
+                  note:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/probes/{id}/task:
+    post:
+      tags: [Probes]
+      operationId: runTask
+      summary: Run an LLM-orchestrated task on a probe
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [task]
+              properties:
+                task:
+                  type: string
+      responses:
+        "200":
+          description: Task completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/probes/{id}/chat:
+    get:
+      tags: [Chat]
+      operationId: getProbeChatHistory
+      summary: Get probe chat history
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Chat messages.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ChatMessage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Chat]
+      operationId: sendProbeChatMessage
+      summary: Send a chat message to a probe
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+      responses:
+        "200":
+          description: Assistant reply.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatMessage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    delete:
+      tags: [Chat]
+      operationId: clearProbeChatHistory
+      summary: Clear probe chat history
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Chat cleared.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/fleet/summary:
+    get:
+      tags: [Fleet]
+      operationId: getFleetSummary
+      summary: Get fleet summary
+      responses:
+        "200":
+          description: Fleet summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FleetSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/fleet/inventory:
+    get:
+      tags: [Fleet]
+      operationId: getFleetInventory
+      summary: Get fleet inventory
+      parameters:
+        - name: tag
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [online, offline, degraded]
+      responses:
+        "200":
+          description: Fleet inventory.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FleetInventory"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/fleet/tags:
+    get:
+      tags: [Fleet]
+      operationId: getFleetTags
+      summary: Get tag counts
+      responses:
+        "200":
+          description: Tag name to count map.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tags:
+                    type: object
+                    additionalProperties:
+                      type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/fleet/by-tag/{tag}:
+    get:
+      tags: [Fleet]
+      operationId: listProbesByTag
+      summary: List probes by tag
+      parameters:
+        - name: tag
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Matching probes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProbeState"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/fleet/by-tag/{tag}/command:
+    post:
+      tags: [Fleet]
+      operationId: groupCommand
+      summary: Dispatch command to all probes with a tag
+      parameters:
+        - name: tag
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommandPayload"
+      responses:
+        "200":
+          description: Per-probe results.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tag:
+                    type: string
+                  total:
+                    type: integer
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        probe_id:
+                          type: string
+                        status:
+                          type: string
+                          enum: [dispatched, error]
+                        request_id:
+                          type: string
+                        error:
+                          type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/fleet/cleanup:
+    post:
+      tags: [Fleet]
+      operationId: fleetCleanup
+      summary: Remove stale offline probes
+      parameters:
+        - name: older_than
+          in: query
+          schema:
+            type: string
+          description: Go duration string (e.g. 2h, 30m). Default is 1h.
+      responses:
+        "200":
+          description: Cleanup result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  removed:
+                    type: array
+                    items:
+                      type: string
+                  count:
+                    type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/fleet/chat:
+    get:
+      tags: [Chat]
+      operationId: getFleetChatHistory
+      summary: Get fleet chat history
+      responses:
+        "200":
+          description: Fleet chat messages.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ChatMessage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Chat]
+      operationId: sendFleetChatMessage
+      summary: Send a fleet chat message
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+      responses:
+        "200":
+          description: Assistant reply.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatMessage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/federation/inventory:
+    get:
+      tags: [Fleet]
+      operationId: getFederationInventory
+      summary: Get federated fleet inventory
+      parameters:
+        - name: tag
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: source
+          in: query
+          schema:
+            type: string
+        - name: cluster
+          in: query
+          schema:
+            type: string
+        - name: site
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: tenant_id
+          in: query
+          schema:
+            type: string
+        - name: org_id
+          in: query
+          schema:
+            type: string
+        - name: scope_id
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Federation inventory.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationInventory"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/federation/summary:
+    get:
+      tags: [Fleet]
+      operationId: getFederationSummary
+      summary: Get federated fleet summary
+      parameters:
+        - name: tag
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: source
+          in: query
+          schema:
+            type: string
+        - name: cluster
+          in: query
+          schema:
+            type: string
+        - name: site
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: tenant_id
+          in: query
+          schema:
+            type: string
+        - name: org_id
+          in: query
+          schema:
+            type: string
+        - name: scope_id
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Federation summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ── Reliability ──────────────────────────────────────────────────────────────
+
+  /api/v1/reliability/scorecard:
+    get:
+      tags: [Reliability]
+      operationId: getReliabilityScorecard
+      summary: Get reliability scorecard
+      responses:
+        "200":
+          description: SLI/SLO scorecard.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReliabilityScorecard"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/reliability/drills:
+    get:
+      tags: [Reliability]
+      operationId: listDrills
+      summary: List failure drills
+      responses:
+        "200":
+          description: Drill definitions.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  drills:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DrillInfo"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/reliability/drills/{name}/run:
+    post:
+      tags: [Reliability]
+      operationId: runDrill
+      summary: Run a failure drill
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Drill started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DrillResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/reliability/drills/history:
+    get:
+      tags: [Reliability]
+      operationId: listDrillHistory
+      summary: Get drill run history
+      responses:
+        "200":
+          description: Drill history.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  history:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DrillHistoryEntry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/reliability/incidents:
+    get:
+      tags: [Reliability]
+      operationId: listIncidents
+      summary: List incidents
+      responses:
+        "200":
+          description: Incident list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  incidents:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Incident"
+                  total:
+                    type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      tags: [Reliability]
+      operationId: createIncident
+      summary: Create an incident
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, severity]
+              properties:
+                title:
+                  type: string
+                severity:
+                  type: string
+                  enum: [P1, P2, P3, P4, P5]
+                affected_probes:
+                  type: array
+                  items:
+                    type: string
+                description:
+                  type: string
+      responses:
+        "201":
+          description: Incident created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  incident:
+                    $ref: "#/components/schemas/Incident"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/reliability/incidents/{id}:
+    get:
+      tags: [Reliability]
+      operationId: getIncident
+      summary: Get an incident
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Incident.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    patch:
+      tags: [Reliability]
+      operationId: updateIncident
+      summary: Update an incident
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                severity:
+                  type: string
+                  enum: [P1, P2, P3, P4, P5]
+                status:
+                  type: string
+                  enum: [open, investigating, resolved]
+                resolved_at:
+                  type: string
+                  format: date-time
+                description:
+                  type: string
+      responses:
+        "200":
+          description: Updated incident.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    delete:
+      tags: [Reliability]
+      operationId: deleteIncident
+      summary: Delete an incident
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/reliability/incidents/{id}/timeline:
+    post:
+      tags: [Reliability]
+      operationId: addTimelineEntry
+      summary: Add a timeline entry to an incident
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [note]
+              properties:
+                note:
+                  type: string
+                actor:
+                  type: string
+      responses:
+        "200":
+          description: Updated incident.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/reliability/incidents/{id}/export:
+    get:
+      tags: [Reliability]
+      operationId: exportIncident
+      summary: Export an incident as JSON
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Full incident export.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ── Alerts ───────────────────────────────────────────────────────────────────
+
+  /api/v1/alerts:
+    get:
+      tags: [Alerts]
+      operationId: listAlertRules
+      summary: List alert rules
+      responses:
+        "200":
+          description: Alert rules.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rules:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AlertRule"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      tags: [Alerts]
+      operationId: createAlertRule
+      summary: Create an alert rule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, condition, severity]
+              properties:
+                name:
+                  type: string
+                condition:
+                  type: string
+                severity:
+                  type: string
+                  enum: [info, warning, critical]
+                probe_ids:
+                  type: array
+                  items:
+                    type: string
+                tags:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "201":
+          description: Alert rule created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertRule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/alerts/active:
+    get:
+      tags: [Alerts]
+      operationId: listActiveAlerts
+      summary: List active alerts
+      responses:
+        "200":
+          description: Firing alerts.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActiveAlert"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/alerts/{id}:
+    get:
+      tags: [Alerts]
+      operationId: getAlertRule
+      summary: Get an alert rule
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Alert rule.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertRule"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    put:
+      tags: [Alerts]
+      operationId: updateAlertRule
+      summary: Update an alert rule
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, condition, severity]
+              properties:
+                name:
+                  type: string
+                condition:
+                  type: string
+                severity:
+                  type: string
+                  enum: [info, warning, critical]
+                probe_ids:
+                  type: array
+                  items:
+                    type: string
+                tags:
+                  type: array
+                  items:
+                    type: string
+                enabled:
+                  type: boolean
+      responses:
+        "200":
+          description: Updated rule.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertRule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    delete:
+      tags: [Alerts]
+      operationId: deleteAlertRule
+      summary: Delete an alert rule
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/alerts/{id}/history:
+    get:
+      tags: [Alerts]
+      operationId: getAlertRuleHistory
+      summary: Get alert rule firing history
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Alert history.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AlertHistoryEntry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/alerts/routing/policies:
+    get:
+      tags: [Alerts]
+      operationId: listRoutingPolicies
+      summary: List alert routing policies
+      responses:
+        "200":
+          description: Routing policies.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RoutingPolicy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      tags: [Alerts]
+      operationId: createRoutingPolicy
+      summary: Create an alert routing policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, matchers, receivers]
+              properties:
+                name:
+                  type: string
+                matchers:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/RoutingMatcher"
+                receivers:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "201":
+          description: Routing policy created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoutingPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/alerts/routing/policies/{id}:
+    get:
+      tags: [Alerts]
+      operationId: getRoutingPolicy
+      summary: Get an alert routing policy
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Routing policy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoutingPolicy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    put:
+      tags: [Alerts]
+      operationId: updateRoutingPolicy
+      summary: Update an alert routing policy
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                matchers:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/RoutingMatcher"
+                receivers:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: Updated policy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoutingPolicy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    delete:
+      tags: [Alerts]
+      operationId: deleteRoutingPolicy
+      summary: Delete an alert routing policy
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/alerts/routing/resolve:
+    post:
+      tags: [Alerts]
+      operationId: resolveRouting
+      summary: Test alert routing resolution
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+      responses:
+        "200":
+          description: Matched routing policy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoutingPolicy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/alerts/escalation/policies:
+    get:
+      tags: [Alerts]
+      operationId: listEscalationPolicies
+      summary: List escalation policies
+      responses:
+        "200":
+          description: Escalation policies.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EscalationPolicy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      tags: [Alerts]
+      operationId: createEscalationPolicy
+      summary: Create an escalation policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, steps]
+              properties:
+                name:
+                  type: string
+                steps:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/EscalationStep"
+      responses:
+        "201":
+          description: Escalation policy created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EscalationPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/alerts/escalation/policies/{id}:
+    get:
+      tags: [Alerts]
+      operationId: getEscalationPolicy
+      summary: Get an escalation policy
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Escalation policy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EscalationPolicy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    put:
+      tags: [Alerts]
+      operationId: updateEscalationPolicy
+      summary: Update an escalation policy
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                steps:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/EscalationStep"
+      responses:
+        "200":
+          description: Updated policy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EscalationPolicy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    delete:
+      tags: [Alerts]
+      operationId: deleteEscalationPolicy
+      summary: Delete an escalation policy
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ── Approvals ────────────────────────────────────────────────────────────────
+
+  /api/v1/approvals:
+    get:
+      tags: [Approvals]
+      operationId: listApprovals
+      summary: List approval requests
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Approval list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  approvals:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ApprovalRequest"
+                  pending_count:
+                    type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/approvals/{id}:
+    get:
+      tags: [Approvals]
+      operationId: getApproval
+      summary: Get an approval request
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Approval request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/approvals/{id}/decide:
+    post:
+      tags: [Approvals]
+      operationId: decideApproval
+      summary: Approve or deny a command
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, decided_by]
+              properties:
+                decision:
+                  type: string
+                  enum: [approved, denied]
+                decided_by:
+                  type: string
+      responses:
+        "200":
+          description: Decision recorded; command dispatched if approved.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  request_id:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Audit ────────────────────────────────────────────────────────────────────
+
+  /api/v1/audit:
+    get:
+      tags: [Audit]
+      operationId: getAuditLog
+      summary: Query audit log
+      parameters:
+        - name: probe_id
+          in: query
+          schema:
+            type: string
+        - name: type
+          in: query
+          schema:
+            type: string
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Audit events page.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AuditEvent"
+                  total:
+                    type: integer
+                  next_cursor:
+                    type: string
+                  has_more:
+                    type: boolean
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/audit/export:
+    get:
+      tags: [Audit]
+      operationId: exportAuditJSONL
+      summary: Export audit log as JSONL
+      parameters:
+        - name: probe_id
+          in: query
+          schema:
+            type: string
+        - name: type
+          in: query
+          schema:
+            type: string
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: until
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: JSONL export file.
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/audit/export/csv:
+    get:
+      tags: [Audit]
+      operationId: exportAuditCSV
+      summary: Export audit log as CSV
+      parameters:
+        - name: probe_id
+          in: query
+          schema:
+            type: string
+        - name: type
+          in: query
+          schema:
+            type: string
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: until
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: CSV export file.
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/audit/purge:
+    delete:
+      tags: [Audit]
+      operationId: purgeAudit
+      summary: Purge old audit events
+      parameters:
+        - name: older_than
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Go duration string (e.g. 30d).
+      responses:
+        "200":
+          description: Purge result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ── Events ───────────────────────────────────────────────────────────────────
+
+  /api/v1/events:
+    get:
+      tags: [Events]
+      operationId: subscribeEvents
+      summary: Subscribe to platform events (SSE)
+      description: >
+        Server-Sent Events stream. Event types: probe.online, probe.offline,
+        command.dispatched, approval.request, job.run.started, job.run.failed, etc.
+      responses:
+        "200":
+          description: SSE stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ── Commands ─────────────────────────────────────────────────────────────────
+
+  /api/v1/commands/pending:
+    get:
+      tags: [Commands]
+      operationId: listPendingCommands
+      summary: List pending commands
+      responses:
+        "200":
+          description: Pending commands.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pending:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  in_flight:
+                    type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/commands/{requestId}/stream:
+    get:
+      tags: [Commands]
+      operationId: streamCommandOutput
+      summary: Stream command output (SSE)
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Command output SSE stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ── Policies ─────────────────────────────────────────────────────────────────
+
+  /api/v1/policies:
+    get:
+      tags: [Policies]
+      operationId: listPolicies
+      summary: List policy templates
+      responses:
+        "200":
+          description: Policy templates.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PolicyTemplate"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Policies]
+      operationId: createPolicy
+      summary: Create a policy template
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, level]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                level:
+                  type: string
+                  enum: [observe, diagnose, remediate]
+                allowed:
+                  type: array
+                  items:
+                    type: string
+                blocked:
+                  type: array
+                  items:
+                    type: string
+                paths:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "201":
+          description: Policy template created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PolicyTemplate"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/policies/{id}:
+    get:
+      tags: [Policies]
+      operationId: getPolicy
+      summary: Get a policy template
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Policy template.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PolicyTemplate"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Policies]
+      operationId: deletePolicy
+      summary: Delete a policy template
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Webhooks ─────────────────────────────────────────────────────────────────
+
+  /api/v1/webhooks:
+    get:
+      tags: [Webhooks]
+      operationId: listWebhooks
+      summary: List webhook endpoints
+      responses:
+        "200":
+          description: Webhooks.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Webhook"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Webhooks]
+      operationId: registerWebhook
+      summary: Register a webhook endpoint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url, events]
+              properties:
+                url:
+                  type: string
+                  format: uri
+                secret:
+                  type: string
+                events:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "201":
+          description: Webhook registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Webhook"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/webhooks/deliveries:
+    get:
+      tags: [Webhooks]
+      operationId: listWebhookDeliveries
+      summary: List recent webhook deliveries
+      responses:
+        "200":
+          description: Delivery log.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WebhookDelivery"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/webhooks/{id}:
+    get:
+      tags: [Webhooks]
+      operationId: getWebhook
+      summary: Get a webhook endpoint
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Webhook.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Webhook"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Webhooks]
+      operationId: deleteWebhook
+      summary: Delete a webhook endpoint
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/webhooks/{id}/test:
+    post:
+      tags: [Webhooks]
+      operationId: testWebhook
+      summary: Send test payload to a webhook
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Test delivered.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Metrics ──────────────────────────────────────────────────────────────────
+
+  /api/v1/metrics:
+    get:
+      tags: [Metrics]
+      operationId: getMetrics
+      summary: Get platform metrics snapshot
+      responses:
+        "200":
+          description: Metrics snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Metrics"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ── Discovery ────────────────────────────────────────────────────────────────
+
+  /api/v1/discovery/scan:
+    post:
+      tags: [Discovery]
+      operationId: startDiscoveryScan
+      summary: Trigger a network discovery scan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cidr]
+              properties:
+                cidr:
+                  type: string
+                ports:
+                  type: array
+                  items:
+                    type: integer
+                timeout:
+                  type: string
+      responses:
+        "202":
+          description: Scan started.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: string
+                  status:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/discovery/runs:
+    get:
+      tags: [Discovery]
+      operationId: listDiscoveryRuns
+      summary: List discovery runs
+      responses:
+        "200":
+          description: Run list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DiscoveryRun"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/discovery/runs/{id}:
+    get:
+      tags: [Discovery]
+      operationId: getDiscoveryRun
+      summary: Get a discovery run
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Discovery run with results.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryRun"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/discovery/install-token:
+    post:
+      tags: [Discovery]
+      operationId: generateInstallToken
+      summary: Generate an install token for a discovered host
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [host, run_id]
+              properties:
+                host:
+                  type: string
+                run_id:
+                  type: string
+      responses:
+        "200":
+          description: Token with install command.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Token"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ── Jobs ─────────────────────────────────────────────────────────────────────
+
+  /api/v1/jobs:
+    get:
+      tags: [Jobs]
+      operationId: listJobs
+      summary: List scheduled jobs
+      responses:
+        "200":
+          description: Job list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Job"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      tags: [Jobs]
+      operationId: createJob
+      summary: Create a scheduled job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, schedule, command]
+              properties:
+                name:
+                  type: string
+                schedule:
+                  type: string
+                command:
+                  type: string
+                probe_ids:
+                  type: array
+                  items:
+                    type: string
+                retry_policy:
+                  $ref: "#/components/schemas/RetryPolicy"
+      responses:
+        "201":
+          description: Job created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/jobs/runs:
+    get:
+      tags: [Jobs]
+      operationId: listAllJobRuns
+      summary: List all job runs
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [queued, running, succeeded, failed, canceled, denied]
+      responses:
+        "200":
+          description: All runs.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/JobRun"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/jobs/{id}:
+    get:
+      tags: [Jobs]
+      operationId: getJob
+      summary: Get a scheduled job
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Job.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    put:
+      tags: [Jobs]
+      operationId: updateJob
+      summary: Update a scheduled job
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                schedule:
+                  type: string
+                command:
+                  type: string
+                probe_ids:
+                  type: array
+                  items:
+                    type: string
+                retry_policy:
+                  $ref: "#/components/schemas/RetryPolicy"
+      responses:
+        "200":
+          description: Updated job.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    delete:
+      tags: [Jobs]
+      operationId: deleteJob
+      summary: Delete a scheduled job
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/jobs/{id}/run:
+    post:
+      tags: [Jobs]
+      operationId: runJob
+      summary: Manually trigger a job run
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "202":
+          description: Run queued.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: string
+                  status:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/jobs/{id}/cancel:
+    post:
+      tags: [Jobs]
+      operationId: cancelJob
+      summary: Cancel all active runs for a job
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Canceled.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/jobs/{id}/runs:
+    get:
+      tags: [Jobs]
+      operationId: listJobRuns
+      summary: List runs for a job
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Job run history.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/JobRun"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/jobs/{id}/runs/{runId}/cancel:
+    post:
+      tags: [Jobs]
+      operationId: cancelJobRun
+      summary: Cancel a specific job run
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Canceled.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/jobs/{id}/runs/{runId}/retry:
+    post:
+      tags: [Jobs]
+      operationId: retryJobRun
+      summary: Retry a failed job run
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Retry queued.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/jobs/{id}/enable:
+    post:
+      tags: [Jobs]
+      operationId: enableJob
+      summary: Enable a scheduled job
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Job enabled.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/jobs/{id}/disable:
+    post:
+      tags: [Jobs]
+      operationId: disableJob
+      summary: Disable a scheduled job
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Job disabled.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ── Model Dock ───────────────────────────────────────────────────────────────
+
+  /api/v1/model-profiles:
+    get:
+      tags: [ModelDock]
+      operationId: listModelProfiles
+      summary: List LLM model profiles
+      responses:
+        "200":
+          description: Model profiles.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ModelProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      tags: [ModelDock]
+      operationId: createModelProfile
+      summary: Create an LLM model profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, provider, model]
+              properties:
+                name:
+                  type: string
+                provider:
+                  type: string
+                model:
+                  type: string
+                api_key_env:
+                  type: string
+                max_tokens:
+                  type: integer
+      responses:
+        "201":
+          description: Profile created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelProfile"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/model-profiles/active:
+    get:
+      tags: [ModelDock]
+      operationId: getActiveModelProfile
+      summary: Get the active LLM model profile
+      responses:
+        "200":
+          description: Active profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/model-profiles/{id}:
+    put:
+      tags: [ModelDock]
+      operationId: updateModelProfile
+      summary: Update an LLM model profile
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                provider:
+                  type: string
+                model:
+                  type: string
+                api_key_env:
+                  type: string
+                max_tokens:
+                  type: integer
+      responses:
+        "200":
+          description: Updated profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    delete:
+      tags: [ModelDock]
+      operationId: deleteModelProfile
+      summary: Delete an LLM model profile
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/model-profiles/{id}/activate:
+    post:
+      tags: [ModelDock]
+      operationId: activateModelProfile
+      summary: Set model profile as active
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Profile activated.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/model-usage:
+    get:
+      tags: [ModelDock]
+      operationId: getModelUsage
+      summary: Get LLM token usage statistics
+      responses:
+        "200":
+          description: Token usage per profile.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ModelUsage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ── Cloud Connectors ──────────────────────────────────────────────────────────
+
+  /api/v1/cloud/connectors:
+    get:
+      tags: [CloudConnectors]
+      operationId: listCloudConnectors
+      summary: List cloud connectors
+      responses:
+        "200":
+          description: Connector list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CloudConnector"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      tags: [CloudConnectors]
+      operationId: createCloudConnector
+      summary: Create a cloud connector
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, provider]
+              properties:
+                name:
+                  type: string
+                provider:
+                  type: string
+                  enum: [aws, gcp, azure, hcloud]
+                region:
+                  type: string
+                credentials:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "201":
+          description: Connector created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudConnector"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/cloud/connectors/{id}:
+    put:
+      tags: [CloudConnectors]
+      operationId: updateCloudConnector
+      summary: Update a cloud connector
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                region:
+                  type: string
+                credentials:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "200":
+          description: Updated connector.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudConnector"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    delete:
+      tags: [CloudConnectors]
+      operationId: deleteCloudConnector
+      summary: Delete a cloud connector
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/cloud/connectors/{id}/scan:
+    post:
+      tags: [CloudConnectors]
+      operationId: scanCloudConnector
+      summary: Trigger an agentless asset scan
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "202":
+          description: Scan started.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/cloud/assets:
+    get:
+      tags: [CloudConnectors]
+      operationId: listCloudAssets
+      summary: List discovered cloud assets
+      responses:
+        "200":
+          description: Cloud assets.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CloudAsset"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ── Automation Packs ──────────────────────────────────────────────────────────
+
+  /api/v1/automation-packs:
+    get:
+      tags: [AutomationPacks]
+      operationId: listAutomationPacks
+      summary: List automation pack definitions
+      responses:
+        "200":
+          description: Pack definitions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AutomationPack"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      tags: [AutomationPacks]
+      operationId: createAutomationPack
+      summary: Create an automation pack definition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AutomationPack"
+      responses:
+        "201":
+          description: Pack created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationPack"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/automation-packs/dry-run:
+    post:
+      tags: [AutomationPacks]
+      operationId: dryRunAutomationPack
+      summary: Validate an automation pack without executing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AutomationPack"
+      responses:
+        "200":
+          description: Validation result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/automation-packs/{id}:
+    get:
+      tags: [AutomationPacks]
+      operationId: getAutomationPack
+      summary: Get an automation pack definition
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+        - name: version
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Pack definition.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationPack"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/automation-packs/{id}/executions:
+    post:
+      tags: [AutomationPacks]
+      operationId: startAutomationPackExecution
+      summary: Start an execution of an automation pack
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: Execution started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationExecution"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/automation-packs/executions/{executionID}:
+    get:
+      tags: [AutomationPacks]
+      operationId: getAutomationPackExecution
+      summary: Get an automation pack execution
+      parameters:
+        - name: executionID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Execution state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationExecution"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/automation-packs/executions/{executionID}/timeline:
+    get:
+      tags: [AutomationPacks]
+      operationId: getAutomationPackExecutionTimeline
+      summary: Get execution timeline
+      parameters:
+        - name: executionID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Ordered timeline of execution steps.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/automation-packs/executions/{executionID}/artifacts:
+    get:
+      tags: [AutomationPacks]
+      operationId: getAutomationPackExecutionArtifacts
+      summary: Get execution artifacts
+      parameters:
+        - name: executionID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Output artifacts.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AutomationArtifact"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ── Kubeflow ─────────────────────────────────────────────────────────────────
+
+  /api/v1/kubeflow/status:
+    get:
+      tags: [Kubeflow]
+      operationId: getKubeflowStatus
+      summary: Get Kubeflow adapter status
+      description: Requires LEGATOR_KUBEFLOW_ENABLED=true.
+      responses:
+        "200":
+          description: Kubeflow status.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/kubeflow/inventory:
+    get:
+      tags: [Kubeflow]
+      operationId: getKubeflowInventory
+      summary: Get Kubeflow resource inventory
+      responses:
+        "200":
+          description: Kubeflow inventory.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/kubeflow/runs/{name}/status:
+    get:
+      tags: [Kubeflow]
+      operationId: getKubeflowRunStatus
+      summary: Get status of a Kubeflow run
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Run status.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/kubeflow/actions/refresh:
+    post:
+      tags: [Kubeflow]
+      operationId: kubeflowRefresh
+      summary: Refresh Kubeflow resource cache
+      description: Requires LEGATOR_KUBEFLOW_ACTIONS_ENABLED=true.
+      responses:
+        "200":
+          description: Refreshed.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/kubeflow/runs/submit:
+    post:
+      tags: [Kubeflow]
+      operationId: kubeflowSubmitRun
+      summary: Submit a Kubeflow run
+      description: Mutations disabled by default; requires LEGATOR_KUBEFLOW_ACTIONS_ENABLED=true.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "202":
+          description: Run submitted.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/kubeflow/runs/{name}/cancel:
+    post:
+      tags: [Kubeflow]
+      operationId: kubeflowCancelRun
+      summary: Cancel a Kubeflow run
+      description: Mutations disabled by default; requires LEGATOR_KUBEFLOW_ACTIONS_ENABLED=true.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Canceled.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ── Grafana ──────────────────────────────────────────────────────────────────
+
+  /api/v1/grafana/status:
+    get:
+      tags: [Grafana]
+      operationId: getGrafanaStatus
+      summary: Get Grafana adapter status
+      description: Requires LEGATOR_GRAFANA_ENABLED=true.
+      responses:
+        "200":
+          description: Grafana status.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  healthy:
+                    type: boolean
+                  version:
+                    type: string
+                  datasource_count:
+                    type: integer
+                  dashboard_count:
+                    type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/grafana/snapshot:
+    get:
+      tags: [Grafana]
+      operationId: getGrafanaSnapshot
+      summary: Get Grafana capacity snapshot
+      description: Dashboard coverage and datasource health. Requires LEGATOR_GRAFANA_ENABLED=true.
+      responses:
+        "200":
+          description: Grafana snapshot.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ── Network Devices ───────────────────────────────────────────────────────────
+
+  /api/v1/network/devices:
+    get:
+      tags: [NetworkDevices]
+      operationId: listNetworkDevices
+      summary: List managed network devices
+      responses:
+        "200":
+          description: Network device list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/NetworkDevice"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      tags: [NetworkDevices]
+      operationId: createNetworkDevice
+      summary: Add a network device
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, host, protocol]
+              properties:
+                name:
+                  type: string
+                host:
+                  type: string
+                protocol:
+                  type: string
+                  enum: [snmp, ssh]
+                community:
+                  type: string
+      responses:
+        "201":
+          description: Device added.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkDevice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/network/devices/{id}:
+    get:
+      tags: [NetworkDevices]
+      operationId: getNetworkDevice
+      summary: Get a network device
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Network device.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkDevice"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    put:
+      tags: [NetworkDevices]
+      operationId: updateNetworkDevice
+      summary: Update a network device
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                host:
+                  type: string
+                protocol:
+                  type: string
+                  enum: [snmp, ssh]
+                community:
+                  type: string
+      responses:
+        "200":
+          description: Updated device.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkDevice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    delete:
+      tags: [NetworkDevices]
+      operationId: deleteNetworkDevice
+      summary: Delete a network device
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/network/devices/{id}/test:
+    post:
+      tags: [NetworkDevices]
+      operationId: testNetworkDevice
+      summary: Test network device connectivity
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200":
+          description: Connectivity result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reachable:
+                    type: boolean
+                  latency_ms:
+                    type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/network/devices/{id}/inventory:
+    post:
+      tags: [NetworkDevices]
+      operationId: pollNetworkDeviceInventory
+      summary: Trigger network device inventory poll
+      description: Polls interfaces, routes, and ARP table.
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "202":
+          description: Poll started.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /mcp:
+    get:
+      tags: [System]
+      operationId: mcpGet
+      summary: MCP endpoint (GET)
+      description: SSE-based Model Context Protocol endpoint.
+      responses:
+        "200":
+          description: MCP SSE stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [System]
+      operationId: mcpPost
+      summary: MCP endpoint (POST)
+      description: SSE-based Model Context Protocol endpoint.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: MCP response stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"

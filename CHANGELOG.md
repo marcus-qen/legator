@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+### Added
+- [compat:additive] Added public OpenAPI spec endpoint `GET /api/v1/openapi.yaml` and hand-written `docs/openapi.yaml` OpenAPI 3.1 document covering all stable API routes.
+
 ---
 
 ## [v1.0.0-beta.1] — 2026-03-02
