@@ -3,11 +3,11 @@ package main
 import (
 	"encoding/json"
 
-	"github.com/marcus-qen/legator/internal/probe/agent"
 	"fmt"
+	"github.com/marcus-qen/legator/internal/probe/agent"
 	"io"
-	"os"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -24,12 +24,12 @@ type probeInfo struct {
 	LastSeen    time.Time `json:"last_seen"`
 	Tags        []string  `json:"tags,omitempty"`
 	Inventory   *struct {
-		Hostname string `json:"hostname"`
-		OS       string `json:"os"`
-		Arch     string `json:"arch"`
-		Kernel   string `json:"kernel"`
-		CPUs     int    `json:"cpus"`
-		MemTotal uint64 `json:"mem_total_bytes"`
+		Hostname  string `json:"hostname"`
+		OS        string `json:"os"`
+		Arch      string `json:"arch"`
+		Kernel    string `json:"kernel"`
+		CPUs      int    `json:"cpus"`
+		MemTotal  uint64 `json:"mem_total_bytes"`
 		DiskTotal uint64 `json:"disk_total_bytes"`
 	} `json:"inventory,omitempty"`
 	Health *struct {

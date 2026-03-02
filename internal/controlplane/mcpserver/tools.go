@@ -86,9 +86,9 @@ type kubeflowCancelRunInput struct {
 type grafanaToolInput struct{}
 
 type grafanaCapacityPolicyPayload struct {
-	Capacity       coreapprovalpolicy.CapacitySignals             `json:"capacity"`
-	PolicyDecision coreapprovalpolicy.CommandPolicyDecisionOutcome `json:"policy_decision"`
-	PolicyRationale coreapprovalpolicy.CommandPolicyRationale      `json:"policy_rationale"`
+	Capacity        coreapprovalpolicy.CapacitySignals              `json:"capacity"`
+	PolicyDecision  coreapprovalpolicy.CommandPolicyDecisionOutcome `json:"policy_decision"`
+	PolicyRationale coreapprovalpolicy.CommandPolicyRationale       `json:"policy_rationale"`
 }
 
 type listJobRunsInput struct {

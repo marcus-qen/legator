@@ -46,8 +46,8 @@ type Hub struct {
 	onConnect     func(probeID string)
 	onDisconnect  func(probeID string)
 	authenticator ProbeAuthenticator // nil = no auth (testing only)
-	signer        *signing.Signer   // nil = signing disabled
-	streams       *streamRegistry   // output chunk subscribers
+	signer        *signing.Signer    // nil = signing disabled
+	streams       *streamRegistry    // output chunk subscribers
 }
 
 // NewHub creates a new Hub.

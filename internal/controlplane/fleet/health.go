@@ -6,19 +6,19 @@ import (
 
 // HealthScore represents a probe's health assessment.
 type HealthScore struct {
-	Score    int      `json:"score"`    // 0-100 (100 = perfect)
-	Status   string   `json:"status"`   // healthy, warning, degraded, critical
+	Score    int      `json:"score"`  // 0-100 (100 = perfect)
+	Status   string   `json:"status"` // healthy, warning, degraded, critical
 	Warnings []string `json:"warnings,omitempty"`
 }
 
 // Thresholds for health scoring.
 const (
-	loadHighThreshold     = 4.0  // 1-minute load average
-	loadCritThreshold     = 8.0
-	memHighPct            = 85.0 // memory usage %
-	memCritPct            = 95.0
-	diskHighPct           = 80.0 // disk usage %
-	diskCritPct           = 95.0
+	loadHighThreshold = 4.0 // 1-minute load average
+	loadCritThreshold = 8.0
+	memHighPct        = 85.0 // memory usage %
+	memCritPct        = 95.0
+	diskHighPct       = 80.0 // disk usage %
+	diskCritPct       = 95.0
 )
 
 // ScoreHealth computes a health score from heartbeat + inventory data.

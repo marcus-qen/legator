@@ -8,9 +8,9 @@ import (
 
 func TestFederationAccessScopeFromPermissions(t *testing.T) {
 	tests := []struct {
-		name    string
-		perms   []Permission
-		want    FederationAccessScope
+		name  string
+		perms []Permission
+		want  FederationAccessScope
 	}{
 		{
 			name:  "no grants means unrestricted",

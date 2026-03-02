@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
 	"github.com/marcus-qen/legator/internal/controlplane/migration"
+	_ "modernc.org/sqlite"
 )
 
 var (
@@ -115,7 +115,7 @@ func (s *Store) ListDefinitions() ([]DefinitionSummary, error) {
 	out := make([]DefinitionSummary, 0)
 	for rows.Next() {
 		var (
-			summary                                DefinitionSummary
+			summary                                   DefinitionSummary
 			definitionRaw, createdAtRaw, updatedAtRaw string
 		)
 

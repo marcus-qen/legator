@@ -460,16 +460,16 @@ func TestStoreQueuedAdmissionTransitionsToExecution(t *testing.T) {
 	retryAt := time.Now().UTC().Add(20 * time.Second)
 
 	run, err := store.RecordRunStart(JobRun{
-		JobID:             job.ID,
-		ProbeID:           "probe-1",
-		RequestID:         "queued-run",
-		ExecutionID:       "exec-queued",
-		Attempt:           1,
-		MaxAttempts:       3,
-		Status:            RunStatusQueued,
-		RetryScheduledAt:  &retryAt,
-		AdmissionDecision: string(AdmissionOutcomeQueue),
-		AdmissionReason:   "capacity limited",
+		JobID:              job.ID,
+		ProbeID:            "probe-1",
+		RequestID:          "queued-run",
+		ExecutionID:        "exec-queued",
+		Attempt:            1,
+		MaxAttempts:        3,
+		Status:             RunStatusQueued,
+		RetryScheduledAt:   &retryAt,
+		AdmissionDecision:  string(AdmissionOutcomeQueue),
+		AdmissionReason:    "capacity limited",
 		AdmissionRationale: json.RawMessage(`{"availability":"limited"}`),
 	})
 	if err != nil {

@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/marcus-qen/legator/internal/controlplane/migration"
 	"go.uber.org/zap"
 	_ "modernc.org/sqlite"
-	"github.com/marcus-qen/legator/internal/controlplane/migration"
 )
 
 // Store provides persistent chat backed by SQLite.

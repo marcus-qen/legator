@@ -51,6 +51,18 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Jobs.StreamRetentionDuration() != 24*time.Hour {
 		t.Fatalf("expected stream retention 24h, got %s", cfg.Jobs.StreamRetentionDuration())
 	}
+	if cfg.Jobs.ApprovalTimeoutSeconds != 900 {
+		t.Errorf("expected approval_timeout_seconds 900, got %d", cfg.Jobs.ApprovalTimeoutSeconds)
+	}
+	if cfg.Jobs.ApprovalTimeoutBehavior != "cancel" {
+		t.Errorf("expected approval_timeout_behavior cancel, got %s", cfg.Jobs.ApprovalTimeoutBehavior)
+	}
+	if cfg.Jobs.ApprovalTimeoutDuration() != 900*time.Second {
+		t.Errorf("expected approval timeout duration 900s, got %s", cfg.Jobs.ApprovalTimeoutDuration())
+	}
+	if cfg.Jobs.ApprovalTimeoutBehaviorOrDefault() != "cancel" {
+		t.Errorf("expected approval timeout behavior default cancel, got %s", cfg.Jobs.ApprovalTimeoutBehaviorOrDefault())
+	}
 }
 
 func TestLoadFromFile(t *testing.T) {

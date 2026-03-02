@@ -143,19 +143,19 @@ func (s *Server) recordFederationAuthorizationDenied(r *http.Request, perm auth.
 	}
 
 	detail := map[string]any{
-		"method":                r.Method,
-		"path":                  r.URL.Path,
-		"required_permission":   string(perm),
-		"reason":                reason,
-		"requested_tenant_id":   requested.TenantID,
-		"requested_org_id":      requested.OrgID,
-		"requested_scope_id":    requested.ScopeID,
-		"effective_tenant_id":   effective.TenantID,
-		"effective_org_id":      effective.OrgID,
-		"effective_scope_id":    effective.ScopeID,
-		"allowed_tenant_ids":    append([]string(nil), access.TenantIDs...),
-		"allowed_org_ids":       append([]string(nil), access.OrgIDs...),
-		"allowed_scope_ids":     append([]string(nil), access.ScopeIDs...),
+		"method":              r.Method,
+		"path":                r.URL.Path,
+		"required_permission": string(perm),
+		"reason":              reason,
+		"requested_tenant_id": requested.TenantID,
+		"requested_org_id":    requested.OrgID,
+		"requested_scope_id":  requested.ScopeID,
+		"effective_tenant_id": effective.TenantID,
+		"effective_org_id":    effective.OrgID,
+		"effective_scope_id":  effective.ScopeID,
+		"allowed_tenant_ids":  append([]string(nil), access.TenantIDs...),
+		"allowed_org_ids":     append([]string(nil), access.OrgIDs...),
+		"allowed_scope_ids":   append([]string(nil), access.ScopeIDs...),
 	}
 
 	s.recordAudit(audit.Event{
@@ -173,19 +173,19 @@ func (s *Server) recordFederationReadAudit(r *http.Request, surface string, requ
 	}
 
 	detail := map[string]any{
-		"surface":               surface,
-		"path":                  r.URL.Path,
-		"requested_tenant_id":   requested.TenantID,
-		"requested_org_id":      requested.OrgID,
-		"requested_scope_id":    requested.ScopeID,
-		"effective_tenant_id":   effective.TenantID,
-		"effective_org_id":      effective.OrgID,
-		"effective_scope_id":    effective.ScopeID,
-		"allowed_tenant_ids":    append([]string(nil), access.TenantIDs...),
-		"allowed_org_ids":       append([]string(nil), access.OrgIDs...),
-		"allowed_scope_ids":     append([]string(nil), access.ScopeIDs...),
-		"sources":               sourceCount,
-		"probes":                probeCount,
+		"surface":             surface,
+		"path":                r.URL.Path,
+		"requested_tenant_id": requested.TenantID,
+		"requested_org_id":    requested.OrgID,
+		"requested_scope_id":  requested.ScopeID,
+		"effective_tenant_id": effective.TenantID,
+		"effective_org_id":    effective.OrgID,
+		"effective_scope_id":  effective.ScopeID,
+		"allowed_tenant_ids":  append([]string(nil), access.TenantIDs...),
+		"allowed_org_ids":     append([]string(nil), access.OrgIDs...),
+		"allowed_scope_ids":   append([]string(nil), access.ScopeIDs...),
+		"sources":             sourceCount,
+		"probes":              probeCount,
 	}
 
 	s.recordAudit(audit.Event{

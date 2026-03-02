@@ -43,8 +43,8 @@ func (s *Server) buildReliabilityScorecard(window time.Duration) reliability.Sco
 	commandTotal, commandSuccess := s.commandResultStats(now, window)
 
 	return reliability.BuildScorecard(reliability.Inputs{
-		Now:    now,
-		Window: window,
+		Now:          now,
+		Window:       window,
 		ControlPlane: requestStats,
 		ProbeFleet: reliability.ProbeFleetInputs{
 			TotalProbes:     len(probes),

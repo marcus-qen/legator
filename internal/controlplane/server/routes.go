@@ -254,6 +254,10 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/v1/jobs/{id}/disable", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
 	}
 
+	// Async job approval — always registered (approval works regardless of scheduled jobs)
+	mux.HandleFunc("POST /api/v1/jobs/{id}/approve", s.withPermission(auth.PermApprovalWrite, s.handleApproveAsyncJob))
+	mux.HandleFunc("POST /api/v1/jobs/{id}/reject", s.withPermission(auth.PermApprovalWrite, s.handleRejectAsyncJob))
+
 	// Permission matrix — public endpoint, no auth required
 	mux.HandleFunc("GET /api/v1/auth/permissions", s.handlePermissionMatrix)
 

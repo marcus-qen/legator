@@ -62,6 +62,23 @@ func migrateAsyncJobs(db *sql.DB) error {
 				return err
 			},
 		},
+		{
+			Version:     4,
+			Description: "add approval audit columns (approved_by, rejected_by, rejection_reason, approval_deadline)",
+			Up: func(tx *sql.Tx) error {
+				for _, col := range []string{
+					`ALTER TABLE async_jobs ADD COLUMN approved_by TEXT NOT NULL DEFAULT ''`,
+					`ALTER TABLE async_jobs ADD COLUMN rejected_by TEXT NOT NULL DEFAULT ''`,
+					`ALTER TABLE async_jobs ADD COLUMN rejection_reason TEXT NOT NULL DEFAULT ''`,
+					`ALTER TABLE async_jobs ADD COLUMN approval_deadline TEXT`,
+				} {
+					if _, err := tx.Exec(col); err != nil {
+						return err
+					}
+				}
+				return nil
+			},
+		},
 	})
 	return runner.Migrate(db)
 }
@@ -108,8 +125,9 @@ func (s *Store) CreateAsyncJob(job AsyncJob) (*AsyncJob, error) {
 
 	_, err = s.db.Exec(`INSERT INTO async_jobs (
 		id, probe_id, request_id, command, args_json, level, state, status_reason, approval_id,
-		exit_code, output, created_at, updated_at, started_at, finished_at, expires_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		exit_code, output, created_at, updated_at, started_at, finished_at, expires_at,
+		approved_by, rejected_by, rejection_reason, approval_deadline
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID,
 		job.ProbeID,
 		job.RequestID,
@@ -126,6 +144,10 @@ func (s *Store) CreateAsyncJob(job AsyncJob) (*AsyncJob, error) {
 		nullableTime(job.StartedAt),
 		nullableTime(job.FinishedAt),
 		nullableTime(job.ExpiresAt),
+		strings.TrimSpace(job.ApprovedBy),
+		strings.TrimSpace(job.RejectedBy),
+		strings.TrimSpace(job.RejectionReason),
+		nullableTime(job.ApprovalDeadline),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert async job: %w", err)
@@ -140,7 +162,8 @@ func (s *Store) ListAsyncJobs(limit int) ([]AsyncJob, error) {
 	limit = normalizeAsyncJobLimit(limit)
 	rows, err := s.db.Query(`SELECT
 		id, probe_id, request_id, command, args_json, level, state, status_reason, approval_id,
-		exit_code, output, created_at, updated_at, started_at, finished_at, expires_at
+		exit_code, output, created_at, updated_at, started_at, finished_at, expires_at,
+		approved_by, rejected_by, rejection_reason, approval_deadline
 		FROM async_jobs
 		ORDER BY created_at DESC
 		LIMIT ?`, limit)
@@ -171,7 +194,8 @@ func (s *Store) ListAsyncJobsByState(state AsyncJobState, limit int) ([]AsyncJob
 	limit = normalizeAsyncJobLimit(limit)
 	rows, err := s.db.Query(`SELECT
 		id, probe_id, request_id, command, args_json, level, state, status_reason, approval_id,
-		exit_code, output, created_at, updated_at, started_at, finished_at, expires_at
+		exit_code, output, created_at, updated_at, started_at, finished_at, expires_at,
+		approved_by, rejected_by, rejection_reason, approval_deadline
 		FROM async_jobs
 		WHERE state = ?
 		ORDER BY created_at ASC
@@ -290,7 +314,8 @@ func (s *Store) GetAsyncJob(id string) (*AsyncJob, error) {
 	}
 	row := s.db.QueryRow(`SELECT
 		id, probe_id, request_id, command, args_json, level, state, status_reason, approval_id,
-		exit_code, output, created_at, updated_at, started_at, finished_at, expires_at
+		exit_code, output, created_at, updated_at, started_at, finished_at, expires_at,
+		approved_by, rejected_by, rejection_reason, approval_deadline
 		FROM async_jobs WHERE id = ?`, id)
 	return scanAsyncJob(row)
 }
@@ -305,7 +330,8 @@ func (s *Store) GetAsyncJobByRequestID(requestID string) (*AsyncJob, error) {
 	}
 	row := s.db.QueryRow(`SELECT
 		id, probe_id, request_id, command, args_json, level, state, status_reason, approval_id,
-		exit_code, output, created_at, updated_at, started_at, finished_at, expires_at
+		exit_code, output, created_at, updated_at, started_at, finished_at, expires_at,
+		approved_by, rejected_by, rejection_reason, approval_deadline
 		FROM async_jobs WHERE request_id = ?`, requestID)
 	return scanAsyncJob(row)
 }
@@ -390,6 +416,22 @@ func (s *Store) TransitionAsyncJob(id string, toState AsyncJobState, opts AsyncJ
 		args = append(args, opts.ExpiresAt.UTC().Format(time.RFC3339Nano))
 	} else if toState != AsyncJobStateWaitingApproval {
 		setClauses = append(setClauses, "expires_at = NULL")
+	}
+	if approvedBy := strings.TrimSpace(opts.ApprovedBy); approvedBy != "" {
+		setClauses = append(setClauses, "approved_by = ?")
+		args = append(args, approvedBy)
+	}
+	if rejectedBy := strings.TrimSpace(opts.RejectedBy); rejectedBy != "" {
+		setClauses = append(setClauses, "rejected_by = ?")
+		args = append(args, rejectedBy)
+	}
+	if rejReason := strings.TrimSpace(opts.RejectionReason); rejReason != "" {
+		setClauses = append(setClauses, "rejection_reason = ?")
+		args = append(args, rejReason)
+	}
+	if opts.ApprovalDeadline != nil {
+		setClauses = append(setClauses, "approval_deadline = ?")
+		args = append(args, opts.ApprovalDeadline.UTC().Format(time.RFC3339Nano))
 	}
 
 	stmt := `UPDATE async_jobs SET ` + strings.Join(setClauses, ", ") + ` WHERE id = ? AND state = ?`
@@ -481,6 +523,10 @@ func scanAsyncJob(s scanner) (*AsyncJob, error) {
 		finishedAt           sql.NullString
 		expiresAt            sql.NullString
 		exitCode             sql.NullInt64
+		approvedBy           string
+		rejectedBy           string
+		rejectionReason      string
+		approvalDeadline     sql.NullString
 	)
 
 	if err := s.Scan(
@@ -500,6 +546,10 @@ func scanAsyncJob(s scanner) (*AsyncJob, error) {
 		&startedAt,
 		&finishedAt,
 		&expiresAt,
+		&approvedBy,
+		&rejectedBy,
+		&rejectionReason,
+		&approvalDeadline,
 	); err != nil {
 		return nil, err
 	}
@@ -532,6 +582,144 @@ func scanAsyncJob(s scanner) (*AsyncJob, error) {
 		v := int(exitCode.Int64)
 		job.ExitCode = &v
 	}
+	job.ApprovedBy = strings.TrimSpace(approvedBy)
+	job.RejectedBy = strings.TrimSpace(rejectedBy)
+	job.RejectionReason = strings.TrimSpace(rejectionReason)
+	if approvalDeadline.Valid && approvalDeadline.String != "" {
+		ts, err := time.Parse(time.RFC3339Nano, approvalDeadline.String)
+		if err == nil {
+			job.ApprovalDeadline = &ts
+		}
+	}
 
 	return &job, nil
+}
+
+// ApproveAsyncJob atomically transitions a waiting_approval job to running.
+// Returns ErrAsyncJobConflict if the job is not in waiting_approval state (race-safe: uses UPDATE WHERE state=?).
+func (s *Store) ApproveAsyncJob(jobID string) (*AsyncJob, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("store unavailable")
+	}
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return nil, fmt.Errorf("job id required")
+	}
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339Nano)
+	res, err := s.db.Exec(
+		`UPDATE async_jobs
+		 SET state = ?, started_at = ?, updated_at = ?
+		 WHERE id = ? AND state = ?`,
+		string(AsyncJobStateRunning), nowStr, nowStr,
+		jobID, string(AsyncJobStateWaitingApproval),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("approve async job: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		existing, err := s.GetAsyncJob(jobID)
+		if err != nil {
+			return nil, err
+		}
+		return nil, &AsyncJobConflictError{
+			JobID:        jobID,
+			CurrentState: existing.State,
+			Operation:    "approve",
+		}
+	}
+	return s.GetAsyncJob(jobID)
+}
+
+// RejectAsyncJob atomically transitions a waiting_approval job to failed with the given reason.
+// Returns ErrAsyncJobConflict if the job is not in waiting_approval state (race-safe).
+func (s *Store) RejectAsyncJob(jobID, reason string) (*AsyncJob, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("store unavailable")
+	}
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return nil, fmt.Errorf("job id required")
+	}
+	reason = strings.TrimSpace(reason)
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339Nano)
+	res, err := s.db.Exec(
+		`UPDATE async_jobs
+		 SET state = ?, status_reason = ?, rejection_reason = ?, finished_at = ?, updated_at = ?
+		 WHERE id = ? AND state = ?`,
+		string(AsyncJobStateFailed), reason, reason, nowStr, nowStr,
+		jobID, string(AsyncJobStateWaitingApproval),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("reject async job: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		existing, err := s.GetAsyncJob(jobID)
+		if err != nil {
+			return nil, err
+		}
+		return nil, &AsyncJobConflictError{
+			JobID:        jobID,
+			CurrentState: existing.State,
+			Operation:    "reject",
+		}
+	}
+	return s.GetAsyncJob(jobID)
+}
+
+// ListExpiredWaitingApprovalJobs returns waiting_approval jobs whose expires_at has passed.
+func (s *Store) ListExpiredWaitingApprovalJobs(now time.Time, limit int) ([]AsyncJob, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("store unavailable")
+	}
+	limit = normalizeAsyncJobLimit(limit)
+	rows, err := s.db.Query(`SELECT
+		id, probe_id, request_id, command, args_json, level, state, status_reason, approval_id,
+		exit_code, output, created_at, updated_at, started_at, finished_at, expires_at,
+		approved_by, rejected_by, rejection_reason, approval_deadline
+		FROM async_jobs
+		WHERE state = ? AND expires_at IS NOT NULL AND expires_at != '' AND expires_at <= ?
+		ORDER BY expires_at ASC
+		LIMIT ?`,
+		string(AsyncJobStateWaitingApproval),
+		now.UTC().Format(time.RFC3339Nano),
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]AsyncJob, 0, limit)
+	for rows.Next() {
+		job, err := scanAsyncJob(rows)
+		if err != nil {
+			continue
+		}
+		out = append(out, *job)
+	}
+	return out, rows.Err()
+}
+
+// ExtendApprovalExpiry updates expires_at for a waiting_approval job without changing state.
+func (s *Store) ExtendApprovalExpiry(jobID string, newExpiry time.Time) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("store unavailable")
+	}
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return fmt.Errorf("job id required")
+	}
+	now := time.Now().UTC()
+	_, err := s.db.Exec(
+		`UPDATE async_jobs SET expires_at = ?, updated_at = ? WHERE id = ? AND state = ?`,
+		newExpiry.UTC().Format(time.RFC3339Nano),
+		now.Format(time.RFC3339Nano),
+		jobID,
+		string(AsyncJobStateWaitingApproval),
+	)
+	return err
 }

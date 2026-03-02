@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "modernc.org/sqlite"
 	"github.com/marcus-qen/legator/internal/controlplane/migration"
+	_ "modernc.org/sqlite"
 )
 
 // ---------------------------------------------------------------------------
@@ -145,11 +145,11 @@ type JobQueue interface {
 // the corresponding drill to use a built-in no-op/stub implementation so that
 // the runner is always unit-testable without real infrastructure.
 type DrillRunnerDeps struct {
-	Probes  ProbeRegistry
-	DB      DBWriter
-	LLM     LLMClient
-	MQ      MessageQueue
-	Jobs    JobQueue
+	Probes ProbeRegistry
+	DB     DBWriter
+	LLM    LLMClient
+	MQ     MessageQueue
+	Jobs   JobQueue
 }
 
 // DrillRunner executes failure drill scenarios.
@@ -717,9 +717,9 @@ type dbScanner interface {
 
 func scanDrillResult(s dbScanner) (DrillResult, error) {
 	var (
-		r        DrillResult
-		ranAt    string
-		obsJSON  string
+		r       DrillResult
+		ranAt   string
+		obsJSON string
 	)
 	if err := s.Scan(
 		&r.ID, (*string)(&r.Scenario), (*string)(&r.Status),

@@ -27,12 +27,12 @@ type deprecationsFile struct {
 }
 
 type deprecationEntry struct {
-	ID              string `json:"id"`
-	Status          string `json:"status"`
-	DeprecatedIn    string `json:"deprecated_in"`
+	ID               string `json:"id"`
+	Status           string `json:"status"`
+	DeprecatedIn     string `json:"deprecated_in"`
 	RemovalNotBefore string `json:"removal_not_before"`
-	Replacement     string `json:"replacement"`
-	ChangeNote      string `json:"change_note"`
+	Replacement      string `json:"replacement"`
+	ChangeNote       string `json:"change_note"`
 }
 
 func TestCompatibilityContract_APIRoutes(t *testing.T) {

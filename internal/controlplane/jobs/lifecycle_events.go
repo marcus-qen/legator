@@ -10,9 +10,9 @@ import (
 type LifecycleEventType string
 
 const (
-	EventJobCreated          LifecycleEventType = "job.created"
-	EventJobUpdated          LifecycleEventType = "job.updated"
-	EventJobDeleted          LifecycleEventType = "job.deleted"
+	EventJobCreated             LifecycleEventType = "job.created"
+	EventJobUpdated             LifecycleEventType = "job.updated"
+	EventJobDeleted             LifecycleEventType = "job.deleted"
 	EventJobRunAdmissionAllowed LifecycleEventType = "job.run.admission_allowed"
 	EventJobRunAdmissionQueued  LifecycleEventType = "job.run.admission_queued"
 	EventJobRunAdmissionDenied  LifecycleEventType = "job.run.admission_denied"

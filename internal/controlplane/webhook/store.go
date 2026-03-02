@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	_ "modernc.org/sqlite"
 	"github.com/marcus-qen/legator/internal/controlplane/migration"
+	_ "modernc.org/sqlite"
 )
 
 // Store provides persistent webhook storage backed by SQLite.

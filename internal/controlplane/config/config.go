@@ -112,6 +112,9 @@ type JobsConfig struct {
 	StreamMaxEventsPerRequest int    `json:"stream_max_events_per_request,omitempty"`
 	StreamMaxEventsTotal      int    `json:"stream_max_events_total,omitempty"`
 	StreamRetention           string `json:"stream_retention,omitempty"`
+
+	ApprovalTimeoutSeconds  int    `json:"approval_timeout_seconds,omitempty"`
+	ApprovalTimeoutBehavior string `json:"approval_timeout_behavior,omitempty"`
 }
 
 func (k KubeflowConfig) NamespaceOrDefault() string {
@@ -167,6 +170,22 @@ func (j JobsConfig) AsyncPollIntervalDuration() time.Duration {
 	return d
 }
 
+func (j JobsConfig) ApprovalTimeoutBehaviorOrDefault() string {
+	switch strings.TrimSpace(j.ApprovalTimeoutBehavior) {
+	case "cancel", "reads_only", "escalate":
+		return strings.TrimSpace(j.ApprovalTimeoutBehavior)
+	default:
+		return "cancel"
+	}
+}
+
+func (j JobsConfig) ApprovalTimeoutDuration() time.Duration {
+	if j.ApprovalTimeoutSeconds <= 0 {
+		return 0
+	}
+	return time.Duration(j.ApprovalTimeoutSeconds) * time.Second
+}
+
 func (j JobsConfig) StreamRetentionDuration() time.Duration {
 	raw := strings.TrimSpace(j.StreamRetention)
 	if raw == "" {
@@ -209,6 +228,8 @@ func Default() Config {
 			StreamMaxEventsPerRequest: 2000,
 			StreamMaxEventsTotal:      100000,
 			StreamRetention:           "24h",
+			ApprovalTimeoutSeconds:    900,
+			ApprovalTimeoutBehavior:   "cancel",
 		},
 	}
 }
@@ -370,6 +391,14 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("LEGATOR_JOBS_STREAM_RETENTION"); v != "" {
 		cfg.Jobs.StreamRetention = v
+	}
+	if v := os.Getenv("LEGATOR_JOBS_APPROVAL_TIMEOUT_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Jobs.ApprovalTimeoutSeconds = n
+		}
+	}
+	if v := os.Getenv("LEGATOR_JOBS_APPROVAL_TIMEOUT_BEHAVIOR"); v != "" {
+		cfg.Jobs.ApprovalTimeoutBehavior = v
 	}
 	if v := os.Getenv("LEGATOR_MCP_ENABLED"); v != "" {
 		cfg.MCPEnabled = v == "true" || v == "1"
