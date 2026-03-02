@@ -113,9 +113,12 @@ type JobsConfig struct {
 	StreamMaxEventsTotal      int    `json:"stream_max_events_total,omitempty"`
 	StreamRetention           string `json:"stream_retention,omitempty"`
 
-	ApprovalTimeoutSeconds  int    `json:"approval_timeout_seconds,omitempty"`
-	ApprovalTimeoutBehavior string `json:"approval_timeout_behavior,omitempty"`
-	RunTokenTTL             string `json:"run_token_ttl,omitempty"`
+	ApprovalTimeoutSeconds      int    `json:"approval_timeout_seconds,omitempty"`
+	ApprovalTimeoutBehavior     string `json:"approval_timeout_behavior,omitempty"`
+	RunTokenTTL                 string `json:"run_token_ttl,omitempty"`
+	RunnerSandboxRuntimeCommand string `json:"runner_sandbox_runtime_command,omitempty"`
+	RunnerSandboxImage          string `json:"runner_sandbox_image,omitempty"`
+	RunnerSandboxTimeout        string `json:"runner_sandbox_timeout,omitempty"`
 }
 
 func (k KubeflowConfig) NamespaceOrDefault() string {
@@ -211,6 +214,18 @@ func (j JobsConfig) RunTokenTTLDuration() time.Duration {
 	return d
 }
 
+func (j JobsConfig) RunnerSandboxTimeoutDuration() time.Duration {
+	raw := strings.TrimSpace(j.RunnerSandboxTimeout)
+	if raw == "" {
+		return 10 * time.Minute
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 10 * time.Minute
+	}
+	return d
+}
+
 // Default returns configuration with sensible defaults.
 func Default() Config {
 	return Config{
@@ -234,16 +249,19 @@ func Default() Config {
 			DashboardLimit: 10,
 		},
 		Jobs: JobsConfig{
-			AsyncMaxInFlight:          8,
-			AsyncMaxQueueDepth:        500,
-			AsyncPollInterval:         "200ms",
-			AsyncFetchBatchSize:       64,
-			StreamMaxEventsPerRequest: 2000,
-			StreamMaxEventsTotal:      100000,
-			StreamRetention:           "24h",
-			ApprovalTimeoutSeconds:    900,
-			ApprovalTimeoutBehavior:   "cancel",
-			RunTokenTTL:               "2m",
+			AsyncMaxInFlight:            8,
+			AsyncMaxQueueDepth:          500,
+			AsyncPollInterval:           "200ms",
+			AsyncFetchBatchSize:         64,
+			StreamMaxEventsPerRequest:   2000,
+			StreamMaxEventsTotal:        100000,
+			StreamRetention:             "24h",
+			ApprovalTimeoutSeconds:      900,
+			ApprovalTimeoutBehavior:     "cancel",
+			RunTokenTTL:                 "2m",
+			RunnerSandboxRuntimeCommand: "podman",
+			RunnerSandboxImage:          "docker.io/library/alpine:3.20",
+			RunnerSandboxTimeout:        "10m",
 		},
 	}
 }
@@ -416,6 +434,15 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("LEGATOR_JOBS_RUN_TOKEN_TTL"); v != "" {
 		cfg.Jobs.RunTokenTTL = v
+	}
+	if v := os.Getenv("LEGATOR_JOBS_RUNNER_SANDBOX_RUNTIME_COMMAND"); v != "" {
+		cfg.Jobs.RunnerSandboxRuntimeCommand = v
+	}
+	if v := os.Getenv("LEGATOR_JOBS_RUNNER_SANDBOX_IMAGE"); v != "" {
+		cfg.Jobs.RunnerSandboxImage = v
+	}
+	if v := os.Getenv("LEGATOR_JOBS_RUNNER_SANDBOX_TIMEOUT"); v != "" {
+		cfg.Jobs.RunnerSandboxTimeout = v
 	}
 	if v := os.Getenv("LEGATOR_MCP_ENABLED"); v != "" {
 		cfg.MCPEnabled = v == "true" || v == "1"

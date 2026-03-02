@@ -156,3 +156,52 @@ func TestRunnerLifecycleTransitions(t *testing.T) {
 		t.Fatalf("expected invalid transition from destroyed -> stopped, got %v", err)
 	}
 }
+
+func TestSandboxRunnerRequiresCommandContract(t *testing.T) {
+	mgr := NewManager(Config{})
+	if _, err := mgr.CreateRunner(CreateRequest{SessionID: "sess-1", Backend: BackendSandbox}); !errors.Is(err, ErrSandboxCommandRequired) {
+		t.Fatalf("expected sandbox command required, got %v", err)
+	}
+
+	r, err := mgr.CreateRunner(CreateRequest{
+		SessionID: "sess-1",
+		Backend:   BackendSandbox,
+		Sandbox: &SandboxContract{
+			Image:          "alpine:3.20",
+			Command:        []string{"sh", "-lc", "echo hi"},
+			TimeoutSeconds: 10,
+		},
+		JobID: "job-1",
+	})
+	if err != nil {
+		t.Fatalf("create sandbox runner: %v", err)
+	}
+	if r.Backend != BackendSandbox {
+		t.Fatalf("expected sandbox backend, got %s", r.Backend)
+	}
+	if r.JobID != "job-1" {
+		t.Fatalf("expected job_id job-1, got %s", r.JobID)
+	}
+	if r.Sandbox == nil || len(r.Sandbox.Command) == 0 {
+		t.Fatalf("expected sandbox contract command")
+	}
+}
+
+func TestRunTokenJobBindingScope(t *testing.T) {
+	now := time.Date(2026, 3, 2, 20, 0, 0, 0, time.UTC)
+	mgr := NewManager(Config{RunTokenTTL: 2 * time.Minute, Now: func() time.Time { return now }})
+
+	r, err := mgr.CreateRunner(CreateRequest{SessionID: "sess-1", JobID: "job-1"})
+	if err != nil {
+		t.Fatalf("create runner: %v", err)
+	}
+
+	issued, err := mgr.IssueRunToken(IssueTokenRequest{RunnerID: r.ID, Audience: AudienceRunnerStart, SessionID: "sess-1", JobID: "job-1"})
+	if err != nil {
+		t.Fatalf("issue run token: %v", err)
+	}
+
+	if _, err := mgr.StartRunner(LifecycleRequest{RunnerID: r.ID, JobID: "job-2", RunToken: issued.Token, SessionID: "sess-1"}); !errors.Is(err, ErrRunTokenScope) {
+		t.Fatalf("expected run token scope rejection on mismatched job id, got %v", err)
+	}
+}

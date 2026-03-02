@@ -66,6 +66,15 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Jobs.RunTokenTTLDuration() != 2*time.Minute {
 		t.Errorf("expected run token ttl 2m, got %s", cfg.Jobs.RunTokenTTLDuration())
 	}
+	if cfg.Jobs.RunnerSandboxRuntimeCommand != "podman" {
+		t.Errorf("expected sandbox runtime command podman, got %s", cfg.Jobs.RunnerSandboxRuntimeCommand)
+	}
+	if cfg.Jobs.RunnerSandboxImage != "docker.io/library/alpine:3.20" {
+		t.Errorf("expected sandbox image default alpine, got %s", cfg.Jobs.RunnerSandboxImage)
+	}
+	if cfg.Jobs.RunnerSandboxTimeoutDuration() != 10*time.Minute {
+		t.Errorf("expected sandbox timeout 10m, got %s", cfg.Jobs.RunnerSandboxTimeoutDuration())
+	}
 }
 
 func TestLoadFromFile(t *testing.T) {
@@ -225,6 +234,9 @@ func TestLoadFromEnvOnly(t *testing.T) {
 	t.Setenv("LEGATOR_GRAFANA_TLS_SKIP_VERIFY", "1")
 	t.Setenv("LEGATOR_GRAFANA_ORG_ID", "9")
 	t.Setenv("LEGATOR_JOBS_RUN_TOKEN_TTL", "45s")
+	t.Setenv("LEGATOR_JOBS_RUNNER_SANDBOX_RUNTIME_COMMAND", "podman")
+	t.Setenv("LEGATOR_JOBS_RUNNER_SANDBOX_IMAGE", "ghcr.io/example/sandbox:latest")
+	t.Setenv("LEGATOR_JOBS_RUNNER_SANDBOX_TIMEOUT", "95s")
 
 	cfg := LoadFromEnv()
 	if cfg.DataDir != "/tmp/env-test" {
@@ -274,6 +286,15 @@ func TestLoadFromEnvOnly(t *testing.T) {
 	}
 	if cfg.Jobs.RunTokenTTLDuration() != 45*time.Second {
 		t.Errorf("expected run token ttl 45s, got %s", cfg.Jobs.RunTokenTTLDuration())
+	}
+	if cfg.Jobs.RunnerSandboxRuntimeCommand != "podman" {
+		t.Errorf("expected sandbox runtime podman, got %s", cfg.Jobs.RunnerSandboxRuntimeCommand)
+	}
+	if cfg.Jobs.RunnerSandboxImage != "ghcr.io/example/sandbox:latest" {
+		t.Errorf("expected sandbox image override, got %s", cfg.Jobs.RunnerSandboxImage)
+	}
+	if cfg.Jobs.RunnerSandboxTimeoutDuration() != 95*time.Second {
+		t.Errorf("expected sandbox timeout 95s, got %s", cfg.Jobs.RunnerSandboxTimeoutDuration())
 	}
 }
 

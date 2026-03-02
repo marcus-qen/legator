@@ -31,38 +31,66 @@ const (
 	AudienceRunnerDestroy Audience = "runner:destroy"
 )
 
+// BackendKind controls where runner commands execute.
+type BackendKind string
+
+const (
+	BackendHost    BackendKind = "host"
+	BackendSandbox BackendKind = "sandbox"
+)
+
 const defaultRunTokenTTL = 2 * time.Minute
 
 var (
-	ErrSessionRequired      = errors.New("session context required")
-	ErrAudienceRequired     = errors.New("run token audience required")
-	ErrInvalidAudience      = errors.New("invalid run token audience")
-	ErrRunnerIDRequired     = errors.New("runner_id is required")
-	ErrRunnerNotFound       = errors.New("runner not found")
-	ErrInvalidTransition    = errors.New("invalid runner lifecycle transition")
-	ErrRunTokenRequired     = errors.New("run token is required")
-	ErrRunTokenInvalid      = errors.New("run token is invalid")
-	ErrRunTokenExpired      = errors.New("run token is expired")
-	ErrRunTokenConsumed     = errors.New("run token already consumed")
-	ErrRunTokenScope        = errors.New("run token scope rejected")
-	ErrRunTokenSessionBound = errors.New("run token session binding rejected")
+	ErrSessionRequired          = errors.New("session context required")
+	ErrAudienceRequired         = errors.New("run token audience required")
+	ErrInvalidAudience          = errors.New("invalid run token audience")
+	ErrRunnerIDRequired         = errors.New("runner_id is required")
+	ErrRunnerNotFound           = errors.New("runner not found")
+	ErrInvalidTransition        = errors.New("invalid runner lifecycle transition")
+	ErrRunTokenRequired         = errors.New("run token is required")
+	ErrRunTokenInvalid          = errors.New("run token is invalid")
+	ErrRunTokenExpired          = errors.New("run token is expired")
+	ErrRunTokenConsumed         = errors.New("run token already consumed")
+	ErrRunTokenScope            = errors.New("run token scope rejected")
+	ErrRunTokenSessionBound     = errors.New("run token session binding rejected")
+	ErrInvalidBackend           = errors.New("invalid runner backend")
+	ErrSandboxCommandRequired   = errors.New("sandbox command is required")
+	ErrSandboxContractMalformed = errors.New("sandbox contract malformed")
+	ErrBackendUnavailable       = errors.New("runner execution backend unavailable")
+	ErrBackendStartFailed       = errors.New("runner execution start failed")
+	ErrBackendStopFailed        = errors.New("runner execution stop failed")
+	ErrBackendTeardownFailed    = errors.New("runner execution teardown failed")
 )
+
+// SandboxContract describes disposable sandbox execution.
+type SandboxContract struct {
+	Image          string   `json:"image,omitempty"`
+	Command        []string `json:"command,omitempty"`
+	TimeoutSeconds int64    `json:"timeout_seconds,omitempty"`
+}
 
 // Runner is the control-plane runner lifecycle projection.
 type Runner struct {
-	ID          string    `json:"id"`
-	Label       string    `json:"label,omitempty"`
-	State       State     `json:"state"`
-	CreatedBy   string    `json:"created_by,omitempty"`
-	SessionID   string    `json:"session_id,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	DestroyedAt time.Time `json:"destroyed_at,omitempty"`
+	ID          string           `json:"id"`
+	Label       string           `json:"label,omitempty"`
+	JobID       string           `json:"job_id,omitempty"`
+	Backend     BackendKind      `json:"backend,omitempty"`
+	Sandbox     *SandboxContract `json:"sandbox,omitempty"`
+	State       State            `json:"state"`
+	CreatedBy   string           `json:"created_by,omitempty"`
+	SessionID   string           `json:"session_id,omitempty"`
+	CreatedAt   time.Time        `json:"created_at"`
+	UpdatedAt   time.Time        `json:"updated_at"`
+	DestroyedAt time.Time        `json:"destroyed_at,omitempty"`
 }
 
 // CreateRequest describes a runner create operation.
 type CreateRequest struct {
 	Label     string
+	JobID     string
+	Backend   BackendKind
+	Sandbox   *SandboxContract
 	CreatedBy string
 	SessionID string
 }
@@ -70,6 +98,7 @@ type CreateRequest struct {
 // IssueTokenRequest describes a run token issuance operation.
 type IssueTokenRequest struct {
 	RunnerID  string
+	JobID     string
 	Audience  Audience
 	SessionID string
 	TTL       time.Duration
@@ -79,6 +108,7 @@ type IssueTokenRequest struct {
 type IssuedToken struct {
 	Token     string    `json:"run_token"`
 	RunnerID  string    `json:"runner_id"`
+	JobID     string    `json:"job_id,omitempty"`
 	Audience  Audience  `json:"audience"`
 	IssuedAt  time.Time `json:"issued_at"`
 	ExpiresAt time.Time `json:"expires_at"`
@@ -88,6 +118,7 @@ type IssuedToken struct {
 // LifecycleRequest describes start/stop/destroy operations.
 type LifecycleRequest struct {
 	RunnerID  string
+	JobID     string
 	RunToken  string
 	SessionID string
 }
@@ -103,6 +134,7 @@ type Config struct {
 type runTokenRecord struct {
 	Token      string
 	RunnerID   string
+	JobID      string
 	Audience   Audience
 	SessionID  string
 	IssuedAt   time.Time
@@ -157,10 +189,22 @@ func (m *Manager) CreateRunner(req CreateRequest) (*Runner, error) {
 		return nil, ErrSessionRequired
 	}
 
+	backend, err := normalizeBackend(req.Backend)
+	if err != nil {
+		return nil, err
+	}
+	sandbox, err := normalizeSandboxContract(backend, req.Sandbox)
+	if err != nil {
+		return nil, err
+	}
+
 	now := m.now()
 	runner := &Runner{
 		ID:        strings.TrimSpace(m.idGenerator()),
 		Label:     strings.TrimSpace(req.Label),
+		JobID:     strings.TrimSpace(req.JobID),
+		Backend:   backend,
+		Sandbox:   sandbox,
 		State:     StateCreated,
 		CreatedBy: strings.TrimSpace(req.CreatedBy),
 		SessionID: sessionID,
@@ -199,8 +243,18 @@ func (m *Manager) IssueRunToken(req IssueTokenRequest) (*IssuedToken, error) {
 	defer m.mu.Unlock()
 	m.pruneExpiredLocked()
 
-	if _, ok := m.runners[runnerID]; !ok {
+	r, ok := m.runners[runnerID]
+	if !ok {
 		return nil, ErrRunnerNotFound
+	}
+
+	jobID := strings.TrimSpace(req.JobID)
+	runnerJobID := strings.TrimSpace(r.JobID)
+	switch {
+	case runnerJobID != "" && jobID == "":
+		jobID = runnerJobID
+	case runnerJobID != "" && jobID != runnerJobID:
+		return nil, fmt.Errorf("%w: token job_id %q does not match runner job_id %q", ErrRunTokenScope, jobID, runnerJobID)
 	}
 
 	ttl := req.TTL
@@ -222,6 +276,7 @@ func (m *Manager) IssueRunToken(req IssueTokenRequest) (*IssuedToken, error) {
 	record := &runTokenRecord{
 		Token:     token,
 		RunnerID:  runnerID,
+		JobID:     jobID,
 		Audience:  audience,
 		SessionID: sessionID,
 		IssuedAt:  now,
@@ -232,6 +287,7 @@ func (m *Manager) IssueRunToken(req IssueTokenRequest) (*IssuedToken, error) {
 	return &IssuedToken{
 		Token:     token,
 		RunnerID:  runnerID,
+		JobID:     jobID,
 		Audience:  audience,
 		IssuedAt:  now,
 		ExpiresAt: expiresAt,
@@ -241,20 +297,81 @@ func (m *Manager) IssueRunToken(req IssueTokenRequest) (*IssuedToken, error) {
 
 // StartRunner transitions runner to running after token checks.
 func (m *Manager) StartRunner(req LifecycleRequest) (*Runner, error) {
-	return m.transition(req, AudienceRunnerStart, StateRunning)
+	if _, err := m.PrepareRunnerLifecycle(req, AudienceRunnerStart); err != nil {
+		return nil, err
+	}
+	return m.CompleteRunnerLifecycle(req.RunnerID, StateRunning)
 }
 
 // StopRunner transitions runner to stopped after token checks.
 func (m *Manager) StopRunner(req LifecycleRequest) (*Runner, error) {
-	return m.transition(req, AudienceRunnerStop, StateStopped)
+	if _, err := m.PrepareRunnerLifecycle(req, AudienceRunnerStop); err != nil {
+		return nil, err
+	}
+	return m.CompleteRunnerLifecycle(req.RunnerID, StateStopped)
 }
 
 // DestroyRunner transitions runner to destroyed after token checks.
 func (m *Manager) DestroyRunner(req LifecycleRequest) (*Runner, error) {
-	return m.transition(req, AudienceRunnerDestroy, StateDestroyed)
+	if _, err := m.PrepareRunnerLifecycle(req, AudienceRunnerDestroy); err != nil {
+		return nil, err
+	}
+	return m.CompleteRunnerLifecycle(req.RunnerID, StateDestroyed)
 }
 
-func (m *Manager) transition(req LifecycleRequest, audience Audience, target State) (*Runner, error) {
+// PrepareRunnerLifecycle validates and consumes a lifecycle token without mutating state.
+func (m *Manager) PrepareRunnerLifecycle(req LifecycleRequest, audience Audience) (*Runner, error) {
+	target, ok := audienceTarget(audience)
+	if !ok {
+		return nil, fmt.Errorf("%w: unsupported audience %s", ErrInvalidAudience, audience)
+	}
+	return m.prepareTransition(req, audience, target)
+}
+
+// CompleteRunnerLifecycle applies a previously prepared transition.
+func (m *Manager) CompleteRunnerLifecycle(runnerID string, target State) (*Runner, error) {
+	runnerID = strings.TrimSpace(runnerID)
+	if runnerID == "" {
+		return nil, ErrRunnerIDRequired
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	r, ok := m.runners[runnerID]
+	if !ok {
+		return nil, ErrRunnerNotFound
+	}
+	if !canTransition(r.State, target) {
+		return nil, fmt.Errorf("%w: cannot move from %s to %s", ErrInvalidTransition, r.State, target)
+	}
+
+	now := m.now()
+	r.State = target
+	r.UpdatedAt = now
+	if target == StateDestroyed {
+		r.DestroyedAt = now
+	}
+	return cloneRunner(r), nil
+}
+
+// GetRunner returns the current runner projection.
+func (m *Manager) GetRunner(runnerID string) (*Runner, error) {
+	runnerID = strings.TrimSpace(runnerID)
+	if runnerID == "" {
+		return nil, ErrRunnerIDRequired
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runners[runnerID]
+	if !ok {
+		return nil, ErrRunnerNotFound
+	}
+	return cloneRunner(r), nil
+}
+
+func (m *Manager) prepareTransition(req LifecycleRequest, audience Audience, target State) (*Runner, error) {
 	sessionID := strings.TrimSpace(req.SessionID)
 	if sessionID == "" {
 		return nil, ErrSessionRequired
@@ -267,35 +384,32 @@ func (m *Manager) transition(req LifecycleRequest, audience Audience, target Sta
 	if rawToken == "" {
 		return nil, ErrRunTokenRequired
 	}
+	requestedJobID := strings.TrimSpace(req.JobID)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.pruneExpiredLocked()
 
-	if err := m.consumeRunTokenLocked(rawToken, audience, runnerID, sessionID); err != nil {
-		return nil, err
-	}
-
-	runner, ok := m.runners[runnerID]
+	r, ok := m.runners[runnerID]
 	if !ok {
 		return nil, ErrRunnerNotFound
 	}
 
-	now := m.now()
-	if !canTransition(runner.State, target) {
-		return nil, fmt.Errorf("%w: cannot move from %s to %s", ErrInvalidTransition, runner.State, target)
+	runnerJobID := strings.TrimSpace(r.JobID)
+	if requestedJobID != "" && runnerJobID != "" && requestedJobID != runnerJobID {
+		return nil, fmt.Errorf("%w: lifecycle job_id %q does not match runner job_id %q", ErrRunTokenScope, requestedJobID, runnerJobID)
+	}
+	if err := m.consumeRunTokenLocked(rawToken, audience, runnerID, runnerJobID, sessionID); err != nil {
+		return nil, err
+	}
+	if !canTransition(r.State, target) {
+		return nil, fmt.Errorf("%w: cannot move from %s to %s", ErrInvalidTransition, r.State, target)
 	}
 
-	runner.State = target
-	runner.UpdatedAt = now
-	if target == StateDestroyed {
-		runner.DestroyedAt = now
-	}
-
-	return cloneRunner(runner), nil
+	return cloneRunner(r), nil
 }
 
-func (m *Manager) consumeRunTokenLocked(rawToken string, audience Audience, runnerID, sessionID string) error {
+func (m *Manager) consumeRunTokenLocked(rawToken string, audience Audience, runnerID, jobID, sessionID string) error {
 	record, ok := m.tokens[rawToken]
 	if !ok {
 		return ErrRunTokenInvalid
@@ -318,6 +432,9 @@ func (m *Manager) consumeRunTokenLocked(rawToken string, audience Audience, runn
 	}
 	if strings.TrimSpace(record.RunnerID) != strings.TrimSpace(runnerID) {
 		return fmt.Errorf("%w: token audience bound to runner %s", ErrRunTokenScope, record.RunnerID)
+	}
+	if strings.TrimSpace(record.JobID) != strings.TrimSpace(jobID) {
+		return fmt.Errorf("%w: token audience bound to job %s", ErrRunTokenScope, strings.TrimSpace(record.JobID))
 	}
 
 	t := now
@@ -357,6 +474,19 @@ func canTransition(current, target State) bool {
 	}
 }
 
+func audienceTarget(a Audience) (State, bool) {
+	switch normalizeAudience(a) {
+	case AudienceRunnerStart:
+		return StateRunning, true
+	case AudienceRunnerStop:
+		return StateStopped, true
+	case AudienceRunnerDestroy:
+		return StateDestroyed, true
+	default:
+		return "", false
+	}
+}
+
 func isAllowedAudience(a Audience) bool {
 	switch normalizeAudience(a) {
 	case AudienceRunnerStart, AudienceRunnerStop, AudienceRunnerDestroy:
@@ -370,11 +500,53 @@ func normalizeAudience(a Audience) Audience {
 	return Audience(strings.TrimSpace(string(a)))
 }
 
+func normalizeBackend(b BackendKind) (BackendKind, error) {
+	switch BackendKind(strings.TrimSpace(string(b))) {
+	case "", BackendHost:
+		return BackendHost, nil
+	case BackendSandbox:
+		return BackendSandbox, nil
+	default:
+		return "", fmt.Errorf("%w: %s", ErrInvalidBackend, strings.TrimSpace(string(b)))
+	}
+}
+
+func normalizeSandboxContract(backend BackendKind, in *SandboxContract) (*SandboxContract, error) {
+	if backend != BackendSandbox {
+		return nil, nil
+	}
+	if in == nil {
+		in = &SandboxContract{}
+	}
+	out := &SandboxContract{
+		Image:          strings.TrimSpace(in.Image),
+		TimeoutSeconds: in.TimeoutSeconds,
+	}
+	for _, part := range in.Command {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			out.Command = append(out.Command, trimmed)
+		}
+	}
+	if len(out.Command) == 0 {
+		return nil, ErrSandboxCommandRequired
+	}
+	if out.TimeoutSeconds < 0 {
+		return nil, fmt.Errorf("%w: timeout_seconds must be >= 0", ErrSandboxContractMalformed)
+	}
+	return out, nil
+}
+
 func cloneRunner(in *Runner) *Runner {
 	if in == nil {
 		return nil
 	}
 	copy := *in
+	if in.Sandbox != nil {
+		sandboxCopy := *in.Sandbox
+		sandboxCopy.Command = append([]string(nil), in.Sandbox.Command...)
+		copy.Sandbox = &sandboxCopy
+	}
 	return &copy
 }
 
