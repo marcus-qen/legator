@@ -299,7 +299,16 @@ func (s *Store) upsertProbe(ps *ProbeState) error {
 	}
 	var credsJSON []byte
 	if ps.RemoteCredentials != nil {
-		credsJSON, _ = json.Marshal(ps.RemoteCredentials)
+		// Manual marshal: RemoteProbeCredentials has json:"-" tags (API safety),
+		// but we need to persist internally.
+		cm := map[string]string{}
+		if ps.RemoteCredentials.Password != "" {
+			cm["password"] = ps.RemoteCredentials.Password
+		}
+		if ps.RemoteCredentials.PrivateKey != "" {
+			cm["private_key"] = ps.RemoteCredentials.PrivateKey
+		}
+		credsJSON, _ = json.Marshal(cm)
 	}
 
 	_, err := s.db.Exec(`INSERT INTO probes (id, hostname, os, arch, status, probe_type, policy_level, api_key, registered, last_seen, labels, tags, inventory, tenant_id, remote, remote_credentials)
@@ -406,8 +415,12 @@ func (s *Store) loadAll() error {
 			}
 		}
 		if credsJSON.Valid && strings.TrimSpace(credsJSON.String) != "" {
-			var creds RemoteProbeCredentials
-			if err := json.Unmarshal([]byte(credsJSON.String), &creds); err == nil {
+			var cm map[string]string
+			if err := json.Unmarshal([]byte(credsJSON.String), &cm); err == nil {
+				creds := RemoteProbeCredentials{
+					Password:   cm["password"],
+					PrivateKey: cm["private_key"],
+				}
 				ps.RemoteCredentials = &creds
 			}
 		}

@@ -1,9 +1,7 @@
-# Stable REST API routes (v1 + health/version + MCP transport)
-# New stable entries must be reflected in CHANGELOG.md and docs/releases/README.md annotations.
 # Append-only list. Do not remove entries; use docs/contracts/deprecations.json with status="removed".
 DELETE /api/v1/alerts/escalation/policies/{id}
-DELETE /api/v1/alerts/routing/policies/{id}
 DELETE /api/v1/alerts/{id}
+DELETE /api/v1/alerts/routing/policies/{id}
 DELETE /api/v1/audit/purge
 DELETE /api/v1/auth/keys/{id}
 DELETE /api/v1/cloud/connectors/{id}
@@ -22,10 +20,10 @@ GET /api/v1/alerts
 GET /api/v1/alerts/active
 GET /api/v1/alerts/escalation/policies
 GET /api/v1/alerts/escalation/policies/{id}
-GET /api/v1/alerts/routing/policies
-GET /api/v1/alerts/routing/policies/{id}
 GET /api/v1/alerts/{id}
 GET /api/v1/alerts/{id}/history
+GET /api/v1/alerts/routing/policies
+GET /api/v1/alerts/routing/policies/{id}
 GET /api/v1/approvals
 GET /api/v1/approvals/{id}
 GET /api/v1/audit
@@ -55,9 +53,9 @@ GET /api/v1/fleet/tags
 GET /api/v1/grafana/snapshot
 GET /api/v1/grafana/status
 GET /api/v1/jobs
-GET /api/v1/jobs/runs
 GET /api/v1/jobs/{id}
 GET /api/v1/jobs/{id}/runs
+GET /api/v1/jobs/runs
 GET /api/v1/kubeflow/inventory
 GET /api/v1/kubeflow/runs/{name}/status
 GET /api/v1/kubeflow/status
@@ -66,9 +64,9 @@ GET /api/v1/metrics
 GET /api/v1/model-profiles
 GET /api/v1/model-profiles/active
 GET /api/v1/model-usage
-GET /api/v1/network-devices/{id}/inventory
 GET /api/v1/network/devices
 GET /api/v1/network/devices/{id}
+GET /api/v1/network-devices/{id}/inventory
 GET /api/v1/network/devices/{id}/inventory
 GET /api/v1/openapi.yaml
 GET /api/v1/policies
@@ -95,6 +93,7 @@ GET /api/v1/webhooks/{id}
 GET /healthz
 GET /mcp
 GET /version
+# New stable entries must be reflected in CHANGELOG.md and docs/releases/README.md annotations.
 PATCH /api/v1/reliability/incidents/{id}
 PATCH /api/v1/tenants/{id}
 POST /api/v1/alerts
@@ -121,18 +120,19 @@ POST /api/v1/jobs/{id}/run
 POST /api/v1/jobs/{id}/runs/{runId}/cancel
 POST /api/v1/jobs/{id}/runs/{runId}/retry
 POST /api/v1/kubeflow/actions/refresh
-POST /api/v1/kubeflow/runs/submit
 POST /api/v1/kubeflow/runs/{name}/cancel
+POST /api/v1/kubeflow/runs/submit
 POST /api/v1/model-profiles
 POST /api/v1/model-profiles/{id}/activate
-POST /api/v1/network-devices/{id}/command
-POST /api/v1/network-devices/{id}/scan
 POST /api/v1/network/devices
+POST /api/v1/network-devices/{id}/command
 POST /api/v1/network/devices/{id}/command
 POST /api/v1/network/devices/{id}/inventory
+POST /api/v1/network-devices/{id}/scan
 POST /api/v1/network/devices/{id}/scan
 POST /api/v1/network/devices/{id}/test
 POST /api/v1/policies
+POST /api/v1/probes
 POST /api/v1/probes/{id}/apply-policy/{policyId}
 POST /api/v1/probes/{id}/chat
 POST /api/v1/probes/{id}/command
@@ -151,8 +151,8 @@ POST /api/v1/webhooks
 POST /api/v1/webhooks/{id}/test
 POST /mcp
 PUT /api/v1/alerts/escalation/policies/{id}
-PUT /api/v1/alerts/routing/policies/{id}
 PUT /api/v1/alerts/{id}
+PUT /api/v1/alerts/routing/policies/{id}
 PUT /api/v1/cloud/connectors/{id}
 PUT /api/v1/jobs/{id}
 PUT /api/v1/model-profiles/{id}
@@ -160,3 +160,4 @@ PUT /api/v1/network/devices/{id}
 PUT /api/v1/probes/{id}/tags
 PUT /api/v1/users/{id}/role
 PUT /api/v1/users/{id}/tenants
+# Stable REST API routes (v1 + health/version + MCP transport)
