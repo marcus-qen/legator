@@ -13,6 +13,7 @@ DELETE /api/v1/probes/{id}
 DELETE /api/v1/probes/{id}/chat
 DELETE /api/v1/reliability/incidents/{id}
 DELETE /api/v1/roles/{name}
+DELETE /api/v1/runners/{id}
 DELETE /api/v1/tenants/{id}
 DELETE /api/v1/users/{id}
 DELETE /api/v1/webhooks/{id}
@@ -153,6 +154,10 @@ POST /api/v1/reliability/drills/{name}/run
 POST /api/v1/reliability/incidents
 POST /api/v1/reliability/incidents/{id}/timeline
 POST /api/v1/roles
+POST /api/v1/runners
+POST /api/v1/runners/{id}/start
+POST /api/v1/runners/{id}/stop
+POST /api/v1/runs
 POST /api/v1/tenants
 POST /api/v1/tokens
 POST /api/v1/users

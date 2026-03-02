@@ -39,6 +39,11 @@ const (
 	EventJobRunFailed           EventType = "job.run.failed"
 	EventJobRunCanceled         EventType = "job.run.canceled"
 	EventJobRunDenied           EventType = "job.run.denied"
+	EventRunnerCreated          EventType = "runner.created"
+	EventRunnerStarted          EventType = "runner.started"
+	EventRunnerStopped          EventType = "runner.stopped"
+	EventRunnerDestroyed        EventType = "runner.destroyed"
+	EventRunnerRunTokenIssued   EventType = "runner.run_token_issued"
 )
 
 // Event is a single audit log entry.

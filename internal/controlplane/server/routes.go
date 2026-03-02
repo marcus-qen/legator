@@ -258,6 +258,13 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/jobs/{id}/approve", s.withPermission(auth.PermApprovalWrite, s.handleApproveAsyncJob))
 	mux.HandleFunc("POST /api/v1/jobs/{id}/reject", s.withPermission(auth.PermApprovalWrite, s.handleRejectAsyncJob))
 
+	// Runner manager + ephemeral run token contract.
+	mux.HandleFunc("POST /api/v1/runners", s.withPermission(auth.PermCommandExec, s.handleCreateRunner))
+	mux.HandleFunc("POST /api/v1/runners/{id}/start", s.withPermission(auth.PermCommandExec, s.handleStartRunner))
+	mux.HandleFunc("POST /api/v1/runners/{id}/stop", s.withPermission(auth.PermCommandExec, s.handleStopRunner))
+	mux.HandleFunc("DELETE /api/v1/runners/{id}", s.withPermission(auth.PermCommandExec, s.handleDestroyRunner))
+	mux.HandleFunc("POST /api/v1/runs", s.withPermission(auth.PermCommandExec, s.handleIssueRunToken))
+
 	// Permission matrix — public endpoint, no auth required
 	mux.HandleFunc("GET /api/v1/auth/permissions", s.handlePermissionMatrix)
 

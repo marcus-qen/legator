@@ -5,6 +5,7 @@
 - [compat:additive] Added configurable async approval timeout policy (`approval_timeout_seconds`, `approval_timeout_behavior`) with `cancel` (default), `reads_only`, and `escalate` behaviors plus `timed_out` stream markers.
 - [compat:additive] Added public OpenAPI spec endpoint `GET /api/v1/openapi.yaml` and hand-written `docs/openapi.yaml` OpenAPI 3.1 document covering all stable API routes.
 - [compat:additive] Added command stream replay route `GET /api/v1/commands/{requestId}/replay` with resume cursor support (`resume_token`, `last_seq`, `since`) and explicit truncated/missed-range metadata.
+- [compat:additive] Added runner manager lifecycle contract: `POST /api/v1/runners`, `POST /api/v1/runners/{id}/start`, `POST /api/v1/runners/{id}/stop`, `DELETE /api/v1/runners/{id}`, plus `POST /api/v1/runs` to issue short-lived session-bound run tokens with TTL + single-use enforcement.
 
 ---
 

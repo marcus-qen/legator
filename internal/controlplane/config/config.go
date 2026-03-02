@@ -115,6 +115,7 @@ type JobsConfig struct {
 
 	ApprovalTimeoutSeconds  int    `json:"approval_timeout_seconds,omitempty"`
 	ApprovalTimeoutBehavior string `json:"approval_timeout_behavior,omitempty"`
+	RunTokenTTL             string `json:"run_token_ttl,omitempty"`
 }
 
 func (k KubeflowConfig) NamespaceOrDefault() string {
@@ -198,6 +199,18 @@ func (j JobsConfig) StreamRetentionDuration() time.Duration {
 	return d
 }
 
+func (j JobsConfig) RunTokenTTLDuration() time.Duration {
+	raw := strings.TrimSpace(j.RunTokenTTL)
+	if raw == "" {
+		return 2 * time.Minute
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 2 * time.Minute
+	}
+	return d
+}
+
 // Default returns configuration with sensible defaults.
 func Default() Config {
 	return Config{
@@ -230,6 +243,7 @@ func Default() Config {
 			StreamRetention:           "24h",
 			ApprovalTimeoutSeconds:    900,
 			ApprovalTimeoutBehavior:   "cancel",
+			RunTokenTTL:               "2m",
 		},
 	}
 }
@@ -399,6 +413,9 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("LEGATOR_JOBS_APPROVAL_TIMEOUT_BEHAVIOR"); v != "" {
 		cfg.Jobs.ApprovalTimeoutBehavior = v
+	}
+	if v := os.Getenv("LEGATOR_JOBS_RUN_TOKEN_TTL"); v != "" {
+		cfg.Jobs.RunTokenTTL = v
 	}
 	if v := os.Getenv("LEGATOR_MCP_ENABLED"); v != "" {
 		cfg.MCPEnabled = v == "true" || v == "1"
