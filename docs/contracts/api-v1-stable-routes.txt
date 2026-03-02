@@ -40,6 +40,9 @@ GET /api/v1/cloud/assets
 GET /api/v1/cloud/connectors
 GET /api/v1/commands/pending
 GET /api/v1/commands/{requestId}/stream
+GET /api/v1/compliance/checks
+GET /api/v1/compliance/results
+GET /api/v1/compliance/summary
 GET /api/v1/discovery/runs
 GET /api/v1/discovery/runs/{id}
 GET /api/v1/events
@@ -107,6 +110,7 @@ POST /api/v1/automation-packs/dry-run
 POST /api/v1/automation-packs/{id}/executions
 POST /api/v1/cloud/connectors
 POST /api/v1/cloud/connectors/{id}/scan
+POST /api/v1/compliance/scan
 POST /api/v1/discovery/install-token
 POST /api/v1/discovery/scan
 POST /api/v1/fleet/by-tag/{tag}/command
