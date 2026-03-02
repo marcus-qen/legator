@@ -59,6 +59,10 @@ type Config struct {
 
 	// MCP endpoint enablement
 	MCPEnabled bool `json:"mcp_enabled"`
+
+	// SandboxEnforcement blocks mutation-capable host-direct execution unless
+	// explicit breakglass confirmation is supplied.
+	SandboxEnforcement bool `json:"sandbox_enforcement"`
 }
 
 // LLMConfig configures the LLM provider.
@@ -229,11 +233,12 @@ func (j JobsConfig) RunnerSandboxTimeoutDuration() time.Duration {
 // Default returns configuration with sensible defaults.
 func Default() Config {
 	return Config{
-		ListenAddr: ":8080",
-		DataDir:    "/var/lib/legator",
-		LogLevel:   "info",
-		OIDC:       oidc.DefaultConfig(),
-		MCPEnabled: true,
+		ListenAddr:         ":8080",
+		DataDir:            "/var/lib/legator",
+		LogLevel:           "info",
+		OIDC:               oidc.DefaultConfig(),
+		MCPEnabled:         true,
+		SandboxEnforcement: true,
 		RateLimit: RateLimitConfig{
 			RequestsPerMinute: 120,
 		},
@@ -446,6 +451,9 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("LEGATOR_MCP_ENABLED"); v != "" {
 		cfg.MCPEnabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("LEGATOR_SANDBOX_ENFORCEMENT"); v != "" {
+		cfg.SandboxEnforcement = v == "true" || v == "1"
 	}
 
 	cfg.OIDC = oidc.ApplyEnv(cfg.OIDC)

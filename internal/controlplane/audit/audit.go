@@ -46,6 +46,7 @@ const (
 	EventRunnerRunTokenIssued   EventType = "runner.run_token_issued"
 	EventRunnerTeardown         EventType = "runner.teardown"
 	EventRunnerError            EventType = "runner.error"
+	EventBreakglassCommand      EventType = "breakglass.command"
 )
 
 // Event is a single audit log entry.

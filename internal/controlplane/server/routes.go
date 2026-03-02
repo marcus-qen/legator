@@ -760,11 +760,16 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var cmd protocol.CommandPayload
-	if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
+	var body struct {
+		protocol.CommandPayload
+		BreakglassReason string `json:"breakglass_reason,omitempty"`
+		BreakglassToken  string `json:"breakglass_token,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request")
 		return
 	}
+	cmd := body.CommandPayload
 	wantWait := r.URL.Query().Get("wait") == "true" || r.URL.Query().Get("wait") == "1"
 	wantStream := r.URL.Query().Get("stream") == "true" || r.URL.Query().Get("stream") == "1"
 
@@ -775,6 +780,88 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	cmd = invokeInput.Command
 
+	decision := s.approvalCore.EvaluateCommandPolicyForProbe(r.Context(), id, &cmd, ps.PolicyLevel)
+	w.Header().Set("X-Legator-Policy-Decision", string(decision.Outcome))
+	w.Header().Set("X-Legator-Execution-Lane", string(decision.Lane))
+	w.Header().Set("X-Legator-Gate-Outcome", string(decision.GateOutcome))
+	w.Header().Set("X-Legator-Reason-Code", decision.ReasonCode)
+	w.Header().Set("X-Legator-Risk-Tier", strconv.Itoa(decision.RiskTier))
+	s.appendCommandStreamMarker(cmd.RequestID, cmdtracker.StreamEventPolicy, "policy_decision", map[string]any{
+		"outcome":      decision.Outcome,
+		"lane":         decision.Lane,
+		"gate_outcome": decision.GateOutcome,
+		"reason_code":  decision.ReasonCode,
+		"risk_tier":    decision.RiskTier,
+		"risk_level":   decision.RiskLevel,
+	})
+
+	breakglass := controlpolicy.ResolveBreakglassConfirmation(body.BreakglassReason, body.BreakglassToken)
+	requiresBreakglass := controlpolicy.RequiresBreakglassConfirmation(decision.Classification.Category, decision.Lane)
+	if s.cfg.SandboxEnforcement && requiresBreakglass {
+		if !breakglass.Confirmed {
+			reasonCode := "sandbox_enforcement.breakglass_required"
+			w.Header().Set("X-Legator-Reason-Code", reasonCode)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":      "blocked",
+				"code":        "sandbox_enforcement",
+				"reason_code": reasonCode,
+				"lane":        decision.Lane,
+				"message":     "Sandbox enforcement blocked host-direct mutation dispatch. Supply breakglass_reason or breakglass_token.",
+			})
+			return
+		}
+		if breakglass.Method == controlpolicy.BreakglassConfirmReasonField && !controlpolicy.BreakglassReasonAllowed(breakglass.Reason, decision.Policy.Breakglass.AllowedReasons) {
+			reasonCode := "sandbox_enforcement.breakglass_reason_not_allowed"
+			w.Header().Set("X-Legator-Reason-Code", reasonCode)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":      "blocked",
+				"code":        "sandbox_enforcement",
+				"reason_code": reasonCode,
+				"lane":        decision.Lane,
+				"message":     "Breakglass reason is not allowed by the applied policy.",
+			})
+			return
+		}
+
+		actor := "api"
+		if user := auth.UserFromContext(r.Context()); user != nil {
+			if user.Username != "" {
+				actor = user.Username
+			} else if user.ID != "" {
+				actor = user.ID
+			}
+		} else if key := auth.FromContext(r.Context()); key != nil {
+			if key.Name != "" {
+				actor = key.Name
+			} else if key.ID != "" {
+				actor = key.ID
+			}
+		}
+
+		s.recordAudit(audit.Event{
+			Type:    audit.EventBreakglassCommand,
+			ProbeID: id,
+			Actor:   actor,
+			Summary: fmt.Sprintf("Breakglass confirmed for command: %s", cmd.Command),
+			Detail: map[string]any{
+				"request_id": cmd.RequestID,
+				"command":    cmd.Command,
+				"lane":       decision.Lane,
+				"reason":     breakglass.Reason,
+				"method":     breakglass.Method,
+			},
+		})
+		s.appendCommandStreamMarker(cmd.RequestID, cmdtracker.StreamEventPolicy, "breakglass_confirmed", map[string]any{
+			"lane":   decision.Lane,
+			"reason": breakglass.Reason,
+			"method": breakglass.Method,
+		})
+	}
+
 	asyncJob, asyncJobErr := s.createAsyncCommandJob(id, cmd)
 	if asyncJob != nil {
 		w.Header().Set("X-Legator-Job-ID", asyncJob.ID)
@@ -784,80 +871,71 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	policyResult, err := s.approvalCore.SubmitCommandApprovalWithContext(r.Context(), id, &cmd, ps.PolicyLevel, "Manual command dispatch", "api")
-	if err != nil {
-		s.failAsyncJobByRequestID(cmd.RequestID, fmt.Sprintf("approval queue: %s", err.Error()), "", nil)
-		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", fmt.Sprintf("approval queue: %s", err.Error()))
-		return
-	}
-	if policyResult != nil {
-		w.Header().Set("X-Legator-Policy-Decision", string(policyResult.Decision.Outcome))
-		w.Header().Set("X-Legator-Execution-Lane", string(policyResult.Decision.Lane))
-		w.Header().Set("X-Legator-Gate-Outcome", string(policyResult.Decision.GateOutcome))
-		w.Header().Set("X-Legator-Reason-Code", policyResult.Decision.ReasonCode)
-		w.Header().Set("X-Legator-Risk-Tier", strconv.Itoa(policyResult.Decision.RiskTier))
-		s.appendCommandStreamMarker(cmd.RequestID, cmdtracker.StreamEventPolicy, "policy_decision", map[string]any{
-			"outcome":      policyResult.Decision.Outcome,
-			"lane":         policyResult.Decision.Lane,
-			"gate_outcome": policyResult.Decision.GateOutcome,
-			"reason_code":  policyResult.Decision.ReasonCode,
-			"risk_tier":    policyResult.Decision.RiskTier,
-			"risk_level":   policyResult.Decision.RiskLevel,
+	switch decision.Outcome {
+	case coreapprovalpolicy.CommandPolicyDecisionDeny:
+		s.failAsyncJobByRequestID(cmd.RequestID, fmt.Sprintf("command denied by policy: %s", decision.ReasonCode), "", nil)
+		s.emitAudit(audit.EventAuthorizationDenied, id, "api", fmt.Sprintf("Command denied by policy: %s (%s)", cmd.Command, decision.ReasonCode))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":           "denied",
+			"policy_decision":  decision.Outcome,
+			"gate_outcome":     decision.GateOutcome,
+			"lane":             decision.Lane,
+			"risk_level":       decision.RiskLevel,
+			"risk_tier":        decision.RiskTier,
+			"reason_code":      decision.ReasonCode,
+			"policy_rationale": decision.Rationale,
+			"message":          "Command denied by policy.",
 		})
-
-		switch policyResult.Decision.Outcome {
-		case coreapprovalpolicy.CommandPolicyDecisionDeny:
-			s.failAsyncJobByRequestID(cmd.RequestID, fmt.Sprintf("command denied by policy: %s", policyResult.Decision.ReasonCode), "", nil)
-			s.emitAudit(audit.EventAuthorizationDenied, id, "api", fmt.Sprintf("Command denied by policy: %s (%s)", cmd.Command, policyResult.Decision.ReasonCode))
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusTooManyRequests)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"status":           "denied",
-				"policy_decision":  policyResult.Decision.Outcome,
-				"gate_outcome":     policyResult.Decision.GateOutcome,
-				"lane":             policyResult.Decision.Lane,
-				"risk_level":       policyResult.Decision.RiskLevel,
-				"risk_tier":        policyResult.Decision.RiskTier,
-				"reason_code":      policyResult.Decision.ReasonCode,
-				"policy_rationale": policyResult.Decision.Rationale,
-				"message":          "Command denied by policy.",
-			})
-			return
-		case coreapprovalpolicy.CommandPolicyDecisionQueue:
-			req := policyResult.Request
-			if req == nil {
-				s.failAsyncJobByRequestID(cmd.RequestID, "approval queue unavailable", "", nil)
-				writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "approval queue unavailable")
-				return
-			}
-			if asyncJob != nil {
-				s.markAsyncJobWaitingApproval(asyncJob.ID, req.ID, &req.ExpiresAt, "command waiting for approval")
-			}
-			s.appendCommandStreamMarker(cmd.RequestID, cmdtracker.StreamEventApproval, "pending_approval", map[string]any{
-				"approval_id": req.ID,
-				"risk_level":  req.RiskLevel,
-				"expires_at":  req.ExpiresAt,
-				"lane":        policyResult.Decision.Lane,
-			})
-			s.emitAudit(audit.EventApprovalRequest, id, "api",
-				fmt.Sprintf("Approval required for: %s (risk: %s, lane: %s)", cmd.Command, req.RiskLevel, policyResult.Decision.Lane))
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusAccepted)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"status":           "pending_approval",
-				"approval_id":      req.ID,
-				"risk_level":       req.RiskLevel,
-				"risk_tier":        policyResult.Decision.RiskTier,
-				"lane":             policyResult.Decision.Lane,
-				"gate_outcome":     policyResult.Decision.GateOutcome,
-				"reason_code":      policyResult.Decision.ReasonCode,
-				"expires_at":       req.ExpiresAt,
-				"policy_decision":  policyResult.Decision.Outcome,
-				"policy_rationale": policyResult.Decision.Rationale,
-				"message":          "Command requires human approval. Use POST /api/v1/approvals/{id}/decide to approve or deny.",
-			})
+		return
+	case coreapprovalpolicy.CommandPolicyDecisionQueue:
+		approvalReason := "Manual command dispatch"
+		if breakglass.Confirmed {
+			approvalReason = fmt.Sprintf("%s (breakglass)", approvalReason)
+		}
+		req, err := s.approvalQueue.SubmitWithPolicyDetails(
+			id,
+			&cmd,
+			approvalReason,
+			decision.RiskLevel,
+			"api",
+			string(decision.Outcome),
+			decision.Rationale,
+		)
+		if err != nil {
+			s.failAsyncJobByRequestID(cmd.RequestID, fmt.Sprintf("approval queue: %s", err.Error()), "", nil)
+			writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", fmt.Sprintf("approval queue: %s", err.Error()))
 			return
 		}
+
+		if asyncJob != nil {
+			s.markAsyncJobWaitingApproval(asyncJob.ID, req.ID, &req.ExpiresAt, "command waiting for approval")
+		}
+		s.appendCommandStreamMarker(cmd.RequestID, cmdtracker.StreamEventApproval, "pending_approval", map[string]any{
+			"approval_id": req.ID,
+			"risk_level":  req.RiskLevel,
+			"expires_at":  req.ExpiresAt,
+			"lane":        decision.Lane,
+		})
+		s.emitAudit(audit.EventApprovalRequest, id, "api",
+			fmt.Sprintf("Approval required for: %s (risk: %s, lane: %s)", cmd.Command, req.RiskLevel, decision.Lane))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":           "pending_approval",
+			"approval_id":      req.ID,
+			"risk_level":       req.RiskLevel,
+			"risk_tier":        decision.RiskTier,
+			"lane":             decision.Lane,
+			"gate_outcome":     decision.GateOutcome,
+			"reason_code":      decision.ReasonCode,
+			"expires_at":       req.ExpiresAt,
+			"policy_decision":  decision.Outcome,
+			"policy_rationale": decision.Rationale,
+			"message":          "Command requires human approval. Use POST /api/v1/approvals/{id}/decide to approve or deny.",
+		})
+		return
 	}
 
 	if asyncJob != nil && !wantWait && s.asyncJobsScheduler != nil {

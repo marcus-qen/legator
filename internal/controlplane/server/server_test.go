@@ -573,6 +573,156 @@ func TestHandleDispatchCommand_UnknownMutationBlocked(t *testing.T) {
 	}
 }
 
+func TestSandboxEnforcementBlocksHostDirectMutationWithoutBreakglass(t *testing.T) {
+	srv := newTestServer(t)
+	srv.cfg.SandboxEnforcement = true
+	srv.fleetMgr.Register("probe-breakglass", "host", "linux", "amd64")
+
+	tpl := srv.policyStore.Create(
+		"Breakglass lane",
+		"host-direct breakglass policy",
+		protocol.CapObserve,
+		nil,
+		nil,
+		nil,
+		policy.TemplateOptions{
+			ExecutionClassRequired: protocol.ExecBreakglassDirect,
+			ApprovalMode:           protocol.ApprovalMutationGate,
+			Breakglass: protocol.BreakglassPolicy{
+				Enabled:                  true,
+				AllowedReasons:           []string{"incident_response"},
+				RequireTypedConfirmation: true,
+			},
+		},
+	)
+	if _, err := srv.approvalCore.ApplyPolicyTemplate("probe-breakglass", tpl.ID, nil); err != nil {
+		t.Fatalf("apply breakglass policy: %v", err)
+	}
+
+	body := map[string]any{
+		"request_id": "req-breakglass-blocked",
+		"command":    "systemctl restart nginx",
+		"level":      string(protocol.CapRemediate),
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/probes/probe-breakglass/command", bytes.NewReader(data))
+	req.SetPathValue("id", "probe-breakglass")
+	rr := httptest.NewRecorder()
+
+	srv.handleDispatchCommand(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("X-Legator-Reason-Code"); got != "sandbox_enforcement.breakglass_required" {
+		t.Fatalf("expected reason header sandbox_enforcement.breakglass_required, got %q", got)
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode sandbox enforcement response: %v", err)
+	}
+	if payload["code"] != "sandbox_enforcement" {
+		t.Fatalf("expected code sandbox_enforcement, got %v", payload["code"])
+	}
+	if srv.approvalQueue.PendingCount() != 0 {
+		t.Fatalf("expected no queued approvals, got %d", srv.approvalQueue.PendingCount())
+	}
+	if events := srv.queryAudit(audit.Filter{Type: audit.EventBreakglassCommand}); len(events) != 0 {
+		t.Fatalf("expected no breakglass audit events, got %d", len(events))
+	}
+}
+
+func TestBreakglassConfirmationAllowsHostDirectMutationAndAudits(t *testing.T) {
+	srv := newTestServer(t)
+	srv.cfg.SandboxEnforcement = true
+	srv.fleetMgr.Register("probe-breakglass-ok", "host", "linux", "amd64")
+
+	tpl := srv.policyStore.Create(
+		"Breakglass lane",
+		"host-direct breakglass policy",
+		protocol.CapObserve,
+		nil,
+		nil,
+		nil,
+		policy.TemplateOptions{
+			ExecutionClassRequired: protocol.ExecBreakglassDirect,
+			ApprovalMode:           protocol.ApprovalMutationGate,
+			Breakglass: protocol.BreakglassPolicy{
+				Enabled:                  true,
+				AllowedReasons:           []string{"incident_response"},
+				RequireTypedConfirmation: true,
+			},
+		},
+	)
+	if _, err := srv.approvalCore.ApplyPolicyTemplate("probe-breakglass-ok", tpl.ID, nil); err != nil {
+		t.Fatalf("apply breakglass policy: %v", err)
+	}
+
+	body := map[string]any{
+		"request_id":        "req-breakglass-allowed",
+		"command":           "systemctl restart nginx",
+		"level":             string(protocol.CapRemediate),
+		"breakglass_reason": "incident_response",
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/probes/probe-breakglass-ok/command", bytes.NewReader(data))
+	req.SetPathValue("id", "probe-breakglass-ok")
+	rr := httptest.NewRecorder()
+
+	srv.handleDispatchCommand(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload["status"] != "pending_approval" {
+		t.Fatalf("expected pending_approval, got %v", payload["status"])
+	}
+	if srv.approvalQueue.PendingCount() != 1 {
+		t.Fatalf("expected 1 queued approval, got %d", srv.approvalQueue.PendingCount())
+	}
+	events := srv.queryAudit(audit.Filter{Type: audit.EventBreakglassCommand})
+	if len(events) != 1 {
+		t.Fatalf("expected 1 breakglass audit event, got %d", len(events))
+	}
+	if events[0].Actor != "api" {
+		t.Fatalf("expected actor api, got %q", events[0].Actor)
+	}
+	detail, ok := events[0].Detail.(map[string]any)
+	if !ok {
+		t.Fatalf("expected event detail map, got %T", events[0].Detail)
+	}
+	if detail["reason"] != "incident_response" {
+		t.Fatalf("expected reason incident_response, got %v", detail["reason"])
+	}
+}
+
+func TestSandboxEnforcementDoesNotBlockObserveCommand(t *testing.T) {
+	srv := newTestServer(t)
+	srv.cfg.SandboxEnforcement = true
+	srv.fleetMgr.Register("probe-observe", "host", "linux", "amd64")
+
+	body := map[string]any{
+		"request_id": "req-observe",
+		"command":    "ls",
+		"level":      string(protocol.CapObserve),
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/probes/probe-observe/command", bytes.NewReader(data))
+	req.SetPathValue("id", "probe-observe")
+	rr := httptest.NewRecorder()
+
+	srv.handleDispatchCommand(rr, req)
+
+	if rr.Code == http.StatusForbidden {
+		t.Fatalf("expected non-mutation command to bypass sandbox enforcement, got 403: %s", rr.Body.String())
+	}
+}
+
 func TestHandleSimulateCommandPolicy(t *testing.T) {
 	srv := newTestServer(t)
 	srv.fleetMgr.Register("probe-sim", "host", "linux", "amd64")

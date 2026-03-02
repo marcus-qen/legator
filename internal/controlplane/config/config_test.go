@@ -24,6 +24,9 @@ func TestDefaultConfig(t *testing.T) {
 	if !cfg.MCPEnabled {
 		t.Error("expected MCP enabled by default")
 	}
+	if !cfg.SandboxEnforcement {
+		t.Error("expected sandbox enforcement enabled by default")
+	}
 	if cfg.Kubeflow.Enabled {
 		t.Error("expected kubeflow disabled by default")
 	}
@@ -200,6 +203,7 @@ func TestEnvOverridesFile(t *testing.T) {
 	t.Setenv("LEGATOR_LISTEN_ADDR", ":7070")
 	t.Setenv("LEGATOR_AUTH", "true")
 	t.Setenv("LEGATOR_MCP_ENABLED", "0")
+	t.Setenv("LEGATOR_SANDBOX_ENFORCEMENT", "false")
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -215,6 +219,9 @@ func TestEnvOverridesFile(t *testing.T) {
 	if cfg.MCPEnabled {
 		t.Error("env LEGATOR_MCP_ENABLED=0 should disable MCP")
 	}
+	if cfg.SandboxEnforcement {
+		t.Error("env LEGATOR_SANDBOX_ENFORCEMENT=false should disable sandbox enforcement")
+	}
 }
 
 func TestLoadFromEnvOnly(t *testing.T) {
@@ -222,6 +229,7 @@ func TestLoadFromEnvOnly(t *testing.T) {
 	t.Setenv("LEGATOR_LOG_LEVEL", "debug")
 	t.Setenv("LEGATOR_AUDIT_RETENTION", "30d")
 	t.Setenv("LEGATOR_MCP_ENABLED", "false")
+	t.Setenv("LEGATOR_SANDBOX_ENFORCEMENT", "0")
 	t.Setenv("LEGATOR_KUBEFLOW_ENABLED", "1")
 	t.Setenv("LEGATOR_KUBEFLOW_NAMESPACE", "kubeflow-user")
 	t.Setenv("LEGATOR_KUBEFLOW_TIMEOUT", "45s")
@@ -250,6 +258,9 @@ func TestLoadFromEnvOnly(t *testing.T) {
 	}
 	if cfg.MCPEnabled {
 		t.Error("expected MCP disabled from env")
+	}
+	if cfg.SandboxEnforcement {
+		t.Error("expected sandbox enforcement disabled from env")
 	}
 	if !cfg.Kubeflow.Enabled {
 		t.Error("expected kubeflow enabled from env")

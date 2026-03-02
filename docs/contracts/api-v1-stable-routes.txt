@@ -145,6 +145,7 @@ POST /api/v1/probes
 POST /api/v1/probes/{id}/apply-policy/{policyId}
 POST /api/v1/probes/{id}/chat
 POST /api/v1/probes/{id}/command
+# [compat:additive] POST /api/v1/probes/{id}/command accepts optional breakglass confirmation fields: breakglass_reason, breakglass_token.
 POST /api/v1/probes/{id}/command/simulate
 POST /api/v1/probes/{id}/rotate-key
 POST /api/v1/probes/{id}/task
