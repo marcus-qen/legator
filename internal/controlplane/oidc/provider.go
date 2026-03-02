@@ -283,7 +283,7 @@ func (p *Provider) HandleCallback(userStore UserStore, sessionCreator SessionCre
 			MaxAge:   oidcSessionMaxAge,
 			Expires:  time.Now().Add(oidcSessionMaxAge * time.Second),
 		})
-		http.Redirect(w, r, "/", http.StatusFound)
+		http.Redirect(w, r, "/dashboard", http.StatusFound)
 	}
 }
 

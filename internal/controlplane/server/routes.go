@@ -415,8 +415,13 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Landing page (testing)
 	mux.Handle("GET /site/", http.StripPrefix("/site/", http.FileServer(http.Dir(filepath.Join("web", "site")))))
 
-	// Web UI pages
-	mux.HandleFunc("GET /", s.handleFleetPage)
+	// Dashboard
+	mux.HandleFunc("GET /dashboard", s.handleDashboardPage)
+	mux.HandleFunc("GET /api/v1/dashboard", s.withPermission(auth.PermFleetRead, s.handleDashboardAPI))
+
+	// Web UI pages — / redirects to /dashboard when templates are loaded
+	mux.HandleFunc("GET /", s.handleRootPage)
+	mux.HandleFunc("GET /fleet", s.handleFleetPage)
 	mux.HandleFunc("GET /federation", s.handleFederationPage)
 	mux.HandleFunc("GET /fleet/chat", s.handleFleetChatPage)
 	mux.HandleFunc("GET /probe/{id}", s.handleProbeDetailPage)
@@ -433,6 +438,24 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// WebSocket for probes
 	mux.HandleFunc("GET /ws/probe", s.hub.HandleProbeWS)
+}
+
+// handleRootPage redirects authenticated users to the dashboard. When
+// templates aren't loaded it falls back to the legacy fleet page.
+func (s *Server) handleRootPage(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermFleetRead) {
+		return
+	}
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	if s.pages != nil {
+		http.Redirect(w, r, "/dashboard", http.StatusFound)
+		return
+	}
+	// Fallback: no templates → serve inline fleet page.
+	s.handleFleetPage(w, r)
 }
 
 func (s *Server) withPermission(perm auth.Permission, next http.HandlerFunc) http.HandlerFunc {
@@ -1742,10 +1765,6 @@ func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleFleetPage(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(w, r, auth.PermFleetRead) {
-		return
-	}
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
 		return
 	}
 	if s.pages == nil {

@@ -43,6 +43,7 @@ GET /api/v1/commands/{requestId}/stream
 GET /api/v1/compliance/checks
 GET /api/v1/compliance/results
 GET /api/v1/compliance/summary
+GET /api/v1/dashboard
 GET /api/v1/discovery/runs
 GET /api/v1/discovery/runs/{id}
 GET /api/v1/events

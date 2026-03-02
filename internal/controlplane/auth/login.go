@@ -142,7 +142,7 @@ func HandleLoginWithAudit(userAuth UserAuthenticator, sessionCreator SessionCrea
 			MaxAge:   sessionMaxAgeSeconds,
 			Expires:  time.Now().Add(sessionMaxAgeSeconds * time.Second),
 		})
-		http.Redirect(w, r, "/", http.StatusFound)
+		http.Redirect(w, r, "/dashboard", http.StatusFound)
 	}
 }
 

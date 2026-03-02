@@ -1,0 +1,401 @@
+{{template "base" .}}
+
+{{define "title"}}Dashboard — Legator{{end}}
+
+{{define "header"}}
+<h1 class="page-title">Dashboard</h1>
+<div class="header-actions">
+  <span class="refresh-indicator" id="refreshIndicator" title="Auto-refreshes every 30s">
+    <svg class="icon" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+    <span id="refreshCountdown">30s</span>
+  </span>
+</div>
+{{end}}
+
+{{define "content"}}
+<div class="dashboard" id="dashboard">
+
+  <!-- Fleet status row -->
+  <section class="dash-section">
+    <h2 class="section-title">Fleet Status</h2>
+    <div class="card-grid">
+      <div class="dash-card" id="card-total">
+        <div class="card-label">Total Probes</div>
+        <div class="card-value" id="fleet-total">—</div>
+      </div>
+      <div class="dash-card status-online" id="card-online">
+        <div class="card-label">Online</div>
+        <div class="card-value" id="fleet-online">—</div>
+      </div>
+      <div class="dash-card status-offline" id="card-offline">
+        <div class="card-label">Offline</div>
+        <div class="card-value" id="fleet-offline">—</div>
+      </div>
+      <div class="dash-card status-degraded" id="card-degraded">
+        <div class="card-label">Degraded</div>
+        <div class="card-value" id="fleet-degraded">—</div>
+      </div>
+      <div class="dash-card" id="card-policy">
+        <div class="card-label">Policy Applied</div>
+        <div class="card-value" id="fleet-policy">—</div>
+        <div class="card-sub" id="fleet-policy-pct">—%</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Incidents + Compliance row -->
+  <section class="dash-section">
+    <div class="dash-row">
+      <div class="dash-panel" id="panel-incidents">
+        <div class="panel-header">
+          <h2 class="section-title">Incidents</h2>
+          <a href="/incidents" class="panel-link">View all →</a>
+        </div>
+        <div class="card-grid card-grid-sm">
+          <div class="dash-card">
+            <div class="card-label">Open</div>
+            <div class="card-value" id="inc-open">—</div>
+          </div>
+          <div class="dash-card">
+            <div class="card-label">Total</div>
+            <div class="card-value" id="inc-total">—</div>
+          </div>
+        </div>
+        <div class="severity-grid" id="inc-severity"></div>
+      </div>
+
+      <div class="dash-panel" id="panel-compliance">
+        <div class="panel-header">
+          <h2 class="section-title">Compliance</h2>
+          <a href="/compliance" class="panel-link">View all →</a>
+        </div>
+        <div id="compliance-unavailable" class="unavail-msg" style="display:none">Not available</div>
+        <div id="compliance-data">
+          <div class="score-ring-wrap">
+            <svg class="score-ring" viewBox="0 0 80 80" id="compliance-ring">
+              <circle class="ring-bg" cx="40" cy="40" r="32" fill="none" stroke-width="8"/>
+              <circle class="ring-fill" cx="40" cy="40" r="32" fill="none" stroke-width="8"
+                      stroke-dasharray="201" stroke-dashoffset="201" id="ring-arc"/>
+            </svg>
+            <div class="ring-label">
+              <span id="compliance-score">—</span>%
+            </div>
+          </div>
+          <div class="compliance-counts">
+            <span class="cc pass" id="comp-pass">— pass</span>
+            <span class="cc fail" id="comp-fail">— fail</span>
+            <span class="cc unknown" id="comp-unknown">— unknown</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Alerts + Drills row -->
+  <section class="dash-section">
+    <div class="dash-row">
+      <div class="dash-panel" id="panel-alerts">
+        <div class="panel-header">
+          <h2 class="section-title">Active Alerts</h2>
+          <a href="/alerts" class="panel-link">View all →</a>
+        </div>
+        <div id="alerts-unavailable" class="unavail-msg" style="display:none">Alerts engine unavailable</div>
+        <div id="alerts-data">
+          <div class="alert-count-wrap">
+            <div class="alert-count" id="alerts-active-count">—</div>
+            <div class="alert-count-label">active alerts</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dash-panel" id="panel-drills">
+        <div class="panel-header">
+          <h2 class="section-title">Recent Drills</h2>
+          <a href="/reliability" class="panel-link">View all →</a>
+        </div>
+        <div id="drills-unavailable" class="unavail-msg" style="display:none">Drill store unavailable</div>
+        <div id="drills-list" class="drill-list"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Unhealthy probes + System stats row -->
+  <section class="dash-section">
+    <div class="dash-row">
+      <div class="dash-panel" id="panel-unhealthy">
+        <div class="panel-header">
+          <h2 class="section-title">Unhealthy Probes</h2>
+          <a href="/fleet" class="panel-link">Fleet →</a>
+        </div>
+        <div id="unhealthy-list" class="unhealthy-list">
+          <div class="empty-msg">No unhealthy probes</div>
+        </div>
+      </div>
+
+      <div class="dash-panel" id="panel-stats">
+        <div class="panel-header">
+          <h2 class="section-title">System Stats</h2>
+        </div>
+        <div class="stat-grid">
+          <div class="stat-item">
+            <div class="stat-label">Audit Events</div>
+            <div class="stat-value" id="stats-audit">—</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">Pending Approvals</div>
+            <div class="stat-value" id="stats-approvals">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+{{end}}
+
+{{define "scripts"}}
+<style>
+  .dashboard { display: flex; flex-direction: column; gap: 1.5rem; padding-bottom: 2rem; }
+  .dash-section { display: flex; flex-direction: column; gap: 1rem; }
+  .section-title { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted, #8b949e); margin: 0 0 0.75rem 0; }
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 1rem; }
+  .card-grid-sm { grid-template-columns: repeat(2, 1fr); }
+  .dash-card { background: var(--surface-2, #161b22); border: 1px solid var(--border, #30363d); border-radius: 8px; padding: 1rem; }
+  .dash-card.status-online { border-left: 3px solid #238636; }
+  .dash-card.status-offline { border-left: 3px solid #da3633; }
+  .dash-card.status-degraded { border-left: 3px solid #d29922; }
+  .card-label { font-size: 0.78rem; color: var(--text-muted, #8b949e); margin-bottom: 0.35rem; }
+  .card-value { font-size: 2rem; font-weight: 700; line-height: 1; }
+  .card-sub { font-size: 0.8rem; color: var(--text-muted, #8b949e); margin-top: 0.25rem; }
+
+  .dash-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 768px) { .dash-row { grid-template-columns: 1fr; } }
+  .dash-panel { background: var(--surface-2, #161b22); border: 1px solid var(--border, #30363d); border-radius: 8px; padding: 1.25rem; }
+  .panel-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 1rem; }
+  .panel-link { font-size: 0.78rem; color: var(--accent, #58a6ff); text-decoration: none; }
+  .panel-link:hover { text-decoration: underline; }
+  .unavail-msg { font-size: 0.85rem; color: var(--text-muted, #8b949e); font-style: italic; }
+
+  /* Compliance ring */
+  .score-ring-wrap { position: relative; width: 80px; height: 80px; margin: 0 auto 0.75rem; }
+  .score-ring { width: 80px; height: 80px; transform: rotate(-90deg); }
+  .ring-bg { stroke: var(--border, #30363d); }
+  .ring-fill { stroke: #238636; transition: stroke-dashoffset 0.6s ease; }
+  .ring-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; font-weight: 700; }
+  .compliance-counts { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; font-size: 0.8rem; }
+  .cc.pass { color: #3fb950; }
+  .cc.fail { color: #f85149; }
+  .cc.unknown { color: #8b949e; }
+
+  /* Alert count */
+  .alert-count-wrap { text-align: center; padding: 0.5rem 0; }
+  .alert-count { font-size: 3rem; font-weight: 700; color: #d29922; }
+  .alert-count-wrap .alert-count[data-zero="true"] { color: #3fb950; }
+  .alert-count-label { font-size: 0.8rem; color: var(--text-muted, #8b949e); margin-top: 0.25rem; }
+
+  /* Severity badges */
+  .severity-grid { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
+  .sev-badge { padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; }
+  .sev-badge.P1 { background: #5a1220; color: #f85149; }
+  .sev-badge.P2 { background: #431407; color: #d29922; }
+  .sev-badge.P3 { background: #1c2a12; color: #3fb950; }
+  .sev-badge.P4 { background: #1c2535; color: #58a6ff; }
+
+  /* Drill list */
+  .drill-list { display: flex; flex-direction: column; gap: 0.5rem; }
+  .drill-item { display: flex; align-items: center; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid var(--border, #30363d); font-size: 0.85rem; }
+  .drill-item:last-child { border-bottom: none; }
+  .drill-status { padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; }
+  .drill-status.pass { background: #1c2a12; color: #3fb950; }
+  .drill-status.fail { background: #5a1220; color: #f85149; }
+  .drill-time { color: var(--text-muted, #8b949e); font-size: 0.75rem; }
+
+  /* Unhealthy probes */
+  .unhealthy-list { display: flex; flex-direction: column; gap: 0.4rem; }
+  .up-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0.5rem; border-radius: 6px; background: var(--surface-3, #0d1117); font-size: 0.85rem; }
+  .up-score { font-weight: 700; min-width: 36px; text-align: center; }
+  .up-score.ok { color: #3fb950; }
+  .up-score.warn { color: #d29922; }
+  .up-score.crit { color: #f85149; }
+  .up-host { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .up-status { font-size: 0.72rem; padding: 0.1rem 0.4rem; border-radius: 3px; }
+  .up-status.online { background: #1c2a12; color: #3fb950; }
+  .up-status.offline { background: #5a1220; color: #f85149; }
+  .up-status.degraded { background: #431407; color: #d29922; }
+
+  /* Stats */
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .stat-label { font-size: 0.78rem; color: var(--text-muted, #8b949e); margin-bottom: 0.3rem; }
+  .stat-value { font-size: 1.5rem; font-weight: 700; }
+
+  /* Refresh indicator */
+  .refresh-indicator { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.78rem; color: var(--text-muted, #8b949e); }
+  .refresh-indicator .icon { width: 14px; height: 14px; }
+  .empty-msg { font-size: 0.85rem; color: var(--text-muted, #8b949e); font-style: italic; }
+</style>
+<script>
+(function () {
+  'use strict';
+
+  const REFRESH_INTERVAL = 30;
+  let countdown = REFRESH_INTERVAL;
+
+  function qs(id) { return document.getElementById(id); }
+  function setText(id, val) { const el = qs(id); if (el) el.textContent = val; }
+
+  function scoreClass(score) {
+    if (score >= 80) return 'ok';
+    if (score >= 50) return 'warn';
+    return 'crit';
+  }
+
+  function renderFleet(fleet) {
+    setText('fleet-total', fleet.total ?? '—');
+    setText('fleet-online', fleet.online ?? '—');
+    setText('fleet-offline', fleet.offline ?? '—');
+    setText('fleet-degraded', fleet.degraded ?? '—');
+    setText('fleet-policy', fleet.policy_applied ?? '—');
+    setText('fleet-policy-pct', (fleet.policy_applied_pct != null ? fleet.policy_applied_pct.toFixed(1) : '—') + '%');
+  }
+
+  function renderIncidents(inc) {
+    setText('inc-open', inc.open ?? '—');
+    setText('inc-total', inc.total ?? '—');
+    const sevGrid = qs('inc-severity');
+    if (sevGrid && inc.by_severity) {
+      sevGrid.innerHTML = '';
+      Object.entries(inc.by_severity).forEach(([sev, count]) => {
+        if (!count) return;
+        const badge = document.createElement('span');
+        badge.className = 'sev-badge ' + sev;
+        badge.textContent = sev + ': ' + count;
+        sevGrid.appendChild(badge);
+      });
+    }
+  }
+
+  function renderCompliance(comp) {
+    const unavail = qs('compliance-unavailable');
+    const data = qs('compliance-data');
+    if (!comp.available) {
+      if (unavail) unavail.style.display = '';
+      if (data) data.style.display = 'none';
+      return;
+    }
+    if (unavail) unavail.style.display = 'none';
+    if (data) data.style.display = '';
+    const score = comp.score_pct != null ? comp.score_pct : 0;
+    setText('compliance-score', Math.round(score));
+    // Update ring arc: circumference ≈ 2πr = 201
+    const arc = qs('ring-arc');
+    if (arc) {
+      const offset = 201 - (201 * score / 100);
+      arc.style.strokeDashoffset = offset;
+      arc.style.stroke = score >= 80 ? '#238636' : score >= 50 ? '#d29922' : '#da3633';
+    }
+    setText('comp-pass', (comp.passing ?? '—') + ' pass');
+    setText('comp-fail', (comp.failing ?? '—') + ' fail');
+    setText('comp-unknown', (comp.unknown ?? '—') + ' unknown');
+  }
+
+  function renderAlerts(al) {
+    const unavail = qs('alerts-unavailable');
+    const data = qs('alerts-data');
+    if (!al.available) {
+      if (unavail) unavail.style.display = '';
+      if (data) data.style.display = 'none';
+      return;
+    }
+    if (unavail) unavail.style.display = 'none';
+    if (data) data.style.display = '';
+    const cnt = qs('alerts-active-count');
+    if (cnt) {
+      cnt.textContent = al.active ?? 0;
+      cnt.dataset.zero = (al.active === 0).toString();
+    }
+  }
+
+  function renderDrills(drills) {
+    const unavail = qs('drills-unavailable');
+    const list = qs('drills-list');
+    if (!drills.available) {
+      if (unavail) unavail.style.display = '';
+      if (list) list.style.display = 'none';
+      return;
+    }
+    if (unavail) unavail.style.display = 'none';
+    if (!list) return;
+    list.style.display = '';
+    if (!drills.recent || !drills.recent.length) {
+      list.innerHTML = '<div class="empty-msg">No drill history</div>';
+      return;
+    }
+    list.innerHTML = drills.recent.map(d => {
+      const st = (d.status || '').toLowerCase();
+      const dt = d.run_at ? new Date(d.run_at).toLocaleString() : '—';
+      return '<div class="drill-item">' +
+        '<span>' + (d.scenario || '—') + '</span>' +
+        '<span class="drill-status ' + st + '">' + (d.status || '—') + '</span>' +
+        '<span class="drill-time">' + dt + '</span>' +
+        '</div>';
+    }).join('');
+  }
+
+  function renderUnhealthy(probes) {
+    const list = qs('unhealthy-list');
+    if (!list) return;
+    if (!probes || !probes.length) {
+      list.innerHTML = '<div class="empty-msg">No unhealthy probes</div>';
+      return;
+    }
+    list.innerHTML = probes.map(p => {
+      const cls = scoreClass(p.score);
+      const statusCls = (p.status || '').toLowerCase();
+      return '<div class="up-item">' +
+        '<a href="/probe/' + p.id + '" class="up-score ' + cls + '">' + p.score + '</a>' +
+        '<a href="/probe/' + p.id + '" class="up-host">' + (p.hostname || p.id) + '</a>' +
+        '<span class="up-status ' + statusCls + '">' + (p.status || '—') + '</span>' +
+        '</div>';
+    }).join('');
+  }
+
+  function renderStats(stats) {
+    setText('stats-audit', (stats.total_audit_events ?? '—').toLocaleString());
+    setText('stats-approvals', stats.pending_approvals ?? '—');
+  }
+
+  function applyData(data) {
+    if (data.fleet) renderFleet(data.fleet);
+    if (data.incidents) renderIncidents(data.incidents);
+    if (data.compliance) renderCompliance(data.compliance);
+    if (data.alerts) renderAlerts(data.alerts);
+    if (data.drills) renderDrills(data.drills);
+    if (data.unhealthy_probes) renderUnhealthy(data.unhealthy_probes);
+    if (data.stats) renderStats(data.stats);
+  }
+
+  function fetchDashboard() {
+    fetch('/api/v1/dashboard')
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(data => {
+        applyData(data);
+        countdown = REFRESH_INTERVAL;
+      })
+      .catch(err => console.warn('dashboard fetch failed:', err));
+  }
+
+  function tickCountdown() {
+    countdown--;
+    const el = qs('refreshCountdown');
+    if (el) el.textContent = countdown + 's';
+    if (countdown <= 0) {
+      fetchDashboard();
+    }
+  }
+
+  // Initial load + start timers
+  fetchDashboard();
+  setInterval(tickCountdown, 1000);
+})();
+</script>
+{{end}}

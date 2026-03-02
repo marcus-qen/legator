@@ -88,8 +88,8 @@ func TestHandleLoginValidSetsCookieAndRedirects(t *testing.T) {
 	if w.Code != http.StatusFound {
 		t.Fatalf("expected 302, got %d body=%s", w.Code, w.Body.String())
 	}
-	if loc := w.Header().Get("Location"); loc != "/" {
-		t.Fatalf("expected redirect to /, got %q", loc)
+	if loc := w.Header().Get("Location"); loc != "/dashboard" {
+		t.Fatalf("expected redirect to /dashboard, got %q", loc)
 	}
 	if creator.userID != "user-1" {
 		t.Fatalf("expected session to be created for user-1, got %q", creator.userID)

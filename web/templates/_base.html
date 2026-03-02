@@ -13,7 +13,11 @@
       <div class="nav-brand">LEGATOR</div>
       <nav class="nav-links">
         {{if hasPermission .CurrentUser "fleet:read"}}
-        <a href="/" class="nav-link{{if eq .ActiveNav "fleet"}} active{{end}}">
+        <a href="/dashboard" class="nav-link{{if eq .ActiveNav "dashboard"}} active{{end}}">
+          <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="2"/><rect x="14" y="3" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="2"/><rect x="3" y="14" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="2"/><rect x="14" y="14" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+          Dashboard
+        </a>
+        <a href="/fleet" class="nav-link{{if eq .ActiveNav "fleet"}} active{{end}}">
           <svg class="icon" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="2" y="14" width="20" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="6" cy="6" r="1" fill="currentColor"/><circle cx="6" cy="18" r="1" fill="currentColor"/></svg>
           Fleet <span class="badge" data-badge="probes"></span>
         </a>
