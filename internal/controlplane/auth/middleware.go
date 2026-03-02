@@ -207,9 +207,10 @@ func (m *AuthMiddleware) trySessionAuth(r *http.Request, next http.Handler, w ht
 	}
 
 	user := &AuthenticatedUser{
-		ID:       session.UserID,
-		Username: session.Username,
-		Role:     session.Role,
+		ID:        session.UserID,
+		Username:  session.Username,
+		Role:      session.Role,
+		SessionID: session.Token,
 	}
 	if m.permissionResolver != nil {
 		user.Permissions = m.permissionResolver.PermissionsForRole(session.Role)

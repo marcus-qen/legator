@@ -63,6 +63,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Jobs.ApprovalTimeoutBehaviorOrDefault() != "cancel" {
 		t.Errorf("expected approval timeout behavior default cancel, got %s", cfg.Jobs.ApprovalTimeoutBehaviorOrDefault())
 	}
+	if cfg.Jobs.RunTokenTTLDuration() != 2*time.Minute {
+		t.Errorf("expected run token ttl 2m, got %s", cfg.Jobs.RunTokenTTLDuration())
+	}
 }
 
 func TestLoadFromFile(t *testing.T) {
@@ -221,6 +224,7 @@ func TestLoadFromEnvOnly(t *testing.T) {
 	t.Setenv("LEGATOR_GRAFANA_DASHBOARD_LIMIT", "40")
 	t.Setenv("LEGATOR_GRAFANA_TLS_SKIP_VERIFY", "1")
 	t.Setenv("LEGATOR_GRAFANA_ORG_ID", "9")
+	t.Setenv("LEGATOR_JOBS_RUN_TOKEN_TTL", "45s")
 
 	cfg := LoadFromEnv()
 	if cfg.DataDir != "/tmp/env-test" {
@@ -267,6 +271,9 @@ func TestLoadFromEnvOnly(t *testing.T) {
 	}
 	if cfg.Grafana.OrgID != 9 {
 		t.Errorf("expected grafana org id 9, got %d", cfg.Grafana.OrgID)
+	}
+	if cfg.Jobs.RunTokenTTLDuration() != 45*time.Second {
+		t.Errorf("expected run token ttl 45s, got %s", cfg.Jobs.RunTokenTTLDuration())
 	}
 }
 

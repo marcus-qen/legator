@@ -43,6 +43,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/oidc"
 	"github.com/marcus-qen/legator/internal/controlplane/policy"
 	"github.com/marcus-qen/legator/internal/controlplane/reliability"
+	"github.com/marcus-qen/legator/internal/controlplane/runner"
 	"github.com/marcus-qen/legator/internal/controlplane/session"
 	"github.com/marcus-qen/legator/internal/controlplane/tenant"
 	"github.com/marcus-qen/legator/internal/controlplane/users"
@@ -123,6 +124,7 @@ type Server struct {
 	jobsHandler        *jobs.Handler
 	asyncJobsManager   *jobs.AsyncManager
 	asyncJobsScheduler *jobs.AsyncWorkerScheduler
+	runnerManager      *runner.Manager
 
 	// Events
 	eventBus *events.Bus
@@ -251,6 +253,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initLLM()
 	s.initHub()
 	s.initJobs()
+	s.initRunnerManager()
 	s.initDispatchCore()
 	if s.cfg.MCPEnabled {
 		mcpserver.Version = Version
@@ -681,6 +684,11 @@ func (s *Server) initJobs() {
 		}),
 	)
 	s.logger.Info("jobs scheduler initialized", zap.String("path", jobsDBPath))
+}
+
+func (s *Server) initRunnerManager() {
+	s.runnerManager = runner.NewManager(runner.Config{RunTokenTTL: s.cfg.Jobs.RunTokenTTLDuration()})
+	s.logger.Info("runner manager initialized", zap.Duration("run_token_ttl", s.cfg.Jobs.RunTokenTTLDuration()))
 }
 
 func (s *Server) initChat() {

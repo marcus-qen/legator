@@ -50,5 +50,6 @@ type AuthenticatedUser struct {
 	Username    string       `json:"username"`
 	DisplayName string       `json:"display_name,omitempty"`
 	Role        string       `json:"role"`
+	SessionID   string       `json:"session_id,omitempty"`
 	Permissions []Permission `json:"permissions,omitempty"`
 }

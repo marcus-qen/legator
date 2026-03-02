@@ -118,6 +118,12 @@ func TestRoutesAuthCoverage(t *testing.T) {
 		{http.MethodPost, "/api/v1/jobs/some-id/runs/some-run/retry"},
 		{http.MethodPost, "/api/v1/jobs/some-id/enable"},
 		{http.MethodPost, "/api/v1/jobs/some-id/disable"},
+		// Runner manager
+		{http.MethodPost, "/api/v1/runners"},
+		{http.MethodPost, "/api/v1/runners/some-runner/start"},
+		{http.MethodPost, "/api/v1/runners/some-runner/stop"},
+		{http.MethodDelete, "/api/v1/runners/some-runner"},
+		{http.MethodPost, "/api/v1/runs"},
 		// Auth keys
 		{http.MethodGet, "/api/v1/auth/keys"},
 		{http.MethodPost, "/api/v1/auth/keys"},
