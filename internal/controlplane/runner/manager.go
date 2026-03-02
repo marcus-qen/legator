@@ -31,21 +31,26 @@ const (
 	AudienceRunnerDestroy Audience = "runner:destroy"
 )
 
-const defaultRunTokenTTL = 2 * time.Minute
+const (
+	defaultRunTokenTTL = 2 * time.Minute
+	maxRunTokenTTL     = 5 * time.Minute
+)
 
 var (
-	ErrSessionRequired      = errors.New("session context required")
-	ErrAudienceRequired     = errors.New("run token audience required")
-	ErrInvalidAudience      = errors.New("invalid run token audience")
-	ErrRunnerIDRequired     = errors.New("runner_id is required")
-	ErrRunnerNotFound       = errors.New("runner not found")
-	ErrInvalidTransition    = errors.New("invalid runner lifecycle transition")
-	ErrRunTokenRequired     = errors.New("run token is required")
-	ErrRunTokenInvalid      = errors.New("run token is invalid")
-	ErrRunTokenExpired      = errors.New("run token is expired")
-	ErrRunTokenConsumed     = errors.New("run token already consumed")
-	ErrRunTokenScope        = errors.New("run token scope rejected")
-	ErrRunTokenSessionBound = errors.New("run token session binding rejected")
+	ErrSessionRequired        = errors.New("session context required")
+	ErrAudienceRequired       = errors.New("run token audience required")
+	ErrInvalidAudience        = errors.New("invalid run token audience")
+	ErrRunnerIDRequired       = errors.New("runner_id is required")
+	ErrRunnerNotFound         = errors.New("runner not found")
+	ErrInvalidTransition      = errors.New("invalid runner lifecycle transition")
+	ErrRunTokenRequired       = errors.New("run token is required")
+	ErrRunTokenInvalid        = errors.New("run token is invalid")
+	ErrRunTokenExpired        = errors.New("run token is expired")
+	ErrRunTokenConsumed       = errors.New("run token already consumed")
+	ErrRunTokenScope          = errors.New("run token scope rejected")
+	ErrRunTokenSessionBound   = errors.New("run token session binding rejected")
+	ErrRunTokenTTLExceeded    = errors.New("run token ttl exceeds maximum")
+	ErrSandboxCommandRequired = errors.New("sandbox command is required")
 )
 
 // Runner is the control-plane runner lifecycle projection.
@@ -123,10 +128,7 @@ type Manager struct {
 
 // NewManager constructs a manager with safe defaults.
 func NewManager(cfg Config) *Manager {
-	ttl := cfg.RunTokenTTL
-	if ttl <= 0 {
-		ttl = defaultRunTokenTTL
-	}
+	ttl := sanitizeRunTokenTTL(cfg.RunTokenTTL)
 	nowFn := cfg.Now
 	if nowFn == nil {
 		nowFn = func() time.Time { return time.Now().UTC() }
@@ -206,6 +208,9 @@ func (m *Manager) IssueRunToken(req IssueTokenRequest) (*IssuedToken, error) {
 	ttl := req.TTL
 	if ttl <= 0 {
 		ttl = m.runTokenTTL
+	}
+	if ttl > m.runTokenTTL {
+		return nil, fmt.Errorf("%w: requested=%s max=%s", ErrRunTokenTTLExceeded, ttl, m.runTokenTTL)
 	}
 	now := m.now()
 	expiresAt := now.Add(ttl)
@@ -368,6 +373,16 @@ func isAllowedAudience(a Audience) bool {
 
 func normalizeAudience(a Audience) Audience {
 	return Audience(strings.TrimSpace(string(a)))
+}
+
+func sanitizeRunTokenTTL(ttl time.Duration) time.Duration {
+	if ttl <= 0 {
+		return defaultRunTokenTTL
+	}
+	if ttl > maxRunTokenTTL {
+		return maxRunTokenTTL
+	}
+	return ttl
 }
 
 func cloneRunner(in *Runner) *Runner {

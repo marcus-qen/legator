@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,42 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/runner"
 )
 
+var (
+	errRunnerSecretFieldRejected = errors.New("runner request includes disallowed long-lived secret field")
+	runnerCreateSecretFieldSet   = map[string]struct{}{
+		"access_key":            {},
+		"access_key_id":         {},
+		"api_key":               {},
+		"aws_access_key_id":     {},
+		"aws_secret_access_key": {},
+		"client_secret":         {},
+		"credentials":           {},
+		"password":              {},
+		"private_key":           {},
+		"provider_api_key":      {},
+		"provider_secret":       {},
+		"provider_token":        {},
+		"secret":                {},
+		"secret_access_key":     {},
+		"service_account_json":  {},
+		"ssh_private_key":       {},
+		"token":                 {},
+	}
+	runnerCreateSecretFieldSuffixes = []string{
+		"_token",
+		"_secret",
+		"_api_key",
+		"_private_key",
+		"_password",
+		"_credentials",
+		"_secret_key",
+	}
+)
+
+type createRunnerRequestPayload struct {
+	Label string `json:"label"`
+}
+
 func (s *Server) handleCreateRunner(w http.ResponseWriter, r *http.Request) {
 	if s.runnerManager == nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "runner manager unavailable")
@@ -25,10 +62,12 @@ func (s *Server) handleCreateRunner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Label string `json:"label"`
-	}
-	if err := decodeOptionalJSONBody(r, &req); err != nil {
+	req, err := decodeCreateRunnerRequest(r)
+	if err != nil {
+		if errors.Is(err, errRunnerSecretFieldRejected) {
+			writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request")
 		return
 	}
@@ -189,6 +228,62 @@ func (s *Server) handleRunnerLifecycle(w http.ResponseWriter, r *http.Request, a
 	_ = json.NewEncoder(w).Encode(updated)
 }
 
+func decodeCreateRunnerRequest(r *http.Request) (createRunnerRequestPayload, error) {
+	var req createRunnerRequestPayload
+	if r == nil || r.Body == nil {
+		return req, nil
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return req, err
+	}
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 {
+		return req, nil
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return req, err
+	}
+	if field, blocked := findDisallowedRunnerSecretField(raw); blocked {
+		return req, fmt.Errorf("%w: %s", errRunnerSecretFieldRejected, field)
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		return req, err
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return req, errors.New("invalid request")
+	}
+	return req, nil
+}
+
+func findDisallowedRunnerSecretField(raw map[string]json.RawMessage) (string, bool) {
+	for field := range raw {
+		normalized := normalizeRunnerCreateField(field)
+		if _, blocked := runnerCreateSecretFieldSet[normalized]; blocked {
+			return field, true
+		}
+		for _, suffix := range runnerCreateSecretFieldSuffixes {
+			if strings.HasSuffix(normalized, suffix) {
+				return field, true
+			}
+		}
+	}
+	return "", false
+}
+
+func normalizeRunnerCreateField(field string) string {
+	normalized := strings.ToLower(strings.TrimSpace(field))
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	normalized = strings.ReplaceAll(normalized, ".", "_")
+	return normalized
+}
+
 func runnerSessionContext(r *http.Request) (sessionID, actor string, ok bool) {
 	if r == nil {
 		return "", "", false
@@ -220,7 +315,8 @@ func (s *Server) writeRunnerError(w http.ResponseWriter, err error) {
 	case errors.Is(err, runner.ErrRunnerIDRequired),
 		errors.Is(err, runner.ErrAudienceRequired),
 		errors.Is(err, runner.ErrInvalidAudience),
-		errors.Is(err, runner.ErrRunTokenRequired):
+		errors.Is(err, runner.ErrRunTokenRequired),
+		errors.Is(err, runner.ErrRunTokenTTLExceeded):
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
 	case errors.Is(err, runner.ErrRunTokenInvalid):
 		writeJSONError(w, http.StatusUnauthorized, "invalid_run_token", err.Error())

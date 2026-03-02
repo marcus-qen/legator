@@ -156,3 +156,45 @@ func TestRunnerLifecycleTransitions(t *testing.T) {
 		t.Fatalf("expected invalid transition from destroyed -> stopped, got %v", err)
 	}
 }
+
+func TestRunTokenTTLMaxEnforced(t *testing.T) {
+	now := time.Date(2026, 3, 2, 20, 0, 0, 0, time.UTC)
+	mgr := NewManager(Config{RunTokenTTL: 2 * time.Minute, Now: func() time.Time { return now }})
+
+	r, err := mgr.CreateRunner(CreateRequest{SessionID: "sess-1", CreatedBy: "alice"})
+	if err != nil {
+		t.Fatalf("create runner: %v", err)
+	}
+
+	if _, err := mgr.IssueRunToken(IssueTokenRequest{
+		RunnerID:  r.ID,
+		Audience:  AudienceRunnerStart,
+		SessionID: "sess-1",
+		TTL:       3 * time.Minute,
+	}); !errors.Is(err, ErrRunTokenTTLExceeded) {
+		t.Fatalf("expected ttl exceeded error, got %v", err)
+	}
+}
+
+func TestRunTokenTTLConfigCappedToShortWindow(t *testing.T) {
+	now := time.Date(2026, 3, 2, 20, 0, 0, 0, time.UTC)
+	mgr := NewManager(Config{RunTokenTTL: 30 * time.Minute, Now: func() time.Time { return now }})
+
+	r, err := mgr.CreateRunner(CreateRequest{SessionID: "sess-1", CreatedBy: "alice"})
+	if err != nil {
+		t.Fatalf("create runner: %v", err)
+	}
+
+	issued, err := mgr.IssueRunToken(IssueTokenRequest{RunnerID: r.ID, Audience: AudienceRunnerStart, SessionID: "sess-1"})
+	if err != nil {
+		t.Fatalf("issue run token: %v", err)
+	}
+
+	wantTTL := int64(maxRunTokenTTL / time.Second)
+	if issued.TTL != wantTTL {
+		t.Fatalf("expected capped ttl %d seconds, got %d", wantTTL, issued.TTL)
+	}
+	if issued.ExpiresAt.Sub(issued.IssuedAt) != maxRunTokenTTL {
+		t.Fatalf("expected capped expiry window %s, got %s", maxRunTokenTTL, issued.ExpiresAt.Sub(issued.IssuedAt))
+	}
+}

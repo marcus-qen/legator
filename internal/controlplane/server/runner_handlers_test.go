@@ -142,3 +142,64 @@ func TestRunnerLifecycleViaSessionBoundRunTokens(t *testing.T) {
 		t.Fatalf("expected runner audit markers create=%v issue=%v start=%v", seenCreate, seenIssue, seenStart)
 	}
 }
+
+func TestCreateRunnerRejectsLongLivedSecretFields(t *testing.T) {
+	srv := newAuthTestServer(t)
+
+	user, err := srv.userStore.Create("runner-op", "Runner Operator", "secret", "operator")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	sess, err := srv.sessionStore.Create(user.ID)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	create := makeSessionRequest(t, srv, http.MethodPost, "/api/v1/runners", sess.ID,
+		`{"label":"ephemeral-ci","aws_secret_access_key":"never"}`)
+	if create.Code != http.StatusBadRequest {
+		t.Fatalf("expected create runner 400 for secret field, got %d body=%s", create.Code, create.Body.String())
+	}
+	var payload APIError
+	if err := json.Unmarshal(create.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if payload.Code != "invalid_request" {
+		t.Fatalf("expected invalid_request code, got %+v", payload)
+	}
+}
+
+func TestIssueRunTokenRejectsTTLOverCap(t *testing.T) {
+	srv := newAuthTestServer(t)
+
+	user, err := srv.userStore.Create("runner-op", "Runner Operator", "secret", "operator")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	sess, err := srv.sessionStore.Create(user.ID)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	create := makeSessionRequest(t, srv, http.MethodPost, "/api/v1/runners", sess.ID, `{"label":"ephemeral-ci"}`)
+	if create.Code != http.StatusCreated {
+		t.Fatalf("expected create runner 201, got %d body=%s", create.Code, create.Body.String())
+	}
+	var created runner.Runner
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	issue := makeSessionRequest(t, srv, http.MethodPost, "/api/v1/runs", sess.ID,
+		`{"runner_id":"`+created.ID+`","audience":"runner:start","ttl_seconds":600}`)
+	if issue.Code != http.StatusBadRequest {
+		t.Fatalf("expected ttl rejection 400, got %d body=%s", issue.Code, issue.Body.String())
+	}
+	var payload APIError
+	if err := json.Unmarshal(issue.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode ttl error payload: %v", err)
+	}
+	if payload.Code != "invalid_request" {
+		t.Fatalf("expected invalid_request code, got %+v", payload)
+	}
+}
