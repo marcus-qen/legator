@@ -273,8 +273,8 @@ func TestHandleLoginAndCallbackValidFlowCreatesSession(t *testing.T) {
 	if cbRec.Code != http.StatusFound {
 		t.Fatalf("expected callback redirect, got %d body=%s", cbRec.Code, cbRec.Body.String())
 	}
-	if loc := cbRec.Header().Get("Location"); loc != "/" {
-		t.Fatalf("expected redirect to /, got %q", loc)
+	if loc := cbRec.Header().Get("Location"); loc != "/dashboard" {
+		t.Fatalf("expected redirect to /dashboard, got %q", loc)
 	}
 	if sessions.userID != "oidc:alice-subject" {
 		t.Fatalf("expected session user id oidc:alice-subject, got %q", sessions.userID)
