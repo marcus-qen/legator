@@ -254,6 +254,8 @@ func normalizeRole(role string) string {
 		return "operator"
 	case "viewer":
 		return "viewer"
+	case "auditor":
+		return "auditor"
 	default:
 		return ""
 	}

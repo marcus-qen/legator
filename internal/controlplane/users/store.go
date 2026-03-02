@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/marcus-qen/legator/internal/controlplane/migration"
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
-	"github.com/marcus-qen/legator/internal/controlplane/migration"
 )
 
 var (
@@ -54,26 +54,63 @@ func NewStore(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("set busy_timeout: %w", err)
 	}
 
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS users (
-		id            TEXT PRIMARY KEY,
-		username      TEXT NOT NULL UNIQUE,
-		display_name  TEXT NOT NULL,
-		password_hash TEXT NOT NULL,
-		role          TEXT NOT NULL CHECK (role IN ('admin', 'operator', 'viewer')),
-		enabled       INTEGER NOT NULL DEFAULT 1,
-		created_at    TEXT NOT NULL,
-		last_login    TEXT
-	)`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("create users table: %w", err)
-	}
-
-	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)`)
-
-	if err := migration.EnsureVersion(db, 1); err != nil {
+	runner := migration.NewRunner("users", []migration.Migration{
+		{
+			Version:     1,
+			Description: "initial users schema",
+			Up: func(tx *sql.Tx) error {
+				if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS users (
+					id            TEXT PRIMARY KEY,
+					username      TEXT NOT NULL UNIQUE,
+					display_name  TEXT NOT NULL,
+					password_hash TEXT NOT NULL,
+					role          TEXT NOT NULL CHECK (role IN ('admin', 'operator', 'viewer')),
+					enabled       INTEGER NOT NULL DEFAULT 1,
+					created_at    TEXT NOT NULL,
+					last_login    TEXT
+				)`); err != nil {
+					return err
+				}
+				_, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)`)
+				return err
+			},
+		},
+		{
+			Version:     2,
+			Description: "expand role constraint to support auditor and custom roles",
+			Up: func(tx *sql.Tx) error {
+				// SQLite doesn't support DROP CONSTRAINT — recreate the table without it.
+				if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS users_v2 (
+					id            TEXT PRIMARY KEY,
+					username      TEXT NOT NULL UNIQUE,
+					display_name  TEXT NOT NULL,
+					password_hash TEXT NOT NULL,
+					role          TEXT NOT NULL DEFAULT 'viewer',
+					enabled       INTEGER NOT NULL DEFAULT 1,
+					created_at    TEXT NOT NULL,
+					last_login    TEXT
+				)`); err != nil {
+					return fmt.Errorf("create users_v2: %w", err)
+				}
+				if _, err := tx.Exec(`INSERT INTO users_v2 SELECT id, username, display_name, password_hash, role, enabled, created_at, last_login FROM users`); err != nil {
+					return fmt.Errorf("copy users to v2: %w", err)
+				}
+				if _, err := tx.Exec(`DROP TABLE users`); err != nil {
+					return fmt.Errorf("drop old users: %w", err)
+				}
+				if _, err := tx.Exec(`ALTER TABLE users_v2 RENAME TO users`); err != nil {
+					return fmt.Errorf("rename users_v2: %w", err)
+				}
+				_, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)`)
+				return err
+			},
+		},
+	})
+	if err := runner.Migrate(db); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("ensure schema version: %w", err)
+		return nil, fmt.Errorf("migrate users db: %w", err)
 	}
+
 	return &Store{db: db}, nil
 }
 
@@ -181,9 +218,10 @@ func (s *Store) UpdatePassword(id, newPassword string) error {
 	return checkRowsAffected(res, ErrUserNotFound)
 }
 
-// UpdateRole updates a user's role.
+// UpdateRole updates a user's role. Accepts any non-empty role string.
 func (s *Store) UpdateRole(id, role string) error {
-	if !validRole(role) {
+	role = strings.TrimSpace(role)
+	if role == "" {
 		return ErrInvalidRole
 	}
 
@@ -336,11 +374,9 @@ func checkRowsAffected(res sql.Result, errWhenZero error) error {
 	return nil
 }
 
+// validRole returns true for any non-empty role string.
+// Built-in role validation is handled by auth.ValidRole; custom role validation
+// is handled by the API layer via the CustomRoleStore.
 func validRole(role string) bool {
-	switch role {
-	case "admin", "operator", "viewer":
-		return true
-	default:
-		return false
-	}
+	return strings.TrimSpace(role) != ""
 }

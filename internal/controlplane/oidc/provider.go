@@ -458,6 +458,8 @@ func roleRank(role string) int {
 		return 2
 	case "viewer":
 		return 1
+	case "auditor":
+		return 1
 	default:
 		return 0
 	}

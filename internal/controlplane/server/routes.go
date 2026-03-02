@@ -231,6 +231,18 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/v1/jobs/{id}/disable", s.withPermission(auth.PermFleetWrite, s.handleJobsUnavailable))
 	}
 
+	// Permission matrix — public endpoint, no auth required
+	mux.HandleFunc("GET /api/v1/auth/permissions", s.handlePermissionMatrix)
+
+	// Roles — list all roles (public), manage custom roles (admin only)
+	mux.HandleFunc("GET /api/v1/roles", s.handleListRoles)
+	mux.HandleFunc("POST /api/v1/roles", s.withPermission(auth.PermAdmin, s.handleCreateRole))
+	mux.HandleFunc("DELETE /api/v1/roles/{name}", s.withPermission(auth.PermAdmin, s.handleDeleteRole))
+
+	// User role assignment (admin only)
+	mux.HandleFunc("GET /api/v1/users/{id}/role", s.withPermission(auth.PermAdmin, s.handleGetUserRole))
+	mux.HandleFunc("PUT /api/v1/users/{id}/role", s.withPermission(auth.PermAdmin, s.handlePutUserRole))
+
 	// Auth (optional)
 	if s.authStore != nil {
 		mux.HandleFunc("GET /api/v1/auth/keys", s.withPermission(auth.PermAdmin, auth.HandleListKeys(s.authStore)))

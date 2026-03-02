@@ -97,6 +97,7 @@ type Server struct {
 	sessionDeleter     auth.SessionDeleter
 	permissionResolver auth.UserPermissionResolver
 	oidcProvider       *oidc.Provider
+	customRoleStore    *auth.CustomRoleStore
 
 	// Policy
 	policyStore      policy.PolicyManager
@@ -277,6 +278,8 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 			"/healthz",
 			"/version",
 			"/api/v1/register",
+			"/api/v1/auth/permissions",
+			"/api/v1/openapi.yaml",
 			"/download/*",
 			"/install.sh",
 			"/ws/probe",
@@ -402,6 +405,9 @@ func (s *Server) Close() {
 	}
 	if s.authStore != nil {
 		s.authStore.Close()
+	}
+	if s.customRoleStore != nil {
+		s.customRoleStore.Close()
 	}
 	if s.policyPersistent != nil {
 		s.policyPersistent.Close()
@@ -1094,7 +1100,8 @@ func (s *Server) initAuth() {
 	s.sessionCreator = sessAdapter
 	s.sessionValidator = sessAdapter
 	s.sessionDeleter = sessAdapter
-	s.permissionResolver = &roleResolver{}
+	s.customRoleStore = initCustomRoleStore(s.cfg.DataDir, s.logger)
+	s.permissionResolver = &roleResolver{customRoles: s.customRoleStore}
 
 	if s.cfg.OIDC.Enabled {
 		provider, err := oidc.NewProvider(context.Background(), s.cfg.OIDC, s.logger)
@@ -1117,6 +1124,22 @@ func (s *Server) initAuth() {
 			}
 		}
 	}()
+}
+
+func initCustomRoleStore(dataDir string, logger *zap.Logger) *auth.CustomRoleStore {
+	if err := os.MkdirAll(dataDir, 0750); err != nil {
+		logger.Warn("cannot create data dir for roles store", zap.Error(err))
+		return nil
+	}
+	rolesDBPath := filepath.Join(dataDir, "roles.db")
+	store, err := auth.NewCustomRoleStore(rolesDBPath)
+	if err != nil {
+		logger.Warn("cannot open custom roles database",
+			zap.String("path", rolesDBPath), zap.Error(err))
+		return nil
+	}
+	logger.Info("custom role store opened", zap.String("path", rolesDBPath))
+	return store
 }
 
 func generateBootstrapPassword() string {

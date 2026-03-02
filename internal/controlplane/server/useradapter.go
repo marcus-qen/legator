@@ -67,8 +67,21 @@ func (a *sessionAdapter) Delete(token string) error {
 }
 
 // roleResolver bridges auth.RolePermissions → auth.UserPermissionResolver.
-type roleResolver struct{}
+// It checks built-in roles first, then falls back to custom roles.
+type roleResolver struct {
+	customRoles *auth.CustomRoleStore
+}
 
 func (r *roleResolver) PermissionsForRole(role string) []auth.Permission {
-	return auth.RolePermissions(auth.Role(role))
+	perms := auth.RolePermissions(auth.Role(role))
+	if len(perms) > 0 {
+		return perms
+	}
+	// Fall back to custom roles if available.
+	if r.customRoles != nil {
+		if custom := r.customRoles.GetPermissions(role); custom != nil {
+			return custom
+		}
+	}
+	return []auth.Permission{}
 }

@@ -1,8 +1,9 @@
-
+# Stable REST API routes (v1 + health/version + MCP transport)
+# New stable entries must be reflected in CHANGELOG.md and docs/releases/README.md annotations.
 # Append-only list. Do not remove entries; use docs/contracts/deprecations.json with status="removed".
 DELETE /api/v1/alerts/escalation/policies/{id}
-DELETE /api/v1/alerts/{id}
 DELETE /api/v1/alerts/routing/policies/{id}
+DELETE /api/v1/alerts/{id}
 DELETE /api/v1/audit/purge
 DELETE /api/v1/auth/keys/{id}
 DELETE /api/v1/cloud/connectors/{id}
@@ -13,22 +14,24 @@ DELETE /api/v1/policies/{id}
 DELETE /api/v1/probes/{id}
 DELETE /api/v1/probes/{id}/chat
 DELETE /api/v1/reliability/incidents/{id}
+DELETE /api/v1/roles/{name}
 DELETE /api/v1/users/{id}
 DELETE /api/v1/webhooks/{id}
 GET /api/v1/alerts
 GET /api/v1/alerts/active
 GET /api/v1/alerts/escalation/policies
 GET /api/v1/alerts/escalation/policies/{id}
-GET /api/v1/alerts/{id}
-GET /api/v1/alerts/{id}/history
 GET /api/v1/alerts/routing/policies
 GET /api/v1/alerts/routing/policies/{id}
+GET /api/v1/alerts/{id}
+GET /api/v1/alerts/{id}/history
 GET /api/v1/approvals
 GET /api/v1/approvals/{id}
 GET /api/v1/audit
 GET /api/v1/audit/export
 GET /api/v1/audit/export/csv
 GET /api/v1/auth/keys
+GET /api/v1/auth/permissions
 GET /api/v1/automation-packs
 GET /api/v1/automation-packs/executions/{executionID}
 GET /api/v1/automation-packs/executions/{executionID}/artifacts
@@ -51,9 +54,9 @@ GET /api/v1/fleet/tags
 GET /api/v1/grafana/snapshot
 GET /api/v1/grafana/status
 GET /api/v1/jobs
+GET /api/v1/jobs/runs
 GET /api/v1/jobs/{id}
 GET /api/v1/jobs/{id}/runs
-GET /api/v1/jobs/runs
 GET /api/v1/kubeflow/inventory
 GET /api/v1/kubeflow/runs/{name}/status
 GET /api/v1/kubeflow/status
@@ -64,6 +67,7 @@ GET /api/v1/model-profiles/active
 GET /api/v1/model-usage
 GET /api/v1/network/devices
 GET /api/v1/network/devices/{id}
+GET /api/v1/openapi.yaml
 GET /api/v1/policies
 GET /api/v1/policies/{id}
 GET /api/v1/probes
@@ -76,15 +80,16 @@ GET /api/v1/reliability/incidents
 GET /api/v1/reliability/incidents/{id}
 GET /api/v1/reliability/incidents/{id}/export
 GET /api/v1/reliability/scorecard
+GET /api/v1/roles
 GET /api/v1/tokens
 GET /api/v1/users
+GET /api/v1/users/{id}/role
 GET /api/v1/webhooks
 GET /api/v1/webhooks/deliveries
 GET /api/v1/webhooks/{id}
 GET /healthz
 GET /mcp
 GET /version
-# New stable entries must be reflected in CHANGELOG.md and docs/releases/README.md annotations.
 PATCH /api/v1/reliability/incidents/{id}
 POST /api/v1/alerts
 POST /api/v1/alerts/escalation/policies
@@ -110,8 +115,8 @@ POST /api/v1/jobs/{id}/run
 POST /api/v1/jobs/{id}/runs/{runId}/cancel
 POST /api/v1/jobs/{id}/runs/{runId}/retry
 POST /api/v1/kubeflow/actions/refresh
-POST /api/v1/kubeflow/runs/{name}/cancel
 POST /api/v1/kubeflow/runs/submit
+POST /api/v1/kubeflow/runs/{name}/cancel
 POST /api/v1/model-profiles
 POST /api/v1/model-profiles/{id}/activate
 POST /api/v1/network/devices
@@ -128,18 +133,18 @@ POST /api/v1/register
 POST /api/v1/reliability/drills/{name}/run
 POST /api/v1/reliability/incidents
 POST /api/v1/reliability/incidents/{id}/timeline
+POST /api/v1/roles
 POST /api/v1/tokens
 POST /api/v1/users
 POST /api/v1/webhooks
 POST /api/v1/webhooks/{id}/test
 POST /mcp
 PUT /api/v1/alerts/escalation/policies/{id}
-PUT /api/v1/alerts/{id}
 PUT /api/v1/alerts/routing/policies/{id}
+PUT /api/v1/alerts/{id}
 PUT /api/v1/cloud/connectors/{id}
 PUT /api/v1/jobs/{id}
 PUT /api/v1/model-profiles/{id}
 PUT /api/v1/network/devices/{id}
 PUT /api/v1/probes/{id}/tags
-# Stable REST API routes (v1 + health/version + MCP transport)
-GET /api/v1/openapi.yaml
+PUT /api/v1/users/{id}/role
