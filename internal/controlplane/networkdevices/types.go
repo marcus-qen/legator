@@ -51,7 +51,39 @@ type InventoryResult struct {
 	CollectedAt time.Time         `json:"collected_at"`
 	Hostname    string            `json:"hostname,omitempty"`
 	Version     string            `json:"version,omitempty"`
+	Serial      string            `json:"serial,omitempty"`
 	Interfaces  []string          `json:"interfaces,omitempty"`
 	Raw         map[string]string `json:"raw,omitempty"`
 	Errors      []string          `json:"errors,omitempty"`
+}
+
+// CommandRequest is the request body for ad-hoc command execution.
+type CommandRequest struct {
+	Command    string `json:"command"`
+	Password   string `json:"password,omitempty"`
+	PrivateKey string `json:"private_key,omitempty"`
+}
+
+// CommandResult holds the output of a single executed command.
+type CommandResult struct {
+	DeviceID   string    `json:"device_id"`
+	Command    string    `json:"command"`
+	Output     string    `json:"output"`
+	Truncated  bool      `json:"truncated,omitempty"`
+	DurationMS int64     `json:"duration_ms"`
+	ExecutedAt time.Time `json:"executed_at"`
+	Error      string    `json:"error,omitempty"`
+}
+
+// DeviceCredential holds stored SSH credentials for a device.
+type DeviceCredential struct {
+	DeviceID   string    `json:"-"`
+	Password   string    `json:"password,omitempty"`
+	PrivateKey string    `json:"private_key,omitempty"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// ScanConfig holds optional parameters for an inventory scan.
+type ScanConfig struct {
+	IncludeRouting bool `json:"include_routing,omitempty"`
 }

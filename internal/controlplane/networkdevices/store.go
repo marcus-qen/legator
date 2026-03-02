@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "modernc.org/sqlite"
 	"github.com/marcus-qen/legator/internal/controlplane/migration"
+	_ "modernc.org/sqlite"
 )
 
 // Store persists network device targets in SQLite.
@@ -314,4 +314,156 @@ func scanDevice(row scanner) (*Device, error) {
 
 func IsNotFound(err error) bool {
 	return errors.Is(err, sql.ErrNoRows)
+}
+
+// --- credential storage ---
+
+func (s *Store) ensureCredentialTable() error {
+	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS network_device_credentials (
+		device_id   TEXT PRIMARY KEY,
+		password    TEXT NOT NULL DEFAULT '',
+		private_key TEXT NOT NULL DEFAULT '',
+		updated_at  TEXT NOT NULL
+	)`)
+	return err
+}
+
+// StoreCredential persists SSH credentials for a device (upsert).
+func (s *Store) StoreCredential(cred DeviceCredential) error {
+	if err := s.ensureCredentialTable(); err != nil {
+		return fmt.Errorf("ensure credential table: %w", err)
+	}
+	_, err := s.db.Exec(`INSERT INTO network_device_credentials (device_id, password, private_key, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(device_id) DO UPDATE SET
+			password=excluded.password,
+			private_key=excluded.private_key,
+			updated_at=excluded.updated_at`,
+		strings.TrimSpace(cred.DeviceID),
+		cred.Password,
+		cred.PrivateKey,
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	return err
+}
+
+// GetCredential returns stored credentials for a device, or nil if none stored.
+func (s *Store) GetCredential(deviceID string) (*DeviceCredential, error) {
+	if err := s.ensureCredentialTable(); err != nil {
+		return nil, fmt.Errorf("ensure credential table: %w", err)
+	}
+	var cred DeviceCredential
+	var updated string
+	err := s.db.QueryRow(`SELECT device_id, password, private_key, updated_at
+		FROM network_device_credentials WHERE device_id = ?`,
+		strings.TrimSpace(deviceID),
+	).Scan(&cred.DeviceID, &cred.Password, &cred.PrivateKey, &updated)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	cred.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+	return &cred, nil
+}
+
+// DeleteCredential removes stored credentials for a device.
+func (s *Store) DeleteCredential(deviceID string) error {
+	if err := s.ensureCredentialTable(); err != nil {
+		return fmt.Errorf("ensure credential table: %w", err)
+	}
+	_, err := s.db.Exec(`DELETE FROM network_device_credentials WHERE device_id = ?`,
+		strings.TrimSpace(deviceID))
+	return err
+}
+
+// --- inventory storage ---
+
+func (s *Store) ensureInventoryTable() error {
+	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS network_device_inventory (
+		id           INTEGER PRIMARY KEY AUTOINCREMENT,
+		device_id    TEXT NOT NULL,
+		vendor       TEXT NOT NULL DEFAULT '',
+		collected_at TEXT NOT NULL,
+		hostname     TEXT NOT NULL DEFAULT '',
+		version      TEXT NOT NULL DEFAULT '',
+		serial       TEXT NOT NULL DEFAULT '',
+		interfaces   TEXT NOT NULL DEFAULT '[]',
+		raw          TEXT NOT NULL DEFAULT '{}',
+		errors       TEXT NOT NULL DEFAULT '[]'
+	)`)
+	if err != nil {
+		return err
+	}
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_nd_inventory_device ON network_device_inventory(device_id, collected_at DESC)`)
+	return nil
+}
+
+// SaveInventory persists an inventory scan result.
+func (s *Store) SaveInventory(result InventoryResult) error {
+	if err := s.ensureInventoryTable(); err != nil {
+		return fmt.Errorf("ensure inventory table: %w", err)
+	}
+	ifacesJSON, _ := json.Marshal(result.Interfaces)
+	rawJSON, _ := json.Marshal(result.Raw)
+	errorsJSON, _ := json.Marshal(result.Errors)
+
+	collectedAt := result.CollectedAt
+	if collectedAt.IsZero() {
+		collectedAt = time.Now().UTC()
+	}
+	_, err := s.db.Exec(`INSERT INTO network_device_inventory
+		(device_id, vendor, collected_at, hostname, version, serial, interfaces, raw, errors)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		strings.TrimSpace(result.DeviceID),
+		result.Vendor,
+		collectedAt.Format(time.RFC3339Nano),
+		result.Hostname,
+		result.Version,
+		result.Serial,
+		string(ifacesJSON),
+		string(rawJSON),
+		string(errorsJSON),
+	)
+	return err
+}
+
+// GetLatestInventory returns the most recent stored inventory for a device.
+func (s *Store) GetLatestInventory(deviceID string) (*InventoryResult, error) {
+	if err := s.ensureInventoryTable(); err != nil {
+		return nil, fmt.Errorf("ensure inventory table: %w", err)
+	}
+	var result InventoryResult
+	var collectedAt, ifacesRaw, rawRaw, errorsRaw string
+
+	err := s.db.QueryRow(`SELECT
+		device_id, vendor, collected_at, hostname, version, serial, interfaces, raw, errors
+		FROM network_device_inventory
+		WHERE device_id = ?
+		ORDER BY collected_at DESC
+		LIMIT 1`,
+		strings.TrimSpace(deviceID),
+	).Scan(
+		&result.DeviceID,
+		&result.Vendor,
+		&collectedAt,
+		&result.Hostname,
+		&result.Version,
+		&result.Serial,
+		&ifacesRaw,
+		&rawRaw,
+		&errorsRaw,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, sql.ErrNoRows
+		}
+		return nil, err
+	}
+	result.CollectedAt, _ = time.Parse(time.RFC3339Nano, collectedAt)
+	_ = json.Unmarshal([]byte(ifacesRaw), &result.Interfaces)
+	_ = json.Unmarshal([]byte(rawRaw), &result.Raw)
+	_ = json.Unmarshal([]byte(errorsRaw), &result.Errors)
+	return &result, nil
 }

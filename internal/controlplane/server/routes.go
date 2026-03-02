@@ -367,6 +367,12 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("DELETE /api/v1/network/devices/{id}", s.withPermission(auth.PermFleetWrite, s.networkDeviceHandlers.HandleDeleteDevice))
 		mux.HandleFunc("POST /api/v1/network/devices/{id}/test", s.withPermission(auth.PermFleetWrite, s.networkDeviceHandlers.HandleTestDevice))
 		mux.HandleFunc("POST /api/v1/network/devices/{id}/inventory", s.withPermission(auth.PermFleetWrite, s.networkDeviceHandlers.HandleInventoryDevice))
+		mux.HandleFunc("POST /api/v1/network/devices/{id}/command", s.withPermission(auth.PermFleetWrite, s.networkDeviceHandlers.HandleCommandDevice))
+		mux.HandleFunc("POST /api/v1/network/devices/{id}/scan", s.withPermission(auth.PermFleetWrite, s.networkDeviceHandlers.HandleScanDevice))
+		mux.HandleFunc("GET /api/v1/network/devices/{id}/inventory", s.withPermission(auth.PermFleetRead, s.networkDeviceHandlers.HandleGetInventory))
+		mux.HandleFunc("POST /api/v1/network-devices/{id}/command", s.withPermission(auth.PermFleetWrite, s.networkDeviceHandlers.HandleCommandDevice))
+		mux.HandleFunc("POST /api/v1/network-devices/{id}/scan", s.withPermission(auth.PermFleetWrite, s.networkDeviceHandlers.HandleScanDevice))
+		mux.HandleFunc("GET /api/v1/network-devices/{id}/inventory", s.withPermission(auth.PermFleetRead, s.networkDeviceHandlers.HandleGetInventory))
 	} else {
 		mux.HandleFunc("GET /api/v1/network/devices", s.withPermission(auth.PermFleetRead, s.handleNetworkDevicesUnavailable))
 		mux.HandleFunc("POST /api/v1/network/devices", s.withPermission(auth.PermFleetWrite, s.handleNetworkDevicesUnavailable))
@@ -375,6 +381,12 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("DELETE /api/v1/network/devices/{id}", s.withPermission(auth.PermFleetWrite, s.handleNetworkDevicesUnavailable))
 		mux.HandleFunc("POST /api/v1/network/devices/{id}/test", s.withPermission(auth.PermFleetWrite, s.handleNetworkDevicesUnavailable))
 		mux.HandleFunc("POST /api/v1/network/devices/{id}/inventory", s.withPermission(auth.PermFleetWrite, s.handleNetworkDevicesUnavailable))
+		mux.HandleFunc("POST /api/v1/network/devices/{id}/command", s.withPermission(auth.PermFleetWrite, s.handleNetworkDevicesUnavailable))
+		mux.HandleFunc("POST /api/v1/network/devices/{id}/scan", s.withPermission(auth.PermFleetWrite, s.handleNetworkDevicesUnavailable))
+		mux.HandleFunc("GET /api/v1/network/devices/{id}/inventory", s.withPermission(auth.PermFleetRead, s.handleNetworkDevicesUnavailable))
+		mux.HandleFunc("POST /api/v1/network-devices/{id}/command", s.withPermission(auth.PermFleetWrite, s.handleNetworkDevicesUnavailable))
+		mux.HandleFunc("POST /api/v1/network-devices/{id}/scan", s.withPermission(auth.PermFleetWrite, s.handleNetworkDevicesUnavailable))
+		mux.HandleFunc("GET /api/v1/network-devices/{id}/inventory", s.withPermission(auth.PermFleetRead, s.handleNetworkDevicesUnavailable))
 	}
 
 	// Binary download + install script

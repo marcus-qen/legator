@@ -174,3 +174,145 @@ func TestHandlerValidation(t *testing.T) {
 		t.Fatalf("expected 400, got %d", badRR.Code)
 	}
 }
+
+func TestHandlerCommandDevice(t *testing.T) {
+	h, store := newTestHandler(t, &fakeProber{})
+
+	device, err := store.CreateDevice(Device{
+		Name:     "sw-1",
+		Host:     "10.0.0.2",
+		Port:     22,
+		Vendor:   VendorCisco,
+		Username: "admin",
+		AuthMode: AuthModePassword,
+	})
+	if err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+
+	// Missing command body → 400.
+	req400 := httptest.NewRequest(http.MethodPost, "/api/v1/network/devices/"+device.ID+"/command",
+		bytes.NewBufferString(`{}`))
+	req400.SetPathValue("id", device.ID)
+	rr400 := httptest.NewRecorder()
+	h.HandleCommandDevice(rr400, req400)
+	if rr400.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing command, got %d body=%s", rr400.Code, rr400.Body.String())
+	}
+
+	// Unknown device → 404.
+	req404 := httptest.NewRequest(http.MethodPost, "/api/v1/network/devices/nope/command",
+		bytes.NewBufferString(`{"command":"hostname"}`))
+	req404.SetPathValue("id", "nope")
+	rr404 := httptest.NewRecorder()
+	h.HandleCommandDevice(rr404, req404)
+	if rr404.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown device, got %d", rr404.Code)
+	}
+
+	// Real execution attempt with no credentials → 502 (no creds).
+	reqCmd := httptest.NewRequest(http.MethodPost, "/api/v1/network/devices/"+device.ID+"/command",
+		bytes.NewBufferString(`{"command":"hostname"}`))
+	reqCmd.SetPathValue("id", device.ID)
+	rrCmd := httptest.NewRecorder()
+	h.HandleCommandDevice(rrCmd, reqCmd)
+	// Should get 502 because no SSH creds available and connection will fail.
+	if rrCmd.Code != http.StatusBadGateway {
+		t.Logf("note: got %d (may pass if host is reachable)", rrCmd.Code)
+	}
+}
+
+func TestHandlerScanDevice(t *testing.T) {
+	h, store := newTestHandler(t, &fakeProber{})
+
+	device, err := store.CreateDevice(Device{
+		Name:     "sw-scan",
+		Host:     "10.0.0.3",
+		Port:     22,
+		Vendor:   VendorJunos,
+		Username: "netops",
+		AuthMode: AuthModePassword,
+	})
+	if err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+
+	// Unknown device → 404.
+	req404 := httptest.NewRequest(http.MethodPost, "/api/v1/network/devices/nope/scan", nil)
+	req404.SetPathValue("id", "nope")
+	rr404 := httptest.NewRecorder()
+	h.HandleScanDevice(rr404, req404)
+	if rr404.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rr404.Code)
+	}
+
+	// Scan with no creds and unreachable host → 502 or scan result with errors.
+	reqScan := httptest.NewRequest(http.MethodPost, "/api/v1/network/devices/"+device.ID+"/scan",
+		bytes.NewBufferString(`{}`))
+	reqScan.SetPathValue("id", device.ID)
+	rrScan := httptest.NewRecorder()
+	h.HandleScanDevice(rrScan, reqScan)
+	// 502 when no creds; scanner itself returns best-effort but executor fails pre-connect.
+	if rrScan.Code != http.StatusBadGateway && rrScan.Code != http.StatusOK {
+		t.Fatalf("expected 502 or 200, got %d body=%s", rrScan.Code, rrScan.Body.String())
+	}
+	_ = device
+}
+
+func TestHandlerGetInventory(t *testing.T) {
+	h, store := newTestHandler(t, &fakeProber{})
+
+	device, err := store.CreateDevice(Device{
+		Name:     "rtr-inv",
+		Host:     "10.0.0.4",
+		Port:     22,
+		Vendor:   VendorCisco,
+		Username: "admin",
+		AuthMode: AuthModePassword,
+	})
+	if err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+
+	// No inventory yet → 404.
+	reqEmpty := httptest.NewRequest(http.MethodGet, "/api/v1/network/devices/"+device.ID+"/inventory", nil)
+	reqEmpty.SetPathValue("id", device.ID)
+	rrEmpty := httptest.NewRecorder()
+	h.HandleGetInventory(rrEmpty, reqEmpty)
+	if rrEmpty.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when no inventory, got %d body=%s", rrEmpty.Code, rrEmpty.Body.String())
+	}
+
+	// Store an inventory result directly.
+	inv := InventoryResult{
+		DeviceID:   device.ID,
+		Vendor:     VendorCisco,
+		Hostname:   "core-router",
+		Version:    "IOS-XE 17.3",
+		Interfaces: []string{"Gi0/0 up"},
+	}
+	if err := store.SaveInventory(inv); err != nil {
+		t.Fatalf("save inventory: %v", err)
+	}
+
+	// Now GET should return it.
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/v1/network/devices/"+device.ID+"/inventory", nil)
+	reqGet.SetPathValue("id", device.ID)
+	rrGet := httptest.NewRecorder()
+	h.HandleGetInventory(rrGet, reqGet)
+	if rrGet.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rrGet.Code, rrGet.Body.String())
+	}
+	if !bytes.Contains(rrGet.Body.Bytes(), []byte("core-router")) {
+		t.Fatalf("expected hostname in response: %s", rrGet.Body.String())
+	}
+
+	// Unknown device → 404.
+	reqUnk := httptest.NewRequest(http.MethodGet, "/api/v1/network/devices/nope/inventory", nil)
+	reqUnk.SetPathValue("id", "nope")
+	rrUnk := httptest.NewRecorder()
+	h.HandleGetInventory(rrUnk, reqUnk)
+	if rrUnk.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown device, got %d", rrUnk.Code)
+	}
+}

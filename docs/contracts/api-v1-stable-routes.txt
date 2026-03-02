@@ -66,8 +66,10 @@ GET /api/v1/metrics
 GET /api/v1/model-profiles
 GET /api/v1/model-profiles/active
 GET /api/v1/model-usage
+GET /api/v1/network-devices/{id}/inventory
 GET /api/v1/network/devices
 GET /api/v1/network/devices/{id}
+GET /api/v1/network/devices/{id}/inventory
 GET /api/v1/openapi.yaml
 GET /api/v1/policies
 GET /api/v1/policies/{id}
@@ -123,8 +125,12 @@ POST /api/v1/kubeflow/runs/submit
 POST /api/v1/kubeflow/runs/{name}/cancel
 POST /api/v1/model-profiles
 POST /api/v1/model-profiles/{id}/activate
+POST /api/v1/network-devices/{id}/command
+POST /api/v1/network-devices/{id}/scan
 POST /api/v1/network/devices
+POST /api/v1/network/devices/{id}/command
 POST /api/v1/network/devices/{id}/inventory
+POST /api/v1/network/devices/{id}/scan
 POST /api/v1/network/devices/{id}/test
 POST /api/v1/policies
 POST /api/v1/probes/{id}/apply-policy/{policyId}
