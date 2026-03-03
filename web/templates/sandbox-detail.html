@@ -1,0 +1,170 @@
+{{define "title"}}Sandbox {{.Session.ID}} — Legator{{end}}
+
+{{define "header"}}
+<div>
+  <h1 class="page-title">Sandbox <span class="id-text">{{.Session.ID}}</span></h1>
+  <span class="page-meta">Session detail, task history, and live output</span>
+</div>
+<div class="right">
+  <a href="/sandboxes" class="btn">← All Sandboxes</a>
+</div>
+{{end}}
+
+{{define "content"}}
+<div data-sandbox-id="{{.Session.ID}}">
+
+<section class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Session Metadata</h2>
+    <span class="panel-sub">
+      State: <span class="tag sandbox-state-{{.Session.State}}">{{.Session.State}}</span>
+    </span>
+  </div>
+  <dl class="kv-grid">
+    <dt>ID</dt>
+    <dd class="id-text">{{.Session.ID}}</dd>
+    <dt>Workspace</dt>
+    <dd>{{if .Session.WorkspaceID}}{{.Session.WorkspaceID}}{{else}}—{{end}}</dd>
+    <dt>Probe</dt>
+    <dd>{{if .Session.ProbeID}}{{.Session.ProbeID}}{{else}}—{{end}}</dd>
+    <dt>Runtime Class</dt>
+    <dd>{{if .Session.RuntimeClass}}{{.Session.RuntimeClass}}{{else}}—{{end}}</dd>
+    <dt>State</dt>
+    <dd><span class="tag sandbox-state-{{.Session.State}}">{{.Session.State}}</span></dd>
+    <dt>Created</dt>
+    <dd>{{.Session.CreatedAt.Format "2006-01-02 15:04:05 UTC"}}</dd>
+    <dt>Updated</dt>
+    <dd>{{.Session.UpdatedAt.Format "2006-01-02 15:04:05 UTC"}}</dd>
+    <dt>TTL</dt>
+    <dd id="sandbox-ttl">{{if .Session.TTL}}{{.Session.TTL}}{{else}}—{{end}}</dd>
+    {{if .Session.ErrorMessage}}
+    <dt>Error</dt>
+    <dd class="muted">{{.Session.ErrorMessage}}</dd>
+    {{end}}
+  </dl>
+  {{if hasPermission .CurrentUser "fleet:write"}}
+  <div class="actions-row" style="margin-top:12px;">
+    <button class="btn btn-primary" type="button" id="sandbox-submit-task-btn">Submit Task</button>
+    <button class="btn btn-danger" type="button" id="sandbox-destroy-btn">Destroy Sandbox</button>
+  </div>
+  {{end}}
+</section>
+
+{{if hasPermission .CurrentUser "fleet:write"}}
+<section class="panel" id="sandbox-task-form-panel" style="display:none;">
+  <div class="panel-header">
+    <h2 class="panel-title">Submit Task</h2>
+  </div>
+  <form id="sandbox-task-form" class="jobs-filter-grid" autocomplete="off">
+    <label>
+      <span class="muted">Kind</span>
+      <select class="input" id="task-kind">
+        <option value="command">Command</option>
+        <option value="repo">Repo</option>
+      </select>
+    </label>
+    <label>
+      <span class="muted">Command (space-separated args)</span>
+      <input class="input" id="task-command" placeholder="e.g. echo hello world" />
+    </label>
+    <label>
+      <span class="muted">Image (optional)</span>
+      <input class="input" id="task-image" placeholder="e.g. ubuntu:22.04" />
+    </label>
+    <label>
+      <span class="muted">Timeout (seconds)</span>
+      <input class="input" type="number" id="task-timeout" value="300" min="1" max="3600" />
+    </label>
+    <div class="actions-row jobs-filter-actions">
+      <button class="btn btn-primary" type="submit">Submit</button>
+      <button class="btn" type="button" id="sandbox-task-cancel-btn">Cancel</button>
+    </div>
+  </form>
+</section>
+{{end}}
+
+<section class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Tasks</h2>
+    <span class="panel-sub" id="tasks-meta">{{len .Tasks}} task{{if ne (len .Tasks) 1}}s{{end}}</span>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Kind</th>
+          <th>Command</th>
+          <th>State</th>
+          <th>Exit Code</th>
+          <th>Started</th>
+          <th>Completed</th>
+          {{if hasPermission .CurrentUser "fleet:write"}}
+          <th>Actions</th>
+          {{end}}
+        </tr>
+      </thead>
+      <tbody id="tasks-table-body">
+        {{if .Tasks}}
+          {{range .Tasks}}
+          <tr>
+            <td class="id-text">{{printf "%.8s" .ID}}</td>
+            <td>{{.Kind}}</td>
+            <td class="id-text">
+              {{if .Command}}
+                {{range $i, $c := .Command}}{{if gt $i 0}} {{end}}{{$c}}{{end}}
+              {{else if .RepoURL}}
+                {{.RepoURL}}
+              {{else}}—{{end}}
+            </td>
+            <td><span class="tag task-state-{{.State}}">{{.State}}</span></td>
+            <td>{{if .IsTerminal}}{{.ExitCode}}{{else}}—{{end}}</td>
+            <td>{{if .StartedAt}}{{.StartedAt.Format "15:04:05"}}{{else}}—{{end}}</td>
+            <td>{{if .CompletedAt}}{{.CompletedAt.Format "15:04:05"}}{{else}}—{{end}}</td>
+            {{if hasPermission $.CurrentUser "fleet:write"}}
+            <td>
+              {{if not .IsTerminal}}
+              <button class="btn btn-small" type="button"
+                data-cancel-task="{{.ID}}">Cancel</button>
+              {{else}}
+              <span class="muted">—</span>
+              {{end}}
+            </td>
+            {{end}}
+          </tr>
+          {{end}}
+        {{else}}
+          <tr><td colspan="8" class="empty-state">No tasks yet.</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Live Output</h2>
+    <div class="right">
+      <button class="btn btn-small scroll-lock-btn" type="button" id="scroll-lock-btn" title="Toggle auto-scroll">
+        Auto-scroll: ON
+      </button>
+      <span class="muted" id="terminal-status">Connecting…</span>
+    </div>
+  </div>
+  <div class="terminal-pane" id="terminal-pane" role="log" aria-live="polite" aria-label="Sandbox output"></div>
+</section>
+
+</div><!-- /data-sandbox-id -->
+{{end}}
+
+{{define "scripts"}}
+<script>
+(function() {
+  const el = document.querySelector('[data-sandbox-id]');
+  const sandboxId = el ? el.dataset.sandboxId : '';
+  if (sandboxId && window.LegatorUI && window.LegatorUI.initSandboxDetail) {
+    window.LegatorUI.initSandboxDetail(sandboxId);
+  }
+})();
+</script>
+{{end}}

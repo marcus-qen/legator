@@ -1651,3 +1651,101 @@ body[data-page='federation'] .federation-tags {
     justify-content: flex-end;
   }
 }
+
+/* ── Sandbox state badges ────────────────────────────────── */
+.sandbox-state-created,
+.task-state-queued {
+  border-color: rgba(96, 165, 250, 0.5);
+  color: #60a5fa;
+  background: rgba(96, 165, 250, 0.09);
+}
+
+.sandbox-state-provisioning {
+  border-color: rgba(251, 191, 36, 0.5);
+  color: var(--amber);
+  background: rgba(251, 191, 36, 0.09);
+}
+
+.sandbox-state-ready,
+.task-state-succeeded {
+  border-color: rgba(74, 222, 128, 0.5);
+  color: var(--green);
+  background: rgba(74, 222, 128, 0.09);
+}
+
+.sandbox-state-running,
+.task-state-running {
+  border-color: rgba(167, 139, 250, 0.5);
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.09);
+}
+
+.sandbox-state-failed,
+.task-state-failed {
+  border-color: rgba(248, 113, 113, 0.5);
+  color: var(--red);
+  background: rgba(248, 113, 113, 0.09);
+}
+
+.sandbox-state-destroyed,
+.task-state-cancelled {
+  border-color: rgba(156, 163, 175, 0.5);
+  color: #9ca3af;
+  background: rgba(156, 163, 175, 0.09);
+}
+
+/* ── Terminal pane ───────────────────────────────────────── */
+.terminal-pane {
+  background: #0d0d1a;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: 'SFMono-Regular', 'Fira Code', 'Consolas', 'Menlo', monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-y: auto;
+  max-height: 500px;
+  padding: 12px 16px;
+  color: #d4d4d4;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.terminal-line {
+  display: block;
+  min-height: 1em;
+}
+
+.terminal-stdout {
+  color: #d4d4d4;
+}
+
+.terminal-stderr {
+  color: #ff6b6b;
+}
+
+/* ── Scroll-lock toggle ──────────────────────────────────── */
+.scroll-lock-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  opacity: 0.8;
+  transition: opacity 0.15s;
+}
+
+.scroll-lock-btn:hover {
+  opacity: 1;
+}
+
+.scroll-lock-btn.locked {
+  border-color: rgba(251, 191, 36, 0.5);
+  color: var(--amber);
+}
+
+/* ── Task form inline panel ──────────────────────────────── */
+#sandbox-task-form-panel {
+  animation: fadeIn 0.15s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

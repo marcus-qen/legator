@@ -504,6 +504,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /discovery", s.handleDiscoveryPage)
 	mux.HandleFunc("GET /jobs", s.handleJobsPage)
 	mux.HandleFunc("GET /compliance", s.handleCompliancePage)
+	mux.HandleFunc("GET /sandboxes", s.handleSandboxesPage)
+	mux.HandleFunc("GET /sandboxes/{id}", s.handleSandboxDetailPage)
 
 	// WebSocket for probes
 	mux.HandleFunc("GET /ws/probe", s.hub.HandleProbeWS)

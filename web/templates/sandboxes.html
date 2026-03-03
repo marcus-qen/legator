@@ -1,0 +1,92 @@
+{{define "title"}}Sandboxes — Legator{{end}}
+
+{{define "header"}}
+<div>
+  <h1 class="page-title">Sandboxes</h1>
+  <span class="page-meta">Sandbox session lifecycle and task execution</span>
+</div>
+<div class="right">
+  <span class="muted" id="sandboxes-last-updated">Last updated: never</span>
+  <button class="btn" type="button" id="sandboxes-refresh">Refresh</button>
+</div>
+{{end}}
+
+{{define "content"}}
+<section class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Summary</h2>
+  </div>
+  <div class="jobs-summary-grid">
+    <article class="jobs-summary-card">
+      <span class="jobs-summary-label">Total</span>
+      <strong class="jobs-summary-value" id="sandboxes-count-total">0</strong>
+    </article>
+    <article class="jobs-summary-card">
+      <span class="jobs-summary-label">Running</span>
+      <strong class="jobs-summary-value" id="sandboxes-count-running">0</strong>
+    </article>
+    <article class="jobs-summary-card">
+      <span class="jobs-summary-label">Ready</span>
+      <strong class="jobs-summary-value" id="sandboxes-count-ready">0</strong>
+    </article>
+    <article class="jobs-summary-card">
+      <span class="jobs-summary-label">Failed</span>
+      <strong class="jobs-summary-value" id="sandboxes-count-failed">0</strong>
+    </article>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Sandbox Sessions</h2>
+    <span class="panel-sub" id="sandboxes-list-meta">0 sessions</span>
+  </div>
+  <form id="sandboxes-filter-form" class="jobs-filter-grid" autocomplete="off">
+    <label>
+      <span class="muted">State</span>
+      <select class="input" id="sandboxes-filter-state">
+        <option value="">All states</option>
+        <option value="created">Created</option>
+        <option value="provisioning">Provisioning</option>
+        <option value="ready">Ready</option>
+        <option value="running">Running</option>
+        <option value="failed">Failed</option>
+        <option value="destroyed">Destroyed</option>
+      </select>
+    </label>
+    <label>
+      <span class="muted">Runtime Class</span>
+      <select class="input" id="sandboxes-filter-runtime">
+        <option value="">All runtimes</option>
+      </select>
+    </label>
+    <div class="actions-row jobs-filter-actions">
+      <button class="btn btn-primary" type="submit">Filter</button>
+      <button class="btn" type="button" id="sandboxes-filter-reset">Reset</button>
+    </div>
+  </form>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Runtime Class</th>
+          <th>State</th>
+          <th>Probe ID</th>
+          <th>Created</th>
+          <th>Duration</th>
+        </tr>
+      </thead>
+      <tbody id="sandboxes-table-body">
+        <tr><td colspan="6" class="empty-state">Loading sandboxes…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{{end}}
+
+{{define "scripts"}}
+<script>
+window.LegatorUI && window.LegatorUI.initSandboxes && window.LegatorUI.initSandboxes();
+</script>
+{{end}}
