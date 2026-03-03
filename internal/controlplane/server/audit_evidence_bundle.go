@@ -55,7 +55,7 @@ type evidenceBundleManifestDigest struct {
 }
 
 type evidenceInventorySnapshot struct {
-	CapturedAt string              `json:"captured_at"`
+	CapturedAt string               `json:"captured_at"`
 	Inventory  fleet.FleetInventory `json:"inventory"`
 }
 

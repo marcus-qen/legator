@@ -43,26 +43,26 @@ func TestHandleAuditEvidenceBundleExport_BundleContentsAndManifest(t *testing.T)
 	})
 
 	if err := srv.complianceStore.UpsertResult(compliance.ComplianceResult{
-		CheckID:    "ssh-root-login",
-		CheckName:  "SSH Root Login",
-		Category:   "cis",
-		Severity:   compliance.SeverityCritical,
-		ProbeID:    "probe-a",
-		Status:     compliance.StatusPass,
-		Evidence:   "PermitRootLogin no",
-		Timestamp:  base.Add(3 * time.Minute),
+		CheckID:   "ssh-root-login",
+		CheckName: "SSH Root Login",
+		Category:  "cis",
+		Severity:  compliance.SeverityCritical,
+		ProbeID:   "probe-a",
+		Status:    compliance.StatusPass,
+		Evidence:  "PermitRootLogin no",
+		Timestamp: base.Add(3 * time.Minute),
 	}); err != nil {
 		t.Fatalf("upsert compliance probe-a: %v", err)
 	}
 	if err := srv.complianceStore.UpsertResult(compliance.ComplianceResult{
-		CheckID:    "firewall-active",
-		CheckName:  "Firewall Active",
-		Category:   "soc2",
-		Severity:   compliance.SeverityHigh,
-		ProbeID:    "probe-b",
-		Status:     compliance.StatusFail,
-		Evidence:   "no rules",
-		Timestamp:  base.Add(4 * time.Minute),
+		CheckID:   "firewall-active",
+		CheckName: "Firewall Active",
+		Category:  "soc2",
+		Severity:  compliance.SeverityHigh,
+		ProbeID:   "probe-b",
+		Status:    compliance.StatusFail,
+		Evidence:  "no rules",
+		Timestamp: base.Add(4 * time.Minute),
 	}); err != nil {
 		t.Fatalf("upsert compliance probe-b: %v", err)
 	}
