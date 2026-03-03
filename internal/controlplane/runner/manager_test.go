@@ -205,3 +205,24 @@ func TestRunTokenJobBindingScope(t *testing.T) {
 		t.Fatalf("expected run token scope rejection on mismatched job id, got %v", err)
 	}
 }
+
+func TestRunTokenRevokedRejected(t *testing.T) {
+	now := time.Date(2026, 3, 2, 20, 0, 0, 0, time.UTC)
+	mgr := NewManager(Config{RunTokenTTL: 2 * time.Minute, Now: func() time.Time { return now }})
+
+	r, err := mgr.CreateRunner(CreateRequest{SessionID: "sess-1", CreatedBy: "alice"})
+	if err != nil {
+		t.Fatalf("create runner: %v", err)
+	}
+	issued, err := mgr.IssueRunToken(IssueTokenRequest{RunnerID: r.ID, Audience: AudienceRunnerStart, SessionID: "sess-1"})
+	if err != nil {
+		t.Fatalf("issue token: %v", err)
+	}
+	if err := mgr.RevokeRunToken(issued.Token); err != nil {
+		t.Fatalf("revoke token: %v", err)
+	}
+
+	if _, err := mgr.StartRunner(LifecycleRequest{RunnerID: r.ID, RunToken: issued.Token, SessionID: "sess-1"}); !errors.Is(err, ErrRunTokenRevoked) {
+		t.Fatalf("expected revoked token error, got %v", err)
+	}
+}

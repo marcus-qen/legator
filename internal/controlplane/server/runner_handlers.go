@@ -120,6 +120,7 @@ func (s *Server) handleIssueRunToken(w http.ResponseWriter, r *http.Request) {
 		RunnerID:  strings.TrimSpace(req.RunnerID),
 		JobID:     strings.TrimSpace(req.JobID),
 		Audience:  runner.Audience(strings.TrimSpace(req.Audience)),
+		Issuer:    actor,
 		SessionID: sessionID,
 		TTL:       ttl,
 	})
@@ -427,6 +428,8 @@ func (s *Server) writeRunnerError(w http.ResponseWriter, err error) {
 		writeJSONError(w, http.StatusUnauthorized, "invalid_run_token", err.Error())
 	case errors.Is(err, runner.ErrRunTokenExpired):
 		writeJSONError(w, http.StatusUnauthorized, "expired_run_token", err.Error())
+	case errors.Is(err, runner.ErrRunTokenRevoked):
+		writeJSONError(w, http.StatusUnauthorized, "revoked_run_token", err.Error())
 	case errors.Is(err, runner.ErrRunTokenConsumed):
 		writeJSONError(w, http.StatusConflict, "run_token_consumed", err.Error())
 	case errors.Is(err, runner.ErrRunTokenSessionBound), errors.Is(err, runner.ErrRunTokenScope):

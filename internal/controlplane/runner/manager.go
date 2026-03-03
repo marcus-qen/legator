@@ -1,8 +1,6 @@
 package runner
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -10,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/marcus-qen/legator/internal/controlplane/tokenbroker"
 )
 
 // State models runner lifecycle states.
@@ -51,6 +50,7 @@ var (
 	ErrRunTokenRequired         = errors.New("run token is required")
 	ErrRunTokenInvalid          = errors.New("run token is invalid")
 	ErrRunTokenExpired          = errors.New("run token is expired")
+	ErrRunTokenRevoked          = errors.New("run token is revoked")
 	ErrRunTokenConsumed         = errors.New("run token already consumed")
 	ErrRunTokenScope            = errors.New("run token scope rejected")
 	ErrRunTokenSessionBound     = errors.New("run token session binding rejected")
@@ -100,6 +100,7 @@ type IssueTokenRequest struct {
 	RunnerID  string
 	JobID     string
 	Audience  Audience
+	Issuer    string
 	SessionID string
 	TTL       time.Duration
 }
@@ -110,6 +111,8 @@ type IssuedToken struct {
 	RunnerID  string    `json:"runner_id"`
 	JobID     string    `json:"job_id,omitempty"`
 	Audience  Audience  `json:"audience"`
+	Scopes    []string  `json:"scopes,omitempty"`
+	Issuer    string    `json:"issuer,omitempty"`
 	IssuedAt  time.Time `json:"issued_at"`
 	ExpiresAt time.Time `json:"expires_at"`
 	TTL       int64     `json:"ttl_seconds"`
@@ -123,34 +126,29 @@ type LifecycleRequest struct {
 	SessionID string
 }
 
+type tokenBroker interface {
+	Issue(req tokenbroker.IssueRequest) (*tokenbroker.IssuedToken, error)
+	Validate(req tokenbroker.ValidateRequest) (*tokenbroker.Claims, error)
+	Revoke(token string) error
+}
+
 // Config controls manager behaviour.
 type Config struct {
 	RunTokenTTL    time.Duration
 	Now            func() time.Time
 	IDGenerator    func() string
 	TokenGenerator func() (string, error)
-}
-
-type runTokenRecord struct {
-	Token      string
-	RunnerID   string
-	JobID      string
-	Audience   Audience
-	SessionID  string
-	IssuedAt   time.Time
-	ExpiresAt  time.Time
-	ConsumedAt *time.Time
+	TokenBroker    tokenBroker
 }
 
 // Manager keeps runner lifecycle and ephemeral run tokens in-memory.
 type Manager struct {
-	mu             sync.Mutex
-	runners        map[string]*Runner
-	tokens         map[string]*runTokenRecord
-	runTokenTTL    time.Duration
-	now            func() time.Time
-	idGenerator    func() string
-	tokenGenerator func() (string, error)
+	mu          sync.Mutex
+	runners     map[string]*Runner
+	runTokenTTL time.Duration
+	now         func() time.Time
+	idGenerator func() string
+	tokens      tokenBroker
 }
 
 // NewManager constructs a manager with safe defaults.
@@ -167,18 +165,22 @@ func NewManager(cfg Config) *Manager {
 	if idGen == nil {
 		idGen = uuid.NewString
 	}
-	tokenGen := cfg.TokenGenerator
-	if tokenGen == nil {
-		tokenGen = generateRunToken
+
+	broker := cfg.TokenBroker
+	if broker == nil {
+		broker = tokenbroker.NewBroker(tokenbroker.Config{
+			DefaultTTL:     ttl,
+			Now:            nowFn,
+			TokenGenerator: cfg.TokenGenerator,
+		})
 	}
 
 	return &Manager{
-		runners:        make(map[string]*Runner),
-		tokens:         make(map[string]*runTokenRecord),
-		runTokenTTL:    ttl,
-		now:            nowFn,
-		idGenerator:    idGen,
-		tokenGenerator: tokenGen,
+		runners:     make(map[string]*Runner),
+		runTokenTTL: ttl,
+		now:         nowFn,
+		idGenerator: idGen,
+		tokens:      broker,
 	}
 }
 
@@ -240,10 +242,8 @@ func (m *Manager) IssueRunToken(req IssueTokenRequest) (*IssuedToken, error) {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.pruneExpiredLocked()
-
 	r, ok := m.runners[runnerID]
+	m.mu.Unlock()
 	if !ok {
 		return nil, ErrRunnerNotFound
 	}
@@ -261,38 +261,51 @@ func (m *Manager) IssueRunToken(req IssueTokenRequest) (*IssuedToken, error) {
 	if ttl <= 0 {
 		ttl = m.runTokenTTL
 	}
-	now := m.now()
-	expiresAt := now.Add(ttl)
 
-	token, err := m.tokenGenerator()
-	if err != nil {
-		return nil, fmt.Errorf("generate run token: %w", err)
+	runID := jobID
+	if runID == "" {
+		runID = runnerID
 	}
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return nil, fmt.Errorf("generate run token: empty token")
+	issuer := strings.TrimSpace(req.Issuer)
+	if issuer == "" {
+		issuer = sessionID
 	}
-
-	record := &runTokenRecord{
-		Token:     token,
-		RunnerID:  runnerID,
-		JobID:     jobID,
-		Audience:  audience,
+	issued, err := m.tokens.Issue(tokenbroker.IssueRequest{
+		RunID:     runID,
+		ProbeID:   runnerID,
+		Scopes:    []string{string(audience)},
+		Issuer:    issuer,
 		SessionID: sessionID,
-		IssuedAt:  now,
-		ExpiresAt: expiresAt,
+		TTL:       ttl,
+	})
+	if err != nil {
+		return nil, mapTokenBrokerError(err)
 	}
-	m.tokens[token] = record
+
+	ttlSeconds := int64(issued.ExpiresAt.Sub(issued.IssuedAt) / time.Second)
+	if ttlSeconds < 0 {
+		ttlSeconds = 0
+	}
 
 	return &IssuedToken{
-		Token:     token,
+		Token:     issued.Token,
 		RunnerID:  runnerID,
 		JobID:     jobID,
 		Audience:  audience,
-		IssuedAt:  now,
-		ExpiresAt: expiresAt,
-		TTL:       int64(ttl / time.Second),
+		Scopes:    append([]string(nil), issued.Scopes...),
+		Issuer:    issued.Issuer,
+		IssuedAt:  issued.IssuedAt,
+		ExpiresAt: issued.ExpiresAt,
+		TTL:       ttlSeconds,
 	}, nil
+}
+
+// RevokeRunToken revokes an issued lifecycle token.
+func (m *Manager) RevokeRunToken(token string) error {
+	if err := m.tokens.Revoke(token); err != nil {
+		return mapTokenBrokerError(err)
+	}
+	return nil
 }
 
 // StartRunner transitions runner to running after token checks.
@@ -388,7 +401,6 @@ func (m *Manager) prepareTransition(req LifecycleRequest, audience Audience, tar
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.pruneExpiredLocked()
 
 	r, ok := m.runners[runnerID]
 	if !ok {
@@ -399,8 +411,20 @@ func (m *Manager) prepareTransition(req LifecycleRequest, audience Audience, tar
 	if requestedJobID != "" && runnerJobID != "" && requestedJobID != runnerJobID {
 		return nil, fmt.Errorf("%w: lifecycle job_id %q does not match runner job_id %q", ErrRunTokenScope, requestedJobID, runnerJobID)
 	}
-	if err := m.consumeRunTokenLocked(rawToken, audience, runnerID, runnerJobID, sessionID); err != nil {
-		return nil, err
+
+	runID := runnerJobID
+	if runID == "" {
+		runID = runnerID
+	}
+	if _, err := m.tokens.Validate(tokenbroker.ValidateRequest{
+		Token:     rawToken,
+		Scope:     string(audience),
+		RunID:     runID,
+		ProbeID:   runnerID,
+		SessionID: sessionID,
+		Consume:   true,
+	}); err != nil {
+		return nil, mapTokenBrokerError(err)
 	}
 	if !canTransition(r.State, target) {
 		return nil, fmt.Errorf("%w: cannot move from %s to %s", ErrInvalidTransition, r.State, target)
@@ -409,55 +433,30 @@ func (m *Manager) prepareTransition(req LifecycleRequest, audience Audience, tar
 	return cloneRunner(r), nil
 }
 
-func (m *Manager) consumeRunTokenLocked(rawToken string, audience Audience, runnerID, jobID, sessionID string) error {
-	record, ok := m.tokens[rawToken]
-	if !ok {
+func mapTokenBrokerError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, tokenbroker.ErrTokenRequired):
+		return ErrRunTokenRequired
+	case errors.Is(err, tokenbroker.ErrTokenInvalid):
 		return ErrRunTokenInvalid
-	}
-	now := m.now()
-
-	if record.ConsumedAt != nil {
-		return fmt.Errorf("%w: token was consumed at %s", ErrRunTokenConsumed, record.ConsumedAt.UTC().Format(time.RFC3339Nano))
-	}
-	if now.After(record.ExpiresAt) {
-		t := now
-		record.ConsumedAt = &t
-		return fmt.Errorf("%w: token expired at %s", ErrRunTokenExpired, record.ExpiresAt.UTC().Format(time.RFC3339Nano))
-	}
-	if strings.TrimSpace(record.SessionID) != strings.TrimSpace(sessionID) {
-		return fmt.Errorf("%w: token session does not match caller session", ErrRunTokenSessionBound)
-	}
-	if normalizeAudience(record.Audience) != normalizeAudience(audience) {
-		return fmt.Errorf("%w: expected audience %s", ErrRunTokenScope, audience)
-	}
-	if strings.TrimSpace(record.RunnerID) != strings.TrimSpace(runnerID) {
-		return fmt.Errorf("%w: token audience bound to runner %s", ErrRunTokenScope, record.RunnerID)
-	}
-	if strings.TrimSpace(record.JobID) != strings.TrimSpace(jobID) {
-		return fmt.Errorf("%w: token audience bound to job %s", ErrRunTokenScope, strings.TrimSpace(record.JobID))
-	}
-
-	t := now
-	record.ConsumedAt = &t
-	return nil
-}
-
-func (m *Manager) pruneExpiredLocked() {
-	now := m.now()
-	for token, record := range m.tokens {
-		if record == nil {
-			delete(m.tokens, token)
-			continue
-		}
-		if record.ConsumedAt != nil {
-			if now.Sub(*record.ConsumedAt) > time.Hour {
-				delete(m.tokens, token)
-			}
-			continue
-		}
-		if now.After(record.ExpiresAt.Add(time.Hour)) {
-			delete(m.tokens, token)
-		}
+	case errors.Is(err, tokenbroker.ErrTokenExpired):
+		return ErrRunTokenExpired
+	case errors.Is(err, tokenbroker.ErrTokenRevoked):
+		return ErrRunTokenRevoked
+	case errors.Is(err, tokenbroker.ErrTokenConsumed):
+		return ErrRunTokenConsumed
+	case errors.Is(err, tokenbroker.ErrScopeRejected),
+		errors.Is(err, tokenbroker.ErrScopeRequired),
+		errors.Is(err, tokenbroker.ErrScopesRequired),
+		errors.Is(err, tokenbroker.ErrRunIDRequired),
+		errors.Is(err, tokenbroker.ErrProbeIDRequired):
+		return fmt.Errorf("%w: %v", ErrRunTokenScope, err)
+	case errors.Is(err, tokenbroker.ErrSessionMismatch):
+		return ErrRunTokenSessionBound
+	default:
+		return err
 	}
 }
 
@@ -548,12 +547,4 @@ func cloneRunner(in *Runner) *Runner {
 		copy.Sandbox = &sandboxCopy
 	}
 	return &copy
-}
-
-func generateRunToken() (string, error) {
-	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
-		return "", err
-	}
-	return "lgrun_" + hex.EncodeToString(raw), nil
 }

@@ -132,6 +132,12 @@ func TestRunnerLifecycleViaSessionBoundRunTokens(t *testing.T) {
 	if issued.Audience != runner.AudienceRunnerStart {
 		t.Fatalf("expected runner:start audience, got %s", issued.Audience)
 	}
+	if len(issued.Scopes) != 1 || issued.Scopes[0] != string(runner.AudienceRunnerStart) {
+		t.Fatalf("expected least-privilege scope runner:start, got %+v", issued.Scopes)
+	}
+	if issued.Issuer != "runner-op" {
+		t.Fatalf("expected issuer runner-op, got %s", issued.Issuer)
+	}
 	if issued.ExpiresAt.Sub(issued.IssuedAt) > 31*time.Second {
 		t.Fatalf("expected short-lived token, got ttl=%s", issued.ExpiresAt.Sub(issued.IssuedAt))
 	}
