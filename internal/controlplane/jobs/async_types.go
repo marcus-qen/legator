@@ -82,7 +82,6 @@ type AsyncJob struct {
 	ID           string        `json:"id"`
 	WorkspaceID  string        `json:"workspace_id,omitempty"`
 	ProbeID      string        `json:"probe_id"`
-	WorkspaceID  string        `json:"workspace_id,omitempty"`
 	RequestID    string        `json:"request_id"`
 	Command      string        `json:"command"`
 	Args         []string      `json:"args,omitempty"`

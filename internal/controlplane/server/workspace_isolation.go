@@ -6,6 +6,7 @@ import (
     "strings"
 
     "github.com/marcus-qen/legator/internal/controlplane/auth"
+	"github.com/marcus-qen/legator/internal/controlplane/jobs"
 )
 
 func normalizeWorkspaceID(workspaceID string) string {
@@ -91,4 +92,37 @@ func (s *Server) requestVisibleToWorkspace(requestID, workspaceID string) bool {
         return false
     }
     return reqWorkspaceID == workspaceID
+}
+
+// withWorkspaceScope is an HTTP middleware that, when workspace isolation is
+// enabled, validates and injects the workspace scope into the request context
+// before the handler runs. Requests without a valid workspace claim are rejected.
+func (s *Server) withWorkspaceScope(next http.HandlerFunc) http.HandlerFunc {
+return func(w http.ResponseWriter, r *http.Request) {
+if s.workspaceIsolationEnabled() {
+workspaceID, ok := s.workspaceScopeForRequest(w, r)
+if !ok {
+return
+}
+// Wildcard means admin — pass empty string so handlers show all.
+if workspaceID == "*" {
+workspaceID = ""
+}
+r = r.WithContext(jobs.WithWorkspaceScope(r.Context(), workspaceID))
+}
+next(w, r)
+}
+}
+
+// workspaceJobFilter returns the workspace ID to use for filtering job/run queries.
+// Returns "" when isolation is disabled or caller has wildcard scope.
+func (s *Server) workspaceJobFilter(r *http.Request) string {
+if !s.workspaceIsolationEnabled() {
+return ""
+}
+workspaceID, err := auth.WorkspaceIDFromContext(r.Context())
+if err != nil || workspaceID == "*" {
+return ""
+}
+return normalizeWorkspaceID(workspaceID)
 }

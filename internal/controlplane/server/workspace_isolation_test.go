@@ -23,7 +23,7 @@ func newIsolatedTestServer(t *testing.T) *Server {
 	cfg := config.Config{
 		ListenAddr:         ":0",
 		DataDir:            t.TempDir(),
-		WorkspaceIsolation: true,
+		WorkspaceIsolation: config.WorkspaceIsolationConfig{Enabled: true},
 	}
 	logger := zap.NewNop()
 	srv, err := New(cfg, logger)
@@ -179,7 +179,7 @@ func TestWorkspaceIsolation_DisabledByDefault(t *testing.T) {
 	if srv.jobsStore == nil {
 		t.Skip("jobs store not available")
 	}
-	if srv.cfg.WorkspaceIsolation {
+	if srv.cfg.WorkspaceIsolation.Enabled {
 		t.Fatal("workspace isolation should be disabled by default")
 	}
 
