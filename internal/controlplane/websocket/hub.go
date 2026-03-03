@@ -37,17 +37,29 @@ type ProbeConn struct {
 // Returns true if the probe ID + bearer token are valid.
 type ProbeAuthenticator func(probeID, bearerToken string) bool
 
+// ProbeHandshakeDecision captures a pre-upgrade auth decision.
+type ProbeHandshakeDecision struct {
+	Allowed    bool
+	StatusCode int
+	Body       string
+}
+
+// ProbeHandshakeAuthorizer can inspect full request context (including TLS peer certs)
+// and decide whether to allow a probe websocket upgrade.
+type ProbeHandshakeAuthorizer func(r *http.Request, probeID, bearerToken string) ProbeHandshakeDecision
+
 // Hub manages all connected probes.
 type Hub struct {
-	probes        map[string]*ProbeConn
-	mu            sync.RWMutex
-	logger        *zap.Logger
-	onMsg         func(probeID string, env protocol.Envelope) // callback for incoming messages
-	onConnect     func(probeID string)
-	onDisconnect  func(probeID string)
-	authenticator ProbeAuthenticator // nil = no auth (testing only)
-	signer        *signing.Signer    // nil = signing disabled
-	streams       *streamRegistry    // output chunk subscribers
+	probes              map[string]*ProbeConn
+	mu                  sync.RWMutex
+	logger              *zap.Logger
+	onMsg               func(probeID string, env protocol.Envelope) // callback for incoming messages
+	onConnect           func(probeID string)
+	onDisconnect        func(probeID string)
+	authenticator       ProbeAuthenticator       // legacy token-only auth (testing/backward compat)
+	handshakeAuthorizer ProbeHandshakeAuthorizer // request-aware auth (mTLS support)
+	signer              *signing.Signer          // nil = signing disabled
+	streams             *streamRegistry          // output chunk subscribers
 }
 
 // NewHub creates a new Hub.
@@ -71,6 +83,13 @@ func (h *Hub) SetAuthenticator(auth ProbeAuthenticator) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.authenticator = auth
+}
+
+// SetHandshakeAuthorizer installs a request-aware auth callback used before websocket upgrade.
+func (h *Hub) SetHandshakeAuthorizer(authorizer ProbeHandshakeAuthorizer) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.handshakeAuthorizer = authorizer
 }
 
 // SetLifecycleHooks installs optional callbacks for connect/disconnect transitions.
@@ -100,8 +119,27 @@ func (h *Hub) HandleProbeWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Authenticate probe before upgrading the connection.
-	if h.authenticator != nil {
-		token := extractBearerToken(r)
+	token := extractBearerToken(r)
+	if h.handshakeAuthorizer != nil {
+		decision := h.handshakeAuthorizer(r, probeID, token)
+		if !decision.Allowed {
+			status := decision.StatusCode
+			if status == 0 {
+				status = http.StatusForbidden
+			}
+			body := decision.Body
+			if body == "" {
+				body = `{"error":"invalid credentials"}`
+			}
+			http.Error(w, body, status)
+			h.logger.Warn("probe connection rejected",
+				zap.String("probe_id", probeID),
+				zap.Int("status_code", status),
+				zap.String("remote_addr", r.RemoteAddr),
+			)
+			return
+		}
+	} else if h.authenticator != nil {
 		if token == "" {
 			http.Error(w, `{"error":"missing authorization"}`, http.StatusUnauthorized)
 			h.logger.Warn("probe connection rejected: no bearer token",

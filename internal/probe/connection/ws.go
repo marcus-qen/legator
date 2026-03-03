@@ -37,6 +37,7 @@ type Client struct {
 	logger    *zap.Logger
 
 	conn      *websocket.Conn
+	dialer    *websocket.Dialer
 	mu        sync.Mutex
 	connected bool
 	inbox     chan protocol.Envelope
@@ -62,6 +63,7 @@ func NewClient(serverURL, probeID, apiKey string, logger *zap.Logger) *Client {
 		probeID:   probeID,
 		apiKey:    apiKey,
 		logger:    logger,
+		dialer:    websocket.DefaultDialer,
 		inbox:     make(chan protocol.Envelope, 64),
 		closed:    make(chan struct{}),
 	}
@@ -79,6 +81,17 @@ func (c *Client) SetAPIKey(apiKey string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.apiKey = apiKey
+}
+
+// SetDialer overrides the websocket dialer used for future connections.
+func (c *Client) SetDialer(d *websocket.Dialer) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if d == nil {
+		c.dialer = websocket.DefaultDialer
+		return
+	}
+	c.dialer = d
 }
 
 // Inbox returns the channel of inbound messages from the control plane.
@@ -162,7 +175,13 @@ func (c *Client) connectAndServe(ctx context.Context) (bool, error) {
 		"Authorization": {fmt.Sprintf("Bearer %s", c.apiKey)},
 	}
 
-	conn, resp, err := websocket.DefaultDialer.DialContext(ctx, url, header)
+	c.mu.Lock()
+	dialer := c.dialer
+	c.mu.Unlock()
+	if dialer == nil {
+		dialer = websocket.DefaultDialer
+	}
+	conn, resp, err := dialer.DialContext(ctx, url, header)
 	if err != nil {
 		if resp != nil {
 			defer resp.Body.Close()

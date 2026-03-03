@@ -58,6 +58,14 @@ Environment variables override config file values. All vars are prefixed with `L
 |---|---|---|---|
 | `LEGATOR_TLS_CERT` | `tls_cert` | — | TLS certificate path (enable HTTPS/WSS when paired with key) |
 | `LEGATOR_TLS_KEY` | `tls_key` | — | TLS private key path |
+| `LEGATOR_PROBE_MTLS_MODE` | `probe_mtls.mode` | `off` | Probe auth mode: `off`, `optional`, `required` |
+| `LEGATOR_PROBE_MTLS_CLIENT_CA_PATH` | `probe_mtls.client_ca_path` | — | Path to PEM CA bundle used to verify probe client certs |
+| `LEGATOR_PROBE_MTLS_CLIENT_CA_PEM` | `probe_mtls.client_ca_pem` | — | Inline PEM CA material for probe client-cert verification |
+| `LEGATOR_PROBE_MTLS_ISSUER_CERT_PATH` | `probe_mtls.issuer_cert_path` | — | Path to issuing CA cert for helper certificate issuance endpoint |
+| `LEGATOR_PROBE_MTLS_ISSUER_KEY_PATH` | `probe_mtls.issuer_key_path` | — | Path to issuing CA private key for helper issuance |
+| `LEGATOR_PROBE_MTLS_ISSUER_CERT_PEM` | `probe_mtls.issuer_cert_pem` | — | Inline issuing CA cert PEM (overrides path when set) |
+| `LEGATOR_PROBE_MTLS_ISSUER_KEY_PEM` | `probe_mtls.issuer_key_pem` | — | Inline issuing CA key PEM (overrides path when set) |
+| `LEGATOR_PROBE_MTLS_ISSUE_TTL` | `probe_mtls.issue_ttl` | `720h` | Default validity duration for issued probe certificates |
 | `LEGATOR_LOG_LEVEL` | `log_level` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 | `LEGATOR_RATE_LIMIT` | `rate_limit.requests_per_minute` | `120` | Per-key request limit per minute |
 | `LEGATOR_KUBEFLOW_ENABLED` | `kubeflow.enabled` | `false` | Enable Kubeflow adapter routes |
@@ -84,6 +92,16 @@ Environment variables override config file values. All vars are prefixed with `L
   "data_dir": "/var/lib/legator",
   "tls_cert": "",
   "tls_key": "",
+  "probe_mtls": {
+    "mode": "off",
+    "client_ca_path": "",
+    "client_ca_pem": "",
+    "issuer_cert_path": "",
+    "issuer_key_path": "",
+    "issuer_cert_pem": "",
+    "issuer_key_pem": "",
+    "issue_ttl": "720h"
+  },
   "auth_enabled": false,
   "signing_key": "",
   "llm": {

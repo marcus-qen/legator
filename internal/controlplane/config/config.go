@@ -24,6 +24,9 @@ type Config struct {
 	TLSCert string `json:"tls_cert,omitempty"`
 	TLSKey  string `json:"tls_key,omitempty"`
 
+	// Probe mTLS authentication settings for /ws/probe.
+	ProbeMTLS ProbeMTLSConfig `json:"probe_mtls,omitempty"`
+
 	// Auth
 	AuthEnabled bool `json:"auth_enabled"`
 
@@ -165,6 +168,28 @@ type AuditConfig struct {
 	ChainKey  string `json:"chain_key,omitempty"`
 }
 
+// ProbeMTLSConfig controls optional mTLS auth for probe websocket sessions.
+// Mode values:
+//   - off      : legacy API key authentication only (default)
+//   - optional : accept mTLS certificate OR API key
+//   - required : require mTLS certificate (no API key fallback)
+type ProbeMTLSConfig struct {
+	Mode string `json:"mode,omitempty"`
+
+	// Client CA used to verify probe certificates.
+	ClientCAPath string `json:"client_ca_path,omitempty"`
+	ClientCAPEM  string `json:"client_ca_pem,omitempty"`
+
+	// Optional issuing CA material for helper endpoint certificate issuance.
+	IssuerCertPath string `json:"issuer_cert_path,omitempty"`
+	IssuerKeyPath  string `json:"issuer_key_path,omitempty"`
+	IssuerCertPEM  string `json:"issuer_cert_pem,omitempty"`
+	IssuerKeyPEM   string `json:"issuer_key_pem,omitempty"`
+
+	// Default TTL used by helper issuance endpoint.
+	IssueTTL string `json:"issue_ttl,omitempty"`
+}
+
 func (k KubeflowConfig) NamespaceOrDefault() string {
 	if namespace := strings.TrimSpace(k.Namespace); namespace != "" {
 		return namespace
@@ -270,6 +295,34 @@ func (j JobsConfig) RunnerSandboxTimeoutDuration() time.Duration {
 	return d
 }
 
+func (p ProbeMTLSConfig) ModeOrDefault() string {
+	switch strings.ToLower(strings.TrimSpace(p.Mode)) {
+	case "optional", "required":
+		return strings.ToLower(strings.TrimSpace(p.Mode))
+	default:
+		return "off"
+	}
+}
+
+func (p ProbeMTLSConfig) Enabled() bool {
+	return p.ModeOrDefault() != "off"
+}
+
+func (p ProbeMTLSConfig) IssueTTLDuration() time.Duration {
+	raw := strings.TrimSpace(p.IssueTTL)
+	if raw == "" {
+		return 30 * 24 * time.Hour
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 30 * 24 * time.Hour
+	}
+	if d > 365*24*time.Hour {
+		return 365 * 24 * time.Hour
+	}
+	return d
+}
+
 func (t TokenBrokerConfig) DefaultTTLDuration(fallback time.Duration) time.Duration {
 	raw := strings.TrimSpace(t.DefaultTTL)
 	if raw == "" {
@@ -356,6 +409,10 @@ func Default() Config {
 		Audit: AuditConfig{
 			ChainMode: false,
 		},
+		ProbeMTLS: ProbeMTLSConfig{
+			Mode:     "off",
+			IssueTTL: "720h",
+		},
 	}
 }
 
@@ -386,6 +443,30 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("LEGATOR_TLS_KEY"); v != "" {
 		cfg.TLSKey = v
+	}
+	if v := os.Getenv("LEGATOR_PROBE_MTLS_MODE"); v != "" {
+		cfg.ProbeMTLS.Mode = v
+	}
+	if v := os.Getenv("LEGATOR_PROBE_MTLS_CLIENT_CA_PATH"); v != "" {
+		cfg.ProbeMTLS.ClientCAPath = v
+	}
+	if v := os.Getenv("LEGATOR_PROBE_MTLS_CLIENT_CA_PEM"); v != "" {
+		cfg.ProbeMTLS.ClientCAPEM = v
+	}
+	if v := os.Getenv("LEGATOR_PROBE_MTLS_ISSUER_CERT_PATH"); v != "" {
+		cfg.ProbeMTLS.IssuerCertPath = v
+	}
+	if v := os.Getenv("LEGATOR_PROBE_MTLS_ISSUER_KEY_PATH"); v != "" {
+		cfg.ProbeMTLS.IssuerKeyPath = v
+	}
+	if v := os.Getenv("LEGATOR_PROBE_MTLS_ISSUER_CERT_PEM"); v != "" {
+		cfg.ProbeMTLS.IssuerCertPEM = v
+	}
+	if v := os.Getenv("LEGATOR_PROBE_MTLS_ISSUER_KEY_PEM"); v != "" {
+		cfg.ProbeMTLS.IssuerKeyPEM = v
+	}
+	if v := os.Getenv("LEGATOR_PROBE_MTLS_ISSUE_TTL"); v != "" {
+		cfg.ProbeMTLS.IssueTTL = v
 	}
 	if v := os.Getenv("LEGATOR_AUTH"); v != "" {
 		cfg.AuthEnabled = v == "true" || v == "1"
@@ -575,6 +656,7 @@ func Load(path string) (Config, error) {
 	}
 
 	cfg.OIDC = oidc.ApplyEnv(cfg.OIDC)
+	cfg.ProbeMTLS.Mode = cfg.ProbeMTLS.ModeOrDefault()
 
 	return cfg, nil
 }

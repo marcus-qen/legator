@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -77,18 +78,21 @@ type Server struct {
 	logger *zap.Logger
 
 	// Core subsystems
-	fleetMgr        fleet.Fleet
-	fleetStore      *fleet.Store
-	federationStore *fleet.FederationStore
-	remoteExecutor  fleet.RemoteProbeExecutor
-	remoteScanner   *fleet.RemoteScanner
-	tokenStore      *api.TokenStore
-	cmdTracker      *cmdtracker.Tracker
-	commandStreams  *cmdtracker.StreamRecorder
-	approvalQueue   *approval.Queue
-	approvalCore    *coreapprovalpolicy.Service
-	dispatchCore    *corecommanddispatch.Service
-	hub             *cpws.Hub
+	fleetMgr          fleet.Fleet
+	fleetStore        *fleet.Store
+	federationStore   *fleet.FederationStore
+	remoteExecutor    fleet.RemoteProbeExecutor
+	remoteScanner     *fleet.RemoteScanner
+	tokenStore        *api.TokenStore
+	cmdTracker        *cmdtracker.Tracker
+	commandStreams    *cmdtracker.StreamRecorder
+	approvalQueue     *approval.Queue
+	approvalCore      *coreapprovalpolicy.Service
+	dispatchCore      *corecommanddispatch.Service
+	hub               *cpws.Hub
+	probeAuth         *auth.ProbeAuthenticator
+	probeCertRegistry *auth.ProbeCertificateRegistry
+	probeCertIssuer   *auth.ProbeCertificateIssuer
 
 	// Persistence (nil = in-memory fallback)
 	auditLog   *audit.Log
@@ -259,6 +263,9 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initDrills()
 	s.initIncidents()
 	s.initLLM()
+	if err := s.initProbeAuthentication(); err != nil {
+		return nil, err
+	}
 	s.initHub()
 	s.initJobs()
 	s.initRunnerManager()
@@ -330,12 +337,21 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 		handler = s.reliabilityTelemetry.Middleware(handler)
 	}
 
+	var tlsConfig *tls.Config
+	if s.cfg.ProbeMTLS.Enabled() {
+		tlsConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			ClientAuth: tls.RequestClientCert,
+		}
+	}
+
 	s.httpServer = &http.Server{
 		Addr:         cfg.ListenAddr,
 		Handler:      handler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
+		TLSConfig:    tlsConfig,
 	}
 
 	return s, nil
@@ -399,7 +415,13 @@ func (s *Server) Run(ctx context.Context) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		var err error
+		if s.cfg.HasTLS() {
+			err = s.httpServer.ListenAndServeTLS(s.cfg.TLSCert, s.cfg.TLSKey)
+		} else {
+			err = s.httpServer.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
 	}()
@@ -1374,17 +1396,8 @@ func (s *Server) initHub() {
 			map[string]string{"status": "degraded", "last_seen": now.Format(time.RFC3339)})
 	})
 
-	// Authenticate probes by validating their API key against fleet store.
-	s.hub.SetAuthenticator(func(probeID, bearerToken string) bool {
-		ps, ok := s.fleetMgr.Get(probeID)
-		if !ok {
-			return false // unknown probe
-		}
-		if ps.APIKey == "" {
-			return false // probe has no key (shouldn't happen)
-		}
-		return ps.APIKey == bearerToken
-	})
+	// Authenticate probes (API key and/or mTLS depending on config).
+	s.hub.SetHandshakeAuthorizer(s.probeHandshakeAuthorizer())
 
 	// Signing key: config file > env var > auto-generated
 	signingKeyHex := s.cfg.SigningKey

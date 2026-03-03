@@ -451,3 +451,36 @@ func TestHandleProbeWS_NoAuthenticatorAllowsAll(t *testing.T) {
 		return containsProbe(hub.Connected(), "prb-noauth")
 	})
 }
+
+func TestHandleProbeWS_HandshakeAuthorizerSupportsRequestAwareAuth(t *testing.T) {
+	hub := NewHub(zap.NewNop(), nil)
+	hub.SetHandshakeAuthorizer(func(r *http.Request, probeID, token string) ProbeHandshakeDecision {
+		if probeID == "prb-authorized" && token == "token-123" {
+			return ProbeHandshakeDecision{Allowed: true}
+		}
+		return ProbeHandshakeDecision{Allowed: false, StatusCode: http.StatusForbidden, Body: `{"error":"denied"}`}
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(hub.HandleProbeWS))
+	defer srv.Close()
+
+	wsURL := probeWSURL(t, srv.URL, "prb-authorized")
+	header := http.Header{"Authorization": []string{"Bearer token-123"}}
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatalf("expected handshake auth success: %v", err)
+	}
+	defer conn.Close()
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("expected 101, got %d", resp.StatusCode)
+	}
+
+	wsURLDenied := probeWSURL(t, srv.URL, "prb-denied")
+	_, deniedResp, deniedErr := websocket.DefaultDialer.Dial(wsURLDenied, nil)
+	if deniedErr == nil {
+		t.Fatal("expected denied connection")
+	}
+	if deniedResp != nil && deniedResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 from handshake authorizer, got %d", deniedResp.StatusCode)
+	}
+}

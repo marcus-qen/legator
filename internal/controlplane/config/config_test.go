@@ -96,6 +96,12 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Audit.ChainMode {
 		t.Error("expected audit chain mode disabled by default")
 	}
+	if cfg.ProbeMTLS.ModeOrDefault() != "off" {
+		t.Errorf("expected probe mTLS mode off by default, got %s", cfg.ProbeMTLS.ModeOrDefault())
+	}
+	if cfg.ProbeMTLS.IssueTTLDuration() != 30*24*time.Hour {
+		t.Errorf("expected probe mTLS issue TTL default 720h, got %s", cfg.ProbeMTLS.IssueTTLDuration())
+	}
 }
 
 func TestLoadFromFile(t *testing.T) {
@@ -542,5 +548,47 @@ func TestAuditChainConfigFromEnv(t *testing.T) {
 	}
 	if cfg.Audit.ChainKey != "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" {
 		t.Fatalf("unexpected audit chain key from env: %s", cfg.Audit.ChainKey)
+	}
+}
+
+func TestProbeMTLSConfigDefaultsAndEnvOverrides(t *testing.T) {
+	cfg := Default()
+	if cfg.ProbeMTLS.ModeOrDefault() != "off" {
+		t.Fatalf("expected probe_mtls mode off by default, got %s", cfg.ProbeMTLS.ModeOrDefault())
+	}
+
+	t.Setenv("LEGATOR_PROBE_MTLS_MODE", "required")
+	t.Setenv("LEGATOR_PROBE_MTLS_CLIENT_CA_PATH", "/etc/legator/ca.pem")
+	t.Setenv("LEGATOR_PROBE_MTLS_CLIENT_CA_PEM", "PEM-DATA")
+	t.Setenv("LEGATOR_PROBE_MTLS_ISSUER_CERT_PATH", "/etc/legator/issuer.crt")
+	t.Setenv("LEGATOR_PROBE_MTLS_ISSUER_KEY_PATH", "/etc/legator/issuer.key")
+	t.Setenv("LEGATOR_PROBE_MTLS_ISSUER_CERT_PEM", "ISSUER-CERT")
+	t.Setenv("LEGATOR_PROBE_MTLS_ISSUER_KEY_PEM", "ISSUER-KEY")
+	t.Setenv("LEGATOR_PROBE_MTLS_ISSUE_TTL", "48h")
+
+	loaded := LoadFromEnv()
+	if loaded.ProbeMTLS.ModeOrDefault() != "required" {
+		t.Fatalf("expected required mode, got %s", loaded.ProbeMTLS.ModeOrDefault())
+	}
+	if loaded.ProbeMTLS.ClientCAPath != "/etc/legator/ca.pem" {
+		t.Fatalf("unexpected client CA path: %s", loaded.ProbeMTLS.ClientCAPath)
+	}
+	if loaded.ProbeMTLS.ClientCAPEM != "PEM-DATA" {
+		t.Fatalf("unexpected client CA pem: %s", loaded.ProbeMTLS.ClientCAPEM)
+	}
+	if loaded.ProbeMTLS.IssuerCertPath != "/etc/legator/issuer.crt" {
+		t.Fatalf("unexpected issuer cert path: %s", loaded.ProbeMTLS.IssuerCertPath)
+	}
+	if loaded.ProbeMTLS.IssuerKeyPath != "/etc/legator/issuer.key" {
+		t.Fatalf("unexpected issuer key path: %s", loaded.ProbeMTLS.IssuerKeyPath)
+	}
+	if loaded.ProbeMTLS.IssuerCertPEM != "ISSUER-CERT" {
+		t.Fatalf("unexpected issuer cert pem: %s", loaded.ProbeMTLS.IssuerCertPEM)
+	}
+	if loaded.ProbeMTLS.IssuerKeyPEM != "ISSUER-KEY" {
+		t.Fatalf("unexpected issuer key pem: %s", loaded.ProbeMTLS.IssuerKeyPEM)
+	}
+	if loaded.ProbeMTLS.IssueTTLDuration() != 48*time.Hour {
+		t.Fatalf("unexpected issue ttl: %s", loaded.ProbeMTLS.IssueTTLDuration())
 	}
 }

@@ -40,6 +40,15 @@ func New(cfg *Config, logger *zap.Logger) *Agent {
 	}
 
 	client := connection.NewClient(wsURL, cfg.ProbeID, cfg.APIKey, logger.Named("ws"))
+	if cfg.MTLS.Enabled {
+		dialer, err := buildMTLSDialer(cfg.MTLS)
+		if err != nil {
+			logger.Error("failed to configure mTLS websocket dialer", zap.Error(err))
+		} else if dialer != nil {
+			client.SetDialer(dialer)
+			logger.Info("probe websocket mTLS enabled")
+		}
+	}
 
 	policyLevel := cfg.PolicyLevel
 	if policyLevel == "" {

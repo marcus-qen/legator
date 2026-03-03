@@ -18,11 +18,12 @@ var (
 
 // Config holds the probe's persistent configuration.
 type Config struct {
-	ServerURL  string `yaml:"server_url"`
-	ProbeID    string `yaml:"probe_id"`
-	APIKey     string `yaml:"api_key"`
-	PolicyID   string `yaml:"policy_id,omitempty"`
-	SigningKey string `yaml:"signing_key,omitempty"` // master signing key
+	ServerURL  string     `yaml:"server_url"`
+	ProbeID    string     `yaml:"probe_id"`
+	APIKey     string     `yaml:"api_key"`
+	PolicyID   string     `yaml:"policy_id,omitempty"`
+	SigningKey string     `yaml:"signing_key,omitempty"` // master signing key
+	MTLS       MTLSConfig `yaml:"mtls,omitempty"`
 
 	// Last applied local policy (persisted for restart safety).
 	PolicyLevel   protocol.CapabilityLevel `yaml:"policy_level,omitempty"`
@@ -38,6 +39,17 @@ type Config struct {
 	PolicyAllowedScopes          []string                  `yaml:"policy_allowed_scopes,omitempty"`
 
 	ConfigDir string `yaml:"-"` // not persisted
+}
+
+// MTLSConfig controls optional client-certificate auth when connecting to /ws/probe.
+type MTLSConfig struct {
+	Enabled        bool   `yaml:"enabled,omitempty"`
+	ClientCertPath string `yaml:"client_cert_path,omitempty"`
+	ClientKeyPath  string `yaml:"client_key_path,omitempty"`
+	ClientCertPEM  string `yaml:"client_cert_pem,omitempty"`
+	ClientKeyPEM   string `yaml:"client_key_pem,omitempty"`
+	RootCAPath     string `yaml:"root_ca_path,omitempty"`
+	RootCAPEM      string `yaml:"root_ca_pem,omitempty"`
 }
 
 // ConfigPath returns the full path to the config file.
