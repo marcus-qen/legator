@@ -31,11 +31,27 @@ type AuditRecorder interface {
 }
 
 // Handler exposes REST endpoints for sandbox session management.
+// HandlerPolicy holds admittance rules evaluated at create time.
+type HandlerPolicy struct {
+	// AllowedRuntimes restricts which runtime_class values may be requested.
+	// An empty or nil slice means all runtimes are allowed.
+	AllowedRuntimes []string
+
+	// MaxConcurrent caps the number of non-terminal sandbox sessions globally.
+	// Zero or negative means unlimited.
+	MaxConcurrent int
+
+	// ProbeValidator, if non-nil, is called to verify the probe_id exists.
+	// Return false to reject the create request.
+	ProbeValidator func(probeID string) bool
+}
+
 type Handler struct {
-	store    *Store
-	events   EventPublisher
-	audit    AuditRecorder
-	logger   *zap.Logger
+	store  *Store
+	events EventPublisher
+	audit  AuditRecorder
+	logger *zap.Logger
+	policy HandlerPolicy
 }
 
 // NewHandler creates a Handler wired to the given store, event publisher,
@@ -50,6 +66,12 @@ func NewHandler(store *Store, events EventPublisher, audit AuditRecorder, logger
 		audit:  audit,
 		logger: logger,
 	}
+}
+
+// SetPolicy replaces the handler's admittance policy. Safe to call before
+// any requests are handled.
+func (h *Handler) SetPolicy(p HandlerPolicy) {
+	h.policy = p
 }
 
 // ── Route helpers ────────────────────────────────────────────────────────────
@@ -101,6 +123,44 @@ func (h *Handler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(body.RuntimeClass) == "" {
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", "runtime_class is required")
 		return
+	}
+
+	runtimeClass := strings.TrimSpace(body.RuntimeClass)
+
+	// Policy: allowed runtimes
+	if len(h.policy.AllowedRuntimes) > 0 {
+		allowed := false
+		for _, rt := range h.policy.AllowedRuntimes {
+			if strings.EqualFold(rt, runtimeClass) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			writeJSONError(w, http.StatusForbidden, "runtime_not_allowed",
+				fmt.Sprintf("runtime_class %q is not permitted by policy", runtimeClass))
+			return
+		}
+	}
+
+	// Policy: probe validation
+	probeID := strings.TrimSpace(body.ProbeID)
+	if h.policy.ProbeValidator != nil && probeID != "" {
+		if !h.policy.ProbeValidator(probeID) {
+			writeJSONError(w, http.StatusUnprocessableEntity, "probe_not_found",
+				fmt.Sprintf("probe %q does not exist", probeID))
+			return
+		}
+	}
+
+	// Policy: max concurrent (non-terminal)
+	if h.policy.MaxConcurrent > 0 {
+		active := h.store.CountActive("")
+		if active >= h.policy.MaxConcurrent {
+			writeJSONError(w, http.StatusTooManyRequests, "max_concurrent_exceeded",
+				fmt.Sprintf("maximum concurrent sandboxes (%d) reached", h.policy.MaxConcurrent))
+			return
+		}
 	}
 
 	sess := &SandboxSession{

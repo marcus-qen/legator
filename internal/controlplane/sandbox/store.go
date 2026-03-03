@@ -355,3 +355,19 @@ func scanSession(scanner rowScanner) (*SandboxSession, error) {
 
 	return &sess, nil
 }
+
+// CountActive returns the number of non-terminal sessions (not in "failed"
+// or "destroyed" states), optionally filtered to a workspace.
+func (s *Store) CountActive(workspaceID string) int {
+	q := `SELECT COUNT(*) FROM sandbox_sessions WHERE state NOT IN ('failed', 'destroyed')`
+	var args []any
+	if workspaceID != "" {
+		q += " AND workspace_id = ?"
+		args = append(args, workspaceID)
+	}
+	var n int
+	if err := s.db.QueryRow(q, args...).Scan(&n); err != nil {
+		return 0
+	}
+	return n
+}

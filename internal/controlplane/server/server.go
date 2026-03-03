@@ -47,6 +47,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/providerproxy"
 	"github.com/marcus-qen/legator/internal/controlplane/reliability"
 	"github.com/marcus-qen/legator/internal/controlplane/runner"
+	"github.com/marcus-qen/legator/internal/controlplane/sandbox"
 	"github.com/marcus-qen/legator/internal/controlplane/session"
 	"github.com/marcus-qen/legator/internal/controlplane/tenant"
 	"github.com/marcus-qen/legator/internal/controlplane/tokenbroker"
@@ -172,6 +173,10 @@ type Server struct {
 	// Multi-tenant isolation
 	tenantStore *tenant.Store
 
+	// Sandbox session lifecycle
+	sandboxStore   *sandbox.Store
+	sandboxHandler *sandbox.Handler
+
 	// MCP
 	mcpServer *mcpserver.MCPServer
 
@@ -249,6 +254,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initApprovals()
 	s.initWebhooks()
 	s.initAlerts()
+	s.initSandbox()
 	s.initChat()
 	s.initPolicy()
 	s.initApprovalCore()
@@ -469,6 +475,9 @@ func (s *Server) Close() {
 	}
 	if s.routingStore != nil {
 		s.routingStore.Close()
+	}
+	if s.sandboxStore != nil {
+		s.sandboxStore.Close()
 	}
 	if s.jobsStore != nil {
 		s.jobsStore.Close()
@@ -938,6 +947,77 @@ func (s *Server) runnerArtifactSigningKey() []byte {
 		s.logger.Fatal("failed to generate runner artifact signing key", zap.Error(err))
 	}
 	return key
+}
+
+// initSandbox initialises the sandbox session store and HTTP handler.
+// If the database cannot be opened, sandbox routes respond 503.
+func (s *Server) initSandbox() {
+	dbPath := s.cfg.Sandbox.DBPath
+	if dbPath == "" {
+		dbPath = filepath.Join(s.cfg.DataDir, "sandbox.db")
+	}
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0750); err != nil {
+		s.logger.Warn("cannot create sandbox db dir; sandbox API disabled",
+			zap.String("path", dbPath), zap.Error(err))
+		return
+	}
+	store, err := sandbox.NewStore(dbPath)
+	if err != nil {
+		s.logger.Warn("cannot open sandbox store; sandbox API disabled",
+			zap.String("path", dbPath), zap.Error(err))
+		return
+	}
+	s.sandboxStore = store
+	s.logger.Info("sandbox store opened", zap.String("path", dbPath))
+
+	h := sandbox.NewHandler(
+		store,
+		&sandboxEventAdapter{bus: s.eventBus},
+		&sandboxAuditAdapter{s: s},
+		s.logger.Named("sandbox"),
+	)
+	h.SetPolicy(sandbox.HandlerPolicy{
+		AllowedRuntimes: s.cfg.Sandbox.AllowedRuntimes,
+		MaxConcurrent:   s.cfg.Sandbox.MaxConcurrent,
+		ProbeValidator: func(probeID string) bool {
+			_, ok := s.fleetMgr.Get(probeID)
+			return ok
+		},
+	})
+	s.sandboxHandler = h
+}
+
+// handleSandboxUnavailable is a placeholder returned when the sandbox store
+// is not initialised (e.g. database could not be opened).
+func (s *Server) handleSandboxUnavailable(w http.ResponseWriter, _ *http.Request) {
+	writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "sandbox API is not available")
+}
+
+// ── Sandbox adapters ──────────────────────────────────────────────────────────
+
+// sandboxAuditAdapter bridges the server's typed audit emitter to the
+// all-string sandbox.AuditRecorder interface.
+type sandboxAuditAdapter struct {
+	s *Server
+}
+
+func (a *sandboxAuditAdapter) Emit(eventType, probeID, actor, summary string) {
+	a.s.emitAudit(audit.EventType(eventType), probeID, actor, summary)
+}
+
+// sandboxEventAdapter bridges *events.Bus to sandbox.EventPublisher.
+type sandboxEventAdapter struct {
+	bus *events.Bus
+}
+
+func (a *sandboxEventAdapter) Publish(evt sandbox.BusEvent) {
+	a.bus.Publish(events.Event{
+		Type:      events.EventType(evt.Type),
+		ProbeID:   evt.ProbeID,
+		Summary:   evt.Summary,
+		Detail:    evt.Detail,
+		Timestamp: evt.Timestamp,
+	})
 }
 
 func (s *Server) initChat() {

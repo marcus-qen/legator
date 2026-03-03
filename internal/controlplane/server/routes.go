@@ -309,6 +309,21 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/tenants/{id}", s.withPermission(auth.PermAdmin, s.handleDeleteTenant))
 	mux.HandleFunc("PUT /api/v1/users/{id}/tenants", s.withPermission(auth.PermAdmin, s.handleAssignUserTenants))
 
+	// Sandbox lifecycle API
+	if s.sandboxHandler != nil {
+		mux.HandleFunc("POST /api/v1/sandboxes", s.withPermission(auth.PermFleetWrite, s.sandboxHandler.HandleCreate))
+		mux.HandleFunc("GET /api/v1/sandboxes", s.withPermission(auth.PermFleetRead, s.sandboxHandler.HandleList))
+		mux.HandleFunc("GET /api/v1/sandboxes/{id}", s.withPermission(auth.PermFleetRead, s.sandboxHandler.HandleGet))
+		mux.HandleFunc("DELETE /api/v1/sandboxes/{id}", s.withPermission(auth.PermFleetWrite, s.sandboxHandler.HandleDestroy))
+		mux.HandleFunc("POST /api/v1/sandboxes/{id}/transition", s.withPermission(auth.PermFleetWrite, s.sandboxHandler.HandleTransition))
+	} else {
+		mux.HandleFunc("POST /api/v1/sandboxes", s.withPermission(auth.PermFleetWrite, s.handleSandboxUnavailable))
+		mux.HandleFunc("GET /api/v1/sandboxes", s.withPermission(auth.PermFleetRead, s.handleSandboxUnavailable))
+		mux.HandleFunc("GET /api/v1/sandboxes/{id}", s.withPermission(auth.PermFleetRead, s.handleSandboxUnavailable))
+		mux.HandleFunc("DELETE /api/v1/sandboxes/{id}", s.withPermission(auth.PermFleetWrite, s.handleSandboxUnavailable))
+		mux.HandleFunc("POST /api/v1/sandboxes/{id}/transition", s.withPermission(auth.PermFleetWrite, s.handleSandboxUnavailable))
+	}
+
 	// Auth (optional)
 	if s.authStore != nil {
 		mux.HandleFunc("GET /api/v1/auth/keys", s.withPermission(auth.PermAdmin, auth.HandleListKeys(s.authStore)))

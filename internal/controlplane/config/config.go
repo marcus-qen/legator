@@ -67,6 +67,9 @@ type Config struct {
 	// Audit controls optional signed hash-chain settings.
 	Audit AuditConfig `json:"audit,omitempty"`
 
+	// Sandbox controls the sandbox session lifecycle API.
+	Sandbox SandboxConfig `json:"sandbox,omitempty"`
+
 	// Log level (debug, info, warn, error)
 	LogLevel string `json:"log_level"`
 
@@ -166,6 +169,21 @@ type ApprovalConfig struct {
 type AuditConfig struct {
 	ChainMode bool   `json:"chain_mode,omitempty"`
 	ChainKey  string `json:"chain_key,omitempty"`
+}
+
+// SandboxConfig controls the sandbox session lifecycle API.
+type SandboxConfig struct {
+	// AllowedRuntimes restricts which runtime_class values may be requested.
+	// An empty or nil slice means all runtimes are allowed.
+	AllowedRuntimes []string `json:"allowed_runtimes,omitempty"`
+
+	// MaxConcurrent caps the number of non-terminal sandbox sessions globally.
+	// Zero means unlimited.
+	MaxConcurrent int `json:"max_concurrent,omitempty"`
+
+	// DBPath overrides the default sandbox SQLite database path
+	// (default: <data_dir>/sandbox.db).
+	DBPath string `json:"db_path,omitempty"`
 }
 
 // ProbeMTLSConfig controls optional mTLS auth for probe websocket sessions.
@@ -653,6 +671,24 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("LEGATOR_APPROVAL_TWO_PERSON_MODE"); v != "" {
 		cfg.Approval.TwoPersonMode = v == "true" || v == "1"
+	}
+
+	if v := os.Getenv("LEGATOR_SANDBOX_MAX_CONCURRENT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Sandbox.MaxConcurrent = n
+		}
+	}
+	if v := os.Getenv("LEGATOR_SANDBOX_ALLOWED_RUNTIMES"); v != "" {
+		parts := strings.Split(v, ",")
+		cfg.Sandbox.AllowedRuntimes = make([]string, 0, len(parts))
+		for _, p := range parts {
+			if t := strings.TrimSpace(p); t != "" {
+				cfg.Sandbox.AllowedRuntimes = append(cfg.Sandbox.AllowedRuntimes, t)
+			}
+		}
+	}
+	if v := os.Getenv("LEGATOR_SANDBOX_DB_PATH"); v != "" {
+		cfg.Sandbox.DBPath = v
 	}
 
 	cfg.OIDC = oidc.ApplyEnv(cfg.OIDC)
