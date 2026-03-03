@@ -34,6 +34,7 @@ GET /api/v1/audit
 GET /api/v1/audit/verify
 GET /api/v1/audit/export
 GET /api/v1/audit/export/csv
+GET /api/v1/audit/export/bundle
 GET /api/v1/auth/keys
 GET /api/v1/auth/permissions
 GET /api/v1/automation-packs
@@ -208,6 +209,7 @@ Permission grant: `workspace:<workspace-id>` or `workspace:*`
 - GET    /api/v1/audit                — filters events to requesting workspace
 - GET    /api/v1/audit/export/jsonl   — filters export to requesting workspace
 - GET    /api/v1/audit/export/csv     — filters export to requesting workspace
+- GET    /api/v1/audit/export/bundle  — filters export to requesting workspace
 - GET    /api/v1/commands/pending     — filters list to requesting workspace
 - GET    /api/v1/commands/{requestId}/stream  — denies cross-workspace access
 - GET    /api/v1/commands/{requestId}/replay  — denies cross-workspace access

@@ -1078,6 +1078,17 @@ JSONL (newline-delimited JSON) export. Supports `since`, `until`, `probe_id`, `t
 CSV export with same filters.  
 **Response:** `text/csv` file download.
 
+### GET /api/v1/audit/export/bundle
+**Permission:** PermAuditRead  
+ZIP export bundle for compliance evidence. Supports `since`, `until`, `framework`, and probe selection via `probe_id`, `probe_ids` (comma-separated), `probe`, or `probes`.  
+**Bundle contents:**
+- `audit-log.jsonl`
+- `inventory-snapshots.json`
+- `compliance-check-results.json`
+- `change-diffs.jsonl`
+- `approval-records.json`
+- `manifest.json` (generation timestamp + SHA256 checksum per exported file)
+
 ### DELETE /api/v1/audit/purge
 **Permission:** PermAdmin  
 **Query params:** `older_than=30d` (required, Go duration)  

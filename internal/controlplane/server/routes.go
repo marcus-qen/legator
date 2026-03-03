@@ -162,6 +162,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/audit/verify", s.withPermission(auth.PermAuditRead, s.handleAuditVerify))
 	mux.HandleFunc("GET /api/v1/audit/export", s.withPermission(auth.PermAuditRead, s.handleAuditExportJSONL))
 	mux.HandleFunc("GET /api/v1/audit/export/csv", s.withPermission(auth.PermAuditRead, s.handleAuditExportCSV))
+	mux.HandleFunc("GET /api/v1/audit/export/bundle", s.withPermission(auth.PermAuditRead, s.handleAuditEvidenceBundleExport))
 	mux.HandleFunc("DELETE /api/v1/audit/purge", s.withPermission(auth.PermAdmin, s.handleAuditPurge))
 
 	// Events SSE stream

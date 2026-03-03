@@ -3200,6 +3200,52 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /api/v1/audit/export/bundle:
+    get:
+      tags: [Audit]
+      operationId: exportAuditEvidenceBundle
+      summary: Export compliance evidence bundle as ZIP
+      parameters:
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: until
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: framework
+          in: query
+          schema:
+            type: string
+        - name: probe_id
+          in: query
+          schema:
+            type: string
+        - name: probe_ids
+          in: query
+          schema:
+            type: string
+            description: Comma-separated probe IDs
+      responses:
+        "200":
+          description: ZIP evidence bundle.
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /api/v1/audit/purge:
     delete:
       tags: [Audit]

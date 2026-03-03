@@ -55,6 +55,7 @@ const (
 	EventNotificationDeliverySucceeded EventType = "notification.delivery_succeeded"
 	EventNotificationDeliveryFailed    EventType = "notification.delivery_failed"
 	EventNotificationTestSent          EventType = "notification.test_sent"
+	EventAuditEvidenceBundleExport     EventType = "audit.evidence_bundle_export"
 )
 
 // Event is a single audit log entry.
