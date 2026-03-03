@@ -570,17 +570,39 @@ func (s *Server) initAudit() {
 		s.logger.Warn("cannot create data dir, audit log will be in-memory only",
 			zap.String("dir", s.cfg.DataDir), zap.Error(err))
 		s.auditLog = audit.NewLog(10000)
-	} else {
-		store, err := audit.NewStore(auditDBPath, 10000)
-		if err != nil {
-			s.logger.Warn("cannot open audit database, falling back to in-memory",
-				zap.String("path", auditDBPath), zap.Error(err))
-			s.auditLog = audit.NewLog(10000)
-		} else {
-			s.auditStore = store
-			s.logger.Info("audit store opened", zap.String("path", auditDBPath))
-		}
+		return
 	}
+
+	storeOpts := audit.StoreOptions{
+		ChainMode: s.cfg.Audit.ChainMode,
+		ChainKey:  strings.TrimSpace(s.cfg.Audit.ChainKey),
+	}
+	if storeOpts.ChainMode && storeOpts.ChainKey == "" {
+		generated, err := audit.GenerateChainKeyHex()
+		if err != nil {
+			s.logger.Warn("cannot generate audit chain key, falling back to in-memory audit log", zap.Error(err))
+			s.auditLog = audit.NewLog(10000)
+			return
+		}
+		storeOpts.ChainKey = generated
+		s.logger.Info("audit chain mode enabled with auto-generated key")
+	} else if storeOpts.ChainMode {
+		s.logger.Info("audit chain mode enabled with configured key")
+	}
+
+	store, err := audit.NewStoreWithOptions(auditDBPath, 10000, storeOpts)
+	if err != nil {
+		s.logger.Warn("cannot open audit database, falling back to in-memory",
+			zap.String("path", auditDBPath), zap.Error(err))
+		s.auditLog = audit.NewLog(10000)
+		return
+	}
+
+	s.auditStore = store
+	s.logger.Info("audit store opened",
+		zap.String("path", auditDBPath),
+		zap.Bool("chain_mode", storeOpts.ChainMode),
+	)
 }
 
 func (s *Server) initApprovals() {

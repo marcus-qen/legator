@@ -1,9 +1,11 @@
 package audit
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -234,5 +236,125 @@ func TestStorePurge(t *testing.T) {
 	}
 	if events[0].ID != "new-1" {
 		t.Fatalf("expected remaining event new-1, got %s", events[0].ID)
+	}
+}
+
+func TestStoreChainModeWritesHashes(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStoreWithOptions(filepath.Join(dir, "audit.db"), 100, StoreOptions{
+		ChainMode: true,
+		ChainKey:  strings.Repeat("a", 64),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	store.Record(Event{ID: "evt-chain-1", Type: EventCommandSent, ProbeID: "p1", Actor: "api", Summary: "first"})
+	store.Record(Event{ID: "evt-chain-2", Type: EventCommandResult, ProbeID: "p1", Actor: "api", Summary: "second"})
+
+	events, err := store.QueryPersisted(Filter{ProbeID: "p1", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
+	}
+
+	newest := events[0]
+	oldest := events[1]
+	if oldest.PrevHash != GenesisHash {
+		t.Fatalf("expected oldest prev hash to be genesis, got %q", oldest.PrevHash)
+	}
+	if oldest.EntryHash == "" {
+		t.Fatal("expected oldest entry hash to be set")
+	}
+	if newest.PrevHash != oldest.EntryHash {
+		t.Fatalf("expected newest prev hash to link to previous entry hash; got %q want %q", newest.PrevHash, oldest.EntryHash)
+	}
+	if newest.EntryHash == "" {
+		t.Fatal("expected newest entry hash to be set")
+	}
+}
+
+func TestStoreVerifyChainDetectsTampering(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStoreWithOptions(filepath.Join(dir, "audit.db"), 100, StoreOptions{
+		ChainMode: true,
+		ChainKey:  strings.Repeat("b", 64),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	store.Record(Event{ID: "tamper-1", Type: EventCommandSent, ProbeID: "p1", Actor: "api", Summary: "safe-1"})
+	store.Record(Event{ID: "tamper-2", Type: EventCommandResult, ProbeID: "p1", Actor: "api", Summary: "safe-2"})
+
+	before, err := store.VerifyChain(context.Background())
+	if err != nil {
+		t.Fatalf("verify before tamper: %v", err)
+	}
+	if !before.Valid || before.EntriesChecked != 2 || before.FirstInvalidAt != nil {
+		t.Fatalf("expected valid chain before tamper, got %+v", before)
+	}
+
+	if _, err := store.db.Exec(`UPDATE audit_events SET summary = ? WHERE id = ?`, "tampered", "tamper-1"); err != nil {
+		t.Fatalf("tamper row: %v", err)
+	}
+
+	after, err := store.VerifyChain(context.Background())
+	if err != nil {
+		t.Fatalf("verify after tamper: %v", err)
+	}
+	if after.Valid {
+		t.Fatalf("expected invalid chain after tamper, got %+v", after)
+	}
+	if after.FirstInvalidAt == nil {
+		t.Fatalf("expected first_invalid_at to be set after tamper, got %+v", after)
+	}
+}
+
+func TestStoreStreamCSVIncludesChainColumnsWhenEnabled(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStoreWithOptions(filepath.Join(dir, "audit.db"), 100, StoreOptions{
+		ChainMode: true,
+		ChainKey:  strings.Repeat("c", 64),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	store.Record(Event{ID: "csv-chain-1", Type: EventCommandSent, Summary: "csv"})
+
+	var buf strings.Builder
+	if err := store.StreamCSV(context.Background(), &buf, Filter{}); err != nil {
+		t.Fatalf("stream csv: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "prev_hash") || !strings.Contains(out, "entry_hash") {
+		t.Fatalf("expected chain columns in csv output, got: %s", out)
+	}
+}
+
+func TestStoreChainModeDisabledKeepsHashesEmpty(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(filepath.Join(dir, "audit.db"), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	store.Record(Event{ID: "unsigned-1", Type: EventCommandSent, Summary: "unsigned"})
+	events, err := store.QueryPersisted(Filter{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].PrevHash != "" || events[0].EntryHash != "" {
+		t.Fatalf("expected empty hashes when chain mode disabled, got prev=%q entry=%q", events[0].PrevHash, events[0].EntryHash)
 	}
 }

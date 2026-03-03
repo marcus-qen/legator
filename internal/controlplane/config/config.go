@@ -61,6 +61,9 @@ type Config struct {
 	// Approval controls quorum behavior for high-risk mutation approvals.
 	Approval ApprovalConfig `json:"approval,omitempty"`
 
+	// Audit controls optional signed hash-chain settings.
+	Audit AuditConfig `json:"audit,omitempty"`
+
 	// Log level (debug, info, warn, error)
 	LogLevel string `json:"log_level"`
 
@@ -155,6 +158,11 @@ type WorkspaceIsolationConfig struct {
 
 type ApprovalConfig struct {
 	TwoPersonMode bool `json:"two_person_mode,omitempty"`
+}
+
+type AuditConfig struct {
+	ChainMode bool   `json:"chain_mode,omitempty"`
+	ChainKey  string `json:"chain_key,omitempty"`
 }
 
 func (k KubeflowConfig) NamespaceOrDefault() string {
@@ -345,6 +353,9 @@ func Default() Config {
 		Approval: ApprovalConfig{
 			TwoPersonMode: false,
 		},
+		Audit: AuditConfig{
+			ChainMode: false,
+		},
 	}
 }
 
@@ -399,6 +410,12 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("LEGATOR_AUDIT_RETENTION"); v != "" {
 		cfg.AuditRetention = v
+	}
+	if v := os.Getenv("LEGATOR_AUDIT_CHAIN_MODE"); v != "" {
+		cfg.Audit.ChainMode = v == "true" || v == "1"
+	}
+	if v := os.Getenv("LEGATOR_AUDIT_CHAIN_KEY"); v != "" {
+		cfg.Audit.ChainKey = v
 	}
 	if v := os.Getenv("LEGATOR_RATE_LIMIT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {

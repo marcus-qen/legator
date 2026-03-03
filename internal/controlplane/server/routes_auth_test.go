@@ -59,6 +59,7 @@ func TestRoutesAuthCoverage(t *testing.T) {
 		{http.MethodPost, "/api/v1/approvals/some-id/decide"},
 		// Audit
 		{http.MethodGet, "/api/v1/audit"},
+		{http.MethodGet, "/api/v1/audit/verify"},
 		{http.MethodGet, "/api/v1/audit/export"},
 		{http.MethodGet, "/api/v1/audit/export/csv"},
 		{http.MethodDelete, "/api/v1/audit/purge"},

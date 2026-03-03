@@ -2,13 +2,13 @@ package audit
 
 import (
 	"context"
-	"strings"
 	"database/sql"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +17,19 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// StoreOptions controls optional audit store features.
+type StoreOptions struct {
+	ChainMode bool
+	ChainKey  string // hex-encoded HMAC key
+}
+
+// VerifyResult reports the outcome of a full chain verification pass.
+type VerifyResult struct {
+	Valid          bool
+	EntriesChecked int
+	FirstInvalidAt *string
+}
+
 // Store provides persistent audit log storage backed by SQLite.
 // It wraps the in-memory Log and syncs events to disk.
 type Store struct {
@@ -24,18 +37,32 @@ type Store struct {
 	log         *Log // in-memory cache for fast queries
 	memoryLimit int
 	mu          sync.RWMutex
+
+	writeMu       sync.Mutex
+	chainMode     bool
+	chainKey      []byte
+	lastEntryHash string
 }
 
 func migrateAuditStore(db *sql.DB) error {
-	// Migration 2: add workspace_id column
-	_, err := db.Exec(`ALTER TABLE audit_events ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`)
-	if err != nil {
-		// Column already exists — ignore "duplicate column name" errors from SQLite
+	if _, err := db.Exec(`ALTER TABLE audit_events ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`); err != nil {
 		if !isDuplicateColumnError(err) {
 			return err
 		}
 	}
+	if _, err := db.Exec(`ALTER TABLE audit_events ADD COLUMN prev_hash TEXT NOT NULL DEFAULT ''`); err != nil {
+		if !isDuplicateColumnError(err) {
+			return err
+		}
+	}
+	if _, err := db.Exec(`ALTER TABLE audit_events ADD COLUMN entry_hash TEXT NOT NULL DEFAULT ''`); err != nil {
+		if !isDuplicateColumnError(err) {
+			return err
+		}
+	}
+
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_workspace ON audit_events(workspace_id)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_entry_hash ON audit_events(entry_hash)`)
 	return nil
 }
 
@@ -46,9 +73,13 @@ func isDuplicateColumnError(err error) bool {
 	return strings.Contains(err.Error(), "duplicate column name")
 }
 
-
 // NewStore opens (or creates) a SQLite-backed audit store.
 func NewStore(dbPath string, memoryLimit int) (*Store, error) {
+	return NewStoreWithOptions(dbPath, memoryLimit, StoreOptions{})
+}
+
+// NewStoreWithOptions opens a SQLite-backed audit store with optional chain signing.
+func NewStoreWithOptions(dbPath string, memoryLimit int, opts StoreOptions) (*Store, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, err
@@ -75,28 +106,12 @@ func NewStore(dbPath string, memoryLimit int) (*Store, error) {
 		summary      TEXT,
 		detail       TEXT,
 		before_val   TEXT,
-		after_val    TEXT
+		after_val    TEXT,
+		prev_hash    TEXT NOT NULL DEFAULT '',
+		entry_hash   TEXT NOT NULL DEFAULT ''
 	)`); err != nil {
 		db.Close()
 		return nil, err
-	}
-
-	// Index for common queries
-	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_workspace ON audit_events(workspace_id)`)
-	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_probe ON audit_events(probe_id)`)
-	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_type ON audit_events(type)`)
-	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_events(timestamp)`)
-	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_workspace ON audit_events(workspace_id)`)
-
-	s := &Store{
-		db:          db,
-		log:         NewLog(memoryLimit),
-		memoryLimit: memoryLimit,
-	}
-
-	// Load recent events into memory cache
-	if err := s.loadRecent(memoryLimit); err != nil {
-		_ = err // Non-fatal — store still works
 	}
 
 	if err := migration.EnsureVersion(db, 1); err != nil {
@@ -107,7 +122,59 @@ func NewStore(dbPath string, memoryLimit int) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate audit store: %w", err)
 	}
+
+	// Index for common queries
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_workspace ON audit_events(workspace_id)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_probe ON audit_events(probe_id)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_type ON audit_events(type)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_events(timestamp)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_entry_hash ON audit_events(entry_hash)`)
+
+	s := &Store{
+		db:          db,
+		log:         NewLog(memoryLimit),
+		memoryLimit: memoryLimit,
+		chainMode:   opts.ChainMode,
+	}
+
+	if s.chainMode {
+		rawKey := strings.TrimSpace(opts.ChainKey)
+		if rawKey == "" {
+			generated, err := GenerateChainKeyHex()
+			if err != nil {
+				_ = db.Close()
+				return nil, err
+			}
+			rawKey = generated
+		}
+		decoded, err := DecodeChainKey(rawKey)
+		if err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+		s.chainKey = decoded
+	}
+
+	// Load recent events into memory cache
+	if err := s.loadRecent(memoryLimit); err != nil {
+		_ = err // Non-fatal — store still works
+	}
+
+	if s.chainMode {
+		h, err := s.latestPersistedEntryHash()
+		if err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("load last entry hash: %w", err)
+		}
+		s.lastEntryHash = h
+	}
+
 	return s, nil
+}
+
+// ChainModeEnabled reports whether hash-chain signing is enabled for this store.
+func (s *Store) ChainModeEnabled() bool {
+	return s != nil && s.chainMode
 }
 
 // enrichEvent fills in ID and Timestamp if missing.
@@ -124,11 +191,31 @@ func enrichEvent(evt *Event) {
 func (s *Store) Record(evt Event) {
 	enrichEvent(&evt)
 
+	if s.chainMode {
+		s.writeMu.Lock()
+		prevHash := s.lastEntryHash
+		if prevHash == "" {
+			prevHash = GenesisHash
+		}
+		evt.PrevHash = prevHash
+
+		entryHash, hashErr := ComputeEntryHash(prevHash, evt, s.chainKey)
+		if hashErr == nil {
+			evt.EntryHash = entryHash
+			if inserted, err := s.persist(evt); err == nil && inserted {
+				s.lastEntryHash = entryHash
+			}
+		} else {
+			_, _ = s.persist(evt)
+		}
+		s.writeMu.Unlock()
+	} else {
+		_, _ = s.persist(evt)
+	}
+
 	s.mu.RLock()
 	s.log.Record(evt)
 	s.mu.RUnlock()
-
-	_ = s.persist(evt)
 }
 
 // Emit is a convenience for recording a new event with minimal args.
@@ -234,11 +321,28 @@ func (s *Store) StreamCSV(ctx context.Context, w io.Writer, f Filter) error {
 	defer rows.Close()
 
 	cw := csv.NewWriter(w)
-	if err := cw.Write([]string{"id", "timestamp", "type", "probe_id", "actor", "summary"}); err != nil {
-		return err
+	if s.chainMode {
+		if err := cw.Write([]string{"id", "timestamp", "type", "probe_id", "actor", "summary", "prev_hash", "entry_hash"}); err != nil {
+			return err
+		}
+	} else {
+		if err := cw.Write([]string{"id", "timestamp", "type", "probe_id", "actor", "summary"}); err != nil {
+			return err
+		}
 	}
 
 	for rows.Next() {
+		if s.chainMode {
+			var id, ts, typ, probeID, actor, summary, prevHash, entryHash string
+			if err := rows.Scan(&id, &ts, &typ, &probeID, &actor, &summary, &prevHash, &entryHash); err != nil {
+				continue
+			}
+			if err := cw.Write([]string{id, ts, typ, probeID, actor, summary, prevHash, entryHash}); err != nil {
+				return err
+			}
+			continue
+		}
+
 		var id, ts, typ, probeID, actor, summary string
 		if err := rows.Scan(&id, &ts, &typ, &probeID, &actor, &summary); err != nil {
 			continue
@@ -253,6 +357,89 @@ func (s *Store) StreamCSV(ctx context.Context, w io.Writer, f Filter) error {
 
 	cw.Flush()
 	return cw.Error()
+}
+
+// VerifyChain verifies the persisted signed chain and reports the first invalid row, if any.
+//
+// Unsigned rows are permitted as a prefix (before chain mode was enabled). Once a signed
+// row appears, all subsequent rows must be signed and contiguous.
+func (s *Store) VerifyChain(ctx context.Context) (VerifyResult, error) {
+	if !s.chainMode {
+		return VerifyResult{Valid: true, EntriesChecked: 0, FirstInvalidAt: nil}, nil
+	}
+
+	rows, err := s.db.QueryContext(ctx, `SELECT id, timestamp, type, probe_id, workspace_id, actor, summary, detail, before_val, after_val, prev_hash, entry_hash
+		FROM audit_events ORDER BY timestamp ASC, id ASC`)
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	defer rows.Close()
+
+	result := VerifyResult{Valid: true}
+	signedStarted := false
+	expectedPrev := GenesisHash
+
+	for rows.Next() {
+		var evt Event
+		var ts, detail, before, after string
+		if err := rows.Scan(&evt.ID, &ts, &evt.Type, &evt.ProbeID, &evt.WorkspaceID, &evt.Actor, &evt.Summary, &detail, &before, &after, &evt.PrevHash, &evt.EntryHash); err != nil {
+			return VerifyResult{}, err
+		}
+		evt.Timestamp, _ = time.Parse(time.RFC3339Nano, ts)
+		if detail != "" && detail != "null" {
+			_ = json.Unmarshal([]byte(detail), &evt.Detail)
+		}
+		if before != "" && before != "null" {
+			_ = json.Unmarshal([]byte(before), &evt.Before)
+		}
+		if after != "" && after != "null" {
+			_ = json.Unmarshal([]byte(after), &evt.After)
+		}
+
+		hasChainData := evt.PrevHash != "" || evt.EntryHash != ""
+		if !hasChainData {
+			if signedStarted {
+				result.Valid = false
+				result.FirstInvalidAt = stringPtr(ts)
+				return result, nil
+			}
+			continue
+		}
+		if evt.PrevHash == "" || evt.EntryHash == "" {
+			result.Valid = false
+			result.FirstInvalidAt = stringPtr(ts)
+			return result, nil
+		}
+
+		if !signedStarted {
+			signedStarted = true
+			expectedPrev = GenesisHash
+		}
+
+		if evt.PrevHash != expectedPrev {
+			result.Valid = false
+			result.FirstInvalidAt = stringPtr(ts)
+			return result, nil
+		}
+
+		expectedHash, err := ComputeEntryHash(evt.PrevHash, evt, s.chainKey)
+		if err != nil {
+			return VerifyResult{}, err
+		}
+		result.EntriesChecked++
+		if evt.EntryHash != expectedHash {
+			result.Valid = false
+			result.FirstInvalidAt = stringPtr(ts)
+			return result, nil
+		}
+		expectedPrev = evt.EntryHash
+	}
+
+	if err := rows.Err(); err != nil {
+		return VerifyResult{}, err
+	}
+
+	return result, nil
 }
 
 // Purge deletes persisted events older than now - olderThan and returns deleted row count.
@@ -275,6 +462,15 @@ func (s *Store) Purge(olderThan time.Duration) (int64, error) {
 	if deleted > 0 {
 		if err := s.loadRecent(s.memoryLimit); err != nil {
 			return deleted, err
+		}
+		if s.chainMode {
+			h, err := s.latestPersistedEntryHash()
+			if err != nil {
+				return deleted, err
+			}
+			s.writeMu.Lock()
+			s.lastEntryHash = h
+			s.writeMu.Unlock()
 		}
 	}
 
@@ -307,13 +503,14 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-func (s *Store) persist(evt Event) error {
+func (s *Store) persist(evt Event) (bool, error) {
 	detail, _ := json.Marshal(evt.Detail)
 	before, _ := json.Marshal(evt.Before)
 	after, _ := json.Marshal(evt.After)
 
-	_, err := s.db.Exec(`INSERT OR IGNORE INTO audit_events (id, timestamp, type, probe_id, workspace_id, actor, summary, detail, before_val, after_val)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	res, err := s.db.Exec(`INSERT OR IGNORE INTO audit_events (
+		id, timestamp, type, probe_id, workspace_id, actor, summary, detail, before_val, after_val, prev_hash, entry_hash
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		evt.ID,
 		evt.Timestamp.Format(time.RFC3339Nano),
 		string(evt.Type),
@@ -324,8 +521,17 @@ func (s *Store) persist(evt Event) error {
 		string(detail),
 		string(before),
 		string(after),
+		evt.PrevHash,
+		evt.EntryHash,
 	)
-	return err
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, nil
+	}
+	return rows > 0, nil
 }
 
 func (s *Store) loadRecent(limit int) error {
@@ -345,10 +551,26 @@ func (s *Store) loadRecent(limit int) error {
 	return nil
 }
 
+func (s *Store) latestPersistedEntryHash() (string, error) {
+	var last string
+	err := s.db.QueryRow(`SELECT entry_hash FROM audit_events WHERE entry_hash <> '' ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&last)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return last, nil
+}
+
 func (s *Store) buildPersistedQuery(f Filter, includeLimit bool, csvMode bool) (string, []any, error) {
-	query := "SELECT id, timestamp, type, probe_id, workspace_id, actor, summary, detail, before_val, after_val FROM audit_events WHERE 1=1"
+	query := "SELECT id, timestamp, type, probe_id, workspace_id, actor, summary, detail, before_val, after_val, prev_hash, entry_hash FROM audit_events WHERE 1=1"
 	if csvMode {
-		query = "SELECT id, timestamp, type, probe_id, actor, summary FROM audit_events WHERE 1=1"
+		if s.chainMode {
+			query = "SELECT id, timestamp, type, probe_id, actor, summary, prev_hash, entry_hash FROM audit_events WHERE 1=1"
+		} else {
+			query = "SELECT id, timestamp, type, probe_id, actor, summary FROM audit_events WHERE 1=1"
+		}
 	}
 	var args []any
 
@@ -404,7 +626,7 @@ type rowScanner interface {
 func scanEvent(scanner rowScanner) (Event, error) {
 	var evt Event
 	var ts, detail, before, after string
-	if err := scanner.Scan(&evt.ID, &ts, &evt.Type, &evt.ProbeID, &evt.WorkspaceID, &evt.Actor, &evt.Summary, &detail, &before, &after); err != nil {
+	if err := scanner.Scan(&evt.ID, &ts, &evt.Type, &evt.ProbeID, &evt.WorkspaceID, &evt.Actor, &evt.Summary, &detail, &before, &after, &evt.PrevHash, &evt.EntryHash); err != nil {
 		return Event{}, err
 	}
 
@@ -419,4 +641,12 @@ func scanEvent(scanner rowScanner) (Event, error) {
 		_ = json.Unmarshal([]byte(after), &evt.After)
 	}
 	return evt, nil
+}
+
+func stringPtr(v string) *string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	vv := v
+	return &vv
 }

@@ -93,6 +93,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Approval.TwoPersonMode {
 		t.Error("expected two-person approval mode disabled by default")
 	}
+	if cfg.Audit.ChainMode {
+		t.Error("expected audit chain mode disabled by default")
+	}
 }
 
 func TestLoadFromFile(t *testing.T) {
@@ -507,5 +510,37 @@ func TestApprovalTwoPersonModeDefaultsAndEnvOverride(t *testing.T) {
 	loaded := LoadFromEnv()
 	if !loaded.Approval.TwoPersonMode {
 		t.Fatal("expected approval two-person mode enabled from env")
+	}
+}
+
+func TestAuditChainConfigFromFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(`{"audit":{"chain_mode":true,"chain_key":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}}`), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if !cfg.Audit.ChainMode {
+		t.Fatal("expected audit.chain_mode=true from file")
+	}
+	if cfg.Audit.ChainKey != "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" {
+		t.Fatalf("unexpected audit.chain_key: %s", cfg.Audit.ChainKey)
+	}
+}
+
+func TestAuditChainConfigFromEnv(t *testing.T) {
+	t.Setenv("LEGATOR_AUDIT_CHAIN_MODE", "1")
+	t.Setenv("LEGATOR_AUDIT_CHAIN_KEY", "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+
+	cfg := LoadFromEnv()
+	if !cfg.Audit.ChainMode {
+		t.Fatal("expected audit chain mode enabled from env")
+	}
+	if cfg.Audit.ChainKey != "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" {
+		t.Fatalf("unexpected audit chain key from env: %s", cfg.Audit.ChainKey)
 	}
 }

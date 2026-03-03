@@ -106,6 +106,7 @@ func TestPermissionsAdminCanAccessAllScopes(t *testing.T) {
 		{name: "approval read", method: http.MethodGet, path: "/api/v1/approvals"},
 		{name: "approval write", method: http.MethodPost, path: "/api/v1/approvals/missing/decide", body: `{"decision":"approved","decided_by":"admin"}`},
 		{name: "audit read", method: http.MethodGet, path: "/api/v1/audit"},
+		{name: "audit verify", method: http.MethodGet, path: "/api/v1/audit/verify"},
 		{name: "webhook manage", method: http.MethodGet, path: "/api/v1/webhooks"},
 		{name: "webhook deliveries", method: http.MethodGet, path: "/api/v1/webhooks/deliveries"},
 		{name: "fleet write", method: http.MethodDelete, path: "/api/v1/probes/missing"},

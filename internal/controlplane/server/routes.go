@@ -159,6 +159,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Audit
 	mux.HandleFunc("GET /api/v1/audit", s.withPermission(auth.PermAuditRead, s.handleAuditLog))
+	mux.HandleFunc("GET /api/v1/audit/verify", s.withPermission(auth.PermAuditRead, s.handleAuditVerify))
 	mux.HandleFunc("GET /api/v1/audit/export", s.withPermission(auth.PermAuditRead, s.handleAuditExportJSONL))
 	mux.HandleFunc("GET /api/v1/audit/export/csv", s.withPermission(auth.PermAuditRead, s.handleAuditExportCSV))
 	mux.HandleFunc("DELETE /api/v1/audit/purge", s.withPermission(auth.PermAdmin, s.handleAuditPurge))
@@ -1781,6 +1782,34 @@ func (s *Server) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleAuditVerify(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(w, r, auth.PermAuditRead) {
+		return
+	}
+	if s.auditStore == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "audit verify requires persistent audit store")
+		return
+	}
+
+	result, err := s.auditStore.VerifyChain(r.Context())
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	firstInvalidAt := any(nil)
+	if result.FirstInvalidAt != nil {
+		firstInvalidAt = *result.FirstInvalidAt
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"valid":            result.Valid,
+		"entries_checked":  result.EntriesChecked,
+		"first_invalid_at": firstInvalidAt,
+	})
+}
+
 func (s *Server) handleAuditExportJSONL(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(w, r, auth.PermAuditRead) {
 		return
@@ -1802,6 +1831,11 @@ func (s *Server) handleAuditExportJSONL(w http.ResponseWriter, r *http.Request) 
 	filename := fmt.Sprintf("legator-audit-%s.jsonl", time.Now().UTC().Format("20060102"))
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	if s.auditStore.ChainModeEnabled() {
+		w.Header().Set("X-Legator-Audit-Chain-Mode", "enabled")
+		w.Header().Set("X-Legator-Audit-Chain-Algorithm", audit.ChainAlgorithm())
+		w.Header().Set("X-Legator-Audit-Genesis-Hash", audit.GenesisHash)
+	}
 
 	if err := s.auditStore.StreamJSONL(r.Context(), w, filter); err != nil {
 		s.logger.Warn("stream audit jsonl export failed", zap.Error(err))
@@ -1829,6 +1863,11 @@ func (s *Server) handleAuditExportCSV(w http.ResponseWriter, r *http.Request) {
 	filename := fmt.Sprintf("legator-audit-%s.csv", time.Now().UTC().Format("20060102"))
 	w.Header().Set("Content-Type", "text/csv")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	if s.auditStore.ChainModeEnabled() {
+		w.Header().Set("X-Legator-Audit-Chain-Mode", "enabled")
+		w.Header().Set("X-Legator-Audit-Chain-Algorithm", audit.ChainAlgorithm())
+		w.Header().Set("X-Legator-Audit-Genesis-Hash", audit.GenesisHash)
+	}
 
 	if err := s.auditStore.StreamCSV(r.Context(), w, filter); err != nil {
 		s.logger.Warn("stream audit csv export failed", zap.Error(err))

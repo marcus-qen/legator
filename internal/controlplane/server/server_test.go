@@ -1640,8 +1640,8 @@ func TestHandleAuditLog(t *testing.T) {
 	}
 
 	var got struct {
-		Events []audit.Event `json:"events"`
-		Total  int           `json:"total"`
+		Events []audit.Event
+		Total  int
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
 		t.Fatalf("decode audit response: %v", err)
@@ -1651,6 +1651,53 @@ func TestHandleAuditLog(t *testing.T) {
 	}
 	if len(got.Events) != 1 || got.Events[0].ProbeID != "probe-a" {
 		t.Fatalf("unexpected events payload: %+v", got.Events)
+	}
+}
+
+func TestHandleAuditVerify(t *testing.T) {
+	t.Setenv("LEGATOR_LLM_PROVIDER", "")
+	t.Setenv("LEGATOR_AUTH", "0")
+	t.Setenv("LEGATOR_SIGNING_KEY", strings.Repeat("a", 64))
+
+	cfg := config.Default()
+	cfg.ListenAddr = ":0"
+	cfg.DataDir = t.TempDir()
+	cfg.Audit.ChainMode = true
+	cfg.Audit.ChainKey = strings.Repeat("f", 64)
+
+	srv, err := New(cfg, zap.NewNop())
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	t.Cleanup(func() { srv.Close() })
+
+	srv.recordAudit(audit.Event{
+		Type:    audit.EventCommandSent,
+		ProbeID: "probe-verify",
+		Actor:   "api",
+		Summary: "verify me",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/audit/verify", nil)
+	rr := httptest.NewRecorder()
+	srv.handleAuditVerify(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var got map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode verify response: %v", err)
+	}
+	if valid, _ := got["valid"].(bool); !valid {
+		t.Fatalf("expected valid=true, got payload=%v", got)
+	}
+	if checked, _ := got["entries_checked"].(float64); int(checked) != 1 {
+		t.Fatalf("expected entries_checked=1, got payload=%v", got)
+	}
+	if got["first_invalid_at"] != nil {
+		t.Fatalf("expected first_invalid_at=nil, got %v", got["first_invalid_at"])
 	}
 }
 
@@ -2221,5 +2268,42 @@ func TestHandleApplyPolicy_AppliedLocallyWhenProbeOffline(t *testing.T) {
 	}
 	if ps.PolicyLevel != protocol.CapObserve {
 		t.Fatalf("expected policy level observe, got %s", ps.PolicyLevel)
+	}
+}
+
+func TestHandleAuditExportJSONLIncludesChainMetadataHeaders(t *testing.T) {
+	t.Setenv("LEGATOR_LLM_PROVIDER", "")
+	t.Setenv("LEGATOR_AUTH", "0")
+	t.Setenv("LEGATOR_SIGNING_KEY", strings.Repeat("a", 64))
+
+	cfg := config.Default()
+	cfg.ListenAddr = ":0"
+	cfg.DataDir = t.TempDir()
+	cfg.Audit.ChainMode = true
+	cfg.Audit.ChainKey = strings.Repeat("1", 64)
+
+	srv, err := New(cfg, zap.NewNop())
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	t.Cleanup(func() { srv.Close() })
+
+	srv.recordAudit(audit.Event{Type: audit.EventCommandSent, Summary: "export-chain"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/audit/export", nil)
+	rr := httptest.NewRecorder()
+	srv.handleAuditExportJSONL(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if rr.Header().Get("X-Legator-Audit-Chain-Mode") != "enabled" {
+		t.Fatalf("expected chain mode header, got %q", rr.Header().Get("X-Legator-Audit-Chain-Mode"))
+	}
+	if rr.Header().Get("X-Legator-Audit-Chain-Algorithm") != audit.ChainAlgorithm() {
+		t.Fatalf("expected chain algorithm header, got %q", rr.Header().Get("X-Legator-Audit-Chain-Algorithm"))
+	}
+	if rr.Header().Get("X-Legator-Audit-Genesis-Hash") != audit.GenesisHash {
+		t.Fatalf("expected genesis hash header, got %q", rr.Header().Get("X-Legator-Audit-Genesis-Hash"))
 	}
 }

@@ -56,16 +56,18 @@ const (
 
 // Event is a single audit log entry.
 type Event struct {
-	ID        string    `json:"id"`
-	Timestamp time.Time `json:"timestamp"`
-	Type      EventType `json:"type"`
-	ProbeID   string    `json:"probe_id,omitempty"`
-	Actor     string    `json:"actor,omitempty"` // who initiated (user, system, probe)
-	Summary   string    `json:"summary"`
+	ID          string    `json:"id"`
+	Timestamp   time.Time `json:"timestamp"`
+	Type        EventType `json:"type"`
+	ProbeID     string    `json:"probe_id,omitempty"`
+	Actor       string    `json:"actor,omitempty"` // who initiated (user, system, probe)
+	Summary     string    `json:"summary"`
 	WorkspaceID string    `json:"workspace_id,omitempty"`
-	Detail    any       `json:"detail,omitempty"`
-	Before    any       `json:"before,omitempty"` // state before change
-	After     any       `json:"after,omitempty"`  // state after change
+	Detail      any       `json:"detail,omitempty"`
+	Before      any       `json:"before,omitempty"` // state before change
+	After       any       `json:"after,omitempty"`  // state after change
+	PrevHash    string    `json:"prev_hash,omitempty"`
+	EntryHash   string    `json:"entry_hash,omitempty"`
 }
 
 // Log is an append-only audit log.
@@ -115,13 +117,13 @@ func (l *Log) Emit(typ EventType, probeID, actor, summary string) {
 
 // Query returns events matching the filter. limit=0 means all.
 type Filter struct {
-	ProbeID string
-	Type    EventType
-	Since   time.Time
-	Until   time.Time
+	ProbeID     string
+	Type        EventType
+	Since       time.Time
+	Until       time.Time
 	WorkspaceID string
-	Cursor  string
-	Limit   int
+	Cursor      string
+	Limit       int
 }
 
 // Query returns filtered events, newest first.
@@ -139,9 +141,6 @@ func (l *Log) Query(f Filter) []Event {
 			continue
 		}
 		if f.ProbeID != "" && evt.ProbeID != f.ProbeID {
-			continue
-		}
-		if f.WorkspaceID != "" && evt.WorkspaceID != f.WorkspaceID {
 			continue
 		}
 		if f.Type != "" && evt.Type != f.Type {
