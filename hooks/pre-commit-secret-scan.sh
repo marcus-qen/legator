@@ -1,43 +1,48 @@
 #!/usr/bin/env bash
 # Pre-commit hook: scan staged files for secret patterns
-# Install: cd .git/hooks && ln -sf ../../hooks/pre-commit-secret-scan.sh pre-commit
+# Install: cp hooks/pre-commit-secret-scan.sh .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+# Or: cd .git/hooks && ln -sf ../../hooks/pre-commit-secret-scan.sh pre-commit
 
 set -euo pipefail
 
 PATTERNS_FILE="$(git rev-parse --show-toplevel)/.secret-patterns"
+FOUND=0
 
 if [ ! -f "$PATTERNS_FILE" ]; then
-    echo "⚠️  No .secret-patterns file found — skipping secret scan"
+    echo "WARNING: .secret-patterns file not found — skipping secret scan"
     exit 0
 fi
 
 echo "🔒 Scanning staged files for secrets..."
 
-FOUND=0
+# Get list of staged files (added/modified)
+STAGED=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)
+
+if [ -z "$STAGED" ]; then
+    exit 0
+fi
+
 while IFS= read -r pattern; do
+    # Skip comments and empty lines
     [[ -z "$pattern" || "$pattern" =~ ^# ]] && continue
-    
-    while IFS= read -r match; do
-        if [ -n "$match" ]; then
-            FILE=$(echo "$match" | cut -d: -f1)
-            # Skip the patterns file itself and the hook
-            [[ "$FILE" == ".secret-patterns" || "$FILE" == hooks/* ]] && continue
-            echo ""
-            echo "🚨 SECRET DETECTED in $match"
-            echo "   Pattern: $pattern"
-            FOUND=1
+
+    for file in $STAGED; do
+        # Skip binary files and the patterns file itself
+        [[ "$file" == ".secret-patterns" ]] && continue
+        [[ "$file" == "hooks/"* ]] && continue
+        [[ "$file" == "*.db" ]] && continue
+
+        if [ -f "$file" ]; then
+            MATCHES=$(grep -nP "$pattern" "$file" 2>/dev/null || true)
+            if [ -n "$MATCHES" ]; then
+                echo ""
+                echo "🚨 SECRET DETECTED in $file:"
+                echo "$MATCHES" | head -5
+                echo "   Pattern: $pattern"
+                FOUND=1
+            fi
         fi
-    done < <(git diff --cached --name-only -z | xargs -0 -I{} git show :"$1{}" 2>/dev/null | grep -nP "$pattern" 2>/dev/null | head -5 | sed "s|^|{}:|" || true) 2>/dev/null || \
-    # Fallback: check staged content via diff
-    while IFS= read -r match; do
-        if [ -n "$match" ]; then
-            echo ""
-            echo "🚨 SECRET DETECTED in $match"
-            echo "   Pattern: $pattern"
-            FOUND=1
-        fi
-    done < <(git diff --cached -U0 | grep -P "^\+" | grep -vP "^\+\+\+" | grep -nP "$pattern" 2>/dev/null | head -5 || true)
-    
+    done
 done < "$PATTERNS_FILE"
 
 if [ "$FOUND" -eq 1 ]; then
@@ -54,3 +59,4 @@ if [ "$FOUND" -eq 1 ]; then
 fi
 
 echo "✅ No secrets found in staged files."
+exit 0
