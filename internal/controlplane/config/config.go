@@ -48,6 +48,9 @@ type Config struct {
 	// Scheduled jobs defaults
 	Jobs JobsConfig `json:"jobs,omitempty"`
 
+	// Scoped token broker settings for runner operations.
+	TokenBroker TokenBrokerConfig `json:"token_broker,omitempty"`
+
 	// Log level (debug, info, warn, error)
 	LogLevel string `json:"log_level"`
 
@@ -123,6 +126,12 @@ type JobsConfig struct {
 	RunnerSandboxRuntimeCommand string `json:"runner_sandbox_runtime_command,omitempty"`
 	RunnerSandboxImage          string `json:"runner_sandbox_image,omitempty"`
 	RunnerSandboxTimeout        string `json:"runner_sandbox_timeout,omitempty"`
+}
+
+// TokenBrokerConfig controls scoped token defaults and scope bounds.
+type TokenBrokerConfig struct {
+	DefaultTTL string `json:"default_ttl,omitempty"`
+	MaxScope   int    `json:"max_scope,omitempty"`
 }
 
 func (k KubeflowConfig) NamespaceOrDefault() string {
@@ -230,6 +239,38 @@ func (j JobsConfig) RunnerSandboxTimeoutDuration() time.Duration {
 	return d
 }
 
+func (t TokenBrokerConfig) DefaultTTLDuration(fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(t.DefaultTTL)
+	if raw == "" {
+		if fallback > 0 {
+			return fallback
+		}
+		return 2 * time.Minute
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		if fallback > 0 {
+			return fallback
+		}
+		return 2 * time.Minute
+	}
+	return d
+}
+
+func (t TokenBrokerConfig) MaxScopeOrDefault() int {
+	if t.MaxScope <= 0 {
+		return 8
+	}
+	if t.MaxScope > 64 {
+		return 64
+	}
+	return t.MaxScope
+}
+
+func (c Config) TokenBrokerDefaultTTLDuration() time.Duration {
+	return c.TokenBroker.DefaultTTLDuration(c.Jobs.RunTokenTTLDuration())
+}
+
 // Default returns configuration with sensible defaults.
 func Default() Config {
 	return Config{
@@ -267,6 +308,9 @@ func Default() Config {
 			RunnerSandboxRuntimeCommand: "podman",
 			RunnerSandboxImage:          "docker.io/library/alpine:3.20",
 			RunnerSandboxTimeout:        "10m",
+		},
+		TokenBroker: TokenBrokerConfig{
+			MaxScope: 8,
 		},
 	}
 }
@@ -448,6 +492,14 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("LEGATOR_JOBS_RUNNER_SANDBOX_TIMEOUT"); v != "" {
 		cfg.Jobs.RunnerSandboxTimeout = v
+	}
+	if v := os.Getenv("LEGATOR_TOKEN_BROKER_DEFAULT_TTL"); v != "" {
+		cfg.TokenBroker.DefaultTTL = v
+	}
+	if v := os.Getenv("LEGATOR_TOKEN_BROKER_MAX_SCOPE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.TokenBroker.MaxScope = n
+		}
 	}
 	if v := os.Getenv("LEGATOR_MCP_ENABLED"); v != "" {
 		cfg.MCPEnabled = v == "true" || v == "1"

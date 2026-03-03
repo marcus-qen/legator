@@ -159,6 +159,7 @@ POST /api/v1/runners
 POST /api/v1/runners/{id}/start
 POST /api/v1/runners/{id}/stop
 POST /api/v1/runs
+# [compat:additive] /api/v1/runs issues opaque brokered runner tokens persisted server-side (SQLite) with scope, audience, runner/job/session bindings and single-use semantics (config: token_broker.default_ttl, token_broker.max_scope).
 POST /api/v1/tenants
 POST /api/v1/tokens
 POST /api/v1/users

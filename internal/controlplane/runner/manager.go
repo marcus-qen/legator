@@ -130,6 +130,7 @@ type tokenBroker interface {
 	Issue(req tokenbroker.IssueRequest) (*tokenbroker.IssuedToken, error)
 	Validate(req tokenbroker.ValidateRequest) (*tokenbroker.Claims, error)
 	Revoke(token string) error
+	Close() error
 }
 
 // Config controls manager behaviour.
@@ -182,6 +183,14 @@ func NewManager(cfg Config) *Manager {
 		idGenerator: idGen,
 		tokens:      broker,
 	}
+}
+
+// Close releases broker resources.
+func (m *Manager) Close() error {
+	if m == nil || m.tokens == nil {
+		return nil
+	}
+	return m.tokens.Close()
 }
 
 // CreateRunner creates a runner in created state.
@@ -273,6 +282,7 @@ func (m *Manager) IssueRunToken(req IssueTokenRequest) (*IssuedToken, error) {
 	issued, err := m.tokens.Issue(tokenbroker.IssueRequest{
 		RunID:     runID,
 		ProbeID:   runnerID,
+		Audience:  string(audience),
 		Scopes:    []string{string(audience)},
 		Issuer:    issuer,
 		SessionID: sessionID,
@@ -419,6 +429,7 @@ func (m *Manager) prepareTransition(req LifecycleRequest, audience Audience, tar
 	if _, err := m.tokens.Validate(tokenbroker.ValidateRequest{
 		Token:     rawToken,
 		Scope:     string(audience),
+		Audience:  string(audience),
 		RunID:     runID,
 		ProbeID:   runnerID,
 		SessionID: sessionID,
@@ -451,7 +462,11 @@ func mapTokenBrokerError(err error) error {
 		errors.Is(err, tokenbroker.ErrScopeRequired),
 		errors.Is(err, tokenbroker.ErrScopesRequired),
 		errors.Is(err, tokenbroker.ErrRunIDRequired),
-		errors.Is(err, tokenbroker.ErrProbeIDRequired):
+		errors.Is(err, tokenbroker.ErrProbeIDRequired),
+		errors.Is(err, tokenbroker.ErrAudienceRequired),
+		errors.Is(err, tokenbroker.ErrAudienceMismatch),
+		errors.Is(err, tokenbroker.ErrBindingMismatch),
+		errors.Is(err, tokenbroker.ErrScopeLimitExceeded):
 		return fmt.Errorf("%w: %v", ErrRunTokenScope, err)
 	case errors.Is(err, tokenbroker.ErrSessionMismatch):
 		return ErrRunTokenSessionBound

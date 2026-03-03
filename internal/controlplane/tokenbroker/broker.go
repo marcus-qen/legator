@@ -10,27 +10,39 @@ import (
 	"time"
 )
 
-const defaultTokenTTL = 2 * time.Minute
+const (
+	defaultTokenTTL  = 2 * time.Minute
+	defaultMaxScope  = 8
+	EventTokenIssued = "token.issued"
+	EventTokenUsed   = "token.consumed"
+	EventTokenExpire = "token.expired"
+	EventTokenReject = "token.rejected"
+)
 
 var (
-	ErrTokenRequired   = errors.New("token is required")
-	ErrTokenInvalid    = errors.New("token is invalid")
-	ErrTokenExpired    = errors.New("token is expired")
-	ErrTokenRevoked    = errors.New("token is revoked")
-	ErrTokenConsumed   = errors.New("token already consumed")
-	ErrScopeRequired   = errors.New("scope is required")
-	ErrScopeRejected   = errors.New("scope rejected")
-	ErrRunIDRequired   = errors.New("run_id is required")
-	ErrProbeIDRequired = errors.New("probe_id is required")
-	ErrIssuerRequired  = errors.New("issuer is required")
-	ErrSessionMismatch = errors.New("session binding rejected")
-	ErrScopesRequired  = errors.New("scopes are required")
+	ErrTokenRequired      = errors.New("token is required")
+	ErrTokenInvalid       = errors.New("token is invalid")
+	ErrTokenExpired       = errors.New("token is expired")
+	ErrTokenRevoked       = errors.New("token is revoked")
+	ErrTokenConsumed      = errors.New("token already consumed")
+	ErrScopeRequired      = errors.New("scope is required")
+	ErrScopeRejected      = errors.New("scope rejected")
+	ErrRunIDRequired      = errors.New("run_id is required")
+	ErrProbeIDRequired    = errors.New("probe_id is required")
+	ErrIssuerRequired     = errors.New("issuer is required")
+	ErrSessionMismatch    = errors.New("session binding rejected")
+	ErrScopesRequired     = errors.New("scopes are required")
+	ErrAudienceRequired   = errors.New("audience is required")
+	ErrAudienceMismatch   = errors.New("audience mismatch")
+	ErrBindingMismatch    = errors.New("binding mismatch")
+	ErrScopeLimitExceeded = errors.New("scope exceeds configured max")
 )
 
 // Claims captures least-privilege token grants for a single runner operation flow.
 type Claims struct {
 	RunID     string    `json:"run_id"`
 	ProbeID   string    `json:"probe_id"`
+	Audience  string    `json:"audience"`
 	Scopes    []string  `json:"scopes"`
 	IssuedAt  time.Time `json:"issued_at"`
 	ExpiresAt time.Time `json:"expires_at"`
@@ -42,6 +54,7 @@ type Claims struct {
 type IssueRequest struct {
 	RunID     string
 	ProbeID   string
+	Audience  string
 	Scopes    []string
 	Issuer    string
 	SessionID string
@@ -58,40 +71,60 @@ type IssuedToken struct {
 type ValidateRequest struct {
 	Token     string
 	Scope     string
+	Audience  string
 	RunID     string
 	ProbeID   string
 	SessionID string
 	Consume   bool
 }
 
+// Event is emitted by the broker on token lifecycle transitions.
+type Event struct {
+	Type      string
+	Token     string
+	RunID     string
+	ProbeID   string
+	Audience  string
+	Scopes    []string
+	Issuer    string
+	SessionID string
+	Reason    string
+	IssuedAt  time.Time
+	ExpiresAt time.Time
+	UsedAt    time.Time
+}
+
 // Config controls broker behaviour.
 type Config struct {
 	DefaultTTL     time.Duration
+	MaxScope       int
 	Now            func() time.Time
 	TokenGenerator func() (string, error)
-}
-
-type tokenRecord struct {
-	Token      string
-	Claims     Claims
-	ConsumedAt *time.Time
-	RevokedAt  *time.Time
+	Store          *Store
+	AuditSink      func(Event)
 }
 
 // Broker mints and validates short-lived least-privilege operation tokens.
 type Broker struct {
 	mu             sync.Mutex
-	tokens         map[string]*tokenRecord
+	store          *Store
+	revoked        map[string]time.Time
 	defaultTTL     time.Duration
+	maxScope       int
 	now            func() time.Time
 	tokenGenerator func() (string, error)
+	auditSink      func(Event)
 }
 
-// NewBroker creates an in-memory scoped token broker.
+// NewBroker creates a scoped token broker.
 func NewBroker(cfg Config) *Broker {
 	ttl := cfg.DefaultTTL
 	if ttl <= 0 {
 		ttl = defaultTokenTTL
+	}
+	maxScope := cfg.MaxScope
+	if maxScope <= 0 {
+		maxScope = defaultMaxScope
 	}
 	nowFn := cfg.Now
 	if nowFn == nil {
@@ -102,11 +135,23 @@ func NewBroker(cfg Config) *Broker {
 		tokenGen = generateToken
 	}
 
+	store := cfg.Store
+	if store == nil {
+		var err error
+		store, err = NewStore(":memory:")
+		if err != nil {
+			panic(fmt.Sprintf("token broker init failed: %v", err))
+		}
+	}
+
 	return &Broker{
-		tokens:         make(map[string]*tokenRecord),
+		store:          store,
+		revoked:        make(map[string]time.Time),
 		defaultTTL:     ttl,
+		maxScope:       maxScope,
 		now:            nowFn,
 		tokenGenerator: tokenGen,
+		auditSink:      cfg.AuditSink,
 	}
 }
 
@@ -124,9 +169,22 @@ func (b *Broker) Issue(req IssueRequest) (*IssuedToken, error) {
 	if issuer == "" {
 		return nil, ErrIssuerRequired
 	}
+	if strings.TrimSpace(req.SessionID) == "" {
+		return nil, ErrSessionMismatch
+	}
+	audience := strings.TrimSpace(req.Audience)
+	if audience == "" {
+		return nil, ErrAudienceRequired
+	}
 	scopes := normalizeScopes(req.Scopes)
 	if len(scopes) == 0 {
 		return nil, ErrScopesRequired
+	}
+	if len(scopes) > b.maxScope {
+		return nil, fmt.Errorf("%w: got %d > max %d", ErrScopeLimitExceeded, len(scopes), b.maxScope)
+	}
+	if !hasScope(scopes, audience) {
+		return nil, fmt.Errorf("%w: expected scope %q", ErrScopeRejected, audience)
 	}
 
 	ttl := req.TTL
@@ -136,35 +194,63 @@ func (b *Broker) Issue(req IssueRequest) (*IssuedToken, error) {
 	issuedAt := b.now()
 	expiresAt := issuedAt.Add(ttl)
 
-	token, err := b.tokenGenerator()
-	if err != nil {
-		return nil, fmt.Errorf("generate scoped token: %w", err)
-	}
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return nil, fmt.Errorf("generate scoped token: empty token")
-	}
-
-	rec := &tokenRecord{
-		Token: token,
-		Claims: Claims{
-			RunID:     runID,
-			ProbeID:   probeID,
-			Scopes:    scopes,
-			IssuedAt:  issuedAt,
-			ExpiresAt: expiresAt,
-			Issuer:    issuer,
-			SessionID: strings.TrimSpace(req.SessionID),
-		},
-	}
-
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.pruneLocked()
-	b.tokens[token] = rec
 
-	out := &IssuedToken{Token: token, Claims: cloneClaims(rec.Claims)}
-	return out, nil
+	const maxAttempts = 5
+	var token string
+	for i := 0; i < maxAttempts; i++ {
+		generated, err := b.tokenGenerator()
+		if err != nil {
+			return nil, fmt.Errorf("generate scoped token: %w", err)
+		}
+		token = strings.TrimSpace(generated)
+		if token == "" {
+			return nil, fmt.Errorf("generate scoped token: empty token")
+		}
+
+		err = b.store.Insert(&TokenState{
+			Token:     token,
+			Scope:     scopes,
+			Audience:  audience,
+			RunnerID:  probeID,
+			JobID:     runID,
+			Issuer:    issuer,
+			SessionID: strings.TrimSpace(req.SessionID),
+			IssuedAt:  issuedAt,
+			ExpiresAt: expiresAt,
+		})
+		if err == nil {
+			issued := &IssuedToken{Token: token, Claims: Claims{
+				RunID:     runID,
+				ProbeID:   probeID,
+				Audience:  audience,
+				Scopes:    append([]string(nil), scopes...),
+				IssuedAt:  issuedAt,
+				ExpiresAt: expiresAt,
+				Issuer:    issuer,
+				SessionID: strings.TrimSpace(req.SessionID),
+			}}
+			b.emit(Event{
+				Type:      EventTokenIssued,
+				Token:     issued.Token,
+				RunID:     issued.RunID,
+				ProbeID:   issued.ProbeID,
+				Audience:  issued.Audience,
+				Scopes:    append([]string(nil), issued.Scopes...),
+				Issuer:    issued.Issuer,
+				SessionID: issued.SessionID,
+				IssuedAt:  issued.IssuedAt,
+				ExpiresAt: issued.ExpiresAt,
+			})
+			return issued, nil
+		}
+		if !errors.Is(err, ErrStoreTokenExists) {
+			return nil, err
+		}
+	}
+
+	return nil, fmt.Errorf("generate scoped token: collision retries exhausted")
 }
 
 // Validate checks token TTL, revocation, scope and bindings.
@@ -180,52 +266,113 @@ func (b *Broker) Validate(req ValidateRequest) (*Claims, error) {
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.pruneLocked()
 
-	rec, ok := b.tokens[token]
-	if !ok || rec == nil {
-		return nil, ErrTokenInvalid
+	state, err := b.store.Get(token)
+	if err != nil {
+		if errors.Is(err, ErrStoreTokenNotFound) {
+			b.emitReject(req, nil, "invalid_token")
+			return nil, ErrTokenInvalid
+		}
+		return nil, err
+	}
+
+	if revokedAt, ok := b.revoked[token]; ok {
+		b.emit(Event{
+			Type:      EventTokenReject,
+			Token:     token,
+			RunID:     state.JobID,
+			ProbeID:   state.RunnerID,
+			Audience:  state.Audience,
+			Scopes:    append([]string(nil), state.Scope...),
+			Issuer:    state.Issuer,
+			SessionID: state.SessionID,
+			Reason:    "revoked",
+			IssuedAt:  state.IssuedAt,
+			ExpiresAt: state.ExpiresAt,
+			UsedAt:    revokedAt,
+		})
+		return nil, ErrTokenRevoked
 	}
 
 	now := b.now()
-	if rec.RevokedAt != nil {
-		return nil, ErrTokenRevoked
-	}
-	if now.After(rec.Claims.ExpiresAt) {
-		if rec.ConsumedAt == nil {
-			t := now
-			rec.ConsumedAt = &t
-		}
-		return nil, ErrTokenExpired
-	}
-	if req.Consume && rec.ConsumedAt != nil {
+	if state.ConsumedAt != nil && req.Consume {
+		b.emitReject(req, state, "token_consumed")
 		return nil, ErrTokenConsumed
 	}
+	if now.After(state.ExpiresAt) {
+		_, _ = b.store.MarkConsumed(token, now)
+		b.emit(Event{
+			Type:      EventTokenExpire,
+			Token:     token,
+			RunID:     state.JobID,
+			ProbeID:   state.RunnerID,
+			Audience:  state.Audience,
+			Scopes:    append([]string(nil), state.Scope...),
+			Issuer:    state.Issuer,
+			SessionID: state.SessionID,
+			Reason:    "expired",
+			IssuedAt:  state.IssuedAt,
+			ExpiresAt: state.ExpiresAt,
+			UsedAt:    now,
+		})
+		return nil, ErrTokenExpired
+	}
 
-	if !hasScope(rec.Claims.Scopes, scope) {
+	if !hasScope(state.Scope, scope) {
+		b.emitReject(req, state, "scope_mismatch")
 		return nil, fmt.Errorf("%w: expected scope %q", ErrScopeRejected, scope)
 	}
-
-	runID := strings.TrimSpace(req.RunID)
-	if runID != "" && runID != strings.TrimSpace(rec.Claims.RunID) {
-		return nil, fmt.Errorf("%w: token bound to run_id %q", ErrScopeRejected, rec.Claims.RunID)
+	if audience := strings.TrimSpace(req.Audience); audience != "" && audience != strings.TrimSpace(state.Audience) {
+		b.emitReject(req, state, "audience_mismatch")
+		return nil, fmt.Errorf("%w: expected audience %q", ErrAudienceMismatch, strings.TrimSpace(state.Audience))
 	}
-	probeID := strings.TrimSpace(req.ProbeID)
-	if probeID != "" && probeID != strings.TrimSpace(rec.Claims.ProbeID) {
-		return nil, fmt.Errorf("%w: token bound to probe_id %q", ErrScopeRejected, rec.Claims.ProbeID)
+	if runID := strings.TrimSpace(req.RunID); runID != "" && runID != strings.TrimSpace(state.JobID) {
+		b.emitReject(req, state, "run_binding_mismatch")
+		return nil, fmt.Errorf("%w: token bound to run_id %q", ErrBindingMismatch, state.JobID)
 	}
-
-	sessionID := strings.TrimSpace(req.SessionID)
-	if strings.TrimSpace(rec.Claims.SessionID) != "" && strings.TrimSpace(rec.Claims.SessionID) != sessionID {
+	if probeID := strings.TrimSpace(req.ProbeID); probeID != "" && probeID != strings.TrimSpace(state.RunnerID) {
+		b.emitReject(req, state, "probe_binding_mismatch")
+		return nil, fmt.Errorf("%w: token bound to probe_id %q", ErrBindingMismatch, state.RunnerID)
+	}
+	if sessionID := strings.TrimSpace(req.SessionID); strings.TrimSpace(state.SessionID) != "" && strings.TrimSpace(state.SessionID) != sessionID {
+		b.emitReject(req, state, "session_mismatch")
 		return nil, ErrSessionMismatch
 	}
 
 	if req.Consume {
-		t := now
-		rec.ConsumedAt = &t
+		updated, err := b.store.MarkConsumed(token, now)
+		if err != nil {
+			return nil, err
+		}
+		if !updated {
+			b.emitReject(req, state, "token_consumed")
+			return nil, ErrTokenConsumed
+		}
+		b.emit(Event{
+			Type:      EventTokenUsed,
+			Token:     token,
+			RunID:     state.JobID,
+			ProbeID:   state.RunnerID,
+			Audience:  state.Audience,
+			Scopes:    append([]string(nil), state.Scope...),
+			Issuer:    state.Issuer,
+			SessionID: state.SessionID,
+			IssuedAt:  state.IssuedAt,
+			ExpiresAt: state.ExpiresAt,
+			UsedAt:    now,
+		})
 	}
 
-	claims := cloneClaims(rec.Claims)
+	claims := Claims{
+		RunID:     state.JobID,
+		ProbeID:   state.RunnerID,
+		Audience:  state.Audience,
+		Scopes:    append([]string(nil), state.Scope...),
+		IssuedAt:  state.IssuedAt,
+		ExpiresAt: state.ExpiresAt,
+		Issuer:    state.Issuer,
+		SessionID: state.SessionID,
+	}
 	return &claims, nil
 }
 
@@ -239,44 +386,73 @@ func (b *Broker) Revoke(token string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	rec, ok := b.tokens[token]
-	if !ok || rec == nil {
-		return ErrTokenInvalid
+	state, err := b.store.Get(token)
+	if err != nil {
+		if errors.Is(err, ErrStoreTokenNotFound) {
+			return ErrTokenInvalid
+		}
+		return err
 	}
 	now := b.now()
-	rec.RevokedAt = &now
+	b.revoked[token] = now
+	_, _ = b.store.MarkConsumed(token, now)
+	b.emit(Event{
+		Type:      EventTokenReject,
+		Token:     token,
+		RunID:     state.JobID,
+		ProbeID:   state.RunnerID,
+		Audience:  state.Audience,
+		Scopes:    append([]string(nil), state.Scope...),
+		Issuer:    state.Issuer,
+		SessionID: state.SessionID,
+		Reason:    "revoked",
+		IssuedAt:  state.IssuedAt,
+		ExpiresAt: state.ExpiresAt,
+		UsedAt:    now,
+	})
 	return nil
 }
 
-func (b *Broker) pruneLocked() {
-	now := b.now()
-	for token, rec := range b.tokens {
-		if rec == nil {
-			delete(b.tokens, token)
-			continue
-		}
-		if rec.RevokedAt != nil {
-			if now.Sub(*rec.RevokedAt) > time.Hour {
-				delete(b.tokens, token)
-			}
-			continue
-		}
-		if rec.ConsumedAt != nil {
-			if now.Sub(*rec.ConsumedAt) > time.Hour {
-				delete(b.tokens, token)
-			}
-			continue
-		}
-		if now.After(rec.Claims.ExpiresAt.Add(time.Hour)) {
-			delete(b.tokens, token)
-		}
+// Close closes the underlying persistence store.
+func (b *Broker) Close() error {
+	if b == nil || b.store == nil {
+		return nil
 	}
+	return b.store.Close()
 }
 
-func cloneClaims(in Claims) Claims {
-	out := in
-	out.Scopes = append([]string(nil), in.Scopes...)
-	return out
+func (b *Broker) emit(evt Event) {
+	if b.auditSink == nil {
+		return
+	}
+	b.auditSink(evt)
+}
+
+func (b *Broker) emitReject(req ValidateRequest, state *TokenState, reason string) {
+	evt := Event{
+		Type:      EventTokenReject,
+		Token:     strings.TrimSpace(req.Token),
+		RunID:     strings.TrimSpace(req.RunID),
+		ProbeID:   strings.TrimSpace(req.ProbeID),
+		Audience:  strings.TrimSpace(req.Audience),
+		SessionID: strings.TrimSpace(req.SessionID),
+		Reason:    strings.TrimSpace(reason),
+	}
+	if state != nil {
+		evt.Token = state.Token
+		evt.RunID = state.JobID
+		evt.ProbeID = state.RunnerID
+		evt.Audience = state.Audience
+		evt.Scopes = append([]string(nil), state.Scope...)
+		evt.Issuer = state.Issuer
+		evt.SessionID = state.SessionID
+		evt.IssuedAt = state.IssuedAt
+		evt.ExpiresAt = state.ExpiresAt
+		if state.ConsumedAt != nil {
+			evt.UsedAt = state.ConsumedAt.UTC()
+		}
+	}
+	b.emit(evt)
 }
 
 func normalizeScopes(in []string) []string {
