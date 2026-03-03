@@ -209,6 +209,7 @@ func (m *AuthMiddleware) tryAPIKeyAuth(w http.ResponseWriter, r *http.Request, n
 	}
 
 	ctx := WithAPIKeyContext(r.Context(), key)
+	ctx = WithWorkspaceScopeContext(ctx, resolveWorkspaceScopeFromAuth(ctx))
 	next.ServeHTTP(w, r.WithContext(ctx))
 	return true
 }
@@ -240,6 +241,7 @@ func (m *AuthMiddleware) trySessionAuth(r *http.Request, next http.Handler, w ht
 	}
 
 	ctx := WithUserContext(r.Context(), user)
+	ctx = WithWorkspaceScopeContext(ctx, resolveWorkspaceScopeFromAuth(ctx))
 	next.ServeHTTP(w, r.WithContext(ctx))
 	return true
 }

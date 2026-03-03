@@ -87,6 +87,7 @@ func NewStore(dbPath string) (*Store, error) {
 
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS job_runs (
 		id                 TEXT PRIMARY KEY,
+		workspace_id       TEXT NOT NULL DEFAULT '',
 		job_id             TEXT NOT NULL,
 		probe_id           TEXT NOT NULL,
 		request_id         TEXT NOT NULL,
@@ -120,6 +121,7 @@ func NewStore(dbPath string) (*Store, error) {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_workspace ON jobs(workspace_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_enabled ON jobs(enabled)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_updated_at ON jobs(updated_at)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_job_runs_workspace_started ON job_runs(workspace_id, started_at DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_job_runs_job_started ON job_runs(job_id, started_at DESC)`)
 	_, _ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_job_runs_request_id ON job_runs(request_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_job_runs_execution_attempt ON job_runs(execution_id, attempt)`)
@@ -161,6 +163,9 @@ func ensureJobColumns(db *sql.DB) error {
 }
 
 func ensureRunColumns(db *sql.DB) error {
+	if err := ensureColumn(db, "job_runs", "workspace_id", "workspace_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("add job_runs.workspace_id: %w", err)
+	}
 	if err := ensureColumn(db, "job_runs", "execution_id", "execution_id TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("add job_runs.execution_id: %w", err)
 	}
@@ -429,9 +434,21 @@ func (s *Store) RecordRunStart(run JobRun) (*JobRun, error) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	_, err = tx.Exec(`INSERT INTO job_runs (id, job_id, probe_id, request_id, execution_id, attempt, max_attempts, retry_scheduled_at, started_at, ended_at, status, admission_decision, admission_reason, admission_rationale, exit_code, output)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	run.WorkspaceID = strings.TrimSpace(run.WorkspaceID)
+	if run.WorkspaceID == "" {
+		if err := tx.QueryRow(`SELECT workspace_id FROM jobs WHERE id = ?`, run.JobID).Scan(&run.WorkspaceID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, sql.ErrNoRows
+			}
+			return nil, err
+		}
+		run.WorkspaceID = strings.TrimSpace(run.WorkspaceID)
+	}
+
+	_, err = tx.Exec(`INSERT INTO job_runs (id, workspace_id, job_id, probe_id, request_id, execution_id, attempt, max_attempts, retry_scheduled_at, started_at, ended_at, status, admission_decision, admission_reason, admission_rationale, exit_code, output)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		run.ID,
+		run.WorkspaceID,
 		run.JobID,
 		run.ProbeID,
 		run.RequestID,
@@ -587,7 +604,7 @@ func (s *Store) setRunAdmission(runID, decision, reason string, rationale any, r
 
 // GetRun returns one run by id.
 func (s *Store) GetRun(id string) (*JobRun, error) {
-	row := s.db.QueryRow(`SELECT id, job_id, probe_id, request_id, execution_id, attempt, max_attempts, retry_scheduled_at, started_at, ended_at, status, admission_decision, admission_reason, admission_rationale, exit_code, output
+	row := s.db.QueryRow(`SELECT id, workspace_id, job_id, probe_id, request_id, execution_id, attempt, max_attempts, retry_scheduled_at, started_at, ended_at, status, admission_decision, admission_reason, admission_rationale, exit_code, output
 		FROM job_runs WHERE id = ?`, id)
 	return scanRun(row)
 }
@@ -599,7 +616,7 @@ func (s *Store) ListActiveRunsByJob(jobID string) ([]JobRun, error) {
 		return nil, fmt.Errorf("job id required")
 	}
 
-	rows, err := s.db.Query(`SELECT id, job_id, probe_id, request_id, execution_id, attempt, max_attempts, retry_scheduled_at, started_at, ended_at, status, admission_decision, admission_reason, admission_rationale, exit_code, output
+	rows, err := s.db.Query(`SELECT id, workspace_id, job_id, probe_id, request_id, execution_id, attempt, max_attempts, retry_scheduled_at, started_at, ended_at, status, admission_decision, admission_reason, admission_rationale, exit_code, output
 		FROM job_runs
 		WHERE job_id = ? AND status IN (?, ?, ?)
 		ORDER BY started_at DESC`, jobID, RunStatusQueued, RunStatusPending, RunStatusRunning)
@@ -799,7 +816,7 @@ func (s *Store) ListRuns(query RunQuery) ([]JobRun, error) {
 		args = append(args, query.StartedBefore.UTC().Format(time.RFC3339Nano))
 	}
 
-	stmt := `SELECT id, job_id, probe_id, request_id, execution_id, attempt, max_attempts, retry_scheduled_at, started_at, ended_at, status, admission_decision, admission_reason, admission_rationale, exit_code, output FROM job_runs`
+	stmt := `SELECT id, workspace_id, job_id, probe_id, request_id, execution_id, attempt, max_attempts, retry_scheduled_at, started_at, ended_at, status, admission_decision, admission_reason, admission_rationale, exit_code, output FROM job_runs`
 	if len(clauses) > 0 {
 		stmt += ` WHERE ` + strings.Join(clauses, " AND ")
 	}
@@ -920,6 +937,7 @@ func scanRun(s scanner) (*JobRun, error) {
 
 	if err := s.Scan(
 		&run.ID,
+		&run.WorkspaceID,
 		&run.JobID,
 		&run.ProbeID,
 		&run.RequestID,
@@ -974,6 +992,7 @@ func scanRun(s scanner) (*JobRun, error) {
 	if run.MaxAttempts <= 0 {
 		run.MaxAttempts = run.Attempt
 	}
+	run.WorkspaceID = strings.TrimSpace(run.WorkspaceID)
 	if strings.TrimSpace(run.ExecutionID) == "" {
 		run.ExecutionID = run.ID
 	}

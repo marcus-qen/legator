@@ -98,39 +98,70 @@ func TestStoreListRunsByWorkspace(t *testing.T) {
 	}
 	defer s.Close()
 
-	// Create a job and record a run with workspace_id on the query level.
-	// workspace_id on job_runs is filtered via RunQuery.WorkspaceID.
-	// Since job_runs doesn't have workspace_id in schema (it's derived from the job),
-	// we test via RunQuery.WorkspaceID filtering which falls through to the store.
-	// The important behaviour: RunQuery.WorkspaceID == "" returns all.
-	jobA, _ := s.CreateJob(Job{
+	jobA, err := s.CreateJob(Job{
 		WorkspaceID: "ws-a",
 		Name:        "j-a",
-		Command:     "echo",
+		Command:     "echo a",
 		Schedule:    "@hourly",
 		Target:      Target{Kind: TargetKindAll},
 		Enabled:     true,
 	})
-
-	_, err = s.RecordRunStart(JobRun{
-		JobID:     jobA.ID,
-		ProbeID:   "p-1",
-		RequestID: "req-1",
-		Status:    RunStatusRunning,
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobB, err := s.CreateJob(Job{
+		WorkspaceID: "ws-b",
+		Name:        "j-b",
+		Command:     "echo b",
+		Schedule:    "@hourly",
+		Target:      Target{Kind: TargetKindAll},
+		Enabled:     true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Empty workspace → returns all runs
-	runs, err := s.ListRuns(RunQuery{Limit: 10})
+	runA, err := s.RecordRunStart(JobRun{JobID: jobA.ID, ProbeID: "p-a", RequestID: "req-a", Status: RunStatusRunning})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(runs) != 1 {
-		t.Fatalf("expected 1 run, got %d", len(runs))
+	runB, err := s.RecordRunStart(JobRun{JobID: jobB.ID, ProbeID: "p-b", RequestID: "req-b", Status: RunStatusRunning})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if runA.WorkspaceID != "ws-a" {
+		t.Fatalf("expected runA workspace ws-a, got %q", runA.WorkspaceID)
+	}
+	if runB.WorkspaceID != "ws-b" {
+		t.Fatalf("expected runB workspace ws-b, got %q", runB.WorkspaceID)
+	}
+
+	runsA, err := s.ListRuns(RunQuery{WorkspaceID: "ws-a", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runsA) != 1 || runsA[0].RequestID != "req-a" {
+		t.Fatalf("expected only ws-a run, got %+v", runsA)
+	}
+
+	runsB, err := s.ListRuns(RunQuery{WorkspaceID: "ws-b", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runsB) != 1 || runsB[0].RequestID != "req-b" {
+		t.Fatalf("expected only ws-b run, got %+v", runsB)
+	}
+
+	allRuns, err := s.ListRuns(RunQuery{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(allRuns) != 2 {
+		t.Fatalf("expected 2 runs without workspace filter, got %d", len(allRuns))
 	}
 }
+
 
 func TestAsyncStoreWorkspaceIsolation(t *testing.T) {
 	s, err := NewStore(":memory:")

@@ -53,3 +53,16 @@ func TestWorkspaceScopeFromContextUnauthenticated(t *testing.T) {
 		t.Fatalf("expected empty unauthenticated scope, got %#v", scope)
 	}
 }
+
+func TestWorkspaceScopeFromContextUsesCachedScope(t *testing.T) {
+	ctx := WithAPIKeyContext(context.Background(), &APIKey{
+		ID:          "key-1",
+		Permissions: []Permission{"workspace:team-a"},
+	})
+	ctx = WithWorkspaceScopeContext(ctx, WorkspaceScope{WorkspaceID: "team-cached", Authenticated: true, Restricted: true})
+
+	scope := WorkspaceScopeFromContext(ctx)
+	if scope.WorkspaceID != "team-cached" {
+		t.Fatalf("expected cached workspace team-cached, got %q", scope.WorkspaceID)
+	}
+}

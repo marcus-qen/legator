@@ -11,6 +11,8 @@ const (
 	workspaceAllClaim         = "all"
 )
 
+const workspaceScopeContextKey contextKey = "workspaceScope"
+
 // WorkspaceScope resolves workspace access derived from the auth context.
 //
 // When Restricted is true, callers must enforce WorkspaceID scoping.
@@ -22,9 +24,37 @@ type WorkspaceScope struct {
 	Authenticated bool
 }
 
+// WithWorkspaceScopeContext caches a resolved workspace scope on request context.
+func WithWorkspaceScopeContext(ctx context.Context, scope WorkspaceScope) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	scope.WorkspaceID = strings.TrimSpace(scope.WorkspaceID)
+	return context.WithValue(ctx, workspaceScopeContextKey, scope)
+}
+
+func workspaceScopeFromContextValue(ctx context.Context) (WorkspaceScope, bool) {
+	if ctx == nil {
+		return WorkspaceScope{}, false
+	}
+	scope, ok := ctx.Value(workspaceScopeContextKey).(WorkspaceScope)
+	if !ok {
+		return WorkspaceScope{}, false
+	}
+	scope.WorkspaceID = strings.TrimSpace(scope.WorkspaceID)
+	return scope, true
+}
+
 // WorkspaceScopeFromContext resolves workspace access from API key claims or
 // session identity.
 func WorkspaceScopeFromContext(ctx context.Context) WorkspaceScope {
+	if cached, ok := workspaceScopeFromContextValue(ctx); ok {
+		return cached
+	}
+	return resolveWorkspaceScopeFromAuth(ctx)
+}
+
+func resolveWorkspaceScopeFromAuth(ctx context.Context) WorkspaceScope {
 	if key := FromContext(ctx); key != nil {
 		ids, wildcard := workspaceClaimsFromPermissions(key.Permissions)
 		if wildcard {

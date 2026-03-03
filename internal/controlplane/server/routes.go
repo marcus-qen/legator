@@ -868,7 +868,7 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	asyncJob, asyncJobErr := s.createAsyncCommandJob(id, cmd)
+	asyncJob, asyncJobErr := s.createAsyncCommandJob(id, cmd, s.workspaceJobFilter(r))
 	if asyncJob != nil {
 		w.Header().Set("X-Legator-Job-ID", asyncJob.ID)
 	}
@@ -1704,6 +1704,13 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
+	wsID := s.workspaceJobFilter(r)
+	if wsID != "" {
+		if _, ok := s.approvalQueue.GetCheckWorkspace(id, wsID); !ok {
+			writeJSONError(w, http.StatusNotFound, "not_found", "approval request not found")
+			return
+		}
+	}
 
 	projection := orchestrateDecideApprovalHTTP(r.Body, func(body *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error) {
 		return s.approvalCore.DecideAndDispatch(id, body.Decision, body.DecidedBy, s.dispatchApprovedCommand)

@@ -235,6 +235,9 @@ func TestEnvOverridesFile(t *testing.T) {
 	if cfg.SandboxEnforcement {
 		t.Error("env LEGATOR_SANDBOX_ENFORCEMENT=false should disable sandbox enforcement")
 	}
+	if !cfg.WorkspaceIsolation {
+		t.Error("env LEGATOR_WORKSPACE_ISOLATION=1 should enable workspace isolation")
+	}
 }
 
 func TestLoadFromEnvOnly(t *testing.T) {

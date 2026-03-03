@@ -18,11 +18,18 @@ import (
 	"go.uber.org/zap"
 )
 
-func (s *Server) createAsyncCommandJob(probeID string, cmd protocol.CommandPayload) (*jobs.AsyncJob, error) {
+func (s *Server) createAsyncCommandJob(probeID string, cmd protocol.CommandPayload, workspaceID string) (*jobs.AsyncJob, error) {
 	if s == nil || s.asyncJobsManager == nil {
 		return nil, nil
 	}
-	job, err := s.asyncJobsManager.CreateForCommand(probeID, cmd)
+	job, err := s.asyncJobsManager.CreateJob(jobs.AsyncJob{
+		WorkspaceID: strings.TrimSpace(workspaceID),
+		ProbeID:     strings.TrimSpace(probeID),
+		RequestID:   strings.TrimSpace(cmd.RequestID),
+		Command:     strings.TrimSpace(cmd.Command),
+		Args:        append([]string(nil), cmd.Args...),
+		Level:       string(cmd.Level),
+	})
 	if err != nil {
 		s.logger.Warn("create async job failed",
 			zap.String("probe_id", probeID),
@@ -32,9 +39,10 @@ func (s *Server) createAsyncCommandJob(probeID string, cmd protocol.CommandPaylo
 		return nil, err
 	}
 	s.recordAudit(audit.Event{
-		Type:    audit.EventJobCreated,
-		ProbeID: probeID,
-		Actor:   "api",
+		Type:        audit.EventJobCreated,
+		WorkspaceID: strings.TrimSpace(job.WorkspaceID),
+		ProbeID:     probeID,
+		Actor:       "api",
 		Summary: fmt.Sprintf("Async job created: %s", job.ID),
 		Detail: map[string]any{
 			"job_id":     job.ID,

@@ -123,3 +123,36 @@ func TestMiddlewareRedirectsWebPageToLoginWhenUnauthenticated(t *testing.T) {
 		t.Fatalf("expected redirect to /login, got %q", got)
 	}
 }
+
+func TestMiddlewareCachesWorkspaceScopeForAPIKey(t *testing.T) {
+	ks, err := NewKeyStore(filepath.Join(t.TempDir(), "auth.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ks.Close()
+
+	_, plain, err := ks.Create("ws-token", []Permission{PermFleetRead, Permission("workspace:team-a")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mw := NewMiddleware(ks, nil)
+	var scope WorkspaceScope
+	h := mw.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		scope = WorkspaceScopeFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/probes", nil)
+	req.Header.Set("Authorization", "Bearer "+plain)
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !scope.Authenticated || !scope.Restricted || scope.WorkspaceID != "team-a" {
+		t.Fatalf("unexpected scope: %#v", scope)
+	}
+}

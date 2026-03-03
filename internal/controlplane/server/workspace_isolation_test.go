@@ -294,3 +294,24 @@ func TestWorkspaceIsolation_ApprovalGetCrossWorkspaceForbidden(t *testing.T) {
 		t.Fatalf("expected 404 cross-workspace approval access, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
+
+// TestWorkspaceIsolation_ApprovalDecideCrossWorkspaceForbidden verifies cross-workspace
+// approval decisions are rejected when isolation is enabled.
+func TestWorkspaceIsolation_ApprovalDecideCrossWorkspaceForbidden(t *testing.T) {
+	srv := newIsolatedTestServer(t)
+
+	reqA, err := srv.approvalQueue.SubmitWithWorkspace("ws-a", "probe-a", nil, "reason", "high", "test", "queue", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := withWorkspaceAPIKey(
+		httptest.NewRequest(http.MethodPost, "/api/v1/approvals/"+reqA.ID+"/decide", strings.NewReader(`{"decision":"denied","decided_by":"operator"}`)),
+		"ws-b",
+	)
+	rr := doRequest(t, srv, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 cross-workspace approval decide, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
