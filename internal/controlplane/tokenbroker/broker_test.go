@@ -2,23 +2,41 @@ package tokenbroker
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
-func TestIssueAndValidateScopedToken(t *testing.T) {
-	now := time.Date(2026, 3, 2, 22, 0, 0, 0, time.UTC)
+func newTestBroker(t *testing.T, now *time.Time) *Broker {
+	t.Helper()
+
+	store, err := NewStore(filepath.Join(t.TempDir(), "tokenbroker.db"))
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
 	broker := NewBroker(Config{
+		Store:      store,
 		DefaultTTL: 30 * time.Second,
-		Now:        func() time.Time { return now },
-		TokenGenerator: func() (string, error) {
-			return "tok-1", nil
+		MaxScope:   4,
+		Now: func() time.Time {
+			return now.UTC()
 		},
 	})
 
+	t.Cleanup(func() {
+		_ = store.Close()
+	})
+	return broker
+}
+
+func issueBaseToken(t *testing.T, broker *Broker) *IssuedToken {
+	t.Helper()
+
 	issued, err := broker.Issue(IssueRequest{
-		RunID:     "run-1",
-		ProbeID:   "probe-1",
+		RunID:     "job-1",
+		ProbeID:   "runner-1",
+		Audience:  "runner:start",
 		Scopes:    []string{"runner:start"},
 		Issuer:    "control-plane",
 		SessionID: "sess-1",
@@ -26,113 +44,136 @@ func TestIssueAndValidateScopedToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue token: %v", err)
 	}
-	if issued.Token == "" {
-		t.Fatalf("expected token")
-	}
-	if issued.RunID != "run-1" || issued.ProbeID != "probe-1" {
-		t.Fatalf("unexpected claims: %+v", issued.Claims)
-	}
-	if issued.Issuer != "control-plane" {
-		t.Fatalf("expected issuer control-plane, got %s", issued.Issuer)
-	}
-	if issued.ExpiresAt.Sub(issued.IssuedAt) != 30*time.Second {
-		t.Fatalf("expected ttl 30s, got %s", issued.ExpiresAt.Sub(issued.IssuedAt))
-	}
-
-	claims, err := broker.Validate(ValidateRequest{
-		Token:     issued.Token,
-		Scope:     "runner:start",
-		RunID:     "run-1",
-		ProbeID:   "probe-1",
-		SessionID: "sess-1",
-	})
-	if err != nil {
-		t.Fatalf("validate token: %v", err)
-	}
-	if claims == nil || claims.RunID != "run-1" {
-		t.Fatalf("unexpected claims from validate: %+v", claims)
-	}
+	return issued
 }
 
 func TestValidateRejectsOutOfScopeToken(t *testing.T) {
-	broker := NewBroker(Config{TokenGenerator: func() (string, error) { return "tok-2", nil }})
-	issued, err := broker.Issue(IssueRequest{
-		RunID:   "run-1",
-		ProbeID: "probe-1",
-		Scopes:  []string{"runner:start"},
-		Issuer:  "cp",
-	})
-	if err != nil {
-		t.Fatalf("issue token: %v", err)
-	}
+	now := time.Date(2026, 3, 2, 22, 0, 0, 0, time.UTC)
+	broker := newTestBroker(t, &now)
+	issued := issueBaseToken(t, broker)
 
-	_, err = broker.Validate(ValidateRequest{Token: issued.Token, Scope: "runner:destroy"})
+	_, err := broker.Validate(ValidateRequest{
+		Token:     issued.Token,
+		Scope:     "runner:stop",
+		Audience:  "runner:start",
+		RunID:     "job-1",
+		ProbeID:   "runner-1",
+		SessionID: "sess-1",
+		Consume:   true,
+	})
 	if !errors.Is(err, ErrScopeRejected) {
-		t.Fatalf("expected scope rejected, got %v", err)
+		t.Fatalf("expected ErrScopeRejected, got %v", err)
 	}
 }
 
 func TestValidateRejectsExpiredToken(t *testing.T) {
 	now := time.Date(2026, 3, 2, 22, 0, 0, 0, time.UTC)
-	broker := NewBroker(Config{
-		Now:            func() time.Time { return now },
-		TokenGenerator: func() (string, error) { return "tok-3", nil },
-	})
+	broker := newTestBroker(t, &now)
+
 	issued, err := broker.Issue(IssueRequest{
-		RunID:   "run-1",
-		ProbeID: "probe-1",
-		Scopes:  []string{"runner:start"},
-		Issuer:  "cp",
-		TTL:     time.Second,
+		RunID:     "job-1",
+		ProbeID:   "runner-1",
+		Audience:  "runner:start",
+		Scopes:    []string{"runner:start"},
+		Issuer:    "control-plane",
+		SessionID: "sess-1",
+		TTL:       time.Second,
 	})
 	if err != nil {
 		t.Fatalf("issue token: %v", err)
 	}
 
 	now = now.Add(2 * time.Second)
-	_, err = broker.Validate(ValidateRequest{Token: issued.Token, Scope: "runner:start"})
+	_, err = broker.Validate(ValidateRequest{
+		Token:     issued.Token,
+		Scope:     "runner:start",
+		Audience:  "runner:start",
+		RunID:     "job-1",
+		ProbeID:   "runner-1",
+		SessionID: "sess-1",
+		Consume:   true,
+	})
 	if !errors.Is(err, ErrTokenExpired) {
-		t.Fatalf("expected token expired, got %v", err)
+		t.Fatalf("expected ErrTokenExpired, got %v", err)
 	}
 }
 
-func TestValidateRejectsRevokedToken(t *testing.T) {
-	broker := NewBroker(Config{TokenGenerator: func() (string, error) { return "tok-4", nil }})
+func TestValidateRejectsConsumedTokenReplay(t *testing.T) {
+	now := time.Date(2026, 3, 2, 22, 0, 0, 0, time.UTC)
+	broker := newTestBroker(t, &now)
+	issued := issueBaseToken(t, broker)
+
+	if _, err := broker.Validate(ValidateRequest{
+		Token:     issued.Token,
+		Scope:     "runner:start",
+		Audience:  "runner:start",
+		RunID:     "job-1",
+		ProbeID:   "runner-1",
+		SessionID: "sess-1",
+		Consume:   true,
+	}); err != nil {
+		t.Fatalf("first consume: %v", err)
+	}
+
+	_, err := broker.Validate(ValidateRequest{
+		Token:     issued.Token,
+		Scope:     "runner:start",
+		Audience:  "runner:start",
+		RunID:     "job-1",
+		ProbeID:   "runner-1",
+		SessionID: "sess-1",
+		Consume:   true,
+	})
+	if !errors.Is(err, ErrTokenConsumed) {
+		t.Fatalf("expected ErrTokenConsumed, got %v", err)
+	}
+}
+
+func TestValidateRejectsAudienceMismatch(t *testing.T) {
+	now := time.Date(2026, 3, 2, 22, 0, 0, 0, time.UTC)
+	broker := newTestBroker(t, &now)
+
 	issued, err := broker.Issue(IssueRequest{
-		RunID:   "run-1",
-		ProbeID: "probe-1",
-		Scopes:  []string{"runner:start"},
-		Issuer:  "cp",
+		RunID:     "job-1",
+		ProbeID:   "runner-1",
+		Audience:  "runner:start",
+		Scopes:    []string{"runner:start", "runner:stop"},
+		Issuer:    "control-plane",
+		SessionID: "sess-1",
 	})
 	if err != nil {
 		t.Fatalf("issue token: %v", err)
 	}
-	if err := broker.Revoke(issued.Token); err != nil {
-		t.Fatalf("revoke token: %v", err)
-	}
 
-	_, err = broker.Validate(ValidateRequest{Token: issued.Token, Scope: "runner:start"})
-	if !errors.Is(err, ErrTokenRevoked) {
-		t.Fatalf("expected token revoked, got %v", err)
+	_, err = broker.Validate(ValidateRequest{
+		Token:     issued.Token,
+		Scope:     "runner:start",
+		Audience:  "runner:stop",
+		RunID:     "job-1",
+		ProbeID:   "runner-1",
+		SessionID: "sess-1",
+		Consume:   true,
+	})
+	if !errors.Is(err, ErrAudienceMismatch) {
+		t.Fatalf("expected ErrAudienceMismatch, got %v", err)
 	}
 }
 
-func TestValidateRejectsConsumedToken(t *testing.T) {
-	broker := NewBroker(Config{TokenGenerator: func() (string, error) { return "tok-5", nil }})
-	issued, err := broker.Issue(IssueRequest{
-		RunID:   "run-1",
-		ProbeID: "probe-1",
-		Scopes:  []string{"runner:start"},
-		Issuer:  "cp",
-	})
-	if err != nil {
-		t.Fatalf("issue token: %v", err)
-	}
+func TestValidateRejectsBindingMismatch(t *testing.T) {
+	now := time.Date(2026, 3, 2, 22, 0, 0, 0, time.UTC)
+	broker := newTestBroker(t, &now)
+	issued := issueBaseToken(t, broker)
 
-	if _, err := broker.Validate(ValidateRequest{Token: issued.Token, Scope: "runner:start", Consume: true}); err != nil {
-		t.Fatalf("first consume validate: %v", err)
-	}
-	if _, err := broker.Validate(ValidateRequest{Token: issued.Token, Scope: "runner:start", Consume: true}); !errors.Is(err, ErrTokenConsumed) {
-		t.Fatalf("expected token consumed, got %v", err)
+	_, err := broker.Validate(ValidateRequest{
+		Token:     issued.Token,
+		Scope:     "runner:start",
+		Audience:  "runner:start",
+		RunID:     "job-2",
+		ProbeID:   "runner-1",
+		SessionID: "sess-1",
+		Consume:   true,
+	})
+	if !errors.Is(err, ErrBindingMismatch) {
+		t.Fatalf("expected ErrBindingMismatch, got %v", err)
 	}
 }

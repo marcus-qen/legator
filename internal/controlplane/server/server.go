@@ -46,6 +46,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/runner"
 	"github.com/marcus-qen/legator/internal/controlplane/session"
 	"github.com/marcus-qen/legator/internal/controlplane/tenant"
+	"github.com/marcus-qen/legator/internal/controlplane/tokenbroker"
 	"github.com/marcus-qen/legator/internal/controlplane/users"
 	"github.com/marcus-qen/legator/internal/controlplane/webhook"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
@@ -488,6 +489,9 @@ func (s *Server) Close() {
 	if s.sessionStore != nil {
 		s.sessionStore.Close()
 	}
+	if s.runnerManager != nil {
+		_ = s.runnerManager.Close()
+	}
 }
 
 // ── Init helpers ─────────────────────────────────────────────
@@ -694,10 +698,38 @@ func (s *Server) initRunnerManager() {
 		DefaultTimeout: s.cfg.Jobs.RunnerSandboxTimeoutDuration(),
 		EventSink:      s.recordRunnerBackendEvent,
 	})
-	s.runnerManager = runner.NewManager(runner.Config{RunTokenTTL: s.cfg.Jobs.RunTokenTTLDuration()})
+
+	runTokenTTL := s.cfg.TokenBrokerDefaultTTLDuration()
+	var broker *tokenbroker.Broker
+	brokerPath := filepath.Join(s.cfg.DataDir, "runner_tokens.db")
+	if err := os.MkdirAll(s.cfg.DataDir, 0750); err != nil {
+		s.logger.Warn("cannot create data dir for runner token broker; using in-memory broker",
+			zap.String("dir", s.cfg.DataDir), zap.Error(err))
+	} else {
+		store, err := tokenbroker.NewStore(brokerPath)
+		if err != nil {
+			s.logger.Warn("cannot open runner token broker store; using in-memory broker",
+				zap.String("path", brokerPath), zap.Error(err))
+		} else {
+			broker = tokenbroker.NewBroker(tokenbroker.Config{
+				Store:      store,
+				DefaultTTL: runTokenTTL,
+				MaxScope:   s.cfg.TokenBroker.MaxScopeOrDefault(),
+				AuditSink:  s.recordTokenBrokerAuditEvent,
+			})
+		}
+	}
+
+	s.runnerManager = runner.NewManager(runner.Config{
+		RunTokenTTL: runTokenTTL,
+		TokenBroker: broker,
+	})
 	s.logger.Info(
 		"runner manager initialized",
-		zap.Duration("run_token_ttl", s.cfg.Jobs.RunTokenTTLDuration()),
+		zap.Duration("run_token_ttl", runTokenTTL),
+		zap.Int("token_broker_max_scope", s.cfg.TokenBroker.MaxScopeOrDefault()),
+		zap.Bool("token_broker_persistent", broker != nil),
+		zap.String("token_broker_path", brokerPath),
 		zap.String("runner_sandbox_runtime", strings.TrimSpace(s.cfg.Jobs.RunnerSandboxRuntimeCommand)),
 		zap.String("runner_sandbox_image", strings.TrimSpace(s.cfg.Jobs.RunnerSandboxImage)),
 		zap.Duration("runner_sandbox_timeout", s.cfg.Jobs.RunnerSandboxTimeoutDuration()),

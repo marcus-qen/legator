@@ -69,6 +69,12 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Jobs.RunTokenTTLDuration() != 2*time.Minute {
 		t.Errorf("expected run token ttl 2m, got %s", cfg.Jobs.RunTokenTTLDuration())
 	}
+	if cfg.TokenBrokerDefaultTTLDuration() != 2*time.Minute {
+		t.Errorf("expected token broker ttl fallback 2m, got %s", cfg.TokenBrokerDefaultTTLDuration())
+	}
+	if cfg.TokenBroker.MaxScopeOrDefault() != 8 {
+		t.Errorf("expected token broker max scope 8, got %d", cfg.TokenBroker.MaxScopeOrDefault())
+	}
 	if cfg.Jobs.RunnerSandboxRuntimeCommand != "podman" {
 		t.Errorf("expected sandbox runtime command podman, got %s", cfg.Jobs.RunnerSandboxRuntimeCommand)
 	}
@@ -245,6 +251,8 @@ func TestLoadFromEnvOnly(t *testing.T) {
 	t.Setenv("LEGATOR_JOBS_RUNNER_SANDBOX_RUNTIME_COMMAND", "podman")
 	t.Setenv("LEGATOR_JOBS_RUNNER_SANDBOX_IMAGE", "ghcr.io/example/sandbox:latest")
 	t.Setenv("LEGATOR_JOBS_RUNNER_SANDBOX_TIMEOUT", "95s")
+	t.Setenv("LEGATOR_TOKEN_BROKER_DEFAULT_TTL", "30s")
+	t.Setenv("LEGATOR_TOKEN_BROKER_MAX_SCOPE", "3")
 
 	cfg := LoadFromEnv()
 	if cfg.DataDir != "/tmp/env-test" {
@@ -297,6 +305,12 @@ func TestLoadFromEnvOnly(t *testing.T) {
 	}
 	if cfg.Jobs.RunTokenTTLDuration() != 45*time.Second {
 		t.Errorf("expected run token ttl 45s, got %s", cfg.Jobs.RunTokenTTLDuration())
+	}
+	if cfg.TokenBrokerDefaultTTLDuration() != 30*time.Second {
+		t.Errorf("expected token broker ttl 30s, got %s", cfg.TokenBrokerDefaultTTLDuration())
+	}
+	if cfg.TokenBroker.MaxScopeOrDefault() != 3 {
+		t.Errorf("expected token broker max scope 3, got %d", cfg.TokenBroker.MaxScopeOrDefault())
 	}
 	if cfg.Jobs.RunnerSandboxRuntimeCommand != "podman" {
 		t.Errorf("expected sandbox runtime podman, got %s", cfg.Jobs.RunnerSandboxRuntimeCommand)

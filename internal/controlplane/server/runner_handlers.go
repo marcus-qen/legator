@@ -13,6 +13,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
 	"github.com/marcus-qen/legator/internal/controlplane/runner"
+	"github.com/marcus-qen/legator/internal/controlplane/tokenbroker"
 )
 
 func (s *Server) handleCreateRunner(w http.ResponseWriter, r *http.Request) {
@@ -373,6 +374,52 @@ func (s *Server) recordRunnerBackendEvent(evt runner.BackendEvent) {
 			Detail:  detail,
 		})
 	}
+}
+
+func (s *Server) recordTokenBrokerAuditEvent(evt tokenbroker.Event) {
+	detail := map[string]any{
+		"token":      strings.TrimSpace(evt.Token),
+		"runner_id":  strings.TrimSpace(evt.ProbeID),
+		"job_id":     strings.TrimSpace(evt.RunID),
+		"audience":   strings.TrimSpace(evt.Audience),
+		"session_id": strings.TrimSpace(evt.SessionID),
+		"issuer":     strings.TrimSpace(evt.Issuer),
+	}
+	if len(evt.Scopes) > 0 {
+		detail["scope"] = append([]string(nil), evt.Scopes...)
+	}
+	if !evt.IssuedAt.IsZero() {
+		detail["issued_at"] = evt.IssuedAt
+	}
+	if !evt.ExpiresAt.IsZero() {
+		detail["expires_at"] = evt.ExpiresAt
+	}
+	if !evt.UsedAt.IsZero() {
+		detail["used_at"] = evt.UsedAt
+	}
+	if reason := strings.TrimSpace(evt.Reason); reason != "" {
+		detail["reason"] = reason
+	}
+
+	actor := strings.TrimSpace(evt.Issuer)
+	if actor == "" {
+		actor = strings.TrimSpace(evt.SessionID)
+	}
+	if actor == "" {
+		actor = "system"
+	}
+
+	summary := fmt.Sprintf("Token event %s", evt.Type)
+	if rid := strings.TrimSpace(evt.ProbeID); rid != "" {
+		summary = fmt.Sprintf("Token event %s for runner %s", evt.Type, rid)
+	}
+
+	s.recordAudit(audit.Event{
+		Type:    audit.EventType(evt.Type),
+		Actor:   actor,
+		Summary: summary,
+		Detail:  detail,
+	})
 }
 
 func audienceTargetState(audience runner.Audience) (runner.State, bool) {
