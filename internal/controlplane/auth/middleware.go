@@ -25,6 +25,28 @@ func UserFromContext(ctx context.Context) *AuthenticatedUser {
 	return user
 }
 
+// WithAPIKeyContext attaches an authenticated API key to context.
+func WithAPIKeyContext(ctx context.Context, key *APIKey) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if key == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, apiKeyContextKey, key)
+}
+
+// WithUserContext attaches an authenticated session user to context.
+func WithUserContext(ctx context.Context, user *AuthenticatedUser) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if user == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, userContextKey, user)
+}
+
 // IsAuthenticated reports whether either API key or session auth is present.
 func IsAuthenticated(ctx context.Context) bool {
 	return FromContext(ctx) != nil || UserFromContext(ctx) != nil
@@ -186,7 +208,8 @@ func (m *AuthMiddleware) tryAPIKeyAuth(w http.ResponseWriter, r *http.Request, n
 		return true
 	}
 
-	ctx := context.WithValue(r.Context(), apiKeyContextKey, key)
+	ctx := WithAPIKeyContext(r.Context(), key)
+	ctx = WithWorkspaceScopeContext(ctx, resolveWorkspaceScopeFromAuth(ctx))
 	next.ServeHTTP(w, r.WithContext(ctx))
 	return true
 }
@@ -207,16 +230,18 @@ func (m *AuthMiddleware) trySessionAuth(r *http.Request, next http.Handler, w ht
 	}
 
 	user := &AuthenticatedUser{
-		ID:        session.UserID,
-		Username:  session.Username,
-		Role:      session.Role,
-		SessionID: session.Token,
+		ID:          session.UserID,
+		Username:    session.Username,
+		Role:        session.Role,
+		SessionID:   session.Token,
+		WorkspaceID: session.WorkspaceID,
 	}
 	if m.permissionResolver != nil {
 		user.Permissions = m.permissionResolver.PermissionsForRole(session.Role)
 	}
 
-	ctx := context.WithValue(r.Context(), userContextKey, user)
+	ctx := WithUserContext(r.Context(), user)
+	ctx = WithWorkspaceScopeContext(ctx, resolveWorkspaceScopeFromAuth(ctx))
 	next.ServeHTTP(w, r.WithContext(ctx))
 	return true
 }

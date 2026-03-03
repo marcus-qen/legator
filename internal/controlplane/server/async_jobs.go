@@ -32,9 +32,10 @@ func (s *Server) createAsyncCommandJob(probeID, workspaceID string, cmd protocol
 		return nil, err
 	}
 	s.recordAudit(audit.Event{
-		Type:    audit.EventJobCreated,
-		ProbeID: probeID,
-		Actor:   "api",
+		Type:        audit.EventJobCreated,
+		WorkspaceID: strings.TrimSpace(job.WorkspaceID),
+		ProbeID:     probeID,
+		Actor:       "api",
 		Summary: fmt.Sprintf("Async job created: %s", job.ID),
 		Detail: map[string]any{
 			"job_id":       job.ID,

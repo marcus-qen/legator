@@ -22,6 +22,7 @@ const (
 // Job describes a scheduled command execution definition.
 type Job struct {
 	ID          string       `json:"id"`
+	WorkspaceID string       `json:"workspace_id,omitempty"`
 	Name        string       `json:"name"`
 	Command     string       `json:"command"`
 	Schedule    string       `json:"schedule"`
@@ -52,6 +53,7 @@ type Target struct {
 // JobRun captures one execution attempt of a job on a single probe.
 type JobRun struct {
 	ID                 string          `json:"id"`
+	WorkspaceID        string          `json:"workspace_id,omitempty"`
 	JobID              string          `json:"job_id"`
 	ProbeID            string          `json:"probe_id"`
 	RequestID          string          `json:"request_id"`

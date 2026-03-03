@@ -150,6 +150,7 @@ func (s *Store) CreateAsyncJob(job AsyncJob) (*AsyncJob, error) {
 		approved_by, rejected_by, rejection_reason, approval_deadline
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID,
+		strings.TrimSpace(job.WorkspaceID),
 		job.ProbeID,
 		job.WorkspaceID,
 		job.RequestID,
@@ -606,6 +607,7 @@ func scanAsyncJob(s scanner) (*AsyncJob, error) {
 
 	if err := s.Scan(
 		&job.ID,
+		&job.WorkspaceID,
 		&job.ProbeID,
 		&job.WorkspaceID,
 		&job.RequestID,
@@ -799,4 +801,56 @@ func (s *Store) ExtendApprovalExpiry(jobID string, newExpiry time.Time) error {
 		string(AsyncJobStateWaitingApproval),
 	)
 	return err
+}
+
+// ListAsyncJobsByWorkspace returns async jobs for a specific workspace.
+// When workspaceID is empty it behaves like ListAsyncJobs (no filter).
+func (s *Store) ListAsyncJobsByWorkspace(workspaceID string, limit int) ([]AsyncJob, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("store unavailable")
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return s.ListAsyncJobs(limit)
+	}
+	limit = normalizeAsyncJobLimit(limit)
+	rows, err := s.db.Query(`SELECT
+		id, workspace_id, probe_id, request_id, command, args_json, level, state, status_reason, approval_id,
+		exit_code, output, created_at, updated_at, started_at, finished_at, expires_at,
+		approved_by, rejected_by, rejection_reason, approval_deadline
+		FROM async_jobs
+		WHERE workspace_id = ?
+		ORDER BY created_at DESC
+		LIMIT ?`, workspaceID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]AsyncJob, 0, limit)
+	for rows.Next() {
+		job, err := scanAsyncJob(rows)
+		if err != nil {
+			continue
+		}
+		out = append(out, *job)
+	}
+	return out, rows.Err()
+}
+
+// GetAsyncJobCheckWorkspace fetches an async job and returns ErrWorkspaceMismatch
+// if the workspace_id on the record doesn't match expectedWorkspace.
+// When expectedWorkspace is empty the check is skipped (single-workspace mode).
+func (s *Store) GetAsyncJobCheckWorkspace(id, expectedWorkspace string) (*AsyncJob, error) {
+	job, err := s.GetAsyncJob(id)
+	if err != nil {
+		return nil, err
+	}
+	if expectedWorkspace == "" {
+		return job, nil
+	}
+	if job.WorkspaceID != "" && job.WorkspaceID != expectedWorkspace {
+		return nil, ErrWorkspaceMismatch
+	}
+	return job, nil
 }

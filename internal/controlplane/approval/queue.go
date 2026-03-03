@@ -27,6 +27,7 @@ const (
 // Request is a pending approval item.
 type Request struct {
 	ID              string                   `json:"id"`
+	WorkspaceID     string                   `json:"workspace_id,omitempty"`
 	ProbeID         string                   `json:"probe_id"`
 	Command         *protocol.CommandPayload `json:"command"`
 	Reason          string                   `json:"reason"`     // why the action was requested
@@ -63,6 +64,22 @@ func NewQueue(ttl time.Duration, maxSize int) *Queue {
 // Submit adds a new approval request without policy explainability metadata.
 func (q *Queue) Submit(probeID string, cmd *protocol.CommandPayload, reason, riskLevel, requester string) (*Request, error) {
 	return q.SubmitWithPolicyDetails(probeID, cmd, reason, riskLevel, requester, "", nil)
+}
+
+// SubmitWithWorkspace is like SubmitWithPolicyDetails but also tags the workspace.
+func (q *Queue) SubmitWithWorkspace(workspaceID, probeID string, cmd *protocol.CommandPayload, reason, riskLevel, requester, policyDecision string, policyRationale any) (*Request, error) {
+	req, err := q.SubmitWithPolicyDetails(probeID, cmd, reason, riskLevel, requester, policyDecision, policyRationale)
+	if err != nil {
+		return nil, err
+	}
+	if req != nil && strings.TrimSpace(workspaceID) != "" {
+		q.mu.Lock()
+		if r, ok := q.requests[req.ID]; ok {
+			r.WorkspaceID = strings.TrimSpace(workspaceID)
+		}
+		q.mu.Unlock()
+	}
+	return req, nil
 }
 
 // SubmitWithPolicyDetails adds a new approval request and stores policy explainability details.
@@ -254,6 +271,58 @@ func sortRequestsByTime(reqs []*Request) {
 			reqs[j], reqs[j-1] = reqs[j-1], reqs[j]
 		}
 	}
+}
+
+// PendingByWorkspace returns all pending (non-expired) requests for a specific workspace.
+// When workspaceID is empty it returns all pending requests regardless of workspace.
+func (q *Queue) PendingByWorkspace(workspaceID string) []*Request {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.evictExpiredLocked()
+	var result []*Request
+	for _, req := range q.requests {
+		if req.Decision != DecisionPending {
+			continue
+		}
+		if workspaceID != "" && req.WorkspaceID != "" && req.WorkspaceID != workspaceID {
+			continue
+		}
+		result = append(result, req)
+	}
+	sortRequestsByTime(result)
+	return result
+}
+
+// AllByWorkspace returns all requests for a workspace, newest first, up to limit.
+// When workspaceID is empty it returns all requests regardless of workspace.
+func (q *Queue) AllByWorkspace(workspaceID string, limit int) []*Request {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+	var result []*Request
+	for _, req := range q.requests {
+		if workspaceID != "" && req.WorkspaceID != "" && req.WorkspaceID != workspaceID {
+			continue
+		}
+		result = append(result, req)
+	}
+	sortRequestsByTime(result)
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result
+}
+
+// GetCheckWorkspace fetches a request and returns (nil, false) if it belongs
+// to a different workspace. When expectedWorkspace is empty no check is performed.
+func (q *Queue) GetCheckWorkspace(id, expectedWorkspace string) (*Request, bool) {
+	req, ok := q.Get(id)
+	if !ok {
+		return nil, false
+	}
+	if expectedWorkspace != "" && req.WorkspaceID != "" && req.WorkspaceID != expectedWorkspace {
+		return nil, false
+	}
+	return req, true
 }
 
 // ClassifyRisk returns a risk level based on command intent.

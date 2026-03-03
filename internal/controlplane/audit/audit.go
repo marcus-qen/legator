@@ -135,6 +135,9 @@ func (l *Log) Query(f Filter) []Event {
 	for i := len(l.events) - 1; i >= 0; i-- {
 		evt := l.events[i]
 
+		if f.WorkspaceID != "" && evt.WorkspaceID != f.WorkspaceID {
+			continue
+		}
 		if f.ProbeID != "" && evt.ProbeID != f.ProbeID {
 			continue
 		}

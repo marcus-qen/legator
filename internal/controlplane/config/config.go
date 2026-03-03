@@ -27,6 +27,9 @@ type Config struct {
 	// Auth
 	AuthEnabled bool `json:"auth_enabled"`
 
+	// Workspace isolation gates run/approval/audit access to auth-derived workspace scope.
+	WorkspaceIsolation bool `json:"workspace_isolation"`
+
 	// OIDC settings (optional)
 	OIDC oidc.Config `json:"oidc,omitempty"`
 
@@ -368,6 +371,9 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("LEGATOR_AUTH"); v != "" {
 		cfg.AuthEnabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("LEGATOR_WORKSPACE_ISOLATION"); v != "" {
+		cfg.WorkspaceIsolation = v == "true" || v == "1"
 	}
 	if v := os.Getenv("LEGATOR_SIGNING_KEY"); v != "" {
 		cfg.SigningKey = v

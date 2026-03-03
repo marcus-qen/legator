@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"strings"
 	"database/sql"
 	"encoding/csv"
 	"encoding/json"
@@ -82,6 +83,7 @@ func NewStore(dbPath string, memoryLimit int) (*Store, error) {
 	}
 
 	// Index for common queries
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_workspace ON audit_events(workspace_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_probe ON audit_events(probe_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_type ON audit_events(type)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_events(timestamp)`)
@@ -316,6 +318,7 @@ func (s *Store) persist(evt Event) error {
 		evt.ID,
 		evt.Timestamp.Format(time.RFC3339Nano),
 		string(evt.Type),
+		strings.TrimSpace(evt.WorkspaceID),
 		evt.ProbeID,
 		evt.WorkspaceID,
 		evt.Actor,

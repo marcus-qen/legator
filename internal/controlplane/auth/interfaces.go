@@ -28,10 +28,11 @@ type SessionValidator interface {
 
 // SessionInfo is the authenticated session identity.
 type SessionInfo struct {
-	Token    string `json:"token"`
-	UserID   string `json:"user_id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	Token       string `json:"token"`
+	UserID      string `json:"user_id"`
+	Username    string `json:"username"`
+	Role        string `json:"role"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
 }
 
 // SessionDeleter invalidates an existing session token.
@@ -51,5 +52,6 @@ type AuthenticatedUser struct {
 	DisplayName string       `json:"display_name,omitempty"`
 	Role        string       `json:"role"`
 	SessionID   string       `json:"session_id,omitempty"`
+	WorkspaceID string       `json:"workspace_id,omitempty"`
 	Permissions []Permission `json:"permissions,omitempty"`
 }

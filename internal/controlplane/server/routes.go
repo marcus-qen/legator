@@ -225,19 +225,19 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Scheduled jobs
 	if s.jobsHandler != nil {
-		mux.HandleFunc("GET /api/v1/jobs", s.withPermission(auth.PermFleetRead, s.jobsHandler.HandleListJobs))
-		mux.HandleFunc("GET /api/v1/jobs/runs", s.withPermission(auth.PermFleetRead, s.jobsHandler.HandleListAllRuns))
-		mux.HandleFunc("POST /api/v1/jobs", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleCreateJob))
-		mux.HandleFunc("GET /api/v1/jobs/{id}", s.withPermission(auth.PermFleetRead, s.jobsHandler.HandleGetJob))
-		mux.HandleFunc("PUT /api/v1/jobs/{id}", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleUpdateJob))
-		mux.HandleFunc("DELETE /api/v1/jobs/{id}", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleDeleteJob))
-		mux.HandleFunc("POST /api/v1/jobs/{id}/run", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleRunJob))
-		mux.HandleFunc("POST /api/v1/jobs/{id}/cancel", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleCancelJob))
-		mux.HandleFunc("GET /api/v1/jobs/{id}/runs", s.withPermission(auth.PermFleetRead, s.jobsHandler.HandleListRuns))
-		mux.HandleFunc("POST /api/v1/jobs/{id}/runs/{runId}/cancel", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleCancelRun))
-		mux.HandleFunc("POST /api/v1/jobs/{id}/runs/{runId}/retry", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleRetryRun))
-		mux.HandleFunc("POST /api/v1/jobs/{id}/enable", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleEnableJob))
-		mux.HandleFunc("POST /api/v1/jobs/{id}/disable", s.withPermission(auth.PermFleetWrite, s.jobsHandler.HandleDisableJob))
+		mux.HandleFunc("GET /api/v1/jobs", s.withPermission(auth.PermFleetRead, s.withWorkspaceScope(s.jobsHandler.HandleListJobs)))
+		mux.HandleFunc("GET /api/v1/jobs/runs", s.withPermission(auth.PermFleetRead, s.withWorkspaceScope(s.jobsHandler.HandleListAllRuns)))
+		mux.HandleFunc("POST /api/v1/jobs", s.withPermission(auth.PermFleetWrite, s.withWorkspaceScope(s.jobsHandler.HandleCreateJob)))
+		mux.HandleFunc("GET /api/v1/jobs/{id}", s.withPermission(auth.PermFleetRead, s.withWorkspaceScope(s.jobsHandler.HandleGetJob)))
+		mux.HandleFunc("PUT /api/v1/jobs/{id}", s.withPermission(auth.PermFleetWrite, s.withWorkspaceScope(s.jobsHandler.HandleUpdateJob)))
+		mux.HandleFunc("DELETE /api/v1/jobs/{id}", s.withPermission(auth.PermFleetWrite, s.withWorkspaceScope(s.jobsHandler.HandleDeleteJob)))
+		mux.HandleFunc("POST /api/v1/jobs/{id}/run", s.withPermission(auth.PermFleetWrite, s.withWorkspaceScope(s.jobsHandler.HandleRunJob)))
+		mux.HandleFunc("POST /api/v1/jobs/{id}/cancel", s.withPermission(auth.PermFleetWrite, s.withWorkspaceScope(s.jobsHandler.HandleCancelJob)))
+		mux.HandleFunc("GET /api/v1/jobs/{id}/runs", s.withPermission(auth.PermFleetRead, s.withWorkspaceScope(s.jobsHandler.HandleListRuns)))
+		mux.HandleFunc("POST /api/v1/jobs/{id}/runs/{runId}/cancel", s.withPermission(auth.PermFleetWrite, s.withWorkspaceScope(s.jobsHandler.HandleCancelRun)))
+		mux.HandleFunc("POST /api/v1/jobs/{id}/runs/{runId}/retry", s.withPermission(auth.PermFleetWrite, s.withWorkspaceScope(s.jobsHandler.HandleRetryRun)))
+		mux.HandleFunc("POST /api/v1/jobs/{id}/enable", s.withPermission(auth.PermFleetWrite, s.withWorkspaceScope(s.jobsHandler.HandleEnableJob)))
+		mux.HandleFunc("POST /api/v1/jobs/{id}/disable", s.withPermission(auth.PermFleetWrite, s.withWorkspaceScope(s.jobsHandler.HandleDisableJob)))
 	} else {
 		mux.HandleFunc("GET /api/v1/jobs", s.withPermission(auth.PermFleetRead, s.handleJobsUnavailable))
 		mux.HandleFunc("GET /api/v1/jobs/runs", s.withPermission(auth.PermFleetRead, s.handleJobsUnavailable))
@@ -904,7 +904,8 @@ asyncJob, asyncJobErr := s.createAsyncCommandJob(id, workspaceID, cmd)
 		if breakglass.Confirmed {
 			approvalReason = fmt.Sprintf("%s (breakglass)", approvalReason)
 		}
-		req, err := s.approvalQueue.SubmitWithPolicyDetails(
+		req, err := s.approvalQueue.SubmitWithWorkspace(
+			s.workspaceJobFilter(r),
 			id,
 			&cmd,
 			approvalReason,
@@ -1672,16 +1673,17 @@ func (s *Server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	w.Header().Set("Content-Type", "application/json")
 
+	wsID := s.workspaceJobFilter(r)
 	if status == "pending" {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"approvals":     s.approvalQueue.Pending(),
+			"approvals":     s.approvalQueue.PendingByWorkspace(wsID),
 			"pending_count": s.approvalQueue.PendingCount(),
 		})
 		return
 	}
 
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"approvals":     s.approvalQueue.All(limit),
+		"approvals":     s.approvalQueue.AllByWorkspace(wsID, limit),
 		"pending_count": s.approvalQueue.PendingCount(),
 	})
 }
@@ -1691,7 +1693,8 @@ func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	req, ok := s.approvalQueue.Get(id)
+	wsID := s.workspaceJobFilter(r)
+	req, ok := s.approvalQueue.GetCheckWorkspace(id, wsID)
 	if !ok {
 		writeJSONError(w, http.StatusNotFound, "not_found", "approval request not found")
 		return
@@ -1705,6 +1708,13 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
+	wsID := s.workspaceJobFilter(r)
+	if wsID != "" {
+		if _, ok := s.approvalQueue.GetCheckWorkspace(id, wsID); !ok {
+			writeJSONError(w, http.StatusNotFound, "not_found", "approval request not found")
+			return
+		}
+	}
 
 	projection := orchestrateDecideApprovalHTTP(r.Body, func(body *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error) {
 		return s.approvalCore.DecideAndDispatch(id, body.Decision, body.DecidedBy, s.dispatchApprovedCommand)
@@ -1723,6 +1733,9 @@ func (s *Server) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
+	}
+	if wsID := s.workspaceJobFilter(r); wsID != "" {
+		filter.WorkspaceID = wsID
 	}
 
 	total := s.countAudit()
@@ -1779,6 +1792,9 @@ func (s *Server) handleAuditExportJSONL(w http.ResponseWriter, r *http.Request) 
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	if wsID := s.workspaceJobFilter(r); wsID != "" {
+		filter.WorkspaceID = wsID
+	}
 
 	filename := fmt.Sprintf("legator-audit-%s.jsonl", time.Now().UTC().Format("20060102"))
 	w.Header().Set("Content-Type", "application/x-ndjson")
@@ -1802,6 +1818,9 @@ func (s *Server) handleAuditExportCSV(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
+	}
+	if wsID := s.workspaceJobFilter(r); wsID != "" {
+		filter.WorkspaceID = wsID
 	}
 
 	filename := fmt.Sprintf("legator-audit-%s.csv", time.Now().UTC().Format("20060102"))
@@ -1912,6 +1931,16 @@ func (s *Server) handleSSEStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Workspace isolation: resolve the async job owning this request and check workspace.
+	if wsID := s.workspaceJobFilter(r); wsID != "" && s.jobsStore != nil {
+		if existing, wsErr := s.jobsStore.GetAsyncJobByRequestID(requestID); wsErr == nil {
+			if existing.WorkspaceID != "" && existing.WorkspaceID != wsID {
+				writeJSONError(w, http.StatusForbidden, "workspace_forbidden", "access to this stream is not permitted for your workspace")
+				return
+			}
+		}
+	}
+
 	query, err := commandReplayQueryFromRequest(r, requestID)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -2001,6 +2030,17 @@ func (s *Server) handleCommandReplay(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", "request_id required")
 		return
 	}
+
+	// Workspace isolation: resolve the async job owning this request and check workspace.
+	if wsID := s.workspaceJobFilter(r); wsID != "" && s.jobsStore != nil {
+		if existing, wsErr := s.jobsStore.GetAsyncJobByRequestID(requestID); wsErr == nil {
+			if existing.WorkspaceID != "" && existing.WorkspaceID != wsID {
+				writeJSONError(w, http.StatusForbidden, "workspace_forbidden", "access to this stream is not permitted for your workspace")
+				return
+			}
+		}
+	}
+
 	if s.commandStreams == nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "command stream replay unavailable")
 		return
