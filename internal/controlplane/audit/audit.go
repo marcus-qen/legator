@@ -48,6 +48,7 @@ const (
 	EventRunnerArtifactUploaded     EventType = "runner.artifact_uploaded"
 	EventRunnerArtifactDownloaded   EventType = "runner.artifact_downloaded"
 	EventRunnerArtifactAccessDenied EventType = "runner.artifact_access_denied"
+	EventRunnerProviderProxy        EventType = "runner.provider_proxy"
 	EventRunnerTeardown             EventType = "runner.teardown"
 	EventRunnerError                EventType = "runner.error"
 	EventBreakglassCommand          EventType = "breakglass.command"

@@ -75,6 +75,12 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.TokenBroker.MaxScopeOrDefault() != 8 {
 		t.Errorf("expected token broker max scope 8, got %d", cfg.TokenBroker.MaxScopeOrDefault())
 	}
+	if cfg.ProviderProxy.MaxTokensPerRun != 0 {
+		t.Errorf("expected provider proxy max tokens default 0, got %d", cfg.ProviderProxy.MaxTokensPerRun)
+	}
+	if cfg.ProviderProxy.MaxCostPerRun != 0 {
+		t.Errorf("expected provider proxy max cost default 0, got %v", cfg.ProviderProxy.MaxCostPerRun)
+	}
 	if cfg.Jobs.RunnerSandboxRuntimeCommand != "podman" {
 		t.Errorf("expected sandbox runtime command podman, got %s", cfg.Jobs.RunnerSandboxRuntimeCommand)
 	}
@@ -253,6 +259,8 @@ func TestLoadFromEnvOnly(t *testing.T) {
 	t.Setenv("LEGATOR_JOBS_RUNNER_SANDBOX_TIMEOUT", "95s")
 	t.Setenv("LEGATOR_TOKEN_BROKER_DEFAULT_TTL", "30s")
 	t.Setenv("LEGATOR_TOKEN_BROKER_MAX_SCOPE", "3")
+	t.Setenv("LEGATOR_PROVIDER_PROXY_MAX_TOKENS_PER_RUN", "12000")
+	t.Setenv("LEGATOR_PROVIDER_PROXY_MAX_COST_PER_RUN", "3.75")
 
 	cfg := LoadFromEnv()
 	if cfg.DataDir != "/tmp/env-test" {
@@ -311,6 +319,12 @@ func TestLoadFromEnvOnly(t *testing.T) {
 	}
 	if cfg.TokenBroker.MaxScopeOrDefault() != 3 {
 		t.Errorf("expected token broker max scope 3, got %d", cfg.TokenBroker.MaxScopeOrDefault())
+	}
+	if cfg.ProviderProxy.MaxTokensPerRun != 12000 {
+		t.Errorf("expected provider proxy max tokens 12000, got %d", cfg.ProviderProxy.MaxTokensPerRun)
+	}
+	if cfg.ProviderProxy.MaxCostPerRun != 3.75 {
+		t.Errorf("expected provider proxy max cost 3.75, got %v", cfg.ProviderProxy.MaxCostPerRun)
 	}
 	if cfg.Jobs.RunnerSandboxRuntimeCommand != "podman" {
 		t.Errorf("expected sandbox runtime podman, got %s", cfg.Jobs.RunnerSandboxRuntimeCommand)
