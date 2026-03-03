@@ -19,6 +19,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/alerts"
 	"github.com/marcus-qen/legator/internal/controlplane/api"
 	"github.com/marcus-qen/legator/internal/controlplane/approval"
+	"github.com/marcus-qen/legator/internal/controlplane/artifacts"
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
 	"github.com/marcus-qen/legator/internal/controlplane/automationpacks"
@@ -46,7 +47,6 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/runner"
 	"github.com/marcus-qen/legator/internal/controlplane/session"
 	"github.com/marcus-qen/legator/internal/controlplane/tenant"
-	"github.com/marcus-qen/legator/internal/controlplane/tokenbroker"
 	"github.com/marcus-qen/legator/internal/controlplane/users"
 	"github.com/marcus-qen/legator/internal/controlplane/webhook"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
@@ -127,6 +127,8 @@ type Server struct {
 	asyncJobsScheduler     *jobs.AsyncWorkerScheduler
 	runnerManager          *runner.Manager
 	runnerExecutionBackend runner.ExecutionBackend
+	artifactPresigner      *artifacts.Service
+	runnerArtifactsDir     string
 
 	// Events
 	eventBus *events.Bus
@@ -307,6 +309,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 			"/api/v1/auth/permissions",
 			"/api/v1/openapi.yaml",
 			"/download/*",
+			"/artifacts/*",
 			"/install.sh",
 			"/ws/probe",
 			"/login",
@@ -488,9 +491,6 @@ func (s *Server) Close() {
 	}
 	if s.sessionStore != nil {
 		s.sessionStore.Close()
-	}
-	if s.runnerManager != nil {
-		_ = s.runnerManager.Close()
 	}
 }
 
@@ -698,42 +698,43 @@ func (s *Server) initRunnerManager() {
 		DefaultTimeout: s.cfg.Jobs.RunnerSandboxTimeoutDuration(),
 		EventSink:      s.recordRunnerBackendEvent,
 	})
+	s.runnerManager = runner.NewManager(runner.Config{RunTokenTTL: s.cfg.Jobs.RunTokenTTLDuration()})
+	s.runnerArtifactsDir = filepath.Join(s.cfg.DataDir, "runner-artifacts")
 
-	runTokenTTL := s.cfg.TokenBrokerDefaultTTLDuration()
-	var broker *tokenbroker.Broker
-	brokerPath := filepath.Join(s.cfg.DataDir, "runner_tokens.db")
-	if err := os.MkdirAll(s.cfg.DataDir, 0750); err != nil {
-		s.logger.Warn("cannot create data dir for runner token broker; using in-memory broker",
-			zap.String("dir", s.cfg.DataDir), zap.Error(err))
-	} else {
-		store, err := tokenbroker.NewStore(brokerPath)
-		if err != nil {
-			s.logger.Warn("cannot open runner token broker store; using in-memory broker",
-				zap.String("path", brokerPath), zap.Error(err))
-		} else {
-			broker = tokenbroker.NewBroker(tokenbroker.Config{
-				Store:      store,
-				DefaultTTL: runTokenTTL,
-				MaxScope:   s.cfg.TokenBroker.MaxScopeOrDefault(),
-				AuditSink:  s.recordTokenBrokerAuditEvent,
-			})
-		}
-	}
-
-	s.runnerManager = runner.NewManager(runner.Config{
-		RunTokenTTL: runTokenTTL,
-		TokenBroker: broker,
+	artifactPresigner, err := artifacts.NewService(artifacts.Config{
+		SigningKey: s.runnerArtifactSigningKey(),
+		DefaultTTL: s.cfg.Jobs.RunTokenTTLDuration(),
 	})
+	if err != nil {
+		s.logger.Fatal("failed to initialize runner artifact presigner", zap.Error(err))
+	}
+	s.artifactPresigner = artifactPresigner
+
 	s.logger.Info(
 		"runner manager initialized",
-		zap.Duration("run_token_ttl", runTokenTTL),
-		zap.Int("token_broker_max_scope", s.cfg.TokenBroker.MaxScopeOrDefault()),
-		zap.Bool("token_broker_persistent", broker != nil),
-		zap.String("token_broker_path", brokerPath),
+		zap.Duration("run_token_ttl", s.cfg.Jobs.RunTokenTTLDuration()),
 		zap.String("runner_sandbox_runtime", strings.TrimSpace(s.cfg.Jobs.RunnerSandboxRuntimeCommand)),
 		zap.String("runner_sandbox_image", strings.TrimSpace(s.cfg.Jobs.RunnerSandboxImage)),
 		zap.Duration("runner_sandbox_timeout", s.cfg.Jobs.RunnerSandboxTimeoutDuration()),
+		zap.String("runner_artifacts_dir", s.runnerArtifactsDir),
 	)
+}
+
+func (s *Server) runnerArtifactSigningKey() []byte {
+	raw := strings.TrimSpace(s.cfg.SigningKey)
+	if raw != "" {
+		decoded, err := hex.DecodeString(raw)
+		if err == nil && len(decoded) >= 32 {
+			return decoded
+		}
+		s.logger.Warn("invalid signing key for artifact presigner, falling back to generated key")
+	}
+
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		s.logger.Fatal("failed to generate runner artifact signing key", zap.Error(err))
+	}
+	return key
 }
 
 func (s *Server) initChat() {

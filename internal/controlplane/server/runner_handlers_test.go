@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -307,5 +309,152 @@ func TestRunnerLifecycleJobScopeRejected(t *testing.T) {
 	}
 	if payload.Code != "run_token_scope_rejected" {
 		t.Fatalf("expected run_token_scope_rejected, got %+v", payload)
+	}
+}
+
+func makeAbsolutePathRequest(t *testing.T, srv *Server, method, absoluteURL, body string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	u, err := url.Parse(absoluteURL)
+	if err != nil {
+		t.Fatalf("parse absolute url: %v", err)
+	}
+
+	var reqBody *bytes.Reader
+	if body == "" {
+		reqBody = bytes.NewReader(nil)
+	} else {
+		reqBody = bytes.NewReader([]byte(body))
+	}
+	req := httptest.NewRequest(method, u.RequestURI(), reqBody)
+	if body != "" {
+		req.Header.Set("Content-Type", "application/octet-stream")
+	}
+
+	rr := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rr, req)
+	return rr
+}
+
+func TestRunnerArtifactPresignedUploadAndDownload(t *testing.T) {
+	srv := newAuthTestServer(t)
+
+	user, err := srv.userStore.Create("runner-op", "Runner Operator", "secret", "operator")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	sess, err := srv.sessionStore.Create(user.ID)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	presignUpload := makeSessionRequest(t, srv, http.MethodPost, "/api/v1/runs/run-42/artifacts/presign", sess.ID,
+		`{"path":"workspace/run-42/stdout.log","scope":"workspace/run-42","operation":"upload","ttl_seconds":60}`)
+	if presignUpload.Code != http.StatusCreated {
+		t.Fatalf("presign upload: status=%d body=%s", presignUpload.Code, presignUpload.Body.String())
+	}
+	var uploadResp struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(presignUpload.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("decode upload presign: %v", err)
+	}
+	if uploadResp.URL == "" {
+		t.Fatalf("expected upload url")
+	}
+
+	upload := makeAbsolutePathRequest(t, srv, http.MethodPut, uploadResp.URL, "hello-from-runner")
+	if upload.Code != http.StatusCreated {
+		t.Fatalf("upload artifact: status=%d body=%s", upload.Code, upload.Body.String())
+	}
+
+	presignDownload := makeSessionRequest(t, srv, http.MethodPost, "/api/v1/runs/run-42/artifacts/presign", sess.ID,
+		`{"path":"workspace/run-42/stdout.log","scope":"workspace/run-42","operation":"download","ttl_seconds":60}`)
+	if presignDownload.Code != http.StatusCreated {
+		t.Fatalf("presign download: status=%d body=%s", presignDownload.Code, presignDownload.Body.String())
+	}
+	var downloadResp struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(presignDownload.Body.Bytes(), &downloadResp); err != nil {
+		t.Fatalf("decode download presign: %v", err)
+	}
+	if downloadResp.URL == "" {
+		t.Fatalf("expected download url")
+	}
+
+	download := makeAbsolutePathRequest(t, srv, http.MethodGet, downloadResp.URL, "")
+	if download.Code != http.StatusOK {
+		t.Fatalf("download artifact: status=%d body=%s", download.Code, download.Body.String())
+	}
+	if got := download.Body.String(); got != "hello-from-runner" {
+		t.Fatalf("unexpected artifact body: got %q", got)
+	}
+}
+
+func TestRunnerArtifactPresignedOutOfScopeRejectedWithAudit(t *testing.T) {
+	srv := newAuthTestServer(t)
+
+	user, err := srv.userStore.Create("runner-op", "Runner Operator", "secret", "operator")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	sess, err := srv.sessionStore.Create(user.ID)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	presignUpload := makeSessionRequest(t, srv, http.MethodPost, "/api/v1/runs/run-7/artifacts/presign", sess.ID,
+		`{"path":"workspace/run-7/out/artifact.txt","scope":"workspace/run-7","operation":"upload","ttl_seconds":60}`)
+	if presignUpload.Code != http.StatusCreated {
+		t.Fatalf("presign upload: status=%d body=%s", presignUpload.Code, presignUpload.Body.String())
+	}
+	var uploadResp struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(presignUpload.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("decode upload presign: %v", err)
+	}
+
+	u, err := url.Parse(uploadResp.URL)
+	if err != nil {
+		t.Fatalf("parse upload url: %v", err)
+	}
+	token := u.Query().Get("token")
+	if token == "" {
+		t.Fatalf("expected token in presigned url")
+	}
+
+	tamperedURL := "http://example.com/artifacts/runs/run-7/workspace/run-8/out/escape.txt?token=" + url.QueryEscape(token)
+	rejected := makeAbsolutePathRequest(t, srv, http.MethodPut, tamperedURL, "bad-write")
+	if rejected.Code != http.StatusForbidden {
+		t.Fatalf("expected scope rejection 403, got %d body=%s", rejected.Code, rejected.Body.String())
+	}
+	var payload APIError
+	if err := json.Unmarshal(rejected.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if payload.Code != "artifact_scope_rejected" {
+		t.Fatalf("expected artifact_scope_rejected, got %+v", payload)
+	}
+
+	events := srv.queryAudit(audit.Filter{Type: audit.EventRunnerArtifactAccessDenied, Limit: 10})
+	if len(events) == 0 {
+		t.Fatalf("expected artifact access denied audit event")
+	}
+	foundScopeReason := false
+	for _, evt := range events {
+		detail, ok := evt.Detail.(map[string]any)
+		if !ok {
+			continue
+		}
+		errVal, _ := detail["error"].(string)
+		if strings.Contains(errVal, "scope") {
+			foundScopeReason = true
+			break
+		}
+	}
+	if !foundScopeReason {
+		t.Fatalf("expected scope rejection reason in audit detail, events=%+v", events)
 	}
 }

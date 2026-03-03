@@ -124,6 +124,7 @@ func TestRoutesAuthCoverage(t *testing.T) {
 		{http.MethodPost, "/api/v1/runners/some-runner/stop"},
 		{http.MethodDelete, "/api/v1/runners/some-runner"},
 		{http.MethodPost, "/api/v1/runs"},
+		{http.MethodPost, "/api/v1/runs/some-run/artifacts/presign"},
 		// Auth keys
 		{http.MethodGet, "/api/v1/auth/keys"},
 		{http.MethodPost, "/api/v1/auth/keys"},
