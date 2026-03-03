@@ -2,6 +2,7 @@ package alerts
 
 import (
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -23,12 +24,14 @@ type Notifier interface {
 
 // Engine evaluates alert rules and delivers notifications.
 type Engine struct {
-	store        *Store
-	routingStore *RoutingStore
-	fleet        fleet.Fleet
-	notifier     Notifier
-	bus          *events.Bus
-	logger       *zap.Logger
+	store         *Store
+	routingStore  *RoutingStore
+	fleet         fleet.Fleet
+	notifier      Notifier
+	bus           *events.Bus
+	logger        *zap.Logger
+	httpClient    *http.Client
+	auditRecorder NotificationAuditRecorder
 
 	evalMu sync.Mutex
 
@@ -48,13 +51,14 @@ func NewEngine(store *Store, fleetMgr fleet.Fleet, notifier Notifier, bus *event
 		logger = zap.NewNop()
 	}
 	e := &Engine{
-		store:    store,
-		fleet:    fleetMgr,
-		notifier: notifier,
-		bus:      bus,
-		logger:   logger,
-		firing:   make(map[FiringKey]*AlertEvent),
-		pending:  make(map[FiringKey]time.Time),
+		store:      store,
+		fleet:      fleetMgr,
+		notifier:   notifier,
+		bus:        bus,
+		logger:     logger,
+		httpClient: &http.Client{Timeout: 5 * time.Second},
+		firing:     make(map[FiringKey]*AlertEvent),
+		pending:    make(map[FiringKey]time.Time),
 	}
 
 	if store != nil {
@@ -323,29 +327,36 @@ func (e *Engine) deliver(rule AlertRule, evt AlertEvent, evtType events.EventTyp
 		})
 	}
 
+	e.deliverNotificationChannels(rule, evt, string(evtType))
+
 	if e.notifier == nil {
 		return
 	}
 
-	if len(rule.Actions) > 0 {
-		available := make(map[string]struct{})
-		for _, cfg := range e.notifier.List() {
-			available[cfg.ID] = struct{}{}
-		}
+	if len(rule.Actions) == 0 {
+		e.notifier.Notify(string(evtType), evt.ProbeID, summary, evt)
+		return
+	}
 
-		hasTarget := false
-		for _, action := range rule.Actions {
-			if action.Type != "webhook" {
-				continue
-			}
-			if _, ok := available[action.WebhookID]; ok {
-				hasTarget = true
-				break
-			}
+	hasWebhookAction := false
+	available := make(map[string]struct{})
+	for _, cfg := range e.notifier.List() {
+		available[cfg.ID] = struct{}{}
+	}
+
+	hasTarget := false
+	for _, action := range rule.Actions {
+		if action.Type != "webhook" {
+			continue
 		}
-		if !hasTarget {
-			return
+		hasWebhookAction = true
+		if _, ok := available[action.WebhookID]; ok {
+			hasTarget = true
+			break
 		}
+	}
+	if !hasWebhookAction || !hasTarget {
+		return
 	}
 
 	e.notifier.Notify(string(evtType), evt.ProbeID, summary, evt)

@@ -1,6 +1,7 @@
 # Append-only list. Do not remove entries; use docs/contracts/deprecations.json with status="removed".
 DELETE /api/v1/alerts/escalation/policies/{id}
 DELETE /api/v1/alerts/{id}
+DELETE /api/v1/notification-channels/{id}
 DELETE /api/v1/alerts/routing/policies/{id}
 DELETE /api/v1/audit/purge
 DELETE /api/v1/auth/keys/{id}
@@ -19,6 +20,8 @@ DELETE /api/v1/users/{id}
 DELETE /api/v1/webhooks/{id}
 GET /api/v1/alerts
 GET /api/v1/alerts/active
+GET /api/v1/notification-channels
+GET /api/v1/notification-channels/{id}
 GET /api/v1/alerts/escalation/policies
 GET /api/v1/alerts/escalation/policies/{id}
 GET /api/v1/alerts/{id}
@@ -104,6 +107,8 @@ GET /version
 PATCH /api/v1/reliability/incidents/{id}
 PATCH /api/v1/tenants/{id}
 POST /api/v1/alerts
+POST /api/v1/notification-channels
+POST /api/v1/notification-channels/{id}/test
 POST /api/v1/alerts/escalation/policies
 POST /api/v1/alerts/routing/policies
 POST /api/v1/alerts/routing/resolve
@@ -172,6 +177,7 @@ POST /api/v1/webhooks/{id}/test
 POST /mcp
 PUT /api/v1/alerts/escalation/policies/{id}
 PUT /api/v1/alerts/{id}
+PUT /api/v1/notification-channels/{id}
 PUT /api/v1/alerts/routing/policies/{id}
 PUT /api/v1/cloud/connectors/{id}
 PUT /api/v1/jobs/{id}

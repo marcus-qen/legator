@@ -514,6 +514,39 @@ Runs an LLM-orchestrated task against the probe.
 **Permission:** FleetRead  
 **Response:** `200 OK` — past firing events for this rule.
 
+### GET /api/v1/notification-channels
+**Permission:** FleetRead  
+**Response:** `200 OK` — list notification channels (Slack, Email, PagerDuty).
+
+### POST /api/v1/notification-channels
+**Permission:** FleetWrite  
+**Request body:**
+```json
+{
+  "name": "Primary Slack",
+  "type": "slack",
+  "enabled": true,
+  "slack": {
+    "webhook_url": "https://hooks.slack.com/services/...",
+    "channel": "#incidents"
+  }
+}
+```
+**Response:** `201 Created`
+
+### GET /api/v1/notification-channels/{id}
+**Permission:** FleetRead
+
+### PUT /api/v1/notification-channels/{id}
+**Permission:** FleetWrite
+
+### DELETE /api/v1/notification-channels/{id}
+**Permission:** FleetWrite
+
+### POST /api/v1/notification-channels/{id}/test
+**Permission:** FleetWrite  
+Sends a synthetic test notification to the target channel.
+
 ### GET /api/v1/alerts/routing/policies
 **Permission:** FleetRead  
 **Response:** `200 OK` — list of routing policies.

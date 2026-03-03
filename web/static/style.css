@@ -695,13 +695,15 @@ textarea {
 }
 
 body.context-open .context-backdrop,
-body.alerts-create-open .context-backdrop {
+body.alerts-create-open .context-backdrop,
+body.alerts-channel-open .context-backdrop {
   opacity: 1;
   pointer-events: auto;
 }
 
 body.context-open .context-column,
-body.alerts-create-open #alerts-create-panel {
+body.alerts-create-open #alerts-create-panel,
+body.alerts-channel-open #alerts-channel-panel {
   transform: translateX(0);
 }
 

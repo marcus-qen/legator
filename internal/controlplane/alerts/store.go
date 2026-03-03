@@ -61,10 +61,24 @@ func NewStore(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("create alert_events: %w", err)
 	}
 
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS notification_channels (
+		id          TEXT PRIMARY KEY,
+		name        TEXT NOT NULL,
+		type        TEXT NOT NULL,
+		enabled     INTEGER NOT NULL DEFAULT 1,
+		config_json TEXT NOT NULL,
+		created_at  TEXT NOT NULL,
+		updated_at  TEXT NOT NULL
+	)`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("create notification_channels: %w", err)
+	}
+
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_alert_rules_updated_at ON alert_rules(updated_at)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_alert_events_rule_id ON alert_events(rule_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_alert_events_status ON alert_events(status)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_alert_events_fired_at ON alert_events(fired_at)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_notification_channels_updated_at ON notification_channels(updated_at)`)
 
 	if err := migration.EnsureVersion(db, 1); err != nil {
 		_ = db.Close()

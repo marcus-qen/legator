@@ -3,9 +3,10 @@
 {{define "header"}}
 <div>
   <h1 class="page-title">Alerts</h1>
-  <span class="page-meta">Rules, active incidents, history</span>
+  <span class="page-meta">Rules, notification channels, active incidents</span>
 </div>
-<div class="right">
+<div class="right actions-row">
+  <button class="btn" type="button" id="create-channel-btn">Create Channel</button>
   <button class="btn" type="button" id="create-rule-btn">Create Rule</button>
 </div>
 {{end}}
@@ -18,6 +19,29 @@
   </div>
   <div id="active-alerts" class="feed">
     <p class="muted">Loading active alerts…</p>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Notification Channels</h2>
+    <span class="panel-sub" id="channels-count">0 channels</span>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Target</th>
+          <th>Enabled</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="channels-body">
+        <tr><td colspan="5" class="empty-state">Loading channels…</td></tr>
+      </tbody>
+    </table>
   </div>
 </section>
 
@@ -47,6 +71,7 @@
 </section>
 
 <div class="context-backdrop" data-create-close></div>
+<div class="context-backdrop" data-channel-close></div>
 
 <aside class="context-column panel" id="alerts-create-panel" aria-hidden="true">
   <div class="panel-header">
@@ -89,6 +114,13 @@
       <input type="text" id="rule-tags" class="input" placeholder="prod, edge, critical" />
     </label>
 
+    <fieldset>
+      <legend class="muted">Notification Channels</legend>
+      <div id="rule-channel-actions" class="feed">
+        <p class="muted">No channels available. Create one first.</p>
+      </div>
+    </fieldset>
+
     <label>
       <input type="checkbox" id="rule-enabled" checked />
       <span>Enabled</span>
@@ -100,6 +132,90 @@
     </div>
   </form>
 </aside>
+
+<aside class="context-column panel" id="alerts-channel-panel" aria-hidden="true">
+  <div class="panel-header">
+    <h2 class="panel-title" id="channel-panel-title">Create Notification Channel</h2>
+    <button class="btn" type="button" data-channel-close>Close</button>
+  </div>
+
+  <form id="channel-form" class="feed" autocomplete="off">
+    <input type="hidden" id="channel-id" />
+
+    <label>
+      <span class="muted">Name</span>
+      <input type="text" id="channel-name" class="input" required />
+    </label>
+
+    <label>
+      <span class="muted">Type</span>
+      <select id="channel-type" class="input" required>
+        <option value="slack">Slack</option>
+        <option value="email">Email</option>
+        <option value="pagerduty">PagerDuty</option>
+      </select>
+    </label>
+
+    <label>
+      <input type="checkbox" id="channel-enabled" checked />
+      <span>Enabled</span>
+    </label>
+
+    <section id="channel-slack-fields" class="feed">
+      <label>
+        <span class="muted">Slack webhook URL</span>
+        <input type="url" id="channel-slack-webhook" class="input" placeholder="https://hooks.slack.com/services/..." />
+      </label>
+      <label>
+        <span class="muted">Channel override (optional)</span>
+        <input type="text" id="channel-slack-override" class="input" placeholder="#incidents" />
+      </label>
+    </section>
+
+    <section id="channel-email-fields" class="feed" style="display:none;">
+      <label>
+        <span class="muted">SMTP host</span>
+        <input type="text" id="channel-email-host" class="input" placeholder="smtp.example.com" />
+      </label>
+      <label>
+        <span class="muted">SMTP port</span>
+        <input type="number" id="channel-email-port" class="input" min="1" max="65535" value="587" />
+      </label>
+      <label>
+        <span class="muted">SMTP username (optional)</span>
+        <input type="text" id="channel-email-username" class="input" />
+      </label>
+      <label>
+        <span class="muted">SMTP password (optional)</span>
+        <input type="password" id="channel-email-password" class="input" />
+      </label>
+      <label>
+        <span class="muted">From address</span>
+        <input type="email" id="channel-email-from" class="input" placeholder="alerts@example.com" />
+      </label>
+      <label>
+        <span class="muted">To addresses (comma separated)</span>
+        <input type="text" id="channel-email-to" class="input" placeholder="oncall@example.com, ops@example.com" />
+      </label>
+    </section>
+
+    <section id="channel-pd-fields" class="feed" style="display:none;">
+      <label>
+        <span class="muted">PagerDuty integration key</span>
+        <input type="text" id="channel-pd-key" class="input" />
+      </label>
+      <label>
+        <span class="muted">Events API URL (optional)</span>
+        <input type="url" id="channel-pd-url" class="input" placeholder="https://events.pagerduty.com/v2/enqueue" />
+      </label>
+    </section>
+
+    <div class="actions-row">
+      <button type="button" class="btn" data-channel-close>Cancel</button>
+      <button type="submit" class="btn btn-primary" id="channel-submit-btn">Create</button>
+    </div>
+  </form>
+</aside>
 {{end}}
 
 {{define "scripts"}}
@@ -107,6 +223,7 @@
 (() => {
   const state = {
     rules: [],
+    channels: [],
     history: {},
   };
   const canWrite = {{if hasPermission .CurrentUser "fleet:write"}}true{{else}}false{{end}};
@@ -115,15 +232,28 @@
   const activeAlertCountEl = document.getElementById('active-alert-count');
   const rulesBodyEl = document.getElementById('rules-body');
   const rulesCountEl = document.getElementById('rules-count');
+  const channelsBodyEl = document.getElementById('channels-body');
+  const channelsCountEl = document.getElementById('channels-count');
 
   const createBtn = document.getElementById('create-rule-btn');
   const createPanel = document.getElementById('alerts-create-panel');
   const createForm = document.getElementById('create-rule-form');
   const createCloseTargets = document.querySelectorAll('[data-create-close]');
 
+  const createChannelBtn = document.getElementById('create-channel-btn');
+  const channelPanel = document.getElementById('alerts-channel-panel');
+  const channelForm = document.getElementById('channel-form');
+  const channelCloseTargets = document.querySelectorAll('[data-channel-close]');
+
   const typeInput = document.getElementById('rule-type');
   const thresholdWrap = document.getElementById('threshold-wrap');
   const thresholdInput = document.getElementById('rule-threshold');
+
+  const ruleChannelsWrap = document.getElementById('rule-channel-actions');
+
+  const channelPanelTitle = document.getElementById('channel-panel-title');
+  const channelSubmitBtn = document.getElementById('channel-submit-btn');
+  const channelTypeInput = document.getElementById('channel-type');
 
   function showToast(message, kind) {
     if (window.LegatorUI && window.LegatorUI.showToast) {
@@ -147,16 +277,21 @@
     return parsed.toLocaleString();
   }
 
+  function parseCSV(input) {
+    return (input || '')
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+  }
+
   function setCreatePanelOpen(isOpen) {
     document.body.classList.toggle('alerts-create-open', isOpen);
     createPanel.setAttribute('aria-hidden', String(!isOpen));
   }
 
-  function parseTags(input) {
-    return (input || '')
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean);
+  function setChannelPanelOpen(isOpen) {
+    document.body.classList.toggle('alerts-channel-open', isOpen);
+    channelPanel.setAttribute('aria-hidden', String(!isOpen));
   }
 
   function conditionThreshold(rule) {
@@ -177,6 +312,13 @@
     } else if (!thresholdInput.value || Number(thresholdInput.value) <= 0) {
       thresholdInput.value = '90';
     }
+  }
+
+  function updateChannelTypeVisibility() {
+    const type = channelTypeInput.value;
+    document.getElementById('channel-slack-fields').style.display = type === 'slack' ? 'block' : 'none';
+    document.getElementById('channel-email-fields').style.display = type === 'email' ? 'block' : 'none';
+    document.getElementById('channel-pd-fields').style.display = type === 'pagerduty' ? 'block' : 'none';
   }
 
   async function requestJSON(url, options) {
@@ -224,6 +366,55 @@
     }).join('');
   }
 
+  function channelTargetSummary(channel) {
+    if (!channel) return '—';
+    if (channel.type === 'slack') {
+      let base = 'slack webhook';
+      if (channel.slack?.webhook_url) {
+        try {
+          base = new URL(channel.slack.webhook_url).host;
+        } catch {
+          base = channel.slack.webhook_url;
+        }
+      }
+      const override = channel.slack?.channel ? ` → ${channel.slack.channel}` : '';
+      return `${base}${override}`;
+    }
+    if (channel.type === 'email') {
+      return Array.isArray(channel.email?.to) && channel.email.to.length ? channel.email.to.join(', ') : 'email recipients';
+    }
+    if (channel.type === 'pagerduty') {
+      return channel.pagerduty?.events_api_url || 'events.pagerduty.com';
+    }
+    return '—';
+  }
+
+  function renderChannels() {
+    const channels = Array.isArray(state.channels) ? state.channels : [];
+    channelsCountEl.textContent = `${channels.length} channels`;
+
+    if (!channels.length) {
+      channelsBodyEl.innerHTML = '<tr><td colspan="5" class="empty-state">No notification channels configured.</td></tr>';
+      return;
+    }
+
+    channelsBodyEl.innerHTML = channels.map((channel) => `
+      <tr data-channel-id="${escapeHTML(channel.id)}">
+        <td>${escapeHTML(channel.name || '—')}</td>
+        <td><span class="tag">${escapeHTML(channel.type || 'unknown')}</span></td>
+        <td>${escapeHTML(channelTargetSummary(channel))}</td>
+        <td>${channel.enabled ? '<span class="tag tag-online">enabled</span>' : '<span class="tag tag-offline">disabled</span>'}</td>
+        <td>
+          <div class="actions-row">
+            <button type="button" class="btn" data-test-channel="${escapeHTML(channel.id)}">Test</button>
+            ${canWrite ? `<button type="button" class="btn" data-edit-channel="${escapeHTML(channel.id)}">Edit</button>` : ''}
+            ${canWrite ? `<button type="button" class="btn btn-danger" data-delete-channel="${escapeHTML(channel.id)}">Delete</button>` : ''}
+          </div>
+        </td>
+      </tr>
+    `).join('');
+  }
+
   function renderHistoryEvents(ruleID, events) {
     const list = Array.isArray(events) ? events : [];
     if (!list.length) {
@@ -240,6 +431,29 @@
         <p><strong>Message:</strong> ${escapeHTML(event.message || '—')}</p>
       </article>
     `).join('')}</div>`;
+  }
+
+  function actionSummary(rule) {
+    const channelByID = new Map((state.channels || []).map((channel) => [channel.id, channel]));
+    const actions = Array.isArray(rule?.actions) ? rule.actions : [];
+    if (!actions.length) {
+      return '<span class="muted">none</span>';
+    }
+
+    const labels = actions.map((action) => {
+      if (action.type === 'channel') {
+        const channel = channelByID.get(action.channel_id);
+        if (channel) {
+          return `<span class="tag">${escapeHTML(channel.name)} (${escapeHTML(channel.type)})</span>`;
+        }
+        return `<span class="tag tag-offline">missing channel ${escapeHTML(action.channel_id || '—')}</span>`;
+      }
+      if (action.type === 'webhook') {
+        return `<span class="tag">webhook:${escapeHTML(action.webhook_id || 'unknown')}</span>`;
+      }
+      return `<span class="tag">${escapeHTML(action.type || 'unknown')}</span>`;
+    });
+    return labels.join(' ');
   }
 
   function renderRules() {
@@ -275,9 +489,12 @@
             </label>
           </td>
           <td>
-            <div class="actions-row">
-              <button type="button" class="btn" data-history-rule="${escapeHTML(rule.id)}">History</button>
-              ${canWrite ? `<button type="button" class="btn btn-danger" data-delete-rule="${escapeHTML(rule.id)}">Delete</button>` : '<span class="muted">Read-only</span>'}
+            <div class="feed">
+              <div>${actionSummary(rule)}</div>
+              <div class="actions-row">
+                <button type="button" class="btn" data-history-rule="${escapeHTML(rule.id)}">History</button>
+                ${canWrite ? `<button type="button" class="btn btn-danger" data-delete-rule="${escapeHTML(rule.id)}">Delete</button>` : '<span class="muted">Read-only</span>'}
+              </div>
             </div>
           </td>
         </tr>
@@ -286,6 +503,96 @@
         </tr>
       `;
     }).join('');
+  }
+
+  function populateRuleChannelChoices() {
+    const channels = (state.channels || []).filter((channel) => channel.enabled);
+    if (!channels.length) {
+      ruleChannelsWrap.innerHTML = '<p class="muted">No enabled channels. Rules can still be created with no actions.</p>';
+      return;
+    }
+
+    ruleChannelsWrap.innerHTML = channels.map((channel) => `
+      <label>
+        <input type="checkbox" value="${escapeHTML(channel.id)}" data-rule-channel />
+        <span>${escapeHTML(channel.name)} <span class="muted">(${escapeHTML(channel.type)})</span></span>
+      </label>
+    `).join('');
+  }
+
+  function openCreateChannelPanel() {
+    channelPanelTitle.textContent = 'Create Notification Channel';
+    channelSubmitBtn.textContent = 'Create';
+    channelForm.reset();
+    document.getElementById('channel-id').value = '';
+    document.getElementById('channel-enabled').checked = true;
+    document.getElementById('channel-type').value = 'slack';
+    document.getElementById('channel-email-port').value = '587';
+    updateChannelTypeVisibility();
+    setChannelPanelOpen(true);
+  }
+
+  function openEditChannelPanel(channel) {
+    if (!channel) return;
+    channelPanelTitle.textContent = 'Edit Notification Channel';
+    channelSubmitBtn.textContent = 'Save';
+
+    document.getElementById('channel-id').value = channel.id || '';
+    document.getElementById('channel-name').value = channel.name || '';
+    document.getElementById('channel-type').value = channel.type || 'slack';
+    document.getElementById('channel-enabled').checked = !!channel.enabled;
+
+    document.getElementById('channel-slack-webhook').value = channel.slack?.webhook_url || '';
+    document.getElementById('channel-slack-override').value = channel.slack?.channel || '';
+
+    document.getElementById('channel-email-host').value = channel.email?.smtp_host || '';
+    document.getElementById('channel-email-port').value = channel.email?.smtp_port || 587;
+    document.getElementById('channel-email-username').value = channel.email?.username || '';
+    document.getElementById('channel-email-password').value = channel.email?.password || '';
+    document.getElementById('channel-email-from').value = channel.email?.from || '';
+    document.getElementById('channel-email-to').value = Array.isArray(channel.email?.to) ? channel.email.to.join(', ') : '';
+
+    document.getElementById('channel-pd-key').value = channel.pagerduty?.integration_key || '';
+    document.getElementById('channel-pd-url').value = channel.pagerduty?.events_api_url || '';
+
+    updateChannelTypeVisibility();
+    setChannelPanelOpen(true);
+  }
+
+  function collectChannelPayload() {
+    const type = document.getElementById('channel-type').value;
+    const payload = {
+      name: document.getElementById('channel-name').value.trim(),
+      type,
+      enabled: document.getElementById('channel-enabled').checked,
+    };
+
+    if (type === 'slack') {
+      payload.slack = {
+        webhook_url: document.getElementById('channel-slack-webhook').value.trim(),
+        channel: document.getElementById('channel-slack-override').value.trim(),
+      };
+    }
+
+    if (type === 'email') {
+      payload.email = {
+        smtp_host: document.getElementById('channel-email-host').value.trim(),
+        smtp_port: Number(document.getElementById('channel-email-port').value || 0),
+        username: document.getElementById('channel-email-username').value.trim(),
+        password: document.getElementById('channel-email-password').value,
+        from: document.getElementById('channel-email-from').value.trim(),
+        to: parseCSV(document.getElementById('channel-email-to').value),
+      };
+    }
+
+    if (type === 'pagerduty') {
+      payload.pagerduty = {
+        integration_key: document.getElementById('channel-pd-key').value.trim(),
+        events_api_url: document.getElementById('channel-pd-url').value.trim(),
+      };
+    }
+
+    return payload;
   }
 
   async function refreshActiveAlerts() {
@@ -303,6 +610,18 @@
       renderRules();
     } catch (error) {
       rulesBodyEl.innerHTML = `<tr><td colspan="7" class="empty-state">Failed to load rules: ${escapeHTML(error.message)}</td></tr>`;
+    }
+  }
+
+  async function refreshChannels() {
+    try {
+      state.channels = await requestJSON('/api/v1/notification-channels', { cache: 'no-store' });
+      renderChannels();
+      populateRuleChannelChoices();
+      renderRules();
+    } catch (error) {
+      channelsBodyEl.innerHTML = `<tr><td colspan="5" class="empty-state">Failed to load channels: ${escapeHTML(error.message)}</td></tr>`;
+      ruleChannelsWrap.innerHTML = '<p class="muted">Failed to load channels.</p>';
     }
   }
 
@@ -406,6 +725,37 @@
     renderRules();
   }
 
+  async function testChannel(channelID) {
+    try {
+      await requestJSON(`/api/v1/notification-channels/${encodeURIComponent(channelID)}/test`, {
+        method: 'POST',
+      });
+      showToast('Test notification sent', 'success');
+    } catch (error) {
+      showToast(`Channel test failed: ${error.message}`, 'error');
+    }
+  }
+
+  async function deleteChannel(channelID) {
+    if (!canWrite) {
+      showToast('fleet:write permission is required to delete channels', 'warning');
+      return;
+    }
+
+    if (!window.confirm('Delete this notification channel?')) {
+      return;
+    }
+
+    try {
+      await requestJSON(`/api/v1/notification-channels/${encodeURIComponent(channelID)}`, { method: 'DELETE' });
+      showToast('Channel deleted', 'success');
+      await refreshChannels();
+      await refreshRules();
+    } catch (error) {
+      showToast(`Failed to delete channel: ${error.message}`, 'error');
+    }
+  }
+
   rulesBodyEl.addEventListener('change', (event) => {
     const checkbox = event.target.closest('[data-toggle-rule]');
     if (!checkbox) return;
@@ -432,9 +782,32 @@
     }
   });
 
+  channelsBodyEl.addEventListener('click', (event) => {
+    const testBtn = event.target.closest('[data-test-channel]');
+    if (testBtn) {
+      void testChannel(testBtn.getAttribute('data-test-channel'));
+      return;
+    }
+
+    const editBtn = event.target.closest('[data-edit-channel]');
+    if (editBtn) {
+      const channelID = editBtn.getAttribute('data-edit-channel');
+      const channel = (state.channels || []).find((item) => item.id === channelID);
+      openEditChannelPanel(channel);
+      return;
+    }
+
+    const deleteBtn = event.target.closest('[data-delete-channel]');
+    if (deleteBtn) {
+      void deleteChannel(deleteBtn.getAttribute('data-delete-channel'));
+    }
+  });
+
   if (!canWrite) {
     createBtn.setAttribute('disabled', 'disabled');
     createBtn.setAttribute('title', 'fleet:write permission required');
+    createChannelBtn.setAttribute('disabled', 'disabled');
+    createChannelBtn.setAttribute('title', 'fleet:write permission required');
   }
 
   createBtn.addEventListener('click', () => {
@@ -444,17 +817,36 @@
     }
     setCreatePanelOpen(true);
   });
+
+  createChannelBtn.addEventListener('click', () => {
+    if (!canWrite) {
+      showToast('fleet:write permission is required to create channels', 'warning');
+      return;
+    }
+    openCreateChannelPanel();
+  });
+
   createCloseTargets.forEach((target) => {
     target.addEventListener('click', () => setCreatePanelOpen(false));
   });
 
+  channelCloseTargets.forEach((target) => {
+    target.addEventListener('click', () => setChannelPanelOpen(false));
+  });
+
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && document.body.classList.contains('alerts-create-open')) {
-      setCreatePanelOpen(false);
+    if (event.key === 'Escape') {
+      if (document.body.classList.contains('alerts-create-open')) {
+        setCreatePanelOpen(false);
+      }
+      if (document.body.classList.contains('alerts-channel-open')) {
+        setChannelPanelOpen(false);
+      }
     }
   });
 
   typeInput.addEventListener('change', updateThresholdVisibility);
+  channelTypeInput.addEventListener('change', updateChannelTypeVisibility);
 
   createForm.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -466,6 +858,7 @@
 
     const ruleType = typeInput.value;
     const needsThreshold = ruleType === 'disk_threshold' || ruleType === 'cpu_threshold';
+    const selectedChannelIDs = Array.from(ruleChannelsWrap.querySelectorAll('[data-rule-channel]:checked')).map((input) => input.value);
 
     const payload = {
       name: document.getElementById('rule-name').value.trim(),
@@ -475,9 +868,9 @@
         type: ruleType,
         threshold: needsThreshold ? Number(thresholdInput.value || 0) : 0,
         duration: document.getElementById('rule-duration').value.trim(),
-        tags: parseTags(document.getElementById('rule-tags').value),
+        tags: parseCSV(document.getElementById('rule-tags').value),
       },
-      actions: [],
+      actions: selectedChannelIDs.map((channelID) => ({ type: 'channel', channel_id: channelID })),
     };
 
     try {
@@ -491,6 +884,7 @@
       document.getElementById('rule-enabled').checked = true;
       typeInput.value = 'probe_offline';
       updateThresholdVisibility();
+      populateRuleChannelChoices();
       setCreatePanelOpen(false);
       await refreshRules();
       await refreshActiveAlerts();
@@ -499,7 +893,44 @@
     }
   });
 
+  channelForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+
+    if (!canWrite) {
+      showToast('fleet:write permission is required to save channels', 'warning');
+      return;
+    }
+
+    const id = document.getElementById('channel-id').value.trim();
+    const payload = collectChannelPayload();
+
+    try {
+      if (id) {
+        await requestJSON(`/api/v1/notification-channels/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        showToast('Channel updated', 'success');
+      } else {
+        await requestJSON('/api/v1/notification-channels', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        showToast('Channel created', 'success');
+      }
+      setChannelPanelOpen(false);
+      await refreshChannels();
+      await refreshRules();
+    } catch (error) {
+      showToast(`Failed to save channel: ${error.message}`, 'error');
+    }
+  });
+
   updateThresholdVisibility();
+  updateChannelTypeVisibility();
+  refreshChannels();
   refreshActiveAlerts();
   refreshRules();
 })();

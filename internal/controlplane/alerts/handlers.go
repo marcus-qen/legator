@@ -246,17 +246,39 @@ func (e *Engine) validateRule(rule AlertRule) error {
 		}
 	}
 
+	channels := map[string]NotificationChannel{}
+	if e.store != nil {
+		storedChannels, err := e.store.ListChannels()
+		if err != nil {
+			return fmt.Errorf("list channels: %w", err)
+		}
+		for _, channel := range storedChannels {
+			channels[channel.ID] = channel
+		}
+	}
+
 	for _, action := range rule.Actions {
-		if action.Type != "webhook" {
-			return fmt.Errorf("unsupported action type: %s", action.Type)
-		}
-		if strings.TrimSpace(action.WebhookID) == "" {
-			return fmt.Errorf("webhook_id is required")
-		}
-		if len(webhooks) > 0 {
-			if _, ok := webhooks[action.WebhookID]; !ok {
-				return fmt.Errorf("unknown webhook id: %s", action.WebhookID)
+		switch action.Type {
+		case "webhook":
+			if strings.TrimSpace(action.WebhookID) == "" {
+				return fmt.Errorf("webhook_id is required")
 			}
+			if len(webhooks) > 0 {
+				if _, ok := webhooks[action.WebhookID]; !ok {
+					return fmt.Errorf("unknown webhook id: %s", action.WebhookID)
+				}
+			}
+		case "channel":
+			if strings.TrimSpace(action.ChannelID) == "" {
+				return fmt.Errorf("channel_id is required")
+			}
+			if len(channels) > 0 {
+				if _, ok := channels[action.ChannelID]; !ok {
+					return fmt.Errorf("unknown channel id: %s", action.ChannelID)
+				}
+			}
+		default:
+			return fmt.Errorf("unsupported action type: %s", action.Type)
 		}
 	}
 

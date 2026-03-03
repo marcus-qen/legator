@@ -29,8 +29,9 @@ type AlertCondition struct {
 
 // AlertAction defines what to do when a rule fires.
 type AlertAction struct {
-	Type      string `json:"type"`       // "webhook"
-	WebhookID string `json:"webhook_id"` // reference to existing webhook
+	Type      string `json:"type"`                 // "webhook" (legacy) or "channel"
+	WebhookID string `json:"webhook_id,omitempty"` // legacy reference to existing webhook
+	ChannelID string `json:"channel_id,omitempty"` // reference to notification channel
 }
 
 // AlertEvent is one alert transition (firing/resolved).

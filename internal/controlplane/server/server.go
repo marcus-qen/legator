@@ -644,6 +644,46 @@ func (s *Server) initAlerts() {
 
 	s.alertStore = store
 	s.alertEngine = alerts.NewEngine(store, s.fleetMgr, s.webhookNotifier, s.eventBus, s.logger.Named("alerts"))
+	s.alertEngine.SetNotificationAuditRecorder(alerts.NotificationAuditRecorderFunc(func(record alerts.NotificationAuditRecord) {
+		eventType := audit.EventNotificationDeliverySucceeded
+		if record.Kind == alerts.NotificationAuditTest {
+			eventType = audit.EventNotificationTestSent
+		} else if !record.Success {
+			eventType = audit.EventNotificationDeliveryFailed
+		}
+
+		status := "succeeded"
+		if !record.Success {
+			status = "failed"
+		}
+
+		summary := fmt.Sprintf("notification %s via %s (%s)", status, strings.TrimSpace(record.ChannelName), strings.TrimSpace(record.ChannelType))
+		if record.Kind == alerts.NotificationAuditTest {
+			summary = fmt.Sprintf("notification test %s via %s (%s)", status, strings.TrimSpace(record.ChannelName), strings.TrimSpace(record.ChannelType))
+		}
+
+		detail := map[string]any{
+			"kind":         string(record.Kind),
+			"success":      record.Success,
+			"channel_id":   record.ChannelID,
+			"channel_name": record.ChannelName,
+			"channel_type": record.ChannelType,
+			"rule_id":      record.RuleID,
+			"rule_name":    record.RuleName,
+			"event_type":   record.EventType,
+		}
+		if strings.TrimSpace(record.Error) != "" {
+			detail["error"] = record.Error
+		}
+
+		s.recordAudit(audit.Event{
+			Type:    eventType,
+			ProbeID: record.ProbeID,
+			Actor:   "alerts",
+			Summary: summary,
+			Detail:  detail,
+		})
+	}))
 
 	routingDBPath := filepath.Join(s.cfg.DataDir, "routing.db")
 	rs, err2 := alerts.NewRoutingStore(routingDBPath)
