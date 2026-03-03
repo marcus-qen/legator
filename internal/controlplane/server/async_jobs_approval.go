@@ -46,6 +46,19 @@ func (s *Server) handleApproveAsyncJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	current, err := s.asyncJobsManager.GetJob(jobID)
+	if err != nil {
+		if jobs.IsNotFound(err) {
+			writeJSONError(w, http.StatusNotFound, "not_found", "async job not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "lookup_failed", fmt.Sprintf("lookup failed: %v", err))
+		return
+	}
+	if !s.enforceWorkspaceMatch(w, r, current.WorkspaceID) {
+		return
+	}
+
 	var req approvalDecisionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, context.Canceled) && err.Error() != "EOF" {
 		writeJSONError(w, http.StatusBadRequest, "invalid_body", "invalid request body")
@@ -74,9 +87,10 @@ func (s *Server) handleApproveAsyncJob(w http.ResponseWriter, r *http.Request) {
 	s.syncApprovalDecision(job.ApprovalID, approval.DecisionApproved, decidedBy)
 
 	s.appendCommandStreamMarker(job.RequestID, cmdtracker.StreamEventApproval, "job_approved", map[string]any{
-		"job_id":      job.ID,
-		"approval_id": job.ApprovalID,
-		"approved_by": decidedBy,
+		"job_id":       job.ID,
+		"approval_id":  job.ApprovalID,
+		"approved_by":  decidedBy,
+		"workspace_id": job.WorkspaceID,
 	})
 	s.recordAudit(audit.Event{
 		Type:    audit.EventApprovalDecided,
@@ -84,11 +98,12 @@ func (s *Server) handleApproveAsyncJob(w http.ResponseWriter, r *http.Request) {
 		Actor:   decidedBy,
 		Summary: fmt.Sprintf("Async job %s approved", job.ID),
 		Detail: map[string]any{
-			"job_id":      job.ID,
-			"request_id":  job.RequestID,
-			"approval_id": job.ApprovalID,
-			"decision":    "approved",
-			"decided_by":  decidedBy,
+			"job_id":       job.ID,
+			"request_id":   job.RequestID,
+			"approval_id":  job.ApprovalID,
+			"decision":     "approved",
+			"decided_by":   decidedBy,
+			"workspace_id": job.WorkspaceID,
 		},
 	})
 
@@ -119,6 +134,19 @@ func (s *Server) handleRejectAsyncJob(w http.ResponseWriter, r *http.Request) {
 	jobID := strings.TrimSpace(r.PathValue("id"))
 	if jobID == "" {
 		writeJSONError(w, http.StatusBadRequest, "missing_id", "job id required")
+		return
+	}
+
+	current, err := s.asyncJobsManager.GetJob(jobID)
+	if err != nil {
+		if jobs.IsNotFound(err) {
+			writeJSONError(w, http.StatusNotFound, "not_found", "async job not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "lookup_failed", fmt.Sprintf("lookup failed: %v", err))
+		return
+	}
+	if !s.enforceWorkspaceMatch(w, r, current.WorkspaceID) {
 		return
 	}
 
@@ -154,10 +182,11 @@ func (s *Server) handleRejectAsyncJob(w http.ResponseWriter, r *http.Request) {
 	s.syncApprovalDecision(job.ApprovalID, approval.DecisionDenied, decidedBy)
 
 	s.appendCommandStreamMarker(job.RequestID, cmdtracker.StreamEventApproval, "job_rejected", map[string]any{
-		"job_id":      job.ID,
-		"approval_id": job.ApprovalID,
-		"rejected_by": decidedBy,
-		"reason":      reason,
+		"job_id":       job.ID,
+		"approval_id":  job.ApprovalID,
+		"rejected_by":  decidedBy,
+		"reason":       reason,
+		"workspace_id": job.WorkspaceID,
 	})
 	s.recordAudit(audit.Event{
 		Type:    audit.EventApprovalDecided,
@@ -165,12 +194,13 @@ func (s *Server) handleRejectAsyncJob(w http.ResponseWriter, r *http.Request) {
 		Actor:   decidedBy,
 		Summary: fmt.Sprintf("Async job %s rejected: %s", job.ID, reason),
 		Detail: map[string]any{
-			"job_id":      job.ID,
-			"request_id":  job.RequestID,
-			"approval_id": job.ApprovalID,
-			"decision":    "rejected",
-			"decided_by":  decidedBy,
-			"reason":      reason,
+			"job_id":       job.ID,
+			"request_id":   job.RequestID,
+			"approval_id":  job.ApprovalID,
+			"decision":     "rejected",
+			"decided_by":   decidedBy,
+			"reason":       reason,
+			"workspace_id": job.WorkspaceID,
 		},
 	})
 

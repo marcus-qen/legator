@@ -54,6 +54,10 @@ type Config struct {
 	// Provider proxy spend limits for runner mediated LLM calls.
 	ProviderProxy ProviderProxyConfig `json:"provider_proxy,omitempty"`
 
+	// Workspace isolation controls workspace-scoped authorization gates across
+	// runner, approvals, command streams, and audit APIs.
+	WorkspaceIsolation WorkspaceIsolationConfig `json:"workspace_isolation,omitempty"`
+
 	// Log level (debug, info, warn, error)
 	LogLevel string `json:"log_level"`
 
@@ -140,6 +144,10 @@ type TokenBrokerConfig struct {
 type ProviderProxyConfig struct {
 	MaxTokensPerRun int     `json:"max_tokens_per_run,omitempty"`
 	MaxCostPerRun   float64 `json:"max_cost_per_run,omitempty"`
+}
+
+type WorkspaceIsolationConfig struct {
+	Enabled bool `json:"enabled"`
 }
 
 func (k KubeflowConfig) NamespaceOrDefault() string {
@@ -323,6 +331,9 @@ func Default() Config {
 		ProviderProxy: ProviderProxyConfig{
 			MaxTokensPerRun: 0,
 			MaxCostPerRun:   0,
+		},
+		WorkspaceIsolation: WorkspaceIsolationConfig{
+			Enabled: false,
 		},
 	}
 }
@@ -528,6 +539,9 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("LEGATOR_SANDBOX_ENFORCEMENT"); v != "" {
 		cfg.SandboxEnforcement = v == "true" || v == "1"
+	}
+	if v := os.Getenv("LEGATOR_WORKSPACE_ISOLATION_ENABLED"); v != "" {
+		cfg.WorkspaceIsolation.Enabled = v == "true" || v == "1"
 	}
 
 	cfg.OIDC = oidc.ApplyEnv(cfg.OIDC)

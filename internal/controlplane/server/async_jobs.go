@@ -18,11 +18,11 @@ import (
 	"go.uber.org/zap"
 )
 
-func (s *Server) createAsyncCommandJob(probeID string, cmd protocol.CommandPayload) (*jobs.AsyncJob, error) {
+func (s *Server) createAsyncCommandJob(probeID, workspaceID string, cmd protocol.CommandPayload) (*jobs.AsyncJob, error) {
 	if s == nil || s.asyncJobsManager == nil {
 		return nil, nil
 	}
-	job, err := s.asyncJobsManager.CreateForCommand(probeID, cmd)
+	job, err := s.asyncJobsManager.CreateForCommandInWorkspace(probeID, workspaceID, cmd)
 	if err != nil {
 		s.logger.Warn("create async job failed",
 			zap.String("probe_id", probeID),
@@ -37,14 +37,16 @@ func (s *Server) createAsyncCommandJob(probeID string, cmd protocol.CommandPaylo
 		Actor:   "api",
 		Summary: fmt.Sprintf("Async job created: %s", job.ID),
 		Detail: map[string]any{
-			"job_id":     job.ID,
-			"request_id": job.RequestID,
-			"command":    job.Command,
+			"job_id":       job.ID,
+			"request_id":   job.RequestID,
+			"command":      job.Command,
+			"workspace_id": job.WorkspaceID,
 		},
 	})
 	s.appendCommandStreamMarker(job.RequestID, cmdtracker.StreamEventJob, "async_job_created", map[string]any{
-		"job_id":   job.ID,
-		"probe_id": probeID,
+		"job_id":       job.ID,
+		"probe_id":     probeID,
+		"workspace_id": job.WorkspaceID,
 	})
 	return job, nil
 }
@@ -91,7 +93,7 @@ func (s *Server) dispatchQueuedAsyncJob(ctx context.Context, job jobs.AsyncJob) 
 		ProbeID: ps.ID,
 		Actor:   "scheduler",
 		Summary: fmt.Sprintf("Async job started: %s", job.ID),
-		Detail:  map[string]any{"job_id": job.ID, "request_id": cmd.RequestID},
+		Detail:  map[string]any{"job_id": job.ID, "request_id": cmd.RequestID, "workspace_id": job.WorkspaceID},
 	})
 	s.emitAudit(audit.EventCommandSent, ps.ID, "api", fmt.Sprintf("Command dispatched: %s", cmd.Command))
 	s.publishEvent(events.CommandDispatched, ps.ID, fmt.Sprintf("Command dispatched: %s", cmd.Command),
@@ -122,7 +124,7 @@ func (s *Server) markAsyncJobRunning(jobID string) {
 		ProbeID: job.ProbeID,
 		Actor:   "api",
 		Summary: fmt.Sprintf("Async job started: %s", job.ID),
-		Detail:  map[string]any{"job_id": job.ID, "request_id": job.RequestID},
+		Detail:  map[string]any{"job_id": job.ID, "request_id": job.RequestID, "workspace_id": job.WorkspaceID},
 	})
 }
 
@@ -143,7 +145,7 @@ func (s *Server) markAsyncJobRunningByRequestID(requestID string) {
 		ProbeID: job.ProbeID,
 		Actor:   "approval",
 		Summary: fmt.Sprintf("Async job started after approval: %s", job.ID),
-		Detail:  map[string]any{"job_id": job.ID, "request_id": job.RequestID},
+		Detail:  map[string]any{"job_id": job.ID, "request_id": job.RequestID, "workspace_id": job.WorkspaceID},
 	})
 	s.appendCommandStreamMarker(job.RequestID, cmdtracker.StreamEventApproval, "approval_granted", map[string]any{
 		"job_id":   job.ID,
@@ -168,7 +170,7 @@ func (s *Server) markAsyncJobWaitingApproval(jobID, approvalID string, expiresAt
 		ProbeID: job.ProbeID,
 		Actor:   "api",
 		Summary: fmt.Sprintf("Async job waiting approval: %s", job.ID),
-		Detail:  map[string]any{"job_id": job.ID, "request_id": job.RequestID, "approval_id": approvalID},
+		Detail:  map[string]any{"job_id": job.ID, "request_id": job.RequestID, "approval_id": approvalID, "workspace_id": job.WorkspaceID},
 	})
 	s.appendCommandStreamMarker(job.RequestID, cmdtracker.StreamEventApproval, "pending_approval", map[string]any{
 		"job_id":      job.ID,
@@ -195,7 +197,7 @@ func (s *Server) failAsyncJobByRequestID(requestID, reason, output string, exitC
 		ProbeID: job.ProbeID,
 		Actor:   "system",
 		Summary: fmt.Sprintf("Async job failed: %s", job.ID),
-		Detail:  map[string]any{"job_id": job.ID, "request_id": job.RequestID, "reason": reason},
+		Detail:  map[string]any{"job_id": job.ID, "request_id": job.RequestID, "reason": reason, "workspace_id": job.WorkspaceID},
 	})
 	s.appendCommandStreamMarker(job.RequestID, cmdtracker.StreamEventResult, "job_failed", map[string]any{
 		"job_id":    job.ID,
@@ -226,7 +228,7 @@ func (s *Server) completeAsyncJobByRequestID(requestID string, exitCode int, out
 		ProbeID: job.ProbeID,
 		Actor:   "system",
 		Summary: fmt.Sprintf("Async job succeeded: %s", job.ID),
-		Detail:  map[string]any{"job_id": job.ID, "request_id": job.RequestID},
+		Detail:  map[string]any{"job_id": job.ID, "request_id": job.RequestID, "workspace_id": job.WorkspaceID},
 	})
 	s.appendCommandStreamMarker(job.RequestID, cmdtracker.StreamEventResult, "job_succeeded", map[string]any{
 		"job_id":    job.ID,

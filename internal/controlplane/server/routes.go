@@ -868,7 +868,11 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	asyncJob, asyncJobErr := s.createAsyncCommandJob(id, cmd)
+	workspaceID, ok := s.workspaceScopeForList(w, r)
+if !ok {
+return
+}
+asyncJob, asyncJobErr := s.createAsyncCommandJob(id, workspaceID, cmd)
 	if asyncJob != nil {
 		w.Header().Set("X-Legator-Job-ID", asyncJob.ID)
 	}

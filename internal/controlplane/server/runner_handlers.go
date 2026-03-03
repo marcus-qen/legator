@@ -26,6 +26,13 @@ func (s *Server) handleCreateRunner(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusUnauthorized, "session_required", "session context required")
 		return
 	}
+	workspaceID, ok := s.workspaceScopeForRequest(w, r)
+	if !ok {
+		return
+	}
+	if workspaceID == "*" {
+		workspaceID = ""
+	}
 
 	var req struct {
 		Label   string `json:"label"`
@@ -63,12 +70,13 @@ func (s *Server) handleCreateRunner(w http.ResponseWriter, r *http.Request) {
 	}
 
 	created, err := s.runnerManager.CreateRunner(runner.CreateRequest{
-		Label:     strings.TrimSpace(req.Label),
-		JobID:     strings.TrimSpace(req.JobID),
-		Backend:   backend,
-		Sandbox:   sandbox,
-		CreatedBy: actor,
-		SessionID: sessionID,
+		Label:       strings.TrimSpace(req.Label),
+		JobID:       strings.TrimSpace(req.JobID),
+		Backend:     backend,
+		Sandbox:     sandbox,
+		CreatedBy:   actor,
+		SessionID:   sessionID,
+		WorkspaceID: workspaceID,
 	})
 	if err != nil {
 		s.writeRunnerError(w, err)
@@ -80,12 +88,13 @@ func (s *Server) handleCreateRunner(w http.ResponseWriter, r *http.Request) {
 		Actor:   actor,
 		Summary: fmt.Sprintf("Runner created: %s", created.ID),
 		Detail: map[string]any{
-			"runner_id":  created.ID,
-			"job_id":     created.JobID,
-			"backend":    created.Backend,
-			"state":      created.State,
-			"session_id": sessionID,
-			"label":      created.Label,
+			"runner_id":    created.ID,
+			"job_id":       created.JobID,
+			"backend":      created.Backend,
+			"state":        created.State,
+			"session_id":   sessionID,
+			"label":        created.Label,
+			"workspace_id": created.WorkspaceID,
 		},
 	})
 
@@ -115,6 +124,14 @@ func (s *Server) handleIssueRunToken(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request")
 		return
 	}
+	targetRunner, err := s.runnerManager.GetRunner(strings.TrimSpace(req.RunnerID))
+	if err != nil {
+		s.writeRunnerError(w, err)
+		return
+	}
+	if !s.enforceWorkspaceMatch(w, r, targetRunner.WorkspaceID) {
+		return
+	}
 
 	ttl := time.Duration(req.TTLSeconds) * time.Second
 	issued, err := s.runnerManager.IssueRunToken(runner.IssueTokenRequest{
@@ -135,11 +152,12 @@ func (s *Server) handleIssueRunToken(w http.ResponseWriter, r *http.Request) {
 		Actor:   actor,
 		Summary: fmt.Sprintf("Runner run token issued: %s", issued.RunnerID),
 		Detail: map[string]any{
-			"runner_id":  issued.RunnerID,
-			"job_id":     issued.JobID,
-			"audience":   issued.Audience,
-			"expires_at": issued.ExpiresAt,
-			"session_id": sessionID,
+			"runner_id":    issued.RunnerID,
+			"job_id":       issued.JobID,
+			"audience":     issued.Audience,
+			"expires_at":   issued.ExpiresAt,
+			"session_id":   sessionID,
+			"workspace_id": targetRunner.WorkspaceID,
 		},
 	})
 
@@ -193,7 +211,16 @@ func (s *Server) handleRunnerLifecycle(w http.ResponseWriter, r *http.Request, a
 		SessionID: sessionID,
 	}
 
-	prepared, err := s.runnerManager.PrepareRunnerLifecycle(input, audience)
+	current, err := s.runnerManager.GetRunner(runnerID)
+if err != nil {
+s.writeRunnerError(w, err)
+return
+}
+if !s.enforceWorkspaceMatch(w, r, current.WorkspaceID) {
+return
+}
+
+prepared, err := s.runnerManager.PrepareRunnerLifecycle(input, audience)
 	if err != nil {
 		s.writeRunnerError(w, err)
 		return
@@ -233,12 +260,13 @@ func (s *Server) handleRunnerLifecycle(w http.ResponseWriter, r *http.Request, a
 		Actor:   actor,
 		Summary: fmt.Sprintf("Runner %s: %s", audience, updated.ID),
 		Detail: map[string]any{
-			"runner_id":  updated.ID,
-			"job_id":     updated.JobID,
-			"backend":    updated.Backend,
-			"state":      updated.State,
-			"session_id": sessionID,
-			"audience":   audience,
+			"runner_id":    updated.ID,
+			"job_id":       updated.JobID,
+			"backend":      updated.Backend,
+			"state":        updated.State,
+			"session_id":   sessionID,
+			"audience":     audience,
+			"workspace_id": updated.WorkspaceID,
 		},
 	})
 

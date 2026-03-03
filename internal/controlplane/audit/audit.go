@@ -62,6 +62,7 @@ type Event struct {
 	ProbeID   string    `json:"probe_id,omitempty"`
 	Actor     string    `json:"actor,omitempty"` // who initiated (user, system, probe)
 	Summary   string    `json:"summary"`
+	WorkspaceID string    `json:"workspace_id,omitempty"`
 	Detail    any       `json:"detail,omitempty"`
 	Before    any       `json:"before,omitempty"` // state before change
 	After     any       `json:"after,omitempty"`  // state after change
@@ -118,6 +119,7 @@ type Filter struct {
 	Type    EventType
 	Since   time.Time
 	Until   time.Time
+	WorkspaceID string
 	Cursor  string
 	Limit   int
 }
@@ -134,6 +136,9 @@ func (l *Log) Query(f Filter) []Event {
 		evt := l.events[i]
 
 		if f.ProbeID != "" && evt.ProbeID != f.ProbeID {
+			continue
+		}
+		if f.WorkspaceID != "" && evt.WorkspaceID != f.WorkspaceID {
 			continue
 		}
 		if f.Type != "" && evt.Type != f.Type {

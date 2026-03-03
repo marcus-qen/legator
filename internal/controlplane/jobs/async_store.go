@@ -17,70 +17,90 @@ const (
 )
 
 func migrateAsyncJobs(db *sql.DB) error {
-	runner := migration.NewRunner("jobs", []migration.Migration{
-		{
-			Version:     2,
-			Description: "add async job state machine tables",
-			Up: func(tx *sql.Tx) error {
-				if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS async_jobs (
-					id            TEXT PRIMARY KEY,
-					probe_id      TEXT NOT NULL,
-					request_id    TEXT NOT NULL UNIQUE,
-					command       TEXT NOT NULL,
-					args_json     TEXT NOT NULL DEFAULT '[]',
-					level         TEXT NOT NULL DEFAULT '',
-					state         TEXT NOT NULL,
-					status_reason TEXT NOT NULL DEFAULT '',
-					approval_id   TEXT NOT NULL DEFAULT '',
-					exit_code     INTEGER,
-					output        TEXT NOT NULL DEFAULT '',
-					created_at    TEXT NOT NULL,
-					updated_at    TEXT NOT NULL,
-					started_at    TEXT,
-					finished_at   TEXT,
-					expires_at    TEXT
-				)`); err != nil {
-					return err
-				}
-				if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_async_jobs_state_updated ON async_jobs(state, updated_at DESC)`); err != nil {
-					return err
-				}
-				if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_async_jobs_created_at ON async_jobs(created_at DESC)`); err != nil {
-					return err
-				}
-				if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_async_jobs_expires_at ON async_jobs(expires_at)`); err != nil {
-					return err
-				}
-				return nil
-			},
-		},
-		{
-			Version:     3,
-			Description: "add async queue scheduling index",
-			Up: func(tx *sql.Tx) error {
-				_, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_async_jobs_state_created ON async_jobs(state, created_at ASC)`)
-				return err
-			},
-		},
-		{
-			Version:     4,
-			Description: "add approval audit columns (approved_by, rejected_by, rejection_reason, approval_deadline)",
-			Up: func(tx *sql.Tx) error {
-				for _, col := range []string{
-					`ALTER TABLE async_jobs ADD COLUMN approved_by TEXT NOT NULL DEFAULT ''`,
-					`ALTER TABLE async_jobs ADD COLUMN rejected_by TEXT NOT NULL DEFAULT ''`,
-					`ALTER TABLE async_jobs ADD COLUMN rejection_reason TEXT NOT NULL DEFAULT ''`,
-					`ALTER TABLE async_jobs ADD COLUMN approval_deadline TEXT`,
-				} {
-					if _, err := tx.Exec(col); err != nil {
-						return err
-					}
-				}
-				return nil
-			},
-		},
-	})
-	return runner.Migrate(db)
+runner := migration.NewRunner("jobs", []migration.Migration{
+{
+Version:     2,
+Description: "add async job state machine tables",
+Up: func(tx *sql.Tx) error {
+if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS async_jobs (
+id            TEXT PRIMARY KEY,
+probe_id      TEXT NOT NULL,
+workspace_id  TEXT NOT NULL DEFAULT '',
+request_id    TEXT NOT NULL UNIQUE,
+command       TEXT NOT NULL,
+args_json     TEXT NOT NULL DEFAULT '[]',
+level         TEXT NOT NULL DEFAULT '',
+state         TEXT NOT NULL,
+status_reason TEXT NOT NULL DEFAULT '',
+approval_id   TEXT NOT NULL DEFAULT '',
+exit_code     INTEGER,
+output        TEXT NOT NULL DEFAULT '',
+created_at    TEXT NOT NULL,
+updated_at    TEXT NOT NULL,
+started_at    TEXT,
+finished_at   TEXT,
+expires_at    TEXT
+)`); err != nil {
+return err
+}
+if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_async_jobs_state_updated ON async_jobs(state, updated_at DESC)`); err != nil {
+return err
+}
+if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_async_jobs_created_at ON async_jobs(created_at DESC)`); err != nil {
+return err
+}
+if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_async_jobs_workspace_id ON async_jobs(workspace_id)`); err != nil {
+return err
+}
+if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_async_jobs_expires_at ON async_jobs(expires_at)`); err != nil {
+return err
+}
+return nil
+},
+},
+{
+Version:     3,
+Description: "add async queue scheduling index",
+Up: func(tx *sql.Tx) error {
+_, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_async_jobs_state_created ON async_jobs(state, created_at ASC)`)
+return err
+},
+},
+{
+Version:     4,
+Description: "add approval audit columns (approved_by, rejected_by, rejection_reason, approval_deadline)",
+Up: func(tx *sql.Tx) error {
+for _, col := range []string{
+`ALTER TABLE async_jobs ADD COLUMN approved_by TEXT NOT NULL DEFAULT ''`,
+`ALTER TABLE async_jobs ADD COLUMN rejected_by TEXT NOT NULL DEFAULT ''`,
+`ALTER TABLE async_jobs ADD COLUMN rejection_reason TEXT NOT NULL DEFAULT ''`,
+`ALTER TABLE async_jobs ADD COLUMN approval_deadline TEXT`,
+} {
+if _, err := tx.Exec(col); err != nil {
+return err
+}
+}
+return nil
+},
+},
+{
+Version:     5,
+Description: "add workspace id column to async jobs",
+Up: func(tx *sql.Tx) error {
+if _, err := tx.Exec(`ALTER TABLE async_jobs ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`); err != nil {
+// ignore duplicate column (column may exist in fresh schema)
+if !strings.Contains(err.Error(), "duplicate column name") {
+	return err
+}
+}
+if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_async_jobs_workspace_id ON async_jobs(workspace_id)`); err != nil {
+return err
+}
+return nil
+},
+},
+})
+return runner.Migrate(db)
 }
 
 func (s *Store) CreateAsyncJob(job AsyncJob) (*AsyncJob, error) {
@@ -91,6 +111,7 @@ func (s *Store) CreateAsyncJob(job AsyncJob) (*AsyncJob, error) {
 	job.Command = strings.TrimSpace(job.Command)
 	job.RequestID = strings.TrimSpace(job.RequestID)
 	job.Level = strings.TrimSpace(job.Level)
+	job.WorkspaceID = strings.ToLower(strings.TrimSpace(job.WorkspaceID))
 	if job.ProbeID == "" {
 		return nil, fmt.Errorf("probe_id required")
 	}
@@ -124,12 +145,13 @@ func (s *Store) CreateAsyncJob(job AsyncJob) (*AsyncJob, error) {
 	}
 
 	_, err = s.db.Exec(`INSERT INTO async_jobs (
-		id, probe_id, request_id, command, args_json, level, state, status_reason, approval_id,
+		id, probe_id, workspace_id, request_id, command, args_json, level, state, status_reason, approval_id,
 		exit_code, output, created_at, updated_at, started_at, finished_at, expires_at,
 		approved_by, rejected_by, rejection_reason, approval_deadline
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID,
 		job.ProbeID,
+		job.WorkspaceID,
 		job.RequestID,
 		job.Command,
 		string(argsJSON),
@@ -161,7 +183,7 @@ func (s *Store) ListAsyncJobs(limit int) ([]AsyncJob, error) {
 	}
 	limit = normalizeAsyncJobLimit(limit)
 	rows, err := s.db.Query(`SELECT
-		id, probe_id, request_id, command, args_json, level, state, status_reason, approval_id,
+		id, probe_id, workspace_id, request_id, command, args_json, level, state, status_reason, approval_id,
 		exit_code, output, created_at, updated_at, started_at, finished_at, expires_at,
 		approved_by, rejected_by, rejection_reason, approval_deadline
 		FROM async_jobs
@@ -183,6 +205,39 @@ func (s *Store) ListAsyncJobs(limit int) ([]AsyncJob, error) {
 	return out, rows.Err()
 }
 
+func (s *Store) ListAsyncJobsByWorkspace(workspaceID string, limit int) ([]AsyncJob, error) {
+if s == nil || s.db == nil {
+return nil, fmt.Errorf("store unavailable")
+}
+workspaceID = strings.ToLower(strings.TrimSpace(workspaceID))
+if workspaceID == "" {
+return nil, fmt.Errorf("workspace_id required")
+}
+limit = normalizeAsyncJobLimit(limit)
+rows, err := s.db.Query(`SELECT
+id, probe_id, workspace_id, request_id, command, args_json, level, state, status_reason, approval_id,
+exit_code, output, created_at, updated_at, started_at, finished_at, expires_at,
+approved_by, rejected_by, rejection_reason, approval_deadline
+FROM async_jobs
+WHERE workspace_id = ?
+ORDER BY created_at DESC
+LIMIT ?`, workspaceID, limit)
+if err != nil {
+return nil, err
+}
+defer rows.Close()
+
+out := make([]AsyncJob, 0, limit)
+for rows.Next() {
+job, err := scanAsyncJob(rows)
+if err != nil {
+continue
+}
+out = append(out, *job)
+}
+return out, rows.Err()
+}
+
 func (s *Store) ListAsyncJobsByState(state AsyncJobState, limit int) ([]AsyncJob, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("store unavailable")
@@ -193,7 +248,7 @@ func (s *Store) ListAsyncJobsByState(state AsyncJobState, limit int) ([]AsyncJob
 	}
 	limit = normalizeAsyncJobLimit(limit)
 	rows, err := s.db.Query(`SELECT
-		id, probe_id, request_id, command, args_json, level, state, status_reason, approval_id,
+		id, probe_id, workspace_id, request_id, command, args_json, level, state, status_reason, approval_id,
 		exit_code, output, created_at, updated_at, started_at, finished_at, expires_at,
 		approved_by, rejected_by, rejection_reason, approval_deadline
 		FROM async_jobs
@@ -313,11 +368,31 @@ func (s *Store) GetAsyncJob(id string) (*AsyncJob, error) {
 		return nil, fmt.Errorf("job id required")
 	}
 	row := s.db.QueryRow(`SELECT
-		id, probe_id, request_id, command, args_json, level, state, status_reason, approval_id,
+		id, probe_id, workspace_id, request_id, command, args_json, level, state, status_reason, approval_id,
 		exit_code, output, created_at, updated_at, started_at, finished_at, expires_at,
 		approved_by, rejected_by, rejection_reason, approval_deadline
 		FROM async_jobs WHERE id = ?`, id)
 	return scanAsyncJob(row)
+}
+
+func (s *Store) GetAsyncJobInWorkspace(id, workspaceID string) (*AsyncJob, error) {
+if s == nil || s.db == nil {
+return nil, fmt.Errorf("store unavailable")
+}
+id = strings.TrimSpace(id)
+if id == "" {
+return nil, fmt.Errorf("job id required")
+}
+workspaceID = strings.ToLower(strings.TrimSpace(workspaceID))
+if workspaceID == "" {
+return nil, fmt.Errorf("workspace_id required")
+}
+row := s.db.QueryRow(`SELECT
+id, probe_id, workspace_id, request_id, command, args_json, level, state, status_reason, approval_id,
+exit_code, output, created_at, updated_at, started_at, finished_at, expires_at,
+approved_by, rejected_by, rejection_reason, approval_deadline
+FROM async_jobs WHERE id = ? AND workspace_id = ?`, id, workspaceID)
+return scanAsyncJob(row)
 }
 
 func (s *Store) GetAsyncJobByRequestID(requestID string) (*AsyncJob, error) {
@@ -329,7 +404,7 @@ func (s *Store) GetAsyncJobByRequestID(requestID string) (*AsyncJob, error) {
 		return nil, fmt.Errorf("request_id required")
 	}
 	row := s.db.QueryRow(`SELECT
-		id, probe_id, request_id, command, args_json, level, state, status_reason, approval_id,
+		id, probe_id, workspace_id, request_id, command, args_json, level, state, status_reason, approval_id,
 		exit_code, output, created_at, updated_at, started_at, finished_at, expires_at,
 		approved_by, rejected_by, rejection_reason, approval_deadline
 		FROM async_jobs WHERE request_id = ?`, requestID)
@@ -532,6 +607,7 @@ func scanAsyncJob(s scanner) (*AsyncJob, error) {
 	if err := s.Scan(
 		&job.ID,
 		&job.ProbeID,
+		&job.WorkspaceID,
 		&job.RequestID,
 		&job.Command,
 		&argsJSON,
@@ -555,6 +631,7 @@ func scanAsyncJob(s scanner) (*AsyncJob, error) {
 	}
 
 	job.State = normalizeAsyncJobState(AsyncJobState(state))
+	job.WorkspaceID = strings.ToLower(strings.TrimSpace(job.WorkspaceID))
 	if len(strings.TrimSpace(argsJSON)) > 0 {
 		_ = json.Unmarshal([]byte(argsJSON), &job.Args)
 	}
@@ -677,7 +754,7 @@ func (s *Store) ListExpiredWaitingApprovalJobs(now time.Time, limit int) ([]Asyn
 	}
 	limit = normalizeAsyncJobLimit(limit)
 	rows, err := s.db.Query(`SELECT
-		id, probe_id, request_id, command, args_json, level, state, status_reason, approval_id,
+		id, probe_id, workspace_id, request_id, command, args_json, level, state, status_reason, approval_id,
 		exit_code, output, created_at, updated_at, started_at, finished_at, expires_at,
 		approved_by, rejected_by, rejection_reason, approval_deadline
 		FROM async_jobs

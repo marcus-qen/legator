@@ -472,3 +472,16 @@ func TestOIDCEnvOverrides(t *testing.T) {
 		t.Fatalf("expected provider name Keycloak, got %s", cfg.OIDC.ProviderName)
 	}
 }
+
+func TestWorkspaceIsolationDefaultsAndEnvOverride(t *testing.T) {
+    cfg := Default()
+    if cfg.WorkspaceIsolation.Enabled {
+        t.Fatal("workspace isolation should default to disabled")
+    }
+
+    t.Setenv("LEGATOR_WORKSPACE_ISOLATION_ENABLED", "1")
+    loaded := LoadFromEnv()
+    if !loaded.WorkspaceIsolation.Enabled {
+        t.Fatal("expected workspace isolation enabled from env")
+    }
+}

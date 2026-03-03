@@ -178,3 +178,32 @@ PUT /api/v1/probes/{id}/tags
 PUT /api/v1/users/{id}/role
 PUT /api/v1/users/{id}/tenants
 # Stable REST API routes (v1 + health/version + MCP transport)
+
+## Workspace Isolation (feature-flag: workspace_isolation.enabled)
+
+When `workspace_isolation.enabled = true`, the following auth claims/headers are enforced:
+
+### Workspace Permission Token (API Key / User)
+Permission grant: `workspace:<workspace-id>` or `workspace:*`
+- `workspace:*`          — admin-level; can access all workspaces
+- `workspace:my-org`     — scoped to workspace "my-org" only
+- No workspace grant     — 403 workspace_scope_required when isolation enabled
+
+### Affected Endpoints
+- POST   /api/v1/runners              — restricts create to scope workspace
+- POST   /api/v1/runs                 — scopes token issuance to matching runner workspace
+- POST   /api/v1/runs/{id}/artifacts/presign  — enforces run workspace match
+- POST   /api/v1/runs/{id}/provider-proxy     — enforces run workspace match
+- POST   /api/v1/jobs/{id}/approve    — enforces job workspace match before approval
+- POST   /api/v1/jobs/{id}/reject     — enforces job workspace match before rejection
+- GET    /api/v1/audit                — filters events to requesting workspace
+- GET    /api/v1/audit/export/jsonl   — filters export to requesting workspace
+- GET    /api/v1/audit/export/csv     — filters export to requesting workspace
+- GET    /api/v1/commands/pending     — filters list to requesting workspace
+- GET    /api/v1/commands/{requestId}/stream  — denies cross-workspace access
+- GET    /api/v1/commands/{requestId}/replay  — denies cross-workspace access
+
+### Error Codes (when isolation enabled)
+- `workspace_scope_required`   (403) — no workspace: grant in token
+- `workspace_scope_ambiguous`  (403) — multiple concrete workspace grants
+- `workspace_forbidden`        (403) — resource belongs to different workspace

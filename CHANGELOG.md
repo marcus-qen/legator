@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 ### Added
+- [compat:additive] **E1 — Workspace isolation gates for runs, approvals, audit, and streams**: Added `workspace_isolation.enabled` config toggle (default `false`; env `LEGATOR_WORKSPACE_ISOLATION_ENABLED`) that enforces workspace-scoped authorization across all sensitive API paths. When enabled: runner create/token/lifecycle endpoints scope to the requesting workspace token; approval `POST /api/v1/jobs/{id}/approve` and `/reject` verify job workspace matches token; audit query and export endpoints filter by workspace; command stream SSE and replay endpoints deny cross-workspace access; pending commands list is filtered by workspace. Added `workspace_id` field to `AsyncJob`, `Runner`, and `audit.Event`. Added `workspace:` permission token pattern for extracting workspace scope from API-key or user claims. Added migration v5 to `async_jobs` table and idempotent migration to `audit_events` table for `workspace_id` column. Added `WorkspaceForRun`, `ListJobsByWorkspace`, `GetAsyncJobInWorkspace`, `CreateForCommandInWorkspace` helpers. All changes are backward-compatible with `workspace_isolation.enabled=false`.
 - [compat:additive] Added runner-to-provider control-plane mediation route `POST /api/v1/runs/{id}/provider-proxy` using scoped run token audience `runner:provider-proxy`, server-side provider credential resolution, OpenAI-compatible request forwarding, SQLite-backed per-run spend tracking, configurable spend limits (`provider_proxy.max_tokens_per_run`, `provider_proxy.max_cost_per_run`), and audit event `runner.provider_proxy` with run/actor/token attribution.
 - [compat:additive] Added sandbox lane enforcement for command dispatch: mutation-classified host-direct lanes now return `403` with `code=sandbox_enforcement` unless explicit breakglass confirmation is provided (`breakglass_reason` or `breakglass_token`). Accepted breakglass dispatches emit elevated audit event `breakglass.command` with actor + reason attribution.
 - [compat:additive] Added async approval-gated job decision routes `POST /api/v1/jobs/{id}/approve` and `POST /api/v1/jobs/{id}/reject` to resume or fail `waiting_approval` async jobs by job id.
@@ -26,6 +27,7 @@ and docs freeze (4.0.3) complete the pre-beta work. See the full release notes i
 `docs/releases/v1.0.0-beta.1.md`.
 
 ### Added
+- [compat:additive] **E1 — Workspace isolation gates for runs, approvals, audit, and streams**: Added `workspace_isolation.enabled` config toggle (default `false`; env `LEGATOR_WORKSPACE_ISOLATION_ENABLED`) that enforces workspace-scoped authorization across all sensitive API paths. When enabled: runner create/token/lifecycle endpoints scope to the requesting workspace token; approval `POST /api/v1/jobs/{id}/approve` and `/reject` verify job workspace matches token; audit query and export endpoints filter by workspace; command stream SSE and replay endpoints deny cross-workspace access; pending commands list is filtered by workspace. Added `workspace_id` field to `AsyncJob`, `Runner`, and `audit.Event`. Added `workspace:` permission token pattern for extracting workspace scope from API-key or user claims. Added migration v5 to `async_jobs` table and idempotent migration to `audit_events` table for `workspace_id` column. Added `WorkspaceForRun`, `ListJobsByWorkspace`, `GetAsyncJobInWorkspace`, `CreateForCommandInWorkspace` helpers. All changes are backward-compatible with `workspace_isolation.enabled=false`.
 - **Stage 4.0.3: Docs freeze — API reference, security model, MCP tools, deployment guide**
   - Froze and published `docs/api-reference.md` covering all 60+ REST endpoints with request/response
     schemas, permission gates, and compatibility annotations.
@@ -358,6 +360,7 @@ and docs freeze (4.0.3) complete the pre-beta work. See the full release notes i
 ## [v1.0.0-alpha.17] — 2026-02-28
 
 ### Added
+- [compat:additive] **E1 — Workspace isolation gates for runs, approvals, audit, and streams**: Added `workspace_isolation.enabled` config toggle (default `false`; env `LEGATOR_WORKSPACE_ISOLATION_ENABLED`) that enforces workspace-scoped authorization across all sensitive API paths. When enabled: runner create/token/lifecycle endpoints scope to the requesting workspace token; approval `POST /api/v1/jobs/{id}/approve` and `/reject` verify job workspace matches token; audit query and export endpoints filter by workspace; command stream SSE and replay endpoints deny cross-workspace access; pending commands list is filtered by workspace. Added `workspace_id` field to `AsyncJob`, `Runner`, and `audit.Event`. Added `workspace:` permission token pattern for extracting workspace scope from API-key or user claims. Added migration v5 to `async_jobs` table and idempotent migration to `audit_events` table for `workspace_id` column. Added `WorkspaceForRun`, `ListJobsByWorkspace`, `GetAsyncJobInWorkspace`, `CreateForCommandInWorkspace` helpers. All changes are backward-compatible with `workspace_isolation.enabled=false`.
 - **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
   - Added  and  policy-as-code types ().
     - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
@@ -401,6 +404,7 @@ and docs freeze (4.0.3) complete the pre-beta work. See the full release notes i
 ## [v1.0.0-alpha.16] — 2026-02-28
 
 ### Added
+- [compat:additive] **E1 — Workspace isolation gates for runs, approvals, audit, and streams**: Added `workspace_isolation.enabled` config toggle (default `false`; env `LEGATOR_WORKSPACE_ISOLATION_ENABLED`) that enforces workspace-scoped authorization across all sensitive API paths. When enabled: runner create/token/lifecycle endpoints scope to the requesting workspace token; approval `POST /api/v1/jobs/{id}/approve` and `/reject` verify job workspace matches token; audit query and export endpoints filter by workspace; command stream SSE and replay endpoints deny cross-workspace access; pending commands list is filtered by workspace. Added `workspace_id` field to `AsyncJob`, `Runner`, and `audit.Event`. Added `workspace:` permission token pattern for extracting workspace scope from API-key or user claims. Added migration v5 to `async_jobs` table and idempotent migration to `audit_events` table for `workspace_id` column. Added `WorkspaceForRun`, `ListJobsByWorkspace`, `GetAsyncJobInWorkspace`, `CreateForCommandInWorkspace` helpers. All changes are backward-compatible with `workspace_isolation.enabled=false`.
 - **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
   - Added  and  policy-as-code types ().
     - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
@@ -581,6 +585,7 @@ and docs freeze (4.0.3) complete the pre-beta work. See the full release notes i
   - Refactored HTTP command dispatch and MCP run-command renderers into pure transport wiring over codec outputs, with strict legacy-vs-codec parity tests to preserve status, payload shape, and error wording semantics.
 
 ### Added
+- [compat:additive] **E1 — Workspace isolation gates for runs, approvals, audit, and streams**: Added `workspace_isolation.enabled` config toggle (default `false`; env `LEGATOR_WORKSPACE_ISOLATION_ENABLED`) that enforces workspace-scoped authorization across all sensitive API paths. When enabled: runner create/token/lifecycle endpoints scope to the requesting workspace token; approval `POST /api/v1/jobs/{id}/approve` and `/reject` verify job workspace matches token; audit query and export endpoints filter by workspace; command stream SSE and replay endpoints deny cross-workspace access; pending commands list is filtered by workspace. Added `workspace_id` field to `AsyncJob`, `Runner`, and `audit.Event`. Added `workspace:` permission token pattern for extracting workspace scope from API-key or user claims. Added migration v5 to `async_jobs` table and idempotent migration to `audit_events` table for `workspace_id` column. Added `WorkspaceForRun`, `ListJobsByWorkspace`, `GetAsyncJobInWorkspace`, `CreateForCommandInWorkspace` helpers. All changes are backward-compatible with `workspace_isolation.enabled=false`.
 - **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
   - Added  and  policy-as-code types ().
     - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
@@ -610,6 +615,7 @@ and docs freeze (4.0.3) complete the pre-beta work. See the full release notes i
 ## [v1.0.0-alpha.14] — 2026-02-27
 
 ### Added
+- [compat:additive] **E1 — Workspace isolation gates for runs, approvals, audit, and streams**: Added `workspace_isolation.enabled` config toggle (default `false`; env `LEGATOR_WORKSPACE_ISOLATION_ENABLED`) that enforces workspace-scoped authorization across all sensitive API paths. When enabled: runner create/token/lifecycle endpoints scope to the requesting workspace token; approval `POST /api/v1/jobs/{id}/approve` and `/reject` verify job workspace matches token; audit query and export endpoints filter by workspace; command stream SSE and replay endpoints deny cross-workspace access; pending commands list is filtered by workspace. Added `workspace_id` field to `AsyncJob`, `Runner`, and `audit.Event`. Added `workspace:` permission token pattern for extracting workspace scope from API-key or user claims. Added migration v5 to `async_jobs` table and idempotent migration to `audit_events` table for `workspace_id` column. Added `WorkspaceForRun`, `ListJobsByWorkspace`, `GetAsyncJobInWorkspace`, `CreateForCommandInWorkspace` helpers. All changes are backward-compatible with `workspace_isolation.enabled=false`.
 - **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
   - Added  and  policy-as-code types ().
     - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
@@ -660,6 +666,7 @@ and docs freeze (4.0.3) complete the pre-beta work. See the full release notes i
   - Write actions on Approvals/Alerts/Model Dock/Cloud Connectors/Discovery are read-only or disabled when `fleet:write` / `approval:write` is missing
 
 ### Added
+- [compat:additive] **E1 — Workspace isolation gates for runs, approvals, audit, and streams**: Added `workspace_isolation.enabled` config toggle (default `false`; env `LEGATOR_WORKSPACE_ISOLATION_ENABLED`) that enforces workspace-scoped authorization across all sensitive API paths. When enabled: runner create/token/lifecycle endpoints scope to the requesting workspace token; approval `POST /api/v1/jobs/{id}/approve` and `/reject` verify job workspace matches token; audit query and export endpoints filter by workspace; command stream SSE and replay endpoints deny cross-workspace access; pending commands list is filtered by workspace. Added `workspace_id` field to `AsyncJob`, `Runner`, and `audit.Event`. Added `workspace:` permission token pattern for extracting workspace scope from API-key or user claims. Added migration v5 to `async_jobs` table and idempotent migration to `audit_events` table for `workspace_id` column. Added `WorkspaceForRun`, `ListJobsByWorkspace`, `GetAsyncJobInWorkspace`, `CreateForCommandInWorkspace` helpers. All changes are backward-compatible with `workspace_isolation.enabled=false`.
 - **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
   - Added  and  policy-as-code types ().
     - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
@@ -688,6 +695,7 @@ and docs freeze (4.0.3) complete the pre-beta work. See the full release notes i
 ## [v1.0.0-alpha.12] — 2026-02-27
 
 ### Added
+- [compat:additive] **E1 — Workspace isolation gates for runs, approvals, audit, and streams**: Added `workspace_isolation.enabled` config toggle (default `false`; env `LEGATOR_WORKSPACE_ISOLATION_ENABLED`) that enforces workspace-scoped authorization across all sensitive API paths. When enabled: runner create/token/lifecycle endpoints scope to the requesting workspace token; approval `POST /api/v1/jobs/{id}/approve` and `/reject` verify job workspace matches token; audit query and export endpoints filter by workspace; command stream SSE and replay endpoints deny cross-workspace access; pending commands list is filtered by workspace. Added `workspace_id` field to `AsyncJob`, `Runner`, and `audit.Event`. Added `workspace:` permission token pattern for extracting workspace scope from API-key or user claims. Added migration v5 to `async_jobs` table and idempotent migration to `audit_events` table for `workspace_id` column. Added `WorkspaceForRun`, `ListJobsByWorkspace`, `GetAsyncJobInWorkspace`, `CreateForCommandInWorkspace` helpers. All changes are backward-compatible with `workspace_isolation.enabled=false`.
 - **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
   - Added  and  policy-as-code types ().
     - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
@@ -726,6 +734,7 @@ and docs freeze (4.0.3) complete the pre-beta work. See the full release notes i
 ## [v1.0.0-alpha.11] — 2026-02-27
 
 ### Added
+- [compat:additive] **E1 — Workspace isolation gates for runs, approvals, audit, and streams**: Added `workspace_isolation.enabled` config toggle (default `false`; env `LEGATOR_WORKSPACE_ISOLATION_ENABLED`) that enforces workspace-scoped authorization across all sensitive API paths. When enabled: runner create/token/lifecycle endpoints scope to the requesting workspace token; approval `POST /api/v1/jobs/{id}/approve` and `/reject` verify job workspace matches token; audit query and export endpoints filter by workspace; command stream SSE and replay endpoints deny cross-workspace access; pending commands list is filtered by workspace. Added `workspace_id` field to `AsyncJob`, `Runner`, and `audit.Event`. Added `workspace:` permission token pattern for extracting workspace scope from API-key or user claims. Added migration v5 to `async_jobs` table and idempotent migration to `audit_events` table for `workspace_id` column. Added `WorkspaceForRun`, `ListJobsByWorkspace`, `GetAsyncJobInWorkspace`, `CreateForCommandInWorkspace` helpers. All changes are backward-compatible with `workspace_isolation.enabled=false`.
 - **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
   - Added  and  policy-as-code types ().
     - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
@@ -765,6 +774,7 @@ and docs freeze (4.0.3) complete the pre-beta work. See the full release notes i
 ## [v1.0.0-alpha.10] — 2026-02-27
 
 ### Added
+- [compat:additive] **E1 — Workspace isolation gates for runs, approvals, audit, and streams**: Added `workspace_isolation.enabled` config toggle (default `false`; env `LEGATOR_WORKSPACE_ISOLATION_ENABLED`) that enforces workspace-scoped authorization across all sensitive API paths. When enabled: runner create/token/lifecycle endpoints scope to the requesting workspace token; approval `POST /api/v1/jobs/{id}/approve` and `/reject` verify job workspace matches token; audit query and export endpoints filter by workspace; command stream SSE and replay endpoints deny cross-workspace access; pending commands list is filtered by workspace. Added `workspace_id` field to `AsyncJob`, `Runner`, and `audit.Event`. Added `workspace:` permission token pattern for extracting workspace scope from API-key or user claims. Added migration v5 to `async_jobs` table and idempotent migration to `audit_events` table for `workspace_id` column. Added `WorkspaceForRun`, `ListJobsByWorkspace`, `GetAsyncJobInWorkspace`, `CreateForCommandInWorkspace` helpers. All changes are backward-compatible with `workspace_isolation.enabled=false`.
 - **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
   - Added  and  policy-as-code types ().
     - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
@@ -817,6 +827,7 @@ All notable changes to Legator are documented here.
 ## [v1.0.0-alpha.6] — 2026-02-26
 
 ### Added
+- [compat:additive] **E1 — Workspace isolation gates for runs, approvals, audit, and streams**: Added `workspace_isolation.enabled` config toggle (default `false`; env `LEGATOR_WORKSPACE_ISOLATION_ENABLED`) that enforces workspace-scoped authorization across all sensitive API paths. When enabled: runner create/token/lifecycle endpoints scope to the requesting workspace token; approval `POST /api/v1/jobs/{id}/approve` and `/reject` verify job workspace matches token; audit query and export endpoints filter by workspace; command stream SSE and replay endpoints deny cross-workspace access; pending commands list is filtered by workspace. Added `workspace_id` field to `AsyncJob`, `Runner`, and `audit.Event`. Added `workspace:` permission token pattern for extracting workspace scope from API-key or user claims. Added migration v5 to `async_jobs` table and idempotent migration to `audit_events` table for `workspace_id` column. Added `WorkspaceForRun`, `ListJobsByWorkspace`, `GetAsyncJobInWorkspace`, `CreateForCommandInWorkspace` helpers. All changes are backward-compatible with `workspace_isolation.enabled=false`.
 - **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
   - Added  and  policy-as-code types ().
     - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
@@ -860,6 +871,7 @@ All notable changes to Legator are documented here.
 ## [v1.0.0-alpha.5] — 2026-02-26
 
 ### Added
+- [compat:additive] **E1 — Workspace isolation gates for runs, approvals, audit, and streams**: Added `workspace_isolation.enabled` config toggle (default `false`; env `LEGATOR_WORKSPACE_ISOLATION_ENABLED`) that enforces workspace-scoped authorization across all sensitive API paths. When enabled: runner create/token/lifecycle endpoints scope to the requesting workspace token; approval `POST /api/v1/jobs/{id}/approve` and `/reject` verify job workspace matches token; audit query and export endpoints filter by workspace; command stream SSE and replay endpoints deny cross-workspace access; pending commands list is filtered by workspace. Added `workspace_id` field to `AsyncJob`, `Runner`, and `audit.Event`. Added `workspace:` permission token pattern for extracting workspace scope from API-key or user claims. Added migration v5 to `async_jobs` table and idempotent migration to `audit_events` table for `workspace_id` column. Added `WorkspaceForRun`, `ListJobsByWorkspace`, `GetAsyncJobInWorkspace`, `CreateForCommandInWorkspace` helpers. All changes are backward-compatible with `workspace_isolation.enabled=false`.
 - **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
   - Added  and  policy-as-code types ().
     - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
@@ -890,6 +902,7 @@ All notable changes to Legator are documented here.
 ## [v1.0.0-alpha.4] — 2026-02-26
 
 ### Added
+- [compat:additive] **E1 — Workspace isolation gates for runs, approvals, audit, and streams**: Added `workspace_isolation.enabled` config toggle (default `false`; env `LEGATOR_WORKSPACE_ISOLATION_ENABLED`) that enforces workspace-scoped authorization across all sensitive API paths. When enabled: runner create/token/lifecycle endpoints scope to the requesting workspace token; approval `POST /api/v1/jobs/{id}/approve` and `/reject` verify job workspace matches token; audit query and export endpoints filter by workspace; command stream SSE and replay endpoints deny cross-workspace access; pending commands list is filtered by workspace. Added `workspace_id` field to `AsyncJob`, `Runner`, and `audit.Event`. Added `workspace:` permission token pattern for extracting workspace scope from API-key or user claims. Added migration v5 to `async_jobs` table and idempotent migration to `audit_events` table for `workspace_id` column. Added `WorkspaceForRun`, `ListJobsByWorkspace`, `GetAsyncJobInWorkspace`, `CreateForCommandInWorkspace` helpers. All changes are backward-compatible with `workspace_isolation.enabled=false`.
 - **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
   - Added  and  policy-as-code types ().
     - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
@@ -919,6 +932,7 @@ All notable changes to Legator are documented here.
 ## [v1.0.0-alpha.3] — 2026-02-26
 
 ### Added
+- [compat:additive] **E1 — Workspace isolation gates for runs, approvals, audit, and streams**: Added `workspace_isolation.enabled` config toggle (default `false`; env `LEGATOR_WORKSPACE_ISOLATION_ENABLED`) that enforces workspace-scoped authorization across all sensitive API paths. When enabled: runner create/token/lifecycle endpoints scope to the requesting workspace token; approval `POST /api/v1/jobs/{id}/approve` and `/reject` verify job workspace matches token; audit query and export endpoints filter by workspace; command stream SSE and replay endpoints deny cross-workspace access; pending commands list is filtered by workspace. Added `workspace_id` field to `AsyncJob`, `Runner`, and `audit.Event`. Added `workspace:` permission token pattern for extracting workspace scope from API-key or user claims. Added migration v5 to `async_jobs` table and idempotent migration to `audit_events` table for `workspace_id` column. Added `WorkspaceForRun`, `ListJobsByWorkspace`, `GetAsyncJobInWorkspace`, `CreateForCommandInWorkspace` helpers. All changes are backward-compatible with `workspace_isolation.enabled=false`.
 - **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
   - Added  and  policy-as-code types ().
     - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
@@ -947,6 +961,7 @@ All notable changes to Legator are documented here.
 ## [v1.0.0-alpha.2] — 2026-02-26
 
 ### Added
+- [compat:additive] **E1 — Workspace isolation gates for runs, approvals, audit, and streams**: Added `workspace_isolation.enabled` config toggle (default `false`; env `LEGATOR_WORKSPACE_ISOLATION_ENABLED`) that enforces workspace-scoped authorization across all sensitive API paths. When enabled: runner create/token/lifecycle endpoints scope to the requesting workspace token; approval `POST /api/v1/jobs/{id}/approve` and `/reject` verify job workspace matches token; audit query and export endpoints filter by workspace; command stream SSE and replay endpoints deny cross-workspace access; pending commands list is filtered by workspace. Added `workspace_id` field to `AsyncJob`, `Runner`, and `audit.Event`. Added `workspace:` permission token pattern for extracting workspace scope from API-key or user claims. Added migration v5 to `async_jobs` table and idempotent migration to `audit_events` table for `workspace_id` column. Added `WorkspaceForRun`, `ListJobsByWorkspace`, `GetAsyncJobInWorkspace`, `CreateForCommandInWorkspace` helpers. All changes are backward-compatible with `workspace_isolation.enabled=false`.
 - **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
   - Added  and  policy-as-code types ().
     - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.
@@ -978,6 +993,7 @@ All notable changes to Legator are documented here.
 ## [v1.0.0-alpha.1] — 2026-02-26
 
 ### Added
+- [compat:additive] **E1 — Workspace isolation gates for runs, approvals, audit, and streams**: Added `workspace_isolation.enabled` config toggle (default `false`; env `LEGATOR_WORKSPACE_ISOLATION_ENABLED`) that enforces workspace-scoped authorization across all sensitive API paths. When enabled: runner create/token/lifecycle endpoints scope to the requesting workspace token; approval `POST /api/v1/jobs/{id}/approve` and `/reject` verify job workspace matches token; audit query and export endpoints filter by workspace; command stream SSE and replay endpoints deny cross-workspace access; pending commands list is filtered by workspace. Added `workspace_id` field to `AsyncJob`, `Runner`, and `audit.Event`. Added `workspace:` permission token pattern for extracting workspace scope from API-key or user claims. Added migration v5 to `async_jobs` table and idempotent migration to `audit_events` table for `workspace_id` column. Added `WorkspaceForRun`, `ListJobsByWorkspace`, `GetAsyncJobInWorkspace`, `CreateForCommandInWorkspace` helpers. All changes are backward-compatible with `workspace_isolation.enabled=false`.
 - **Stage 3.9.2 Reliability: Alert Routing + Escalation Policy as Code** [compat:additive]
   - Added  and  policy-as-code types ().
     - : owner label/contact, runbook URL, escalation reference, AND-chained matchers on , , , and  fields; priority-ordered.

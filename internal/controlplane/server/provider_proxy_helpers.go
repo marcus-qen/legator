@@ -89,5 +89,14 @@ func (s *Server) handleProviderProxy(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", "run id required")
 		return
 	}
+	if s.workspaceIsolationEnabled() {
+		runWorkspaceID := ""
+		if s.runnerManager != nil {
+			runWorkspaceID, _ = s.runnerManager.WorkspaceForRun(runID)
+		}
+		if !s.enforceWorkspaceMatch(w, r, runWorkspaceID) {
+			return
+		}
+	}
 	s.providerProxy.HandleHTTP(w, r, runID)
 }

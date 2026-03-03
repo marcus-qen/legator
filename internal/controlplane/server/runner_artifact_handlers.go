@@ -33,6 +33,15 @@ func (s *Server) handlePresignRunnerArtifact(w http.ResponseWriter, r *http.Requ
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", "run id required")
 		return
 	}
+	runWorkspaceID := ""
+	if s.workspaceIsolationEnabled() {
+		if s.runnerManager != nil {
+			runWorkspaceID, _ = s.runnerManager.WorkspaceForRun(runID)
+		}
+		if !s.enforceWorkspaceMatch(w, r, runWorkspaceID) {
+			return
+		}
+	}
 
 	sessionID, actor, ok := runnerSessionContext(r)
 	if !ok {
@@ -82,6 +91,7 @@ func (s *Server) handlePresignRunnerArtifact(w http.ResponseWriter, r *http.Requ
 			"expires_at":   issued.ExpiresAt,
 			"session_id":   sessionID,
 			"transfer_url": transferURL,
+			"workspace_id": runWorkspaceID,
 		},
 	})
 

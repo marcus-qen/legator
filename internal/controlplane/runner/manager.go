@@ -81,6 +81,7 @@ type Runner struct {
 	State       State            `json:"state"`
 	CreatedBy   string           `json:"created_by,omitempty"`
 	SessionID   string           `json:"session_id,omitempty"`
+	WorkspaceID string           `json:"workspace_id,omitempty"`
 	CreatedAt   time.Time        `json:"created_at"`
 	UpdatedAt   time.Time        `json:"updated_at"`
 	DestroyedAt time.Time        `json:"destroyed_at,omitempty"`
@@ -92,8 +93,9 @@ type CreateRequest struct {
 	JobID     string
 	Backend   BackendKind
 	Sandbox   *SandboxContract
-	CreatedBy string
-	SessionID string
+	CreatedBy   string
+	SessionID   string
+	WorkspaceID string
 }
 
 // IssueTokenRequest describes a run token issuance operation.
@@ -240,9 +242,10 @@ func (m *Manager) CreateRunner(req CreateRequest) (*Runner, error) {
 		Backend:   backend,
 		Sandbox:   sandbox,
 		State:     StateCreated,
-		CreatedBy: strings.TrimSpace(req.CreatedBy),
-		SessionID: sessionID,
-		CreatedAt: now,
+		CreatedBy:   strings.TrimSpace(req.CreatedBy),
+		SessionID:   sessionID,
+		WorkspaceID: strings.ToLower(strings.TrimSpace(req.WorkspaceID)),
+		CreatedAt:   now,
 		UpdatedAt: now,
 	}
 	if runner.ID == "" {
@@ -463,6 +466,26 @@ func (m *Manager) GetRunner(runnerID string) (*Runner, error) {
 		return nil, ErrRunnerNotFound
 	}
 	return cloneRunner(r), nil
+}
+
+// WorkspaceForRun resolves a workspace for either runner id or logical run id (job id).
+func (m *Manager) WorkspaceForRun(runID string) (string, bool) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return "", false
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if rr, ok := m.runners[runID]; ok {
+		return strings.ToLower(strings.TrimSpace(rr.WorkspaceID)), true
+	}
+	for _, rr := range m.runners {
+		if strings.TrimSpace(rr.JobID) == runID {
+			return strings.ToLower(strings.TrimSpace(rr.WorkspaceID)), true
+		}
+	}
+	return "", false
 }
 
 func (m *Manager) prepareTransition(req LifecycleRequest, audience Audience, target State) (*Runner, error) {
