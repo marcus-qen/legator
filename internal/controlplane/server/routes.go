@@ -323,6 +323,12 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 			mux.HandleFunc("GET /api/v1/sandboxes/{id}/tasks/{taskId}", s.withPermission(auth.PermFleetRead, s.sandboxTaskHandler.HandleGetTask))
 			mux.HandleFunc("POST /api/v1/sandboxes/{id}/tasks/{taskId}/cancel", s.withPermission(auth.PermFleetWrite, s.sandboxTaskHandler.HandleCancelTask))
 		}
+		// Sandbox output streaming routes
+		if s.sandboxStreamHandler != nil {
+			mux.HandleFunc("POST /api/v1/sandboxes/{id}/output", s.sandboxStreamHandler.HandleIngestOutput)
+			mux.HandleFunc("GET /api/v1/sandboxes/{id}/output", s.withPermission(auth.PermFleetRead, s.sandboxStreamHandler.HandleGetOutput))
+			mux.HandleFunc("GET /ws/sandboxes/{id}/stream", s.sandboxStreamHandler.HandleStreamOutput)
+		}
 	} else {
 		mux.HandleFunc("POST /api/v1/sandboxes", s.withPermission(auth.PermFleetWrite, s.handleSandboxUnavailable))
 		mux.HandleFunc("GET /api/v1/sandboxes", s.withPermission(auth.PermFleetRead, s.handleSandboxUnavailable))

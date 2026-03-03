@@ -174,10 +174,13 @@ type Server struct {
 	tenantStore *tenant.Store
 
 	// Sandbox session lifecycle
-	sandboxStore       *sandbox.Store
-	sandboxHandler     *sandbox.Handler
-	sandboxTaskStore   *sandbox.TaskStore
-	sandboxTaskHandler *sandbox.TaskHandler
+	sandboxStore         *sandbox.Store
+	sandboxHandler       *sandbox.Handler
+	sandboxTaskStore     *sandbox.TaskStore
+	sandboxTaskHandler   *sandbox.TaskHandler
+	sandboxStreamStore   *sandbox.StreamStore
+	sandboxStreamHub     *sandbox.StreamHub
+	sandboxStreamHandler *sandbox.StreamHandler
 
 	// MCP
 	mcpServer *mcpserver.MCPServer
@@ -480,6 +483,9 @@ func (s *Server) Close() {
 	}
 	if s.sandboxStore != nil {
 		s.sandboxStore.Close()
+	}
+	if s.sandboxStreamHub != nil {
+		s.sandboxStreamHub.Close()
 	}
 	if s.jobsStore != nil {
 		s.jobsStore.Close()
@@ -1004,6 +1010,27 @@ func (s *Server) initSandbox() {
 		s.logger.Named("sandbox.tasks"),
 	)
 	s.sandboxTaskHandler = th
+
+	// Output streaming pipeline
+	streamStore, streamStoreErr := sandbox.NewStreamStore(store.DB())
+	if streamStoreErr != nil {
+		s.logger.Warn("cannot init sandbox stream store; streaming API disabled", zap.Error(streamStoreErr))
+		return
+	}
+	s.sandboxStreamStore = streamStore
+
+	sh := sandbox.NewStreamHub()
+	s.sandboxStreamHub = sh
+
+	streamHandler := sandbox.NewStreamHandler(
+		store,
+		streamStore,
+		sh,
+		&sandboxEventAdapter{bus: s.eventBus},
+		&sandboxAuditAdapter{s: s},
+		s.logger.Named("sandbox.stream"),
+	)
+	s.sandboxStreamHandler = streamHandler
 }
 
 // handleSandboxUnavailable is a placeholder returned when the sandbox store
