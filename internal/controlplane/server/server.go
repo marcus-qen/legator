@@ -43,10 +43,12 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/networkdevices"
 	"github.com/marcus-qen/legator/internal/controlplane/oidc"
 	"github.com/marcus-qen/legator/internal/controlplane/policy"
+	"github.com/marcus-qen/legator/internal/controlplane/providerproxy"
 	"github.com/marcus-qen/legator/internal/controlplane/reliability"
 	"github.com/marcus-qen/legator/internal/controlplane/runner"
 	"github.com/marcus-qen/legator/internal/controlplane/session"
 	"github.com/marcus-qen/legator/internal/controlplane/tenant"
+	"github.com/marcus-qen/legator/internal/controlplane/tokenbroker"
 	"github.com/marcus-qen/legator/internal/controlplane/users"
 	"github.com/marcus-qen/legator/internal/controlplane/webhook"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
@@ -129,6 +131,8 @@ type Server struct {
 	runnerExecutionBackend runner.ExecutionBackend
 	artifactPresigner      *artifacts.Service
 	runnerArtifactsDir     string
+	providerProxy          *providerproxy.Proxy
+	providerProxySpend     *providerproxy.SpendStore
 
 	// Events
 	eventBus *events.Bus
@@ -492,6 +496,12 @@ func (s *Server) Close() {
 	if s.sessionStore != nil {
 		s.sessionStore.Close()
 	}
+	if s.providerProxySpend != nil {
+		s.providerProxySpend.Close()
+	}
+	if s.runnerManager != nil {
+		_ = s.runnerManager.Close()
+	}
 }
 
 // ── Init helpers ─────────────────────────────────────────────
@@ -698,7 +708,27 @@ func (s *Server) initRunnerManager() {
 		DefaultTimeout: s.cfg.Jobs.RunnerSandboxTimeoutDuration(),
 		EventSink:      s.recordRunnerBackendEvent,
 	})
-	s.runnerManager = runner.NewManager(runner.Config{RunTokenTTL: s.cfg.Jobs.RunTokenTTLDuration()})
+
+	runnerCfg := runner.Config{RunTokenTTL: s.cfg.Jobs.RunTokenTTLDuration()}
+	tokenBrokerPath := filepath.Join(s.cfg.DataDir, "runner-token-broker.db")
+	if err := os.MkdirAll(s.cfg.DataDir, 0750); err != nil {
+		s.logger.Warn("cannot create data dir, runner token broker will be in-memory", zap.String("dir", s.cfg.DataDir), zap.Error(err))
+	} else {
+		store, err := tokenbroker.NewStore(tokenBrokerPath)
+		if err != nil {
+			s.logger.Warn("cannot open runner token broker store, falling back to in-memory", zap.String("path", tokenBrokerPath), zap.Error(err))
+		} else {
+			runnerCfg.TokenBroker = tokenbroker.NewBroker(tokenbroker.Config{
+				DefaultTTL: s.cfg.TokenBrokerDefaultTTLDuration(),
+				MaxScope:   s.cfg.TokenBroker.MaxScopeOrDefault(),
+				Store:      store,
+				AuditSink:  s.recordTokenBrokerAuditEvent,
+			})
+			s.logger.Info("runner token broker initialized", zap.String("path", tokenBrokerPath))
+		}
+	}
+
+	s.runnerManager = runner.NewManager(runnerCfg)
 	s.runnerArtifactsDir = filepath.Join(s.cfg.DataDir, "runner-artifacts")
 
 	artifactPresigner, err := artifacts.NewService(artifacts.Config{
@@ -709,6 +739,95 @@ func (s *Server) initRunnerManager() {
 		s.logger.Fatal("failed to initialize runner artifact presigner", zap.Error(err))
 	}
 	s.artifactPresigner = artifactPresigner
+
+	spendPath := filepath.Join(s.cfg.DataDir, "provider-proxy-spend.db")
+	spendStore, err := providerproxy.NewSpendStore(spendPath)
+	if err != nil {
+		s.logger.Warn("cannot open provider proxy spend store", zap.String("path", spendPath), zap.Error(err))
+	} else {
+		s.providerProxySpend = spendStore
+		proxy, proxyErr := providerproxy.New(providerproxy.ProxyConfig{
+			TokenValidator: providerproxy.TokenValidatorFunc(func(_ context.Context, req providerproxy.TokenValidationRequest) (*providerproxy.TokenClaims, error) {
+				claims, validateErr := s.runnerManager.ValidateRunToken(runner.ValidateRunTokenRequest{
+					RunToken:  strings.TrimSpace(req.Token),
+					RunID:     strings.TrimSpace(req.RunID),
+					ProbeID:   strings.TrimSpace(req.ProbeID),
+					SessionID: strings.TrimSpace(req.SessionID),
+					Audience:  runner.Audience(strings.TrimSpace(req.Audience)),
+					Scope:     strings.TrimSpace(req.Scope),
+					Consume:   req.Consume,
+				})
+				if validateErr != nil {
+					switch {
+					case errors.Is(validateErr, runner.ErrRunTokenScope), errors.Is(validateErr, runner.ErrRunTokenSessionBound):
+						return nil, providerproxy.ErrForbidden
+					case errors.Is(validateErr, runner.ErrRunTokenInvalid),
+						errors.Is(validateErr, runner.ErrRunTokenRequired),
+						errors.Is(validateErr, runner.ErrRunTokenExpired),
+						errors.Is(validateErr, runner.ErrRunTokenRevoked),
+						errors.Is(validateErr, runner.ErrRunTokenConsumed),
+						errors.Is(validateErr, runner.ErrAudienceRequired),
+						errors.Is(validateErr, runner.ErrInvalidAudience),
+						errors.Is(validateErr, runner.ErrSessionRequired):
+						return nil, providerproxy.ErrUnauthorized
+					default:
+						return nil, validateErr
+					}
+				}
+				return &providerproxy.TokenClaims{
+					RunID:     claims.RunID,
+					ProbeID:   claims.ProbeID,
+					SessionID: claims.SessionID,
+					Issuer:    claims.Issuer,
+					Audience:  claims.Audience,
+					Scopes:    append([]string(nil), claims.Scopes...),
+					IssuedAt:  claims.IssuedAt,
+					ExpiresAt: claims.ExpiresAt,
+				}, nil
+			}),
+			Credentials: providerproxy.CredentialResolverFunc(func(ctx context.Context, runID, requestedModel string) (providerproxy.ProviderCredentials, error) {
+				return s.resolveProviderProxyCredentials(ctx, runID, requestedModel)
+			}),
+			SpendStore: spendStore,
+			AuditSink: providerproxy.AuditSinkFunc(func(_ context.Context, evt providerproxy.AuditEvent) {
+				if strings.TrimSpace(evt.RunID) == "" {
+					return
+				}
+				detail := map[string]any{
+					"run_id":         strings.TrimSpace(evt.RunID),
+					"session_id":     strings.TrimSpace(evt.SessionID),
+					"model":          strings.TrimSpace(evt.Model),
+					"input_tokens":   evt.InputTokens,
+					"output_tokens":  evt.OutputTokens,
+					"total_tokens":   evt.TotalTokens,
+					"estimated_cost": evt.EstimatedCost,
+				}
+				actor := strings.TrimSpace(evt.Actor)
+				if actor == "" {
+					actor = "runner"
+				}
+				s.recordAudit(audit.Event{
+					Type:    audit.EventRunnerProviderProxy,
+					Actor:   actor,
+					Summary: fmt.Sprintf("Runner provider proxy call: %s", strings.TrimSpace(evt.RunID)),
+					Detail:  detail,
+				})
+			}),
+			MaxTokensPerRun: s.cfg.ProviderProxy.MaxTokensPerRun,
+			MaxCostPerRun:   s.cfg.ProviderProxy.MaxCostPerRun,
+		})
+		if proxyErr != nil {
+			s.logger.Warn("failed to initialize provider proxy", zap.Error(proxyErr))
+		} else {
+			s.providerProxy = proxy
+			s.logger.Info(
+				"provider proxy initialized",
+				zap.String("spend_path", spendPath),
+				zap.Int("max_tokens_per_run", s.cfg.ProviderProxy.MaxTokensPerRun),
+				zap.Float64("max_cost_per_run", s.cfg.ProviderProxy.MaxCostPerRun),
+			)
+		}
+	}
 
 	s.logger.Info(
 		"runner manager initialized",

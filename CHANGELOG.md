@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 ### Added
+- [compat:additive] Added runner-to-provider control-plane mediation route `POST /api/v1/runs/{id}/provider-proxy` using scoped run token audience `runner:provider-proxy`, server-side provider credential resolution, OpenAI-compatible request forwarding, SQLite-backed per-run spend tracking, configurable spend limits (`provider_proxy.max_tokens_per_run`, `provider_proxy.max_cost_per_run`), and audit event `runner.provider_proxy` with run/actor/token attribution.
 - [compat:additive] Added sandbox lane enforcement for command dispatch: mutation-classified host-direct lanes now return `403` with `code=sandbox_enforcement` unless explicit breakglass confirmation is provided (`breakglass_reason` or `breakglass_token`). Accepted breakglass dispatches emit elevated audit event `breakglass.command` with actor + reason attribution.
 - [compat:additive] Added async approval-gated job decision routes `POST /api/v1/jobs/{id}/approve` and `POST /api/v1/jobs/{id}/reject` to resume or fail `waiting_approval` async jobs by job id.
 - [compat:additive] Added configurable async approval timeout policy (`approval_timeout_seconds`, `approval_timeout_behavior`) with `cancel` (default), `reads_only`, and `escalate` behaviors plus `timed_out` stream markers.

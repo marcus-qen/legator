@@ -119,6 +119,7 @@ func TestRoutesAuthCoverage(t *testing.T) {
 		{http.MethodPost, "/api/v1/jobs/some-id/enable"},
 		{http.MethodPost, "/api/v1/jobs/some-id/disable"},
 		// Runner manager
+		{http.MethodPost, "/api/v1/runs/some-run/provider-proxy"},
 		{http.MethodPost, "/api/v1/runners"},
 		{http.MethodPost, "/api/v1/runners/some-runner/start"},
 		{http.MethodPost, "/api/v1/runners/some-runner/stop"},

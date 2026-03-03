@@ -51,6 +51,9 @@ type Config struct {
 	// Scoped token broker settings for runner operations.
 	TokenBroker TokenBrokerConfig `json:"token_broker,omitempty"`
 
+	// Provider proxy spend limits for runner mediated LLM calls.
+	ProviderProxy ProviderProxyConfig `json:"provider_proxy,omitempty"`
+
 	// Log level (debug, info, warn, error)
 	LogLevel string `json:"log_level"`
 
@@ -132,6 +135,11 @@ type JobsConfig struct {
 type TokenBrokerConfig struct {
 	DefaultTTL string `json:"default_ttl,omitempty"`
 	MaxScope   int    `json:"max_scope,omitempty"`
+}
+
+type ProviderProxyConfig struct {
+	MaxTokensPerRun int     `json:"max_tokens_per_run,omitempty"`
+	MaxCostPerRun   float64 `json:"max_cost_per_run,omitempty"`
 }
 
 func (k KubeflowConfig) NamespaceOrDefault() string {
@@ -311,6 +319,10 @@ func Default() Config {
 		},
 		TokenBroker: TokenBrokerConfig{
 			MaxScope: 8,
+		},
+		ProviderProxy: ProviderProxyConfig{
+			MaxTokensPerRun: 0,
+			MaxCostPerRun:   0,
 		},
 	}
 }
@@ -499,6 +511,16 @@ func Load(path string) (Config, error) {
 	if v := os.Getenv("LEGATOR_TOKEN_BROKER_MAX_SCOPE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.TokenBroker.MaxScope = n
+		}
+	}
+	if v := os.Getenv("LEGATOR_PROVIDER_PROXY_MAX_TOKENS_PER_RUN"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.ProviderProxy.MaxTokensPerRun = n
+		}
+	}
+	if v := os.Getenv("LEGATOR_PROVIDER_PROXY_MAX_COST_PER_RUN"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.ProviderProxy.MaxCostPerRun = f
 		}
 	}
 	if v := os.Getenv("LEGATOR_MCP_ENABLED"); v != "" {

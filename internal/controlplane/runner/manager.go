@@ -25,9 +25,10 @@ const (
 type Audience string
 
 const (
-	AudienceRunnerStart   Audience = "runner:start"
-	AudienceRunnerStop    Audience = "runner:stop"
-	AudienceRunnerDestroy Audience = "runner:destroy"
+	AudienceRunnerStart         Audience = "runner:start"
+	AudienceRunnerStop          Audience = "runner:stop"
+	AudienceRunnerDestroy       Audience = "runner:destroy"
+	AudienceRunnerProviderProxy Audience = "runner:provider-proxy"
 )
 
 // BackendKind controls where runner commands execute.
@@ -124,6 +125,28 @@ type LifecycleRequest struct {
 	JobID     string
 	RunToken  string
 	SessionID string
+}
+
+type ValidateRunTokenRequest struct {
+	RunToken  string
+	RunID     string
+	ProbeID   string
+	SessionID string
+	Audience  Audience
+	Scope     string
+	Consume   bool
+}
+
+// RunTokenClaims is a normalized view of token broker claims.
+type RunTokenClaims struct {
+	RunID     string
+	ProbeID   string
+	SessionID string
+	Issuer    string
+	Audience  string
+	Scopes    []string
+	IssuedAt  time.Time
+	ExpiresAt time.Time
 }
 
 type tokenBroker interface {
@@ -318,6 +341,54 @@ func (m *Manager) RevokeRunToken(token string) error {
 	return nil
 }
 
+// ValidateRunToken validates an arbitrary run token scope against token broker state.
+func (m *Manager) ValidateRunToken(req ValidateRunTokenRequest) (*RunTokenClaims, error) {
+	if m == nil || m.tokens == nil {
+		return nil, ErrRunTokenInvalid
+	}
+	runToken := strings.TrimSpace(req.RunToken)
+	if runToken == "" {
+		return nil, ErrRunTokenRequired
+	}
+	sessionID := strings.TrimSpace(req.SessionID)
+	if sessionID == "" {
+		return nil, ErrSessionRequired
+	}
+	audience := normalizeAudience(req.Audience)
+	if audience == "" {
+		return nil, ErrAudienceRequired
+	}
+
+	scope := strings.TrimSpace(req.Scope)
+	if scope == "" {
+		scope = string(audience)
+	}
+
+	claims, err := m.tokens.Validate(tokenbroker.ValidateRequest{
+		Token:     runToken,
+		Scope:     scope,
+		Audience:  string(audience),
+		RunID:     strings.TrimSpace(req.RunID),
+		ProbeID:   strings.TrimSpace(req.ProbeID),
+		SessionID: sessionID,
+		Consume:   req.Consume,
+	})
+	if err != nil {
+		return nil, mapTokenBrokerError(err)
+	}
+
+	return &RunTokenClaims{
+		RunID:     strings.TrimSpace(claims.RunID),
+		ProbeID:   strings.TrimSpace(claims.ProbeID),
+		SessionID: strings.TrimSpace(claims.SessionID),
+		Issuer:    strings.TrimSpace(claims.Issuer),
+		Audience:  strings.TrimSpace(claims.Audience),
+		Scopes:    append([]string(nil), claims.Scopes...),
+		IssuedAt:  claims.IssuedAt,
+		ExpiresAt: claims.ExpiresAt,
+	}, nil
+}
+
 // StartRunner transitions runner to running after token checks.
 func (m *Manager) StartRunner(req LifecycleRequest) (*Runner, error) {
 	if _, err := m.PrepareRunnerLifecycle(req, AudienceRunnerStart); err != nil {
@@ -503,7 +574,7 @@ func audienceTarget(a Audience) (State, bool) {
 
 func isAllowedAudience(a Audience) bool {
 	switch normalizeAudience(a) {
-	case AudienceRunnerStart, AudienceRunnerStop, AudienceRunnerDestroy:
+	case AudienceRunnerStart, AudienceRunnerStop, AudienceRunnerDestroy, AudienceRunnerProviderProxy:
 		return true
 	default:
 		return false
