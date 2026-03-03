@@ -66,6 +66,10 @@ func NewStore(dbPath string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
+// DB returns the underlying database connection. Used by TaskStore to share
+// the same SQLite handle without opening a second connection.
+func (s *Store) DB() *sql.DB { return s.db }
+
 // Close shuts down the store.
 func (s *Store) Close() error {
 	return s.db.Close()

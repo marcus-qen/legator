@@ -316,6 +316,13 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/v1/sandboxes/{id}", s.withPermission(auth.PermFleetRead, s.sandboxHandler.HandleGet))
 		mux.HandleFunc("DELETE /api/v1/sandboxes/{id}", s.withPermission(auth.PermFleetWrite, s.sandboxHandler.HandleDestroy))
 		mux.HandleFunc("POST /api/v1/sandboxes/{id}/transition", s.withPermission(auth.PermFleetWrite, s.sandboxHandler.HandleTransition))
+		// Sandbox task sub-routes (task execution layer)
+		if s.sandboxTaskHandler != nil {
+			mux.HandleFunc("POST /api/v1/sandboxes/{id}/tasks", s.withPermission(auth.PermFleetWrite, s.sandboxTaskHandler.HandleCreateTask))
+			mux.HandleFunc("GET /api/v1/sandboxes/{id}/tasks", s.withPermission(auth.PermFleetRead, s.sandboxTaskHandler.HandleListTasks))
+			mux.HandleFunc("GET /api/v1/sandboxes/{id}/tasks/{taskId}", s.withPermission(auth.PermFleetRead, s.sandboxTaskHandler.HandleGetTask))
+			mux.HandleFunc("POST /api/v1/sandboxes/{id}/tasks/{taskId}/cancel", s.withPermission(auth.PermFleetWrite, s.sandboxTaskHandler.HandleCancelTask))
+		}
 	} else {
 		mux.HandleFunc("POST /api/v1/sandboxes", s.withPermission(auth.PermFleetWrite, s.handleSandboxUnavailable))
 		mux.HandleFunc("GET /api/v1/sandboxes", s.withPermission(auth.PermFleetRead, s.handleSandboxUnavailable))

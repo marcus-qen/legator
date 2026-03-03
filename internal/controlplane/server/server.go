@@ -174,8 +174,10 @@ type Server struct {
 	tenantStore *tenant.Store
 
 	// Sandbox session lifecycle
-	sandboxStore   *sandbox.Store
-	sandboxHandler *sandbox.Handler
+	sandboxStore       *sandbox.Store
+	sandboxHandler     *sandbox.Handler
+	sandboxTaskStore   *sandbox.TaskStore
+	sandboxTaskHandler *sandbox.TaskHandler
 
 	// MCP
 	mcpServer *mcpserver.MCPServer
@@ -985,6 +987,23 @@ func (s *Server) initSandbox() {
 		},
 	})
 	s.sandboxHandler = h
+
+	// Initialise task store and handler sharing the same SQLite connection.
+	taskStore, taskStoreErr := sandbox.NewTaskStore(store.DB())
+	if taskStoreErr != nil {
+		s.logger.Warn("cannot init sandbox task store; task API disabled", zap.Error(taskStoreErr))
+		return
+	}
+	s.sandboxTaskStore = taskStore
+
+	th := sandbox.NewTaskHandler(
+		store,
+		taskStore,
+		&sandboxEventAdapter{bus: s.eventBus},
+		&sandboxAuditAdapter{s: s},
+		s.logger.Named("sandbox.tasks"),
+	)
+	s.sandboxTaskHandler = th
 }
 
 // handleSandboxUnavailable is a placeholder returned when the sandbox store
