@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"strings"
 	"database/sql"
 	"encoding/csv"
 	"encoding/json"
@@ -44,21 +45,23 @@ func NewStore(dbPath string, memoryLimit int) (*Store, error) {
 
 	// Create table
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS audit_events (
-		id         TEXT PRIMARY KEY,
-		timestamp  TEXT NOT NULL,
-		type       TEXT NOT NULL,
-		probe_id   TEXT,
-		actor      TEXT,
-		summary    TEXT,
-		detail     TEXT,
-		before_val TEXT,
-		after_val  TEXT
+		id           TEXT PRIMARY KEY,
+		timestamp    TEXT NOT NULL,
+		type         TEXT NOT NULL,
+		workspace_id TEXT NOT NULL DEFAULT '',
+		probe_id     TEXT,
+		actor        TEXT,
+		summary      TEXT,
+		detail       TEXT,
+		before_val   TEXT,
+		after_val    TEXT
 	)`); err != nil {
 		db.Close()
 		return nil, err
 	}
 
 	// Index for common queries
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_workspace ON audit_events(workspace_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_probe ON audit_events(probe_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_type ON audit_events(type)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_events(timestamp)`)
@@ -283,11 +286,12 @@ func (s *Store) persist(evt Event) error {
 	before, _ := json.Marshal(evt.Before)
 	after, _ := json.Marshal(evt.After)
 
-	_, err := s.db.Exec(`INSERT OR IGNORE INTO audit_events (id, timestamp, type, probe_id, actor, summary, detail, before_val, after_val)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err := s.db.Exec(`INSERT OR IGNORE INTO audit_events (id, timestamp, type, workspace_id, probe_id, actor, summary, detail, before_val, after_val)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		evt.ID,
 		evt.Timestamp.Format(time.RFC3339Nano),
 		string(evt.Type),
+		strings.TrimSpace(evt.WorkspaceID),
 		evt.ProbeID,
 		evt.Actor,
 		evt.Summary,
@@ -316,12 +320,16 @@ func (s *Store) loadRecent(limit int) error {
 }
 
 func (s *Store) buildPersistedQuery(f Filter, includeLimit bool, csvMode bool) (string, []any, error) {
-	query := "SELECT id, timestamp, type, probe_id, actor, summary, detail, before_val, after_val FROM audit_events WHERE 1=1"
+	query := "SELECT id, workspace_id, timestamp, type, probe_id, actor, summary, detail, before_val, after_val FROM audit_events WHERE 1=1"
 	if csvMode {
 		query = "SELECT id, timestamp, type, probe_id, actor, summary FROM audit_events WHERE 1=1"
 	}
 	var args []any
 
+	if f.WorkspaceID != "" {
+		query += " AND workspace_id = ?"
+		args = append(args, f.WorkspaceID)
+	}
 	if f.ProbeID != "" {
 		query += " AND probe_id = ?"
 		args = append(args, f.ProbeID)
@@ -369,7 +377,7 @@ type rowScanner interface {
 func scanEvent(scanner rowScanner) (Event, error) {
 	var evt Event
 	var ts, detail, before, after string
-	if err := scanner.Scan(&evt.ID, &ts, &evt.Type, &evt.ProbeID, &evt.Actor, &evt.Summary, &detail, &before, &after); err != nil {
+	if err := scanner.Scan(&evt.ID, &evt.WorkspaceID, &ts, &evt.Type, &evt.ProbeID, &evt.Actor, &evt.Summary, &detail, &before, &after); err != nil {
 		return Event{}, err
 	}
 

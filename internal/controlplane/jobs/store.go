@@ -24,6 +24,7 @@ var ErrInvalidRunTransition = errors.New("invalid run status transition")
 
 // RunQuery controls filtering for job run history lookups.
 type RunQuery struct {
+	WorkspaceID   string
 	JobID         string
 	ProbeID       string
 	Status        string
@@ -116,6 +117,7 @@ func NewStore(dbPath string) (*Store, error) {
 		return nil, err
 	}
 
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_workspace ON jobs(workspace_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_enabled ON jobs(enabled)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_updated_at ON jobs(updated_at)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_job_runs_job_started ON job_runs(job_id, started_at DESC)`)
@@ -140,6 +142,9 @@ func NewStore(dbPath string) (*Store, error) {
 }
 
 func ensureJobColumns(db *sql.DB) error {
+	if err := ensureColumn(db, "jobs", "workspace_id", "workspace_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("add jobs.workspace_id: %w", err)
+	}
 	if err := ensureColumn(db, "jobs", "retry_max_attempts", "retry_max_attempts INTEGER"); err != nil {
 		return fmt.Errorf("add jobs.retry_max_attempts: %w", err)
 	}
@@ -249,9 +254,10 @@ func (s *Store) CreateJob(job Job) (*Job, error) {
 		enabled = 1
 	}
 
-	_, err := s.db.Exec(`INSERT INTO jobs (id, name, command, schedule, target_kind, target_value, retry_max_attempts, retry_initial_backoff, retry_multiplier, retry_max_backoff, enabled, created_at, updated_at, last_run_at, last_status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err := s.db.Exec(`INSERT INTO jobs (id, workspace_id, name, command, schedule, target_kind, target_value, retry_max_attempts, retry_initial_backoff, retry_multiplier, retry_max_backoff, enabled, created_at, updated_at, last_run_at, last_status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID,
+		strings.TrimSpace(job.WorkspaceID),
 		strings.TrimSpace(job.Name),
 		strings.TrimSpace(job.Command),
 		strings.TrimSpace(job.Schedule),
@@ -344,14 +350,14 @@ func (s *Store) SetEnabled(id string, enabled bool) (*Job, error) {
 
 // GetJob returns one job by id.
 func (s *Store) GetJob(id string) (*Job, error) {
-	row := s.db.QueryRow(`SELECT id, name, command, schedule, target_kind, target_value, retry_max_attempts, retry_initial_backoff, retry_multiplier, retry_max_backoff, enabled, created_at, updated_at, last_run_at, last_status
+	row := s.db.QueryRow(`SELECT id, workspace_id, name, command, schedule, target_kind, target_value, retry_max_attempts, retry_initial_backoff, retry_multiplier, retry_max_backoff, enabled, created_at, updated_at, last_run_at, last_status
 		FROM jobs WHERE id = ?`, id)
 	return scanJob(row)
 }
 
 // ListJobs returns all jobs sorted by updated time (newest first).
 func (s *Store) ListJobs() ([]Job, error) {
-	rows, err := s.db.Query(`SELECT id, name, command, schedule, target_kind, target_value, retry_max_attempts, retry_initial_backoff, retry_multiplier, retry_max_backoff, enabled, created_at, updated_at, last_run_at, last_status
+	rows, err := s.db.Query(`SELECT id, workspace_id, name, command, schedule, target_kind, target_value, retry_max_attempts, retry_initial_backoff, retry_multiplier, retry_max_backoff, enabled, created_at, updated_at, last_run_at, last_status
 		FROM jobs ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
@@ -768,6 +774,10 @@ func (s *Store) ListRuns(query RunQuery) ([]JobRun, error) {
 	clauses := make([]string, 0, 5)
 	args := make([]any, 0, 6)
 
+	if wsID := strings.TrimSpace(query.WorkspaceID); wsID != "" {
+		clauses = append(clauses, "workspace_id = ?")
+		args = append(args, wsID)
+	}
 	if jobID := strings.TrimSpace(query.JobID); jobID != "" {
 		clauses = append(clauses, "job_id = ?")
 		args = append(args, jobID)
@@ -848,6 +858,7 @@ func scanJob(s scanner) (*Job, error) {
 
 	if err := s.Scan(
 		&job.ID,
+		&job.WorkspaceID,
 		&job.Name,
 		&job.Command,
 		&job.Schedule,
@@ -1123,3 +1134,47 @@ func IsNotFound(err error) bool {
 func IsInvalidRunTransition(err error) bool {
 	return errors.Is(err, ErrInvalidRunTransition)
 }
+
+// ListJobsByWorkspace returns jobs belonging to a specific workspace.
+// When workspaceID is empty it behaves like ListJobs (no filter).
+func (s *Store) ListJobsByWorkspace(workspaceID string) ([]Job, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return s.ListJobs()
+	}
+	rows, err := s.db.Query(`SELECT id, workspace_id, name, command, schedule, target_kind, target_value, retry_max_attempts, retry_initial_backoff, retry_multiplier, retry_max_backoff, enabled, created_at, updated_at, last_run_at, last_status
+		FROM jobs WHERE workspace_id = ? ORDER BY updated_at DESC`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]Job, 0)
+	for rows.Next() {
+		job, err := scanJob(rows)
+		if err != nil {
+			continue
+		}
+		out = append(out, *job)
+	}
+	return out, rows.Err()
+}
+
+// GetJobCheckWorkspace fetches a job and returns ErrWorkspaceMismatch if the
+// workspace_id on the record doesn't match the expected workspace.
+// When expectedWorkspace is empty the check is skipped (single-workspace mode).
+func (s *Store) GetJobCheckWorkspace(id, expectedWorkspace string) (*Job, error) {
+	job, err := s.GetJob(id)
+	if err != nil {
+		return nil, err
+	}
+	if expectedWorkspace == "" {
+		return job, nil
+	}
+	if job.WorkspaceID != "" && job.WorkspaceID != expectedWorkspace {
+		return nil, ErrWorkspaceMismatch
+	}
+	return job, nil
+}
+
+// ErrWorkspaceMismatch is returned when a resource belongs to a different workspace.
+var ErrWorkspaceMismatch = errors.New("resource belongs to a different workspace")

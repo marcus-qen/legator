@@ -216,6 +216,7 @@ func TestEnvOverridesFile(t *testing.T) {
 	t.Setenv("LEGATOR_AUTH", "true")
 	t.Setenv("LEGATOR_MCP_ENABLED", "0")
 	t.Setenv("LEGATOR_SANDBOX_ENFORCEMENT", "false")
+	t.Setenv("LEGATOR_WORKSPACE_ISOLATION", "1")
 
 	cfg, err := Load(path)
 	if err != nil {

@@ -46,6 +46,20 @@ func (s *Server) handleApproveAsyncJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Workspace isolation check before mutation
+	if wsID := s.workspaceJobFilter(r); wsID != "" && s.jobsStore != nil {
+		existing, wsErr := s.jobsStore.GetAsyncJobCheckWorkspace(jobID, wsID)
+		if wsErr != nil || existing == nil {
+			if workspaceCheckErr(w, wsErr) {
+				return
+			}
+			if wsErr != nil {
+				writeJSONError(w, http.StatusNotFound, "not_found", "async job not found")
+				return
+			}
+		}
+	}
+
 	var req approvalDecisionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, context.Canceled) && err.Error() != "EOF" {
 		writeJSONError(w, http.StatusBadRequest, "invalid_body", "invalid request body")
@@ -120,6 +134,20 @@ func (s *Server) handleRejectAsyncJob(w http.ResponseWriter, r *http.Request) {
 	if jobID == "" {
 		writeJSONError(w, http.StatusBadRequest, "missing_id", "job id required")
 		return
+	}
+
+	// Workspace isolation check before mutation
+	if wsID := s.workspaceJobFilter(r); wsID != "" && s.jobsStore != nil {
+		existing, wsErr := s.jobsStore.GetAsyncJobCheckWorkspace(jobID, wsID)
+		if wsErr != nil || existing == nil {
+			if workspaceCheckErr(w, wsErr) {
+				return
+			}
+			if wsErr != nil {
+				writeJSONError(w, http.StatusNotFound, "not_found", "async job not found")
+				return
+			}
+		}
 	}
 
 	var req approvalDecisionRequest

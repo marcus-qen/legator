@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -73,7 +74,14 @@ func (h *Handler) HandleListJobs(w http.ResponseWriter, r *http.Request) {
 			}
 			limit = parsed
 		}
-		jobs, err := h.asyncManager.ListJobs(limit)
+		wsID := WorkspaceScopeFromContext(r.Context())
+		var jobs []AsyncJob
+		var err error
+		if wsID != "" {
+			jobs, err = h.store.ListAsyncJobsByWorkspace(wsID, limit)
+		} else {
+			jobs, err = h.asyncManager.ListJobs(limit)
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
@@ -82,7 +90,14 @@ func (h *Handler) HandleListJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jobs, err := h.store.ListJobs()
+	wsID := WorkspaceScopeFromContext(r.Context())
+	var jobs []Job
+	var err error
+	if wsID != "" {
+		jobs, err = h.store.ListJobsByWorkspace(wsID)
+	} else {
+		jobs, err = h.store.ListJobs()
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -179,10 +194,15 @@ func (h *Handler) HandleGetJob(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, "service_unavailable", "async jobs unavailable")
 			return
 		}
-		job, err := h.asyncManager.GetJob(id)
+		wsID := WorkspaceScopeFromContext(r.Context())
+		job, err := h.store.GetAsyncJobCheckWorkspace(id, wsID)
 		if err != nil {
 			if IsNotFound(err) {
 				writeError(w, http.StatusNotFound, "not_found", "job not found")
+				return
+			}
+			if isWorkspaceMismatch(err) {
+				writeError(w, http.StatusForbidden, "workspace_forbidden", "access to this resource is not permitted for your workspace")
 				return
 			}
 			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
@@ -192,9 +212,14 @@ func (h *Handler) HandleGetJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := h.store.GetJob(id)
+	wsID := WorkspaceScopeFromContext(r.Context())
+	job, err := h.store.GetJobCheckWorkspace(id, wsID)
 	if err == nil {
 		writeJSON(w, http.StatusOK, job)
+		return
+	}
+	if isWorkspaceMismatch(err) {
+		writeError(w, http.StatusForbidden, "workspace_forbidden", "access to this resource is not permitted for your workspace")
 		return
 	}
 	if !IsNotFound(err) {
@@ -203,9 +228,14 @@ func (h *Handler) HandleGetJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.asyncManager != nil {
-		asyncJob, asyncErr := h.asyncManager.GetJob(id)
+		wsID := WorkspaceScopeFromContext(r.Context())
+		asyncJob, asyncErr := h.store.GetAsyncJobCheckWorkspace(id, wsID)
 		if asyncErr == nil {
 			writeJSON(w, http.StatusOK, asyncJob)
+			return
+		}
+		if isWorkspaceMismatch(asyncErr) {
+			writeError(w, http.StatusForbidden, "workspace_forbidden", "access to this resource is not permitted for your workspace")
 			return
 		}
 		if !IsNotFound(asyncErr) {
@@ -693,4 +723,25 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, map[string]string{"error": code, "message": message})
+}
+
+// workspaceScopeKey is the context key for workspace scope injected by the server layer.
+type workspaceScopeKey struct{}
+
+// WorkspaceScopeFromContext retrieves the injected workspace scope (workspace ID string)
+// from the handler's request context. Returns empty string when not set (isolation disabled).
+func WorkspaceScopeFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(workspaceScopeKey{}).(string)
+	return v
+}
+
+// WithWorkspaceScope returns a new context with the given workspaceID injected.
+// This is called by the server layer before invoking handler methods.
+func WithWorkspaceScope(ctx context.Context, workspaceID string) context.Context {
+	return context.WithValue(ctx, workspaceScopeKey{}, workspaceID)
+}
+
+// isWorkspaceMismatch reports whether err signals a workspace isolation violation.
+func isWorkspaceMismatch(err error) bool {
+	return errors.Is(err, ErrWorkspaceMismatch)
 }

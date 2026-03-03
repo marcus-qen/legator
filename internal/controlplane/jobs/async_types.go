@@ -80,6 +80,7 @@ func IsAsyncQueueSaturated(err error) bool {
 // AsyncJob is a durable command execution record.
 type AsyncJob struct {
 	ID           string        `json:"id"`
+	WorkspaceID  string        `json:"workspace_id,omitempty"`
 	ProbeID      string        `json:"probe_id"`
 	RequestID    string        `json:"request_id"`
 	Command      string        `json:"command"`
