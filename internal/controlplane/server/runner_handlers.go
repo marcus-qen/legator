@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
+	"github.com/marcus-qen/legator/internal/controlplane/llm"
+	"github.com/marcus-qen/legator/internal/controlplane/modeldock"
 	"github.com/marcus-qen/legator/internal/controlplane/runner"
 	"github.com/marcus-qen/legator/internal/controlplane/tokenbroker"
 )
@@ -146,6 +149,208 @@ func (s *Server) handleIssueRunToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(issued)
+}
+
+const runnerProviderProxyAudience = string(runner.AudienceRunnerProviderProxy)
+
+func (s *Server) handleRunProviderProxy(w http.ResponseWriter, r *http.Request) {
+	if s.runTokenBroker == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "run token broker unavailable")
+		return
+	}
+
+	runID := strings.TrimSpace(r.PathValue("id"))
+	if runID == "" {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "run id required")
+		return
+	}
+
+	var req struct {
+		RunToken    string        `json:"run_token"`
+		SessionID   string        `json:"session_id"`
+		Model       string        `json:"model"`
+		Messages    []llm.Message `json:"messages"`
+		Temperature float64       `json:"temperature,omitempty"`
+		MaxTokens   int           `json:"max_tokens,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request")
+		return
+	}
+	if len(req.Messages) == 0 {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "messages are required")
+		return
+	}
+
+	claims, err := s.runTokenBroker.Validate(tokenbroker.ValidateRequest{
+		Token:     strings.TrimSpace(req.RunToken),
+		Scope:     runnerProviderProxyAudience,
+		Audience:  runnerProviderProxyAudience,
+		RunID:     runID,
+		SessionID: strings.TrimSpace(req.SessionID),
+		Consume:   false,
+	})
+	if err != nil {
+		status, code := providerProxyTokenError(err)
+		s.recordAudit(audit.Event{
+			Type:    audit.EventAuthorizationDenied,
+			Actor:   "runner",
+			Summary: fmt.Sprintf("Runner provider proxy denied: %s", runID),
+			Detail: map[string]any{
+				"run_id":          runID,
+				"actor":           "runner",
+				"allow":           false,
+				"provider_status": 0,
+				"error":           err.Error(),
+			},
+		})
+		writeJSONError(w, status, code, "run token validation failed")
+		return
+	}
+
+	actor := strings.TrimSpace(claims.ProbeID)
+	if actor == "" {
+		actor = strings.TrimSpace(claims.Issuer)
+	}
+	if actor == "" {
+		actor = "runner"
+	}
+
+	if s.modelProviderMgr == nil {
+		s.recordAudit(audit.Event{
+			Type:    audit.EventCommandResult,
+			Actor:   actor,
+			Summary: fmt.Sprintf("Runner provider proxy unavailable: %s", runID),
+			Detail: map[string]any{
+				"run_id":          runID,
+				"actor":           actor,
+				"allow":           true,
+				"provider_status": http.StatusServiceUnavailable,
+			},
+		})
+		writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "no active LLM provider configured")
+		return
+	}
+
+	provider := s.modelProviderMgr.Provider(modeldock.FeatureTask, s.modelDockStore)
+	completionReq := &llm.CompletionRequest{
+		Model:       strings.TrimSpace(req.Model),
+		Messages:    append([]llm.Message(nil), req.Messages...),
+		Temperature: req.Temperature,
+		MaxTokens:   req.MaxTokens,
+	}
+
+	providerResp, err := provider.Complete(r.Context(), completionReq)
+	if err != nil {
+		providerStatus := llmProviderStatusFromError(err)
+		if providerStatus == 0 {
+			providerStatus = http.StatusBadGateway
+		}
+
+		s.recordAudit(audit.Event{
+			Type:    audit.EventCommandResult,
+			Actor:   actor,
+			Summary: fmt.Sprintf("Runner provider proxy failed: %s", runID),
+			Detail: map[string]any{
+				"run_id":          runID,
+				"actor":           actor,
+				"allow":           true,
+				"provider_status": providerStatus,
+				"error":           err.Error(),
+			},
+		})
+
+		if errors.Is(err, modeldock.ErrNoActiveProvider) {
+			writeJSONError(w, http.StatusServiceUnavailable, "service_unavailable", "no active LLM provider configured")
+			return
+		}
+		writeJSONError(w, http.StatusBadGateway, "llm_unavailable", "LLM provider is unavailable")
+		return
+	}
+
+	s.recordAudit(audit.Event{
+		Type:    audit.EventCommandResult,
+		Actor:   actor,
+		Summary: fmt.Sprintf("Runner provider proxy completed: %s", runID),
+		Detail: map[string]any{
+			"run_id":          runID,
+			"actor":           actor,
+			"allow":           true,
+			"provider_status": http.StatusOK,
+		},
+	})
+
+	resp := struct {
+		RunID        string `json:"run_id"`
+		Content      string `json:"content"`
+		Model        string `json:"model"`
+		FinishReason string `json:"finish_reason"`
+		Usage        struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		} `json:"usage"`
+	}{
+		RunID:        runID,
+		Content:      providerResp.Content,
+		Model:        providerResp.Model,
+		FinishReason: providerResp.FinishReason,
+	}
+	resp.Usage.PromptTokens = providerResp.PromptTokens
+	resp.Usage.CompletionTokens = providerResp.CompTokens
+	resp.Usage.TotalTokens = providerResp.PromptTokens + providerResp.CompTokens
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func providerProxyTokenError(err error) (status int, code string) {
+	switch {
+	case errors.Is(err, tokenbroker.ErrTokenRequired), errors.Is(err, tokenbroker.ErrTokenInvalid):
+		return http.StatusUnauthorized, "invalid_run_token"
+	case errors.Is(err, tokenbroker.ErrTokenExpired):
+		return http.StatusUnauthorized, "expired_run_token"
+	case errors.Is(err, tokenbroker.ErrTokenRevoked):
+		return http.StatusUnauthorized, "revoked_run_token"
+	case errors.Is(err, tokenbroker.ErrTokenConsumed):
+		return http.StatusUnauthorized, "run_token_consumed"
+	case errors.Is(err, tokenbroker.ErrScopeRejected),
+		errors.Is(err, tokenbroker.ErrScopeRequired),
+		errors.Is(err, tokenbroker.ErrScopesRequired),
+		errors.Is(err, tokenbroker.ErrRunIDRequired),
+		errors.Is(err, tokenbroker.ErrProbeIDRequired),
+		errors.Is(err, tokenbroker.ErrAudienceRequired),
+		errors.Is(err, tokenbroker.ErrAudienceMismatch),
+		errors.Is(err, tokenbroker.ErrBindingMismatch),
+		errors.Is(err, tokenbroker.ErrSessionMismatch):
+		return http.StatusForbidden, "run_token_scope_rejected"
+	default:
+		return http.StatusForbidden, "run_token_scope_rejected"
+	}
+}
+
+func llmProviderStatusFromError(err error) int {
+	if errors.Is(err, modeldock.ErrNoActiveProvider) {
+		return http.StatusServiceUnavailable
+	}
+	msg := err.Error()
+	idx := strings.Index(msg, "provider returned ")
+	if idx < 0 {
+		return 0
+	}
+	start := idx + len("provider returned ")
+	end := start
+	for end < len(msg) && msg[end] >= 0 && msg[end] <= 9 {
+		end++
+	}
+	if end == start {
+		return 0
+	}
+	status, convErr := strconv.Atoi(msg[start:end])
+	if convErr != nil {
+		return 0
+	}
+	return status
 }
 
 func (s *Server) handleStartRunner(w http.ResponseWriter, r *http.Request) {

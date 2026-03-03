@@ -15,6 +15,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
 	"github.com/marcus-qen/legator/internal/controlplane/runner"
+	"github.com/marcus-qen/legator/internal/controlplane/tokenbroker"
 )
 
 func makeSessionRequest(t *testing.T, srv *Server, method, path, sessionID, body string) *httptest.ResponseRecorder {
@@ -456,5 +457,152 @@ func TestRunnerArtifactPresignedOutOfScopeRejectedWithAudit(t *testing.T) {
 	}
 	if !foundScopeReason {
 		t.Fatalf("expected scope rejection reason in audit detail, events=%+v", events)
+	}
+}
+
+func issueProviderProxyToken(t *testing.T, broker *tokenbroker.Broker, runID, runnerID, sessionID string, ttl time.Duration) string {
+	t.Helper()
+
+	issued, err := broker.Issue(tokenbroker.IssueRequest{
+		RunID:     runID,
+		ProbeID:   runnerID,
+		Audience:  string(runner.AudienceRunnerProviderProxy),
+		Scopes:    []string{string(runner.AudienceRunnerProviderProxy)},
+		Issuer:    "runner-agent",
+		SessionID: sessionID,
+		TTL:       ttl,
+	})
+	if err != nil {
+		t.Fatalf("issue provider proxy token: %v", err)
+	}
+	return issued.Token
+}
+
+func TestRunProviderProxyValidTokenSuccessAndAudit(t *testing.T) {
+	var upstreamAuthHeader string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamAuthHeader = r.Header.Get("Authorization")
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("unexpected upstream path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"gpt-proxy","choices":[{"message":{"content":"proxy-ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":3}}`))
+	}))
+	defer upstream.Close()
+
+	t.Setenv("LEGATOR_LLM_PROVIDER", "openai")
+	t.Setenv("LEGATOR_LLM_BASE_URL", upstream.URL)
+	t.Setenv("LEGATOR_LLM_API_KEY", "super-secret-provider-key")
+	t.Setenv("LEGATOR_LLM_MODEL", "gpt-proxy")
+
+	srv := newAuthTestServer(t)
+	token := issueProviderProxyToken(t, srv.runTokenBroker, "run-123", "runner-9", "sess-runner", 2*time.Minute)
+
+	body := `{"run_token":"` + token + `","session_id":"sess-runner","messages":[{"role":"user","content":"hello"}]}`
+	rr := makeRequest(t, srv, http.MethodPost, "/api/v1/runs/run-123/provider-proxy", "", body)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if upstreamAuthHeader != "Bearer super-secret-provider-key" {
+		t.Fatalf("expected upstream bearer auth to be injected, got %q", upstreamAuthHeader)
+	}
+	if strings.Contains(rr.Body.String(), "super-secret-provider-key") {
+		t.Fatalf("response leaked provider key: %s", rr.Body.String())
+	}
+
+	var resp struct {
+		RunID        string `json:"run_id"`
+		Content      string `json:"content"`
+		Model        string `json:"model"`
+		FinishReason string `json:"finish_reason"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode proxy response: %v", err)
+	}
+	if resp.RunID != "run-123" || resp.Content != "proxy-ok" || resp.Model != "gpt-proxy" {
+		t.Fatalf("unexpected proxy response: %+v", resp)
+	}
+
+	events := srv.queryAudit(audit.Filter{Limit: 20})
+	found := false
+	for _, evt := range events {
+		if !strings.Contains(evt.Summary, "Runner provider proxy completed: run-123") {
+			continue
+		}
+		detail, ok := evt.Detail.(map[string]any)
+		if !ok {
+			continue
+		}
+		if detail["run_id"] == "run-123" && detail["allow"] == true {
+			found = true
+			if detail["provider_status"] != float64(http.StatusOK) && detail["provider_status"] != http.StatusOK {
+				t.Fatalf("expected provider_status=200 in audit detail, got %+v", detail)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected provider proxy success audit event, got events=%+v", events)
+	}
+}
+
+func TestRunProviderProxyExpiredTokenReturnsUnauthorized(t *testing.T) {
+	srv := newAuthTestServer(t)
+
+	now := time.Date(2026, 3, 3, 1, 0, 0, 0, time.UTC)
+	broker := tokenbroker.NewBroker(tokenbroker.Config{Now: func() time.Time { return now }})
+	t.Cleanup(func() { _ = broker.Close() })
+	srv.runTokenBroker = broker
+
+	token := issueProviderProxyToken(t, broker, "run-expired", "runner-9", "sess-expired", time.Second)
+	now = now.Add(2 * time.Second)
+
+	body := `{"run_token":"` + token + `","session_id":"sess-expired","messages":[{"role":"user","content":"hello"}]}`
+	rr := makeRequest(t, srv, http.MethodPost, "/api/v1/runs/run-expired/provider-proxy", "", body)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload APIError
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if payload.Code != "expired_run_token" {
+		t.Fatalf("expected expired_run_token, got %+v", payload)
+	}
+
+	events := srv.queryAudit(audit.Filter{Type: audit.EventAuthorizationDenied, Limit: 10})
+	found := false
+	for _, evt := range events {
+		detail, ok := evt.Detail.(map[string]any)
+		if !ok {
+			continue
+		}
+		if detail["run_id"] == "run-expired" && detail["allow"] == false {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected auth denied audit event for expired token, events=%+v", events)
+	}
+}
+
+func TestRunProviderProxySessionMismatchReturnsForbidden(t *testing.T) {
+	srv := newAuthTestServer(t)
+	token := issueProviderProxyToken(t, srv.runTokenBroker, "run-bound", "runner-9", "sess-good", 2*time.Minute)
+
+	body := `{"run_token":"` + token + `","session_id":"sess-bad","messages":[{"role":"user","content":"hello"}]}`
+	rr := makeRequest(t, srv, http.MethodPost, "/api/v1/runs/run-bound/provider-proxy", "", body)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload APIError
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if payload.Code != "run_token_scope_rejected" {
+		t.Fatalf("expected run_token_scope_rejected, got %+v", payload)
 	}
 }

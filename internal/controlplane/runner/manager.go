@@ -25,9 +25,10 @@ const (
 type Audience string
 
 const (
-	AudienceRunnerStart   Audience = "runner:start"
-	AudienceRunnerStop    Audience = "runner:stop"
-	AudienceRunnerDestroy Audience = "runner:destroy"
+	AudienceRunnerStart         Audience = "runner:start"
+	AudienceRunnerStop          Audience = "runner:stop"
+	AudienceRunnerDestroy       Audience = "runner:destroy"
+	AudienceRunnerProviderProxy Audience = "runner:provider-proxy"
 )
 
 // BackendKind controls where runner commands execute.
@@ -503,7 +504,7 @@ func audienceTarget(a Audience) (State, bool) {
 
 func isAllowedAudience(a Audience) bool {
 	switch normalizeAudience(a) {
-	case AudienceRunnerStart, AudienceRunnerStop, AudienceRunnerDestroy:
+	case AudienceRunnerStart, AudienceRunnerStop, AudienceRunnerDestroy, AudienceRunnerProviderProxy:
 		return true
 	default:
 		return false

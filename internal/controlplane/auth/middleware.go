@@ -124,6 +124,9 @@ func (m *AuthMiddleware) shouldSkip(path string) bool {
 	if path == "/login" || path == "/logout" || strings.HasPrefix(path, "/static/") {
 		return true
 	}
+	if strings.HasPrefix(path, "/api/v1/runs/") && strings.HasSuffix(path, "/provider-proxy") {
+		return true
+	}
 	if m.skipExact[path] {
 		return true
 	}

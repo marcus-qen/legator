@@ -264,6 +264,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/runners/{id}/stop", s.withPermission(auth.PermCommandExec, s.handleStopRunner))
 	mux.HandleFunc("DELETE /api/v1/runners/{id}", s.withPermission(auth.PermCommandExec, s.handleDestroyRunner))
 	mux.HandleFunc("POST /api/v1/runs", s.withPermission(auth.PermCommandExec, s.handleIssueRunToken))
+	mux.HandleFunc("POST /api/v1/runs/{id}/provider-proxy", s.handleRunProviderProxy)
 	mux.HandleFunc("POST /api/v1/runs/{id}/artifacts/presign", s.withPermission(auth.PermCommandExec, s.handlePresignRunnerArtifact))
 
 	// Runner artifact transfers use presigned URLs and do not require API keys.

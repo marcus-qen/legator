@@ -47,6 +47,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/runner"
 	"github.com/marcus-qen/legator/internal/controlplane/session"
 	"github.com/marcus-qen/legator/internal/controlplane/tenant"
+	"github.com/marcus-qen/legator/internal/controlplane/tokenbroker"
 	"github.com/marcus-qen/legator/internal/controlplane/users"
 	"github.com/marcus-qen/legator/internal/controlplane/webhook"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
@@ -126,6 +127,7 @@ type Server struct {
 	asyncJobsManager       *jobs.AsyncManager
 	asyncJobsScheduler     *jobs.AsyncWorkerScheduler
 	runnerManager          *runner.Manager
+	runTokenBroker         *tokenbroker.Broker
 	runnerExecutionBackend runner.ExecutionBackend
 	artifactPresigner      *artifacts.Service
 	runnerArtifactsDir     string
@@ -698,7 +700,14 @@ func (s *Server) initRunnerManager() {
 		DefaultTimeout: s.cfg.Jobs.RunnerSandboxTimeoutDuration(),
 		EventSink:      s.recordRunnerBackendEvent,
 	})
-	s.runnerManager = runner.NewManager(runner.Config{RunTokenTTL: s.cfg.Jobs.RunTokenTTLDuration()})
+	s.runTokenBroker = tokenbroker.NewBroker(tokenbroker.Config{
+		DefaultTTL: s.cfg.Jobs.RunTokenTTLDuration(),
+		AuditSink:  s.recordTokenBrokerAuditEvent,
+	})
+	s.runnerManager = runner.NewManager(runner.Config{
+		RunTokenTTL: s.cfg.Jobs.RunTokenTTLDuration(),
+		TokenBroker: s.runTokenBroker,
+	})
 	s.runnerArtifactsDir = filepath.Join(s.cfg.DataDir, "runner-artifacts")
 
 	artifactPresigner, err := artifacts.NewService(artifacts.Config{
