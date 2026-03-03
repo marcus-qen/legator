@@ -22,6 +22,7 @@ type Template struct {
 	ExecutionClassRequired protocol.ExecutionClass   `json:"execution_class_required,omitempty"`
 	SandboxRequired        bool                      `json:"sandbox_required"`
 	ApprovalMode           protocol.ApprovalMode     `json:"approval_mode,omitempty"`
+	RequireSecondApprover  bool                      `json:"require_second_approver,omitempty"`
 	Breakglass             protocol.BreakglassPolicy `json:"breakglass,omitempty"`
 	MaxRuntimeSec          int                       `json:"max_runtime_sec,omitempty"`
 	AllowedScopes          []string                  `json:"allowed_scopes,omitempty"`
@@ -32,12 +33,14 @@ type Template struct {
 
 // TemplateOptions contains additive policy v2 fields.
 type TemplateOptions struct {
-	ExecutionClassRequired protocol.ExecutionClass
-	SandboxRequired        bool
-	ApprovalMode           protocol.ApprovalMode
-	Breakglass             protocol.BreakglassPolicy
-	MaxRuntimeSec          int
-	AllowedScopes          []string
+	ExecutionClassRequired   protocol.ExecutionClass
+	SandboxRequired          bool
+	ApprovalMode             protocol.ApprovalMode
+	RequireSecondApprover    bool
+	RequireSecondApproverSet bool
+	Breakglass               protocol.BreakglassPolicy
+	MaxRuntimeSec            int
+	AllowedScopes            []string
 }
 
 // PolicyManager is the interface used by handlers for policy CRUD.
@@ -198,6 +201,7 @@ func (t *Template) ToPolicy() *protocol.PolicyUpdatePayload {
 		ExecutionClassRequired: t.ExecutionClassRequired,
 		SandboxRequired:        t.SandboxRequired,
 		ApprovalMode:           t.ApprovalMode,
+		RequireSecondApprover:  t.RequireSecondApprover,
 		Breakglass:             t.Breakglass,
 		MaxRuntimeSec:          t.MaxRuntimeSec,
 		AllowedScopes:          append([]string(nil), t.AllowedScopes...),
@@ -214,6 +218,7 @@ func (s *Store) applyOptions(tpl *Template, opts TemplateOptions) {
 	tpl.ExecutionClassRequired = opts.ExecutionClassRequired
 	tpl.SandboxRequired = opts.SandboxRequired
 	tpl.ApprovalMode = opts.ApprovalMode
+	tpl.RequireSecondApprover = opts.RequireSecondApprover
 	tpl.Breakglass = opts.Breakglass
 	tpl.MaxRuntimeSec = opts.MaxRuntimeSec
 	tpl.AllowedScopes = append([]string(nil), opts.AllowedScopes...)

@@ -167,6 +167,66 @@ func TestQueueFull(t *testing.T) {
 	}
 }
 
+func TestTwoPersonApprovalRequiresDistinctApprovers(t *testing.T) {
+	q := NewQueue(5*time.Minute, 100)
+	cmd := makeCmd("apt-get upgrade", protocol.CapRemediate)
+
+	req, err := q.SubmitWithPolicyDetailsAndOptions("probe-2", cmd, "security patches", "high", "api", "queue", nil, SubmissionOptions{RequireSecondApprover: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := q.Decide(req.ID, DecisionApproved, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Decision != DecisionPending {
+		t.Fatalf("expected pending after first approval, got %s", first.Decision)
+	}
+	if len(first.Approvals) != 1 {
+		t.Fatalf("expected one approval recorded, got %d", len(first.Approvals))
+	}
+
+	second, err := q.Decide(req.ID, DecisionApproved, "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Decision != DecisionApproved {
+		t.Fatalf("expected approved after second approver, got %s", second.Decision)
+	}
+	if len(second.Approvals) != 2 {
+		t.Fatalf("expected two approvals recorded, got %d", len(second.Approvals))
+	}
+	if second.DecidedBy != "bob" {
+		t.Fatalf("expected final decision actor bob, got %q", second.DecidedBy)
+	}
+}
+
+func TestTwoPersonApprovalRejectsDuplicateApprover(t *testing.T) {
+	q := NewQueue(5*time.Minute, 100)
+	cmd := makeCmd("apt-get upgrade", protocol.CapRemediate)
+
+	req, err := q.SubmitWithPolicyDetailsAndOptions("probe-2", cmd, "security patches", "high", "api", "queue", nil, SubmissionOptions{RequireSecondApprover: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := q.Decide(req.ID, DecisionApproved, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Decide(req.ID, DecisionApproved, "alice"); err == nil {
+		t.Fatal("expected duplicate approver rejection")
+	}
+
+	current, ok := q.Get(req.ID)
+	if !ok {
+		t.Fatal("expected approval request to exist")
+	}
+	if current.Decision != DecisionPending {
+		t.Fatalf("expected request to remain pending, got %s", current.Decision)
+	}
+}
+
 func TestClassifyRisk(t *testing.T) {
 	tests := []struct {
 		cmd      string

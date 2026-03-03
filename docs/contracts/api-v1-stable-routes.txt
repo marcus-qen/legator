@@ -122,6 +122,7 @@ POST /api/v1/fleet/cleanup
 POST /api/v1/jobs
 POST /api/v1/jobs/{id}/cancel
 POST /api/v1/jobs/{id}/approve
+# [compat:additive] POST /api/v1/jobs/{id}/approve may return status pending_second_approval when quorum is enabled (approval.two_person_mode=true + policy require_second_approver=true) and only resumes execution after two distinct approvers.
 POST /api/v1/jobs/{id}/reject
 POST /api/v1/jobs/{id}/disable
 POST /api/v1/jobs/{id}/enable
@@ -141,6 +142,7 @@ POST /api/v1/network-devices/{id}/scan
 POST /api/v1/network/devices/{id}/scan
 POST /api/v1/network/devices/{id}/test
 POST /api/v1/policies
+# [compat:additive] POST /api/v1/policies accepts optional policy field require_second_approver to require dual approval for high-risk mutation classes when two-person mode is enabled.
 POST /api/v1/probes
 POST /api/v1/probes/{id}/apply-policy/{policyId}
 POST /api/v1/probes/{id}/chat

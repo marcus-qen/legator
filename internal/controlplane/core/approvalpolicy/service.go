@@ -20,6 +20,7 @@ var (
 type approvalQueue interface {
 	Submit(probeID string, cmd *protocol.CommandPayload, reason, riskLevel, requester string) (*approval.Request, error)
 	SubmitWithPolicyDetails(probeID string, cmd *protocol.CommandPayload, reason, riskLevel, requester, policyDecision string, policyRationale any) (*approval.Request, error)
+	SubmitWithPolicyDetailsAndOptions(probeID string, cmd *protocol.CommandPayload, reason, riskLevel, requester, policyDecision string, policyRationale any, options approval.SubmissionOptions) (*approval.Request, error)
 	Decide(id string, decision approval.Decision, decidedBy string) (*approval.Request, error)
 	WaitForDecision(id string, timeout time.Duration) (*approval.Request, error)
 }
@@ -123,6 +124,7 @@ type Service struct {
 	decisionHooks        DecisionHooks
 	capacitySignalSource CapacitySignalProvider
 	capacityThresholds   CapacityThresholds
+	twoPersonMode        bool
 
 	appliedPolicyMu sync.RWMutex
 	appliedPolicy   map[string]appliedPolicyContext
@@ -141,6 +143,12 @@ func WithDecisionHooks(hooks DecisionHooks) Option {
 func WithCapacitySignalProvider(provider CapacitySignalProvider) Option {
 	return func(s *Service) {
 		s.capacitySignalSource = provider
+	}
+}
+
+func WithTwoPersonMode(enabled bool) Option {
+	return func(s *Service) {
+		s.twoPersonMode = enabled
 	}
 }
 
@@ -190,7 +198,8 @@ func (s *Service) SubmitCommandApprovalWithContext(ctx context.Context, probeID 
 		return result, nil
 	}
 
-	req, err := s.approvals.SubmitWithPolicyDetails(
+	requireSecondApprover := s.twoPersonMode && decision.RiskTier >= 3 && decision.Policy.RequireSecondApprover
+	req, err := s.approvals.SubmitWithPolicyDetailsAndOptions(
 		probeID,
 		cmd,
 		reason,
@@ -198,6 +207,7 @@ func (s *Service) SubmitCommandApprovalWithContext(ctx context.Context, probeID 
 		requester,
 		string(decision.Outcome),
 		decision.Rationale,
+		approval.SubmissionOptions{RequireSecondApprover: requireSecondApprover},
 	)
 	if err != nil {
 		return result, err
@@ -299,6 +309,7 @@ func (s *Service) rememberAppliedPolicy(probeID string, tpl *policy.Template) {
 			ExecutionClassRequired: tpl.ExecutionClassRequired,
 			SandboxRequired:        tpl.SandboxRequired,
 			ApprovalMode:           tpl.ApprovalMode,
+			RequireSecondApprover:  tpl.RequireSecondApprover,
 			Breakglass:             tpl.Breakglass,
 			MaxRuntimeSec:          tpl.MaxRuntimeSec,
 			AllowedScopes:          append([]string(nil), tpl.AllowedScopes...),

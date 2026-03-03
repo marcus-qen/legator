@@ -58,6 +58,9 @@ type Config struct {
 	// runner, approvals, command streams, and audit APIs.
 	WorkspaceIsolation WorkspaceIsolationConfig `json:"workspace_isolation,omitempty"`
 
+	// Approval controls quorum behavior for high-risk mutation approvals.
+	Approval ApprovalConfig `json:"approval,omitempty"`
+
 	// Log level (debug, info, warn, error)
 	LogLevel string `json:"log_level"`
 
@@ -148,6 +151,10 @@ type ProviderProxyConfig struct {
 
 type WorkspaceIsolationConfig struct {
 	Enabled bool `json:"enabled"`
+}
+
+type ApprovalConfig struct {
+	TwoPersonMode bool `json:"two_person_mode,omitempty"`
 }
 
 func (k KubeflowConfig) NamespaceOrDefault() string {
@@ -334,6 +341,9 @@ func Default() Config {
 		},
 		WorkspaceIsolation: WorkspaceIsolationConfig{
 			Enabled: false,
+		},
+		Approval: ApprovalConfig{
+			TwoPersonMode: false,
 		},
 	}
 }
@@ -542,6 +552,9 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("LEGATOR_WORKSPACE_ISOLATION_ENABLED"); v != "" {
 		cfg.WorkspaceIsolation.Enabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("LEGATOR_APPROVAL_TWO_PERSON_MODE"); v != "" {
+		cfg.Approval.TwoPersonMode = v == "true" || v == "1"
 	}
 
 	cfg.OIDC = oidc.ApplyEnv(cfg.OIDC)

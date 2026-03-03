@@ -90,6 +90,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Jobs.RunnerSandboxTimeoutDuration() != 10*time.Minute {
 		t.Errorf("expected sandbox timeout 10m, got %s", cfg.Jobs.RunnerSandboxTimeoutDuration())
 	}
+	if cfg.Approval.TwoPersonMode {
+		t.Error("expected two-person approval mode disabled by default")
+	}
 }
 
 func TestLoadFromFile(t *testing.T) {
@@ -217,6 +220,7 @@ func TestEnvOverridesFile(t *testing.T) {
 	t.Setenv("LEGATOR_MCP_ENABLED", "0")
 	t.Setenv("LEGATOR_SANDBOX_ENFORCEMENT", "false")
 	t.Setenv("LEGATOR_WORKSPACE_ISOLATION_ENABLED", "1")
+	t.Setenv("LEGATOR_APPROVAL_TWO_PERSON_MODE", "1")
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -237,6 +241,9 @@ func TestEnvOverridesFile(t *testing.T) {
 	}
 	if !cfg.WorkspaceIsolation.Enabled {
 		t.Error("env LEGATOR_WORKSPACE_ISOLATION_ENABLED=1 should enable workspace isolation")
+	}
+	if !cfg.Approval.TwoPersonMode {
+		t.Error("env LEGATOR_APPROVAL_TWO_PERSON_MODE=1 should enable two-person mode")
 	}
 }
 
@@ -478,14 +485,27 @@ func TestOIDCEnvOverrides(t *testing.T) {
 }
 
 func TestWorkspaceIsolationDefaultsAndEnvOverride(t *testing.T) {
-    cfg := Default()
-    if cfg.WorkspaceIsolation.Enabled {
-        t.Fatal("workspace isolation should default to disabled")
-    }
+	cfg := Default()
+	if cfg.WorkspaceIsolation.Enabled {
+		t.Fatal("workspace isolation should default to disabled")
+	}
 
-    t.Setenv("LEGATOR_WORKSPACE_ISOLATION_ENABLED", "1")
-    loaded := LoadFromEnv()
-    if !loaded.WorkspaceIsolation.Enabled {
-        t.Fatal("expected workspace isolation enabled from env")
-    }
+	t.Setenv("LEGATOR_WORKSPACE_ISOLATION_ENABLED", "1")
+	loaded := LoadFromEnv()
+	if !loaded.WorkspaceIsolation.Enabled {
+		t.Fatal("expected workspace isolation enabled from env")
+	}
+}
+
+func TestApprovalTwoPersonModeDefaultsAndEnvOverride(t *testing.T) {
+	cfg := Default()
+	if cfg.Approval.TwoPersonMode {
+		t.Fatal("approval two-person mode should default to disabled")
+	}
+
+	t.Setenv("LEGATOR_APPROVAL_TWO_PERSON_MODE", "1")
+	loaded := LoadFromEnv()
+	if !loaded.Approval.TwoPersonMode {
+		t.Fatal("expected approval two-person mode enabled from env")
+	}
 }

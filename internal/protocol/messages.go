@@ -200,6 +200,7 @@ type PolicyUpdatePayload struct {
 	ExecutionClassRequired ExecutionClass   `json:"execution_class_required,omitempty"`
 	SandboxRequired        bool             `json:"sandbox_required,omitempty"`
 	ApprovalMode           ApprovalMode     `json:"approval_mode,omitempty"`
+	RequireSecondApprover  bool             `json:"require_second_approver,omitempty"`
 	Breakglass             BreakglassPolicy `json:"breakglass,omitempty"`
 	MaxRuntimeSec          int              `json:"max_runtime_sec,omitempty"`
 	AllowedScopes          []string         `json:"allowed_scopes,omitempty"`

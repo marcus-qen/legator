@@ -24,22 +24,75 @@ const (
 	DecisionExpired  Decision = "expired"
 )
 
+// ApprovalRecord captures one distinct approval actor and timestamp.
+type ApprovalRecord struct {
+	Actor     string    `json:"actor"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// SubmissionOptions controls quorum behavior for submitted approvals.
+type SubmissionOptions struct {
+	RequireSecondApprover bool
+}
+
 // Request is a pending approval item.
 type Request struct {
-	ID              string                   `json:"id"`
-	WorkspaceID     string                   `json:"workspace_id,omitempty"`
-	ProbeID         string                   `json:"probe_id"`
-	Command         *protocol.CommandPayload `json:"command"`
-	Reason          string                   `json:"reason"`     // why the action was requested
-	RiskLevel       string                   `json:"risk_level"` // low/medium/high/critical
-	Requester       string                   `json:"requester"`  // who/what initiated (e.g. "llm-task", "api")
-	PolicyDecision  string                   `json:"policy_decision,omitempty"`
-	PolicyRationale any                      `json:"policy_rationale,omitempty"`
-	Decision        Decision                 `json:"decision"`
-	DecidedBy       string                   `json:"decided_by,omitempty"`
-	DecidedAt       time.Time                `json:"decided_at,omitempty"`
-	CreatedAt       time.Time                `json:"created_at"`
-	ExpiresAt       time.Time                `json:"expires_at"`
+	ID                    string                   `json:"id"`
+	WorkspaceID           string                   `json:"workspace_id,omitempty"`
+	ProbeID               string                   `json:"probe_id"`
+	Command               *protocol.CommandPayload `json:"command"`
+	Reason                string                   `json:"reason"`     // why the action was requested
+	RiskLevel             string                   `json:"risk_level"` // low/medium/high/critical
+	Requester             string                   `json:"requester"`  // who/what initiated (e.g. "llm-task", "api")
+	PolicyDecision        string                   `json:"policy_decision,omitempty"`
+	PolicyRationale       any                      `json:"policy_rationale,omitempty"`
+	RequireSecondApprover bool                     `json:"require_second_approver,omitempty"`
+	RequiredApprovals     int                      `json:"required_approvals,omitempty"`
+	Approvals             []ApprovalRecord         `json:"approvals,omitempty"`
+	Decision              Decision                 `json:"decision"`
+	DecidedBy             string                   `json:"decided_by,omitempty"`
+	DecidedAt             time.Time                `json:"decided_at,omitempty"`
+	CreatedAt             time.Time                `json:"created_at"`
+	ExpiresAt             time.Time                `json:"expires_at"`
+}
+
+// RequiredApprovalCount returns the approval quorum for this request.
+func (r *Request) RequiredApprovalCount() int {
+	if r == nil {
+		return 1
+	}
+	if r.RequiredApprovals > 1 {
+		return r.RequiredApprovals
+	}
+	if r.RequireSecondApprover {
+		return 2
+	}
+	return 1
+}
+
+// ApproverIDs returns all recorded approver identities in order.
+func (r *Request) ApproverIDs() []string {
+	if r == nil || len(r.Approvals) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(r.Approvals))
+	for _, approval := range r.Approvals {
+		if actor := strings.TrimSpace(approval.Actor); actor != "" {
+			out = append(out, actor)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// LatestApproval returns the most recent recorded approval.
+func (r *Request) LatestApproval() (ApprovalRecord, bool) {
+	if r == nil || len(r.Approvals) == 0 {
+		return ApprovalRecord{}, false
+	}
+	return r.Approvals[len(r.Approvals)-1], true
 }
 
 // Queue manages pending approval requests.
@@ -68,7 +121,12 @@ func (q *Queue) Submit(probeID string, cmd *protocol.CommandPayload, reason, ris
 
 // SubmitWithWorkspace is like SubmitWithPolicyDetails but also tags the workspace.
 func (q *Queue) SubmitWithWorkspace(workspaceID, probeID string, cmd *protocol.CommandPayload, reason, riskLevel, requester, policyDecision string, policyRationale any) (*Request, error) {
-	req, err := q.SubmitWithPolicyDetails(probeID, cmd, reason, riskLevel, requester, policyDecision, policyRationale)
+	return q.SubmitWithWorkspaceAndOptions(workspaceID, probeID, cmd, reason, riskLevel, requester, policyDecision, policyRationale, SubmissionOptions{})
+}
+
+// SubmitWithWorkspaceAndOptions is like SubmitWithWorkspace but accepts quorum options.
+func (q *Queue) SubmitWithWorkspaceAndOptions(workspaceID, probeID string, cmd *protocol.CommandPayload, reason, riskLevel, requester, policyDecision string, policyRationale any, options SubmissionOptions) (*Request, error) {
+	req, err := q.SubmitWithPolicyDetailsAndOptions(probeID, cmd, reason, riskLevel, requester, policyDecision, policyRationale, options)
 	if err != nil {
 		return nil, err
 	}
@@ -84,6 +142,11 @@ func (q *Queue) SubmitWithWorkspace(workspaceID, probeID string, cmd *protocol.C
 
 // SubmitWithPolicyDetails adds a new approval request and stores policy explainability details.
 func (q *Queue) SubmitWithPolicyDetails(probeID string, cmd *protocol.CommandPayload, reason, riskLevel, requester, policyDecision string, policyRationale any) (*Request, error) {
+	return q.SubmitWithPolicyDetailsAndOptions(probeID, cmd, reason, riskLevel, requester, policyDecision, policyRationale, SubmissionOptions{})
+}
+
+// SubmitWithPolicyDetailsAndOptions adds a new approval request and stores policy explainability details.
+func (q *Queue) SubmitWithPolicyDetailsAndOptions(probeID string, cmd *protocol.CommandPayload, reason, riskLevel, requester, policyDecision string, policyRationale any, options SubmissionOptions) (*Request, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -94,18 +157,26 @@ func (q *Queue) SubmitWithPolicyDetails(probeID string, cmd *protocol.CommandPay
 		return nil, fmt.Errorf("approval queue full (%d/%d)", len(q.requests), q.maxSize)
 	}
 
+	requiredApprovals := 1
+	if options.RequireSecondApprover {
+		requiredApprovals = 2
+	}
+
+	now := time.Now().UTC()
 	req := &Request{
-		ID:              uuid.New().String(),
-		ProbeID:         probeID,
-		Command:         cmd,
-		Reason:          reason,
-		RiskLevel:       riskLevel,
-		Requester:       requester,
-		PolicyDecision:  policyDecision,
-		PolicyRationale: policyRationale,
-		Decision:        DecisionPending,
-		CreatedAt:       time.Now().UTC(),
-		ExpiresAt:       time.Now().UTC().Add(q.ttl),
+		ID:                    uuid.New().String(),
+		ProbeID:               probeID,
+		Command:               cmd,
+		Reason:                reason,
+		RiskLevel:             riskLevel,
+		Requester:             requester,
+		PolicyDecision:        policyDecision,
+		PolicyRationale:       policyRationale,
+		RequireSecondApprover: options.RequireSecondApprover,
+		RequiredApprovals:     requiredApprovals,
+		Decision:              DecisionPending,
+		CreatedAt:             now,
+		ExpiresAt:             now.Add(q.ttl),
 	}
 
 	q.requests[req.ID] = req
@@ -116,6 +187,11 @@ func (q *Queue) SubmitWithPolicyDetails(probeID string, cmd *protocol.CommandPay
 func (q *Queue) Decide(id string, decision Decision, decidedBy string) (*Request, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+
+	decidedBy = strings.TrimSpace(decidedBy)
+	if decidedBy == "" {
+		return nil, fmt.Errorf("decided_by is required")
+	}
 
 	req, ok := q.requests[id]
 	if !ok {
@@ -135,9 +211,29 @@ func (q *Queue) Decide(id string, decision Decision, decidedBy string) (*Request
 		return nil, fmt.Errorf("invalid decision %q: must be approved or denied", decision)
 	}
 
-	req.Decision = decision
+	now := time.Now().UTC()
+	if decision == DecisionDenied {
+		req.Decision = decision
+		req.DecidedBy = decidedBy
+		req.DecidedAt = now
+		return req, nil
+	}
+
+	for _, prior := range req.Approvals {
+		if strings.EqualFold(strings.TrimSpace(prior.Actor), decidedBy) {
+			return nil, fmt.Errorf("approver %q has already approved request %s", decidedBy, id)
+		}
+	}
+
+	req.Approvals = append(req.Approvals, ApprovalRecord{Actor: decidedBy, Timestamp: now})
+	if len(req.Approvals) < req.RequiredApprovalCount() {
+		req.Decision = DecisionPending
+		return req, nil
+	}
+
+	req.Decision = DecisionApproved
 	req.DecidedBy = decidedBy
-	req.DecidedAt = time.Now().UTC()
+	req.DecidedAt = now
 
 	return req, nil
 }

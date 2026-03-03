@@ -51,9 +51,11 @@ func TestUpdate(t *testing.T) {
 	s := NewStore()
 	tpl := s.Create("Test", "desc", protocol.CapObserve, nil, nil, nil, TemplateOptions{})
 	updated, err := s.Update(tpl.ID, "Test v2", "new desc", protocol.CapRemediate, []string{"ls"}, []string{"rm"}, []string{"/etc"}, TemplateOptions{
-		ExecutionClassRequired: protocol.ExecBreakglassDirect,
-		SandboxRequired:        true,
-		ApprovalMode:           protocol.ApprovalEveryAction,
+		ExecutionClassRequired:   protocol.ExecBreakglassDirect,
+		SandboxRequired:          true,
+		ApprovalMode:             protocol.ApprovalEveryAction,
+		RequireSecondApprover:    true,
+		RequireSecondApproverSet: true,
 		Breakglass: protocol.BreakglassPolicy{
 			Enabled:                  true,
 			AllowedReasons:           []string{"incident_response", "incident_response"},
@@ -70,6 +72,9 @@ func TestUpdate(t *testing.T) {
 	}
 	if updated.ExecutionClassRequired != protocol.ExecBreakglassDirect || updated.ApprovalMode != protocol.ApprovalEveryAction {
 		t.Fatalf("expected v2 override fields, got %+v", updated)
+	}
+	if !updated.RequireSecondApprover {
+		t.Fatalf("expected require_second_approver override, got %+v", updated)
 	}
 	if len(updated.Breakglass.AllowedReasons) != 1 || updated.Breakglass.AllowedReasons[0] != "incident_response" {
 		t.Fatalf("expected normalized breakglass reasons, got %+v", updated.Breakglass)
@@ -117,5 +122,8 @@ func TestToPolicy(t *testing.T) {
 	}
 	if pol.ExecutionClassRequired != protocol.ExecObserveDirect || pol.ApprovalMode != protocol.ApprovalNone {
 		t.Fatalf("expected v2 fields in policy payload: %+v", pol)
+	}
+	if pol.RequireSecondApprover {
+		t.Fatalf("expected require_second_approver false by default: %+v", pol)
 	}
 }

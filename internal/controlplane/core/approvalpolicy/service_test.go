@@ -86,6 +86,97 @@ func TestSubmitCommandApproval_Required(t *testing.T) {
 	}
 }
 
+func TestSubmitCommandApproval_TwoPersonModeEnabledForHighRiskMutation(t *testing.T) {
+	queue := approval.NewQueue(15*time.Minute, 16)
+	fleetMgr := fleet.NewManager(zap.NewNop())
+	policies := policy.NewStore()
+	svc := NewService(queue, fleetMgr, policies, WithTwoPersonMode(true))
+
+	fleetMgr.Register("probe-a", "host", "linux", "amd64")
+	tpl := policies.Create(
+		"two-person",
+		"requires dual approval for high-risk mutation",
+		protocol.CapRemediate,
+		nil,
+		nil,
+		nil,
+		policy.TemplateOptions{RequireSecondApprover: true, RequireSecondApproverSet: true},
+	)
+	if _, err := svc.ApplyPolicyTemplate("probe-a", tpl.ID, func(string, *protocol.PolicyUpdatePayload) error { return nil }); err != nil {
+		t.Fatalf("apply policy: %v", err)
+	}
+
+	cmd := &protocol.CommandPayload{RequestID: "req-two-person", Command: "systemctl restart nginx", Level: protocol.CapRemediate}
+	result, err := svc.SubmitCommandApprovalWithContext(context.Background(), "probe-a", cmd, protocol.CapRemediate, "manual", "api")
+	if err != nil {
+		t.Fatalf("SubmitCommandApprovalWithContext returned error: %v", err)
+	}
+	if result.Decision.Outcome != CommandPolicyDecisionQueue {
+		t.Fatalf("expected queue decision, got %s", result.Decision.Outcome)
+	}
+	if result.Request == nil {
+		t.Fatal("expected approval request")
+	}
+	if !result.Request.RequireSecondApprover {
+		t.Fatal("expected request to require second approver")
+	}
+	if result.Request.RequiredApprovalCount() != 2 {
+		t.Fatalf("expected required approvals=2, got %d", result.Request.RequiredApprovalCount())
+	}
+
+	first, err := queue.Decide(result.Request.ID, approval.DecisionApproved, "alice")
+	if err != nil {
+		t.Fatalf("first approval failed: %v", err)
+	}
+	if first.Decision != approval.DecisionPending {
+		t.Fatalf("expected pending after first approval, got %s", first.Decision)
+	}
+
+	second, err := queue.Decide(result.Request.ID, approval.DecisionApproved, "bob")
+	if err != nil {
+		t.Fatalf("second approval failed: %v", err)
+	}
+	if second.Decision != approval.DecisionApproved {
+		t.Fatalf("expected approved after second approval, got %s", second.Decision)
+	}
+}
+
+func TestSubmitCommandApproval_TwoPersonModeDisabledKeepsSingleApproval(t *testing.T) {
+	queue := approval.NewQueue(15*time.Minute, 16)
+	fleetMgr := fleet.NewManager(zap.NewNop())
+	policies := policy.NewStore()
+	svc := NewService(queue, fleetMgr, policies)
+
+	fleetMgr.Register("probe-a", "host", "linux", "amd64")
+	tpl := policies.Create(
+		"two-person-off",
+		"requires dual approval for high-risk mutation",
+		protocol.CapRemediate,
+		nil,
+		nil,
+		nil,
+		policy.TemplateOptions{RequireSecondApprover: true, RequireSecondApproverSet: true},
+	)
+	if _, err := svc.ApplyPolicyTemplate("probe-a", tpl.ID, func(string, *protocol.PolicyUpdatePayload) error { return nil }); err != nil {
+		t.Fatalf("apply policy: %v", err)
+	}
+
+	cmd := &protocol.CommandPayload{RequestID: "req-single", Command: "systemctl restart nginx", Level: protocol.CapRemediate}
+	result, err := svc.SubmitCommandApprovalWithContext(context.Background(), "probe-a", cmd, protocol.CapRemediate, "manual", "api")
+	if err != nil {
+		t.Fatalf("SubmitCommandApprovalWithContext returned error: %v", err)
+	}
+	if result.Request == nil {
+		t.Fatal("expected approval request")
+	}
+	if result.Request.RequireSecondApprover {
+		t.Fatal("expected request to stay single-approver when feature disabled")
+	}
+	if result.Request.RequiredApprovalCount() != 1 {
+		t.Fatalf("expected required approvals=1, got %d", result.Request.RequiredApprovalCount())
+	}
+}
+
 func TestSubmitCommandApprovalWithContext_CapacityDenied(t *testing.T) {
 	queue := approval.NewQueue(15*time.Minute, 16)
 	fleetMgr := fleet.NewManager(zap.NewNop())

@@ -109,6 +109,16 @@ func NewPersistentStore(dbPath string) (*PersistentStore, error) {
 				return err
 			},
 		},
+		{
+			Version:     3,
+			Description: "add require_second_approver policy field",
+			Up: func(tx *sql.Tx) error {
+				if err := addColumn(tx, `ALTER TABLE policy_templates ADD COLUMN require_second_approver INTEGER NOT NULL DEFAULT 0`); err != nil {
+					return err
+				}
+				return nil
+			},
+		},
 	})
 	if err := runner.Migrate(db); err != nil {
 		_ = db.Close()
@@ -165,10 +175,10 @@ func (ps *PersistentStore) persist(t *Template) error {
 
 	_, err := ps.db.Exec(`INSERT INTO policy_templates (
 			id, name, description, level, allowed, blocked, paths,
-			execution_class_required, sandbox_required, approval_mode, breakglass_json, max_runtime_sec, allowed_scopes,
+			execution_class_required, sandbox_required, approval_mode, require_second_approver, breakglass_json, max_runtime_sec, allowed_scopes,
 			created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			description = excluded.description,
@@ -179,6 +189,7 @@ func (ps *PersistentStore) persist(t *Template) error {
 			execution_class_required = excluded.execution_class_required,
 			sandbox_required = excluded.sandbox_required,
 			approval_mode = excluded.approval_mode,
+			require_second_approver = excluded.require_second_approver,
 			breakglass_json = excluded.breakglass_json,
 			max_runtime_sec = excluded.max_runtime_sec,
 			allowed_scopes = excluded.allowed_scopes,
@@ -193,6 +204,7 @@ func (ps *PersistentStore) persist(t *Template) error {
 		string(t.ExecutionClassRequired),
 		boolToInt(t.SandboxRequired),
 		string(t.ApprovalMode),
+		boolToInt(t.RequireSecondApprover),
 		string(breakglassJSON),
 		t.MaxRuntimeSec,
 		string(allowedScopesJSON),
@@ -205,7 +217,7 @@ func (ps *PersistentStore) persist(t *Template) error {
 func (ps *PersistentStore) loadFromDB() error {
 	rows, err := ps.db.Query(`SELECT
 		id, name, description, level, allowed, blocked, paths,
-		execution_class_required, sandbox_required, approval_mode, breakglass_json, max_runtime_sec, allowed_scopes,
+		execution_class_required, sandbox_required, approval_mode, require_second_approver, breakglass_json, max_runtime_sec, allowed_scopes,
 		created_at, updated_at
 		FROM policy_templates`)
 	if err != nil {
@@ -218,18 +230,18 @@ func (ps *PersistentStore) loadFromDB() error {
 
 	for rows.Next() {
 		var (
-			id, name, desc, level               string
-			allowedJSON, blockedJSON, pathsJSON string
-			executionClass, approvalMode        string
-			sandboxRequired                     int
-			breakglassJSON, allowedScopesJSON   string
-			maxRuntimeSec                       int
-			createdStr, updatedStr              string
+			id, name, desc, level                  string
+			allowedJSON, blockedJSON, pathsJSON    string
+			executionClass, approvalMode           string
+			sandboxRequired, requireSecondApprover int
+			breakglassJSON, allowedScopesJSON      string
+			maxRuntimeSec                          int
+			createdStr, updatedStr                 string
 		)
 		if err := rows.Scan(
 			&id, &name, &desc, &level,
 			&allowedJSON, &blockedJSON, &pathsJSON,
-			&executionClass, &sandboxRequired, &approvalMode, &breakglassJSON, &maxRuntimeSec, &allowedScopesJSON,
+			&executionClass, &sandboxRequired, &approvalMode, &requireSecondApprover, &breakglassJSON, &maxRuntimeSec, &allowedScopesJSON,
 			&createdStr, &updatedStr,
 		); err != nil {
 			continue
@@ -245,6 +257,7 @@ func (ps *PersistentStore) loadFromDB() error {
 			ExecutionClassRequired: protocol.ExecutionClass(strings.TrimSpace(executionClass)),
 			SandboxRequired:        sandboxRequired != 0,
 			ApprovalMode:           protocol.ApprovalMode(strings.TrimSpace(approvalMode)),
+			RequireSecondApprover:  requireSecondApprover != 0,
 			MaxRuntimeSec:          maxRuntimeSec,
 		}
 		if opts.ExecutionClassRequired == "" {
@@ -278,6 +291,7 @@ func (ps *PersistentStore) loadFromDB() error {
 			ExecutionClassRequired: opts.ExecutionClassRequired,
 			SandboxRequired:        opts.SandboxRequired,
 			ApprovalMode:           opts.ApprovalMode,
+			RequireSecondApprover:  opts.RequireSecondApprover,
 			Breakglass:             opts.Breakglass,
 			MaxRuntimeSec:          opts.MaxRuntimeSec,
 			AllowedScopes:          opts.AllowedScopes,

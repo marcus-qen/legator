@@ -46,9 +46,11 @@ func TestPersistentStoreSurvivesRestartWithV2Fields(t *testing.T) {
 	created := s1.Create("Custom", "Persisted policy", protocol.CapDiagnose,
 		[]string{"strace", "tcpdump"}, []string{"rm"}, []string{"/tmp"},
 		TemplateOptions{
-			ExecutionClassRequired: protocol.ExecBreakglassDirect,
-			SandboxRequired:        true,
-			ApprovalMode:           protocol.ApprovalPlanFirst,
+			ExecutionClassRequired:   protocol.ExecBreakglassDirect,
+			SandboxRequired:          true,
+			ApprovalMode:             protocol.ApprovalPlanFirst,
+			RequireSecondApprover:    true,
+			RequireSecondApproverSet: true,
 			Breakglass: protocol.BreakglassPolicy{
 				Enabled:                  true,
 				AllowedReasons:           []string{"incident_response"},
@@ -76,6 +78,9 @@ func TestPersistentStoreSurvivesRestartWithV2Fields(t *testing.T) {
 	}
 	if got.ExecutionClassRequired != protocol.ExecBreakglassDirect || got.ApprovalMode != protocol.ApprovalPlanFirst {
 		t.Fatalf("v2 fields not restored: %+v", got)
+	}
+	if !got.RequireSecondApprover {
+		t.Fatalf("require_second_approver not restored: %+v", got)
 	}
 	if !got.Breakglass.Enabled || len(got.Breakglass.AllowedReasons) != 1 {
 		t.Fatalf("breakglass not restored: %+v", got.Breakglass)

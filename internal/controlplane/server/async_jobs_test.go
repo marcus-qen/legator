@@ -9,10 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marcus-qen/legator/internal/controlplane/approval"
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
+	"github.com/marcus-qen/legator/internal/controlplane/config"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/controlplane/jobs"
+	"github.com/marcus-qen/legator/internal/controlplane/policy"
 	"github.com/marcus-qen/legator/internal/protocol"
 )
 
@@ -348,6 +351,193 @@ func TestProcessTimedOutApprovalJobs_EscalateBehavior(t *testing.T) {
 	events := srv.queryAudit(audit.Filter{Limit: 100})
 	if !hasApprovalTimeoutAudit(events, job.ID, "escalate", "extended") {
 		t.Fatalf("expected escalation timeout audit event for job %s", job.ID)
+	}
+}
+
+func createPendingTwoPersonApprovalAsyncJob(t *testing.T, srv *Server, probeID, requestID string) *jobs.AsyncJob {
+	t.Helper()
+	registerRemoteProbe(t, srv, probeID)
+	srv.remoteExecutor = &fakeRemoteExecutor{}
+
+	tpl := srv.policyStore.Create(
+		"two-person",
+		"dual approval for high-risk mutation",
+		protocol.CapRemediate,
+		nil,
+		nil,
+		nil,
+		policy.TemplateOptions{
+			ApprovalMode:             protocol.ApprovalMutationGate,
+			RequireSecondApprover:    true,
+			RequireSecondApproverSet: true,
+		},
+	)
+	if _, err := srv.approvalCore.ApplyPolicyTemplate(probeID, tpl.ID, nil); err != nil {
+		t.Fatalf("apply two-person policy: %v", err)
+	}
+
+	payload := protocol.CommandPayload{RequestID: requestID, Command: "systemctl", Args: []string{"restart", "nginx"}, Level: protocol.CapRemediate}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/probes/"+probeID+"/command", bytes.NewReader(body))
+	req.SetPathValue("id", probeID)
+	rr := httptest.NewRecorder()
+
+	srv.handleDispatchCommand(rr, req)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 pending approval, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	jobID := rr.Header().Get("X-Legator-Job-ID")
+	if jobID == "" {
+		t.Fatalf("expected X-Legator-Job-ID header")
+	}
+	job, err := srv.asyncJobsManager.GetJob(jobID)
+	if err != nil {
+		t.Fatalf("get async job: %v", err)
+	}
+	if job.State != jobs.AsyncJobStateWaitingApproval {
+		t.Fatalf("expected waiting_approval, got %s", job.State)
+	}
+
+	approvalReq, ok := srv.approvalQueue.Get(job.ApprovalID)
+	if !ok {
+		t.Fatalf("expected approval request %s", job.ApprovalID)
+	}
+	if !approvalReq.RequireSecondApprover {
+		t.Fatal("expected approval request to require second approver")
+	}
+	if approvalReq.RequiredApprovalCount() != 2 {
+		t.Fatalf("expected required approvals=2, got %d", approvalReq.RequiredApprovalCount())
+	}
+
+	return job
+}
+
+func TestHandleApproveAsyncJob_TwoPersonModePendingThenResumes(t *testing.T) {
+	srv := newTestServerWithDataDir(t, t.TempDir(), func(cfg *config.Config) {
+		cfg.Approval.TwoPersonMode = true
+	})
+	job := createPendingTwoPersonApprovalAsyncJob(t, srv, "remote-approve-two-person", "req-remote-approve-two-person")
+
+	approve := func(actor string) (*httptest.ResponseRecorder, approvalDecisionResponse) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/"+job.ID+"/approve", bytes.NewBufferString(`{"decided_by":"`+actor+`"}`))
+		req.SetPathValue("id", job.ID)
+		rr := httptest.NewRecorder()
+		srv.handleApproveAsyncJob(rr, req)
+		var resp approvalDecisionResponse
+		_ = json.NewDecoder(rr.Body).Decode(&resp)
+		return rr, resp
+	}
+
+	rr1, resp1 := approve("alice")
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("expected first approval 200, got %d body=%s", rr1.Code, rr1.Body.String())
+	}
+	if resp1.Status != "pending_second_approval" {
+		t.Fatalf("expected pending_second_approval, got %q", resp1.Status)
+	}
+	waiting := waitForAsyncJobState(t, srv, job.ID, jobs.AsyncJobStateWaitingApproval)
+	if waiting.State != jobs.AsyncJobStateWaitingApproval {
+		t.Fatalf("expected job to stay waiting_approval after first approval, got %s", waiting.State)
+	}
+
+	rr2, resp2 := approve("bob")
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("expected second approval 200, got %d body=%s", rr2.Code, rr2.Body.String())
+	}
+	if resp2.Status != "approved" {
+		t.Fatalf("expected final status approved, got %q", resp2.Status)
+	}
+
+	updated := waitForAsyncJobState(t, srv, job.ID, jobs.AsyncJobStateRunning, jobs.AsyncJobStateSucceeded)
+	if updated.State == jobs.AsyncJobStateWaitingApproval {
+		t.Fatalf("expected job to resume after quorum")
+	}
+
+	approvalReq, ok := srv.approvalQueue.Get(job.ApprovalID)
+	if !ok {
+		t.Fatalf("expected approval request %s", job.ApprovalID)
+	}
+	if approvalReq.Decision != approval.DecisionApproved {
+		t.Fatalf("expected approved queue request, got %s", approvalReq.Decision)
+	}
+	if len(approvalReq.Approvals) != 2 {
+		t.Fatalf("expected two approvers recorded, got %d", len(approvalReq.Approvals))
+	}
+
+	events := srv.queryAudit(audit.Filter{Type: audit.EventApprovalDecided, Limit: 200})
+	foundDualAttribution := false
+	for _, evt := range events {
+		detail, ok := evt.Detail.(map[string]any)
+		if !ok || detail["job_id"] != job.ID {
+			continue
+		}
+		var approverIDs []string
+		switch raw := detail["approvers"].(type) {
+		case []string:
+			approverIDs = append(approverIDs, raw...)
+		case []any:
+			for _, entry := range raw {
+				if actor, ok := entry.(string); ok {
+					approverIDs = append(approverIDs, actor)
+				}
+			}
+		}
+		if len(approverIDs) == 2 && approverIDs[0] == "alice" && approverIDs[1] == "bob" {
+			foundDualAttribution = true
+			break
+		}
+	}
+	if !foundDualAttribution {
+		t.Fatalf("expected audit event with both approvers for job %s", job.ID)
+	}
+}
+
+func TestHandleApproveAsyncJob_TwoPersonModeRejectsDuplicateApprover(t *testing.T) {
+	srv := newTestServerWithDataDir(t, t.TempDir(), func(cfg *config.Config) {
+		cfg.Approval.TwoPersonMode = true
+	})
+	job := createPendingTwoPersonApprovalAsyncJob(t, srv, "remote-approve-two-person-dup", "req-remote-approve-two-person-dup")
+
+	approve := func(actor string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/"+job.ID+"/approve", bytes.NewBufferString(`{"decided_by":"`+actor+`"}`))
+		req.SetPathValue("id", job.ID)
+		rr := httptest.NewRecorder()
+		srv.handleApproveAsyncJob(rr, req)
+		return rr
+	}
+
+	rr1 := approve("alice")
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("expected first approval 200, got %d body=%s", rr1.Code, rr1.Body.String())
+	}
+
+	rr2 := approve("alice")
+	if rr2.Code != http.StatusConflict {
+		t.Fatalf("expected duplicate approver conflict, got %d body=%s", rr2.Code, rr2.Body.String())
+	}
+	var errPayload map[string]any
+	if err := json.NewDecoder(rr2.Body).Decode(&errPayload); err == nil {
+		if got := errPayload["code"]; got != "duplicate_approver" {
+			t.Fatalf("expected code duplicate_approver, got %v", got)
+		}
+	}
+
+	waiting := waitForAsyncJobState(t, srv, job.ID, jobs.AsyncJobStateWaitingApproval)
+	if waiting.State != jobs.AsyncJobStateWaitingApproval {
+		t.Fatalf("expected waiting_approval after duplicate approver, got %s", waiting.State)
+	}
+	approvalReq, ok := srv.approvalQueue.Get(job.ApprovalID)
+	if !ok {
+		t.Fatalf("expected approval request %s", job.ApprovalID)
+	}
+	if len(approvalReq.Approvals) != 1 || approvalReq.Approvals[0].Actor != "alice" {
+		t.Fatalf("expected only first approver recorded, got %+v", approvalReq.Approvals)
+	}
+	if approvalReq.Decision != approval.DecisionPending {
+		t.Fatalf("expected approval request to remain pending, got %s", approvalReq.Decision)
 	}
 }
 

@@ -69,6 +69,79 @@ func (s *Server) handleApproveAsyncJob(w http.ResponseWriter, r *http.Request) {
 		decidedBy = "api"
 	}
 
+	approvalReq, syncErr := s.syncApprovalDecision(current.ApprovalID, approval.DecisionApproved, decidedBy)
+	if syncErr != nil {
+		if strings.Contains(syncErr.Error(), "already approved request") {
+			writeJSONError(w, http.StatusConflict, "duplicate_approver", syncErr.Error())
+			return
+		}
+		if strings.Contains(syncErr.Error(), "expired at") {
+			writeJSONError(w, http.StatusConflict, "approval_expired", syncErr.Error())
+			return
+		}
+		if strings.Contains(syncErr.Error(), "already decided") {
+			// approval queue already resolved (e.g. concurrent approve); let the job manager handle it
+			job, err := s.asyncJobsManager.ApproveJob(jobID)
+			if err != nil {
+				switch {
+				case jobs.IsAsyncJobConflict(err) || errors.Is(err, jobs.ErrInvalidAsyncJobTransition):
+					writeJSONError(w, http.StatusConflict, "already_decided", err.Error())
+				case jobs.IsNotFound(err):
+					writeJSONError(w, http.StatusNotFound, "not_found", "async job not found")
+				default:
+					writeJSONError(w, http.StatusInternalServerError, "approve_failed", fmt.Sprintf("approve failed: %v", err))
+				}
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(approvalDecisionResponse{JobID: job.ID, Status: "approved"})
+			return
+		}
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", syncErr.Error())
+		return
+	}
+
+	approvers := []string(nil)
+	approvalCount := 0
+	requiredApprovals := 1
+	if approvalReq != nil {
+		approvers = approvalReq.ApproverIDs()
+		approvalCount = len(approvers)
+		requiredApprovals = approvalReq.RequiredApprovalCount()
+	}
+	if approvalReq != nil && approvalReq.Decision == approval.DecisionPending && approvalCount > 0 {
+		latestApproval, hasLatest := approvalReq.LatestApproval()
+		detail := map[string]any{
+			"job_id":                  current.ID,
+			"request_id":              current.RequestID,
+			"approval_id":             current.ApprovalID,
+			"decision":                "pending",
+			"decided_by":              decidedBy,
+			"approvers":               approvers,
+			"approval_count":          approvalCount,
+			"required_approvals":      requiredApprovals,
+			"require_second_approver": approvalReq.RequireSecondApprover,
+			"workspace_id":            current.WorkspaceID,
+		}
+		if hasLatest {
+			detail["approval_timestamp"] = latestApproval.Timestamp
+		}
+		s.appendCommandStreamMarker(current.RequestID, cmdtracker.StreamEventApproval, "approval_recorded", detail)
+		s.recordAudit(audit.Event{
+			Type:        audit.EventApprovalDecided,
+			ProbeID:     current.ProbeID,
+			WorkspaceID: current.WorkspaceID,
+			Actor:       decidedBy,
+			Summary:     fmt.Sprintf("Async job %s approval recorded (%d/%d)", current.ID, approvalCount, requiredApprovals),
+			Detail:      detail,
+		})
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(approvalDecisionResponse{JobID: current.ID, Status: "pending_second_approval"})
+		return
+	}
+
 	job, err := s.asyncJobsManager.ApproveJob(jobID)
 	if err != nil {
 		switch {
@@ -84,26 +157,31 @@ func (s *Server) handleApproveAsyncJob(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.syncApprovalDecision(job.ApprovalID, approval.DecisionApproved, decidedBy)
-
 	s.appendCommandStreamMarker(job.RequestID, cmdtracker.StreamEventApproval, "job_approved", map[string]any{
-		"job_id":       job.ID,
-		"approval_id":  job.ApprovalID,
-		"approved_by":  decidedBy,
-		"workspace_id": job.WorkspaceID,
+		"job_id":             job.ID,
+		"approval_id":        job.ApprovalID,
+		"approved_by":        decidedBy,
+		"approvers":          approvers,
+		"approval_count":     approvalCount,
+		"required_approvals": requiredApprovals,
+		"workspace_id":       job.WorkspaceID,
 	})
 	s.recordAudit(audit.Event{
-		Type:    audit.EventApprovalDecided,
-		ProbeID: job.ProbeID,
-		Actor:   decidedBy,
-		Summary: fmt.Sprintf("Async job %s approved", job.ID),
+		Type:        audit.EventApprovalDecided,
+		ProbeID:     job.ProbeID,
+		WorkspaceID: job.WorkspaceID,
+		Actor:       decidedBy,
+		Summary:     fmt.Sprintf("Async job %s approved", job.ID),
 		Detail: map[string]any{
-			"job_id":       job.ID,
-			"request_id":   job.RequestID,
-			"approval_id":  job.ApprovalID,
-			"decision":     "approved",
-			"decided_by":   decidedBy,
-			"workspace_id": job.WorkspaceID,
+			"job_id":             job.ID,
+			"request_id":         job.RequestID,
+			"approval_id":        job.ApprovalID,
+			"decision":           "approved",
+			"decided_by":         decidedBy,
+			"approvers":          approvers,
+			"approval_count":     approvalCount,
+			"required_approvals": requiredApprovals,
+			"workspace_id":       job.WorkspaceID,
 		},
 	})
 
@@ -179,7 +257,7 @@ func (s *Server) handleRejectAsyncJob(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.syncApprovalDecision(job.ApprovalID, approval.DecisionDenied, decidedBy)
+	_, _ = s.syncApprovalDecision(job.ApprovalID, approval.DecisionDenied, decidedBy)
 
 	s.appendCommandStreamMarker(job.RequestID, cmdtracker.StreamEventApproval, "job_rejected", map[string]any{
 		"job_id":       job.ID,
@@ -253,7 +331,7 @@ func (s *Server) processTimedOutApprovalJobs(now time.Time) (int, error) {
 					s.logger.Sugar().Warnf("reads_only timeout auto-approve failed: job=%s err=%v", job.ID, approveErr)
 					continue
 				}
-				s.syncApprovalDecision(job.ApprovalID, approval.DecisionApproved, "system")
+				_, _ = s.syncApprovalDecision(job.ApprovalID, approval.DecisionApproved, "system")
 				s.recordApprovalTimeoutAudit(*resumed, behavior, "auto_approved", "reads_only auto-approved on timeout", nil)
 				s.appendCommandStreamMarker(resumed.RequestID, cmdtracker.StreamEventApproval, "approval_timeout_reads_only_resumed", map[string]any{
 					"job_id":      resumed.ID,
@@ -275,7 +353,7 @@ func (s *Server) processTimedOutApprovalJobs(now time.Time) (int, error) {
 				s.logger.Sugar().Warnf("cancel timed-out job (reads_only) failed: job=%s err=%v", job.ID, cancelErr)
 				continue
 			}
-			s.syncApprovalDecision(job.ApprovalID, approval.DecisionDenied, "system")
+			_, _ = s.syncApprovalDecision(job.ApprovalID, approval.DecisionDenied, "system")
 			s.recordApprovalTimeoutAudit(job, behavior, "cancelled", reason, nil)
 			s.appendCommandStreamMarker(job.RequestID, cmdtracker.StreamEventApproval, "approval_timeout_reads_only_cancelled", map[string]any{
 				"job_id":      job.ID,
@@ -289,7 +367,7 @@ func (s *Server) processTimedOutApprovalJobs(now time.Time) (int, error) {
 				s.logger.Sugar().Warnf("cancel timed-out job failed: job=%s err=%v", job.ID, cancelErr)
 				continue
 			}
-			s.syncApprovalDecision(job.ApprovalID, approval.DecisionDenied, "system")
+			_, _ = s.syncApprovalDecision(job.ApprovalID, approval.DecisionDenied, "system")
 			s.recordApprovalTimeoutAudit(job, behavior, "cancelled", reason, nil)
 			s.appendCommandStreamMarker(job.RequestID, cmdtracker.StreamEventApproval, "approval_timeout_cancelled", map[string]any{
 				"job_id":      job.ID,
@@ -341,24 +419,30 @@ func (s *Server) recordApprovalTimeoutAudit(job jobs.AsyncJob, behavior, action,
 	})
 }
 
-func (s *Server) syncApprovalDecision(approvalID string, decision approval.Decision, decidedBy string) {
+func (s *Server) syncApprovalDecision(approvalID string, decision approval.Decision, decidedBy string) (*approval.Request, error) {
 	approvalID = strings.TrimSpace(approvalID)
 	decidedBy = strings.TrimSpace(decidedBy)
 	if s == nil || s.approvalQueue == nil || approvalID == "" {
-		return
+		return nil, nil
 	}
 	if decidedBy == "" {
 		decidedBy = "system"
 	}
 	if _, ok := s.approvalQueue.Get(approvalID); !ok {
-		return
+		return nil, nil
 	}
-	if _, err := s.approvalQueue.Decide(approvalID, decision, decidedBy); err != nil {
+	req, err := s.approvalQueue.Decide(approvalID, decision, decidedBy)
+	if err != nil {
 		if strings.Contains(err.Error(), "already decided") || strings.Contains(err.Error(), "expired at") || strings.Contains(err.Error(), "not found") {
-			return
+			return nil, err
+		}
+		if strings.Contains(err.Error(), "already approved request") {
+			return nil, err
 		}
 		s.logger.Sugar().Debugf("sync approval decision failed: approval=%s decision=%s err=%v", approvalID, decision, err)
+		return nil, err
 	}
+	return req, nil
 }
 
 func isReadOnlyAsyncJobLevel(level string) bool {

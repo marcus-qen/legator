@@ -900,15 +900,49 @@ func (s *Server) initApprovalCore() {
 				commandText = req.Command.Command
 				requestID = req.Command.RequestID
 			}
-			s.emitAudit(audit.EventApprovalDecided, req.ProbeID, req.DecidedBy,
-				fmt.Sprintf("Approval %s for: %s", req.Decision, commandText))
-			s.publishEvent(events.ApprovalDecided, req.ProbeID, fmt.Sprintf("Approval %s: %s", req.Decision, commandText), nil)
-			s.appendCommandStreamMarker(requestID, cmdtracker.StreamEventApproval, "approval_decided", map[string]any{
-				"approval_id": req.ID,
-				"decision":    req.Decision,
-				"decided_by":  req.DecidedBy,
-				"probe_id":    req.ProbeID,
+
+			approvers := req.ApproverIDs()
+			requiredApprovals := req.RequiredApprovalCount()
+			approvalCount := len(approvers)
+			latestApproval, hasLatestApproval := req.LatestApproval()
+
+			actor := strings.TrimSpace(req.DecidedBy)
+			if actor == "" && hasLatestApproval {
+				actor = strings.TrimSpace(latestApproval.Actor)
+			}
+
+			summary := fmt.Sprintf("Approval %s for: %s", req.Decision, commandText)
+			streamStage := "approval_decided"
+			if req.Decision == approval.DecisionPending && approvalCount > 0 {
+				summary = fmt.Sprintf("Approval recorded (%d/%d) for: %s", approvalCount, requiredApprovals, commandText)
+				streamStage = "approval_recorded"
+			}
+
+			detail := map[string]any{
+				"approval_id":             req.ID,
+				"decision":                req.Decision,
+				"probe_id":                req.ProbeID,
+				"decided_by":              actor,
+				"approvers":               approvers,
+				"approval_count":          approvalCount,
+				"required_approvals":      requiredApprovals,
+				"require_second_approver": req.RequireSecondApprover,
+			}
+			if hasLatestApproval {
+				detail["approval_actor"] = latestApproval.Actor
+				detail["approval_timestamp"] = latestApproval.Timestamp
+			}
+
+			s.recordAudit(audit.Event{
+				Type:        audit.EventApprovalDecided,
+				ProbeID:     req.ProbeID,
+				WorkspaceID: req.WorkspaceID,
+				Actor:       actor,
+				Summary:     summary,
+				Detail:      detail,
 			})
+			s.publishEvent(events.ApprovalDecided, req.ProbeID, fmt.Sprintf("Approval %s: %s", req.Decision, commandText), nil)
+			s.appendCommandStreamMarker(requestID, cmdtracker.StreamEventApproval, streamStage, detail)
 			if req.Decision == approval.DecisionDenied {
 				s.failAsyncJobByRequestID(requestID, "approval denied", "", nil)
 			}
@@ -925,15 +959,30 @@ func (s *Server) initApprovalCore() {
 				commandText = req.Command.Command
 				requestID = req.Command.RequestID
 			}
+			approvers := req.ApproverIDs()
+			actor := strings.TrimSpace(req.DecidedBy)
+			if actor == "" && len(approvers) > 0 {
+				actor = approvers[len(approvers)-1]
+			}
 			s.markAsyncJobRunningByRequestID(requestID)
-			s.appendCommandStreamMarker(requestID, cmdtracker.StreamEventDispatch, "approval_dispatch", map[string]any{
-				"approval_id": req.ID,
-				"probe_id":    req.ProbeID,
-				"decided_by":  req.DecidedBy,
-				"command":     commandText,
+			detail := map[string]any{
+				"approval_id":        req.ID,
+				"probe_id":           req.ProbeID,
+				"decided_by":         actor,
+				"approvers":          approvers,
+				"approval_count":     len(approvers),
+				"required_approvals": req.RequiredApprovalCount(),
+				"command":            commandText,
+			}
+			s.appendCommandStreamMarker(requestID, cmdtracker.StreamEventDispatch, "approval_dispatch", detail)
+			s.recordAudit(audit.Event{
+				Type:        audit.EventCommandSent,
+				ProbeID:     req.ProbeID,
+				WorkspaceID: req.WorkspaceID,
+				Actor:       actor,
+				Summary:     fmt.Sprintf("Approved command dispatched: %s", commandText),
+				Detail:      detail,
 			})
-			s.emitAudit(audit.EventCommandSent, req.ProbeID, req.DecidedBy,
-				fmt.Sprintf("Approved command dispatched: %s", commandText))
 			return nil
 		},
 	}
@@ -963,6 +1012,7 @@ func (s *Server) initApprovalCore() {
 		s.policyStore,
 		coreapprovalpolicy.WithDecisionHooks(hooks),
 		coreapprovalpolicy.WithCapacitySignalProvider(capacityProvider),
+		coreapprovalpolicy.WithTwoPersonMode(s.cfg.Approval.TwoPersonMode),
 	)
 }
 

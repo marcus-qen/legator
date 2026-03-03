@@ -66,6 +66,9 @@ func MergeTemplateOptions(base, override TemplateOptions) TemplateOptions {
 	if override.SandboxRequired {
 		out.SandboxRequired = true
 	}
+	if override.RequireSecondApproverSet || override.RequireSecondApprover {
+		out.RequireSecondApprover = override.RequireSecondApprover
+	}
 	if override.Breakglass.Enabled || override.Breakglass.RequireTypedConfirmation || len(override.Breakglass.AllowedReasons) > 0 {
 		out.Breakglass = override.Breakglass
 	}

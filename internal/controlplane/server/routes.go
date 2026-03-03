@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/marcus-qen/legator/internal/controlplane/api"
+	"github.com/marcus-qen/legator/internal/controlplane/approval"
 	"github.com/marcus-qen/legator/internal/controlplane/audit"
 	"github.com/marcus-qen/legator/internal/controlplane/auth"
 	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
@@ -869,10 +870,10 @@ func (s *Server) handleDispatchCommand(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workspaceID, ok := s.workspaceScopeForList(w, r)
-if !ok {
-return
-}
-asyncJob, asyncJobErr := s.createAsyncCommandJob(id, workspaceID, cmd)
+	if !ok {
+		return
+	}
+	asyncJob, asyncJobErr := s.createAsyncCommandJob(id, workspaceID, cmd)
 	if asyncJob != nil {
 		w.Header().Set("X-Legator-Job-ID", asyncJob.ID)
 	}
@@ -904,7 +905,8 @@ asyncJob, asyncJobErr := s.createAsyncCommandJob(id, workspaceID, cmd)
 		if breakglass.Confirmed {
 			approvalReason = fmt.Sprintf("%s (breakglass)", approvalReason)
 		}
-		req, err := s.approvalQueue.SubmitWithWorkspace(
+		requireSecondApprover := s.cfg.Approval.TwoPersonMode && decision.RiskTier >= 3 && decision.Policy.RequireSecondApprover
+		req, err := s.approvalQueue.SubmitWithWorkspaceAndOptions(
 			s.workspaceJobFilter(r),
 			id,
 			&cmd,
@@ -913,6 +915,7 @@ asyncJob, asyncJobErr := s.createAsyncCommandJob(id, workspaceID, cmd)
 			"api",
 			string(decision.Outcome),
 			decision.Rationale,
+			approval.SubmissionOptions{RequireSecondApprover: requireSecondApprover},
 		)
 		if err != nil {
 			s.failAsyncJobByRequestID(cmd.RequestID, fmt.Sprintf("approval queue: %s", err.Error()), "", nil)
@@ -2207,6 +2210,7 @@ func (s *Server) handleCreatePolicy(w http.ResponseWriter, r *http.Request) {
 		ExecutionClassRequired protocol.ExecutionClass   `json:"execution_class_required"`
 		SandboxRequired        *bool                     `json:"sandbox_required"`
 		ApprovalMode           protocol.ApprovalMode     `json:"approval_mode"`
+		RequireSecondApprover  *bool                     `json:"require_second_approver"`
 		Breakglass             protocol.BreakglassPolicy `json:"breakglass"`
 		MaxRuntimeSec          int                       `json:"max_runtime_sec"`
 		AllowedScopes          []string                  `json:"allowed_scopes"`
@@ -2229,6 +2233,10 @@ func (s *Server) handleCreatePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.ApprovalMode != "" {
 		opts.ApprovalMode = body.ApprovalMode
+	}
+	if body.RequireSecondApprover != nil {
+		opts.RequireSecondApprover = *body.RequireSecondApprover
+		opts.RequireSecondApproverSet = true
 	}
 	if body.Breakglass.Enabled || body.Breakglass.RequireTypedConfirmation || len(body.Breakglass.AllowedReasons) > 0 {
 		opts.Breakglass = body.Breakglass

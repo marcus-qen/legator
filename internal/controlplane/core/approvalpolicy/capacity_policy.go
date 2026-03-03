@@ -100,6 +100,7 @@ type CommandPolicyProfile struct {
 	ExecutionClassRequired protocol.ExecutionClass   `json:"execution_class_required"`
 	SandboxRequired        bool                      `json:"sandbox_required"`
 	ApprovalMode           protocol.ApprovalMode     `json:"approval_mode"`
+	RequireSecondApprover  bool                      `json:"require_second_approver,omitempty"`
 	Breakglass             protocol.BreakglassPolicy `json:"breakglass"`
 }
 
@@ -359,6 +360,7 @@ func (s *Service) resolvePolicyProfile(probeID string, probeLevel protocol.Capab
 		ExecutionClassRequired: defaults.ExecutionClassRequired,
 		SandboxRequired:        defaults.SandboxRequired,
 		ApprovalMode:           defaults.ApprovalMode,
+		RequireSecondApprover:  defaults.RequireSecondApprover,
 	}
 
 	if ctx, ok := s.appliedPolicyForProbe(probeID); ok {
@@ -366,6 +368,7 @@ func (s *Service) resolvePolicyProfile(probeID string, probeLevel protocol.Capab
 		profile.ExecutionClassRequired = protocol.ExecutionClass(strings.TrimSpace(string(ctx.Options.ExecutionClassRequired)))
 		profile.SandboxRequired = ctx.Options.SandboxRequired
 		profile.ApprovalMode = protocol.ApprovalMode(strings.TrimSpace(string(ctx.Options.ApprovalMode)))
+		profile.RequireSecondApprover = ctx.Options.RequireSecondApprover
 		profile.Breakglass = ctx.Options.Breakglass
 	}
 
@@ -380,6 +383,7 @@ func (s *Service) resolvePolicyProfile(probeID string, probeLevel protocol.Capab
 		if strings.TrimSpace(string(override.ApprovalMode)) != "" {
 			profile.ApprovalMode = protocol.ApprovalMode(strings.TrimSpace(string(override.ApprovalMode)))
 		}
+		profile.RequireSecondApprover = override.RequireSecondApprover
 		profile.Breakglass = override.Breakglass
 	}
 
