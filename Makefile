@@ -10,7 +10,7 @@ IMAGE_TAG ?= $(VERSION)
 
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-.PHONY: build build-cp build-probe build-ctl build-all build-cp-all build-probe-all build-ctl-all release-build test drills architecture-guard preflight lint e2e \
+.PHONY: build build-cp build-probe build-ctl build-all build-cp-all build-probe-all build-ctl-all release-build test drills architecture-guard preflight lint e2e bench-smoke bench-performance \
 	docker-cp docker-probe docker-ctl docker-all \
 	docker-push-cp docker-push-probe docker-push-ctl docker-push-all \
 	clean
@@ -68,6 +68,18 @@ lint:
 
 e2e:
 	bash hack/e2e-test.sh
+
+bench-smoke:
+	bash hack/bench/smoke.sh
+
+bench-performance:
+	@echo "Run individual benchmark scripts under hack/bench/ for full characterization."
+	@echo "Examples:"
+	@echo "  TARGET_CONNECTIONS=1000 bash hack/bench/ws-connections.sh"
+	@echo "  CONNECTIONS=200 DURATION=20s bash hack/bench/ws-throughput.sh"
+	@echo "  BENCH_TIME=5s bash hack/bench/sqlite-write-throughput.sh"
+	@echo "  BENCH_TIME=5s bash hack/bench/job-queue-throughput.sh"
+	@echo "  BENCH_TIME=5s bash hack/bench/sse-fanout-latency.sh"
 
 # ─── Container image targets ──────────────────────────────────────────────────
 
