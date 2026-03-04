@@ -6,7 +6,7 @@
   --fg-0: #e8e6e3;
   --fg-1: #a8a49e;
   --fg-2: #706c66;
-  --border: #2e2d2a;
+  --border: #363530;
   --border-hover: #3e3d3a;
   --green: #4ade80;
   --red: #f87171;
@@ -30,7 +30,7 @@ body {
 body {
   background: var(--bg-0);
   color: var(--fg-0);
-  font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', ui-monospace, monospace;
+  font-family: 'Barlow', system-ui, -apple-system, sans-serif;
   font-size: 13px;
   line-height: 1.4;
 }
@@ -45,7 +45,7 @@ h3,
 .page-title,
 .panel-title,
 .nav-brand {
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: 'Rajdhani', system-ui, -apple-system, sans-serif;
   letter-spacing: 0.01em;
 }
 
@@ -606,7 +606,7 @@ textarea {
 }
 
 .policy-summary {
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: 'Rajdhani', system-ui, -apple-system, sans-serif;
 }
 
 .policy-capacity-grid {
@@ -958,7 +958,7 @@ body[data-page='fleet'] .detail-empty {
 }
 
 body[data-page='fleet'] .detail-empty-title {
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: 'Rajdhani', system-ui, -apple-system, sans-serif;
   font-size: 22px;
   font-weight: 600;
 }
@@ -988,7 +988,7 @@ body[data-page='fleet'] .detail-header {
 
 body[data-page='fleet'] .detail-hostname {
   margin: 0;
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: 'Rajdhani', system-ui, -apple-system, sans-serif;
   font-size: 20px;
   font-weight: 600;
 }
@@ -1272,7 +1272,7 @@ body[data-page='fleet'] .tree-hostname,
 body[data-page='fleet'] .tree-group-header,
 body[data-page='fleet'] .detail-meta,
 body[data-page='fleet'] .tab {
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: 'Rajdhani', system-ui, -apple-system, sans-serif;
 }
 
 body[data-page='fleet'] .feed-summary {
@@ -1985,3 +1985,235 @@ body[data-page='federation'] .federation-tags {
 
 .replay-event-label-task_state { background: rgba(167,139,250,0.2); color: #a78bfa; }
 .replay-event-label-artifact   { background: rgba(52,211,153,0.2);  color: #34d399; }
+
+/* =============================================
+   UI DESIGN OVERHAUL — TYPOGRAPHY & POLISH
+   ============================================= */
+
+/* Nav group labels and dividers */
+.nav-group-label {
+  font-size: 0.65rem;
+  color: var(--fg-2);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 12px 12px 4px;
+  font-family: 'Rajdhani', system-ui, sans-serif;
+  font-weight: 600;
+  pointer-events: none;
+  user-select: none;
+}
+
+.nav-group-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 8px;
+  opacity: 0.6;
+}
+
+/* Brand upgrades */
+.nav-brand {
+  font-family: 'Rajdhani', system-ui, sans-serif !important;
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.18em !important;
+}
+
+/* Page title upgrades */
+.page-title {
+  font-family: 'Rajdhani', system-ui, sans-serif !important;
+  font-size: 22px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.04em !important;
+}
+
+/* Section titles — bold, uppercase, Rajdhani */
+.section-title,
+.panel-title {
+  font-family: 'Rajdhani', system-ui, sans-serif !important;
+  font-size: 0.9rem !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.1em !important;
+  color: var(--fg-0) !important;
+}
+
+/* Data labels — lighter, smaller */
+.card-label,
+.stat-label,
+.kv-grid dt {
+  font-size: 0.72rem !important;
+  color: var(--fg-2) !important;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+/* Data values — bolder, larger */
+.card-value {
+  font-size: 2.2rem !important;
+  font-weight: 700 !important;
+  font-family: 'Rajdhani', system-ui, sans-serif !important;
+  letter-spacing: 0.02em;
+  color: var(--fg-0);
+}
+
+.stat-value {
+  font-size: 1.6rem !important;
+  font-weight: 700 !important;
+  font-family: 'Rajdhani', system-ui, sans-serif !important;
+}
+
+/* Table header styling */
+.data-table thead th {
+  font-family: 'Rajdhani', system-ui, sans-serif !important;
+  font-size: 0.72rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.1em !important;
+  color: var(--fg-2) !important;
+  text-transform: uppercase !important;
+}
+
+/* Card and panel shadows */
+.dash-card {
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
+  transition: box-shadow 150ms ease, border-color 150ms ease !important;
+}
+
+.dash-card:hover {
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4) !important;
+  border-color: var(--border-hover) !important;
+}
+
+.dash-panel,
+.panel {
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
+}
+
+/* Table row hover states */
+.data-table tbody tr:hover {
+  background: var(--bg-2) !important;
+}
+
+.data-table tbody tr:nth-child(even) {
+  background: rgba(255,255,255,0.02) !important;
+}
+
+.data-table tbody tr:nth-child(even):hover {
+  background: var(--bg-2) !important;
+}
+
+/* Dash row equal height panels */
+.dash-row {
+  align-items: stretch !important;
+}
+
+/* Audit filter buttons */
+.audit-filter-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.audit-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-1);
+  padding: 3px 10px;
+  font-size: 0.75rem;
+  font-family: 'Rajdhani', system-ui, sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 100ms ease;
+}
+
+.audit-filter-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.audit-filter-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
+/* Audit date group row */
+.audit-date-row td {
+  background: var(--bg-3) !important;
+  color: var(--fg-2) !important;
+  font-size: 0.7rem !important;
+  font-family: 'Rajdhani', system-ui, sans-serif !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.1em !important;
+  text-transform: uppercase !important;
+  padding: 6px 9px !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+
+/* Audit pagination */
+.audit-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0 4px;
+  font-size: 0.8rem;
+  color: var(--fg-1);
+}
+
+.audit-pagination-btns {
+  display: flex;
+  gap: 6px;
+}
+
+/* Empty state improvements */
+.empty-state-enhanced {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  gap: 0.5rem;
+  text-align: center;
+}
+
+.empty-state-icon {
+  font-size: 2rem;
+  opacity: 0.3;
+  margin-bottom: 0.25rem;
+}
+
+.empty-state-title {
+  font-family: 'Rajdhani', system-ui, sans-serif;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--fg-1);
+  letter-spacing: 0.05em;
+}
+
+.empty-state-sub {
+  font-size: 0.78rem;
+  color: var(--fg-2);
+}
+
+/* Nav link font cleanup */
+.nav-link {
+  font-family: 'Barlow', system-ui, sans-serif !important;
+  font-size: 13px !important;
+}
+
+/* Monospace stays monospace for data display */
+.id-text,
+.chat-code,
+pre,
+code,
+.mono {
+  font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', ui-monospace, monospace !important;
+}

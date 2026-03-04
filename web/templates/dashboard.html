@@ -119,12 +119,12 @@
     </div>
   </section>
 
-  <!-- Unhealthy probes + System stats row -->
+  <!-- Probe Health + System stats row -->
   <section class="dash-section">
     <div class="dash-row">
       <div class="dash-panel" id="panel-unhealthy">
         <div class="panel-header">
-          <h2 class="section-title">Unhealthy Probes</h2>
+          <h2 class="section-title">Probe Health</h2>
           <a href="/fleet" class="panel-link">Fleet →</a>
         </div>
         <div id="unhealthy-list" class="unhealthy-list">
@@ -145,6 +145,18 @@
             <div class="stat-label">Pending Approvals</div>
             <div class="stat-value" id="stats-approvals">—</div>
           </div>
+          <div class="stat-item">
+            <div class="stat-label">Active Jobs</div>
+            <div class="stat-value" id="stats-jobs">—</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">Federations</div>
+            <div class="stat-value" id="stats-federations">—</div>
+          </div>
+        </div>
+        <div class="stat-meta-row" id="stats-meta" style="margin-top:0.75rem; font-size:0.75rem; color:var(--fg-2); display:flex; flex-direction:column; gap:3px;">
+          <span id="stats-version"></span>
+          <span id="stats-uptime"></span>
         </div>
       </div>
     </div>
@@ -160,78 +172,79 @@
   .section-title { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted, #8b949e); margin: 0 0 0.75rem 0; }
   .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 1rem; }
   .card-grid-sm { grid-template-columns: repeat(2, 1fr); }
-  .dash-card { background: var(--surface-2, #161b22); border: 1px solid var(--border, #30363d); border-radius: 8px; padding: 1rem; }
-  .dash-card.status-online { border-left: 3px solid #238636; }
-  .dash-card.status-offline { border-left: 3px solid #da3633; }
-  .dash-card.status-degraded { border-left: 3px solid #d29922; }
-  .card-label { font-size: 0.78rem; color: var(--text-muted, #8b949e); margin-bottom: 0.35rem; }
-  .card-value { font-size: 2rem; font-weight: 700; line-height: 1; }
-  .card-sub { font-size: 0.8rem; color: var(--text-muted, #8b949e); margin-top: 0.25rem; }
+  .dash-card { background: var(--bg-1); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
+  .dash-card.status-online { border-left: 3px solid #4ade80; }
+  .dash-card.status-offline { border-left: 3px solid #f87171; }
+  .dash-card.status-degraded { border-left: 3px solid #fbbf24; }
+  .card-label { font-size: 0.72rem; color: var(--fg-2); margin-bottom: 0.35rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.07em; }
+  .card-value { font-size: 2.2rem; font-weight: 700; line-height: 1; font-family: 'Rajdhani', system-ui, sans-serif; }
+  .card-sub { font-size: 0.8rem; color: var(--fg-2); margin-top: 0.25rem; }
 
-  .dash-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .dash-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: stretch; }
   @media (max-width: 768px) { .dash-row { grid-template-columns: 1fr; } }
-  .dash-panel { background: var(--surface-2, #161b22); border: 1px solid var(--border, #30363d); border-radius: 8px; padding: 1.25rem; }
+  .dash-panel { background: var(--bg-1); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
   .panel-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 1rem; }
-  .panel-link { font-size: 0.78rem; color: var(--accent, #58a6ff); text-decoration: none; }
+  .panel-link { font-size: 0.78rem; color: var(--accent); text-decoration: none; }
   .panel-link:hover { text-decoration: underline; }
-  .unavail-msg { font-size: 0.85rem; color: var(--text-muted, #8b949e); font-style: italic; }
+  .unavail-msg { font-size: 0.85rem; color: var(--fg-2); font-style: italic; }
 
   /* Compliance ring */
   .score-ring-wrap { position: relative; width: 80px; height: 80px; margin: 0 auto 0.75rem; }
   .score-ring { width: 80px; height: 80px; transform: rotate(-90deg); }
-  .ring-bg { stroke: var(--border, #30363d); }
-  .ring-fill { stroke: #238636; transition: stroke-dashoffset 0.6s ease; }
-  .ring-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; font-weight: 700; }
+  .ring-bg { stroke: var(--border); }
+  .ring-fill { stroke: var(--green); transition: stroke-dashoffset 0.6s ease; }
+  .ring-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; font-weight: 700; font-family: 'Rajdhani', system-ui, sans-serif; }
   .compliance-counts { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; font-size: 0.8rem; }
-  .cc.pass { color: #3fb950; }
-  .cc.fail { color: #f85149; }
-  .cc.unknown { color: #8b949e; }
+  .cc.pass { color: var(--green); }
+  .cc.fail { color: var(--red); }
+  .cc.unknown { color: var(--fg-2); }
 
   /* Alert count */
   .alert-count-wrap { text-align: center; padding: 0.5rem 0; }
-  .alert-count { font-size: 3rem; font-weight: 700; color: #d29922; }
-  .alert-count-wrap .alert-count[data-zero="true"] { color: #3fb950; }
-  .alert-count-label { font-size: 0.8rem; color: var(--text-muted, #8b949e); margin-top: 0.25rem; }
+  .alert-count { font-size: 3rem; font-weight: 700; color: var(--amber); font-family: 'Rajdhani', system-ui, sans-serif; }
+  .alert-count-wrap .alert-count[data-zero="true"] { color: var(--green); }
+  .alert-count-label { font-size: 0.75rem; color: var(--fg-2); margin-top: 0.25rem; text-transform: uppercase; letter-spacing: 0.07em; }
 
   /* Severity badges */
   .severity-grid { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
-  .sev-badge { padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; }
-  .sev-badge.P1 { background: #5a1220; color: #f85149; }
-  .sev-badge.P2 { background: #431407; color: #d29922; }
-  .sev-badge.P3 { background: #1c2a12; color: #3fb950; }
-  .sev-badge.P4 { background: #1c2535; color: #58a6ff; }
+  .sev-badge { padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; font-family: 'Rajdhani', system-ui, sans-serif; }
+  .sev-badge.P1 { background: rgba(248,113,113,0.15); color: var(--red); border: 1px solid rgba(248,113,113,0.3); }
+  .sev-badge.P2 { background: rgba(251,191,36,0.12); color: var(--amber); border: 1px solid rgba(251,191,36,0.3); }
+  .sev-badge.P3 { background: rgba(74,222,128,0.1); color: var(--green); border: 1px solid rgba(74,222,128,0.3); }
+  .sev-badge.P4 { background: rgba(96,165,250,0.1); color: var(--blue); border: 1px solid rgba(96,165,250,0.3); }
 
   /* Drill list */
   .drill-list { display: flex; flex-direction: column; gap: 0.5rem; }
-  .drill-item { display: flex; align-items: center; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid var(--border, #30363d); font-size: 0.85rem; }
+  .drill-item { display: flex; align-items: center; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
   .drill-item:last-child { border-bottom: none; }
-  .drill-status { padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; }
-  .drill-status.pass { background: #1c2a12; color: #3fb950; }
-  .drill-status.fail { background: #5a1220; color: #f85149; }
-  .drill-time { color: var(--text-muted, #8b949e); font-size: 0.75rem; }
+  .drill-status { padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; font-family: 'Rajdhani', system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.05em; }
+  .drill-status.pass { background: rgba(74,222,128,0.1); color: var(--green); }
+  .drill-status.fail { background: rgba(248,113,113,0.1); color: var(--red); }
+  .drill-time { color: var(--fg-2); font-size: 0.75rem; }
 
-  /* Unhealthy probes */
+  /* Probe health list */
   .unhealthy-list { display: flex; flex-direction: column; gap: 0.4rem; }
-  .up-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0.5rem; border-radius: 6px; background: var(--surface-3, #0d1117); font-size: 0.85rem; }
-  .up-score { font-weight: 700; min-width: 36px; text-align: center; }
-  .up-score.ok { color: #3fb950; }
-  .up-score.warn { color: #d29922; }
-  .up-score.crit { color: #f85149; }
+  .up-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0.5rem; border-radius: 6px; background: var(--bg-2); font-size: 0.85rem; transition: background 100ms ease; }
+  .up-item:hover { background: var(--bg-3); }
+  .up-score { font-weight: 700; min-width: 36px; text-align: center; font-family: 'Rajdhani', system-ui, sans-serif; font-size: 1rem; }
+  .up-score.ok { color: var(--green); }
+  .up-score.warn { color: var(--amber); }
+  .up-score.crit { color: var(--red); }
   .up-host { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .up-status { font-size: 0.72rem; padding: 0.1rem 0.4rem; border-radius: 3px; }
-  .up-status.online { background: #1c2a12; color: #3fb950; }
-  .up-status.offline { background: #5a1220; color: #f85149; }
-  .up-status.degraded { background: #431407; color: #d29922; }
+  .up-status { font-size: 0.72rem; padding: 0.1rem 0.4rem; border-radius: 3px; font-family: 'Rajdhani', system-ui, sans-serif; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+  .up-status.online { background: rgba(74,222,128,0.1); color: var(--green); }
+  .up-status.offline { background: rgba(248,113,113,0.1); color: var(--red); }
+  .up-status.degraded { background: rgba(251,191,36,0.1); color: var(--amber); }
 
   /* Stats */
   .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-  .stat-label { font-size: 0.78rem; color: var(--text-muted, #8b949e); margin-bottom: 0.3rem; }
-  .stat-value { font-size: 1.5rem; font-weight: 700; }
+  .stat-label { font-size: 0.72rem; color: var(--fg-2); margin-bottom: 0.3rem; text-transform: uppercase; letter-spacing: 0.07em; }
+  .stat-value { font-size: 1.6rem; font-weight: 700; font-family: 'Rajdhani', system-ui, sans-serif; }
 
   /* Refresh indicator */
-  .refresh-indicator { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.78rem; color: var(--text-muted, #8b949e); }
+  .refresh-indicator { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.78rem; color: var(--fg-2); }
   .refresh-indicator .icon { width: 14px; height: 14px; }
-  .empty-msg { font-size: 0.85rem; color: var(--text-muted, #8b949e); font-style: italic; }
+  .empty-msg { font-size: 0.85rem; color: var(--fg-2); font-style: italic; padding: 0.5rem 0; }
 </style>
 <script>
 (function () {
@@ -286,12 +299,11 @@
     if (data) data.style.display = '';
     const score = comp.score_pct != null ? comp.score_pct : 0;
     setText('compliance-score', Math.round(score));
-    // Update ring arc: circumference ≈ 2πr = 201
     const arc = qs('ring-arc');
     if (arc) {
       const offset = 201 - (201 * score / 100);
       arc.style.strokeDashoffset = offset;
-      arc.style.stroke = score >= 80 ? '#238636' : score >= 50 ? '#d29922' : '#da3633';
+      arc.style.stroke = score >= 80 ? '#4ade80' : score >= 50 ? '#fbbf24' : '#f87171';
     }
     setText('comp-pass', (comp.passing ?? '—') + ' pass');
     setText('comp-fail', (comp.failing ?? '—') + ' fail');
@@ -345,7 +357,7 @@
     const list = qs('unhealthy-list');
     if (!list) return;
     if (!probes || !probes.length) {
-      list.innerHTML = '<div class="empty-msg">No unhealthy probes</div>';
+      list.innerHTML = '<div class="empty-msg">✓ All probes healthy</div>';
       return;
     }
     list.innerHTML = probes.map(p => {
@@ -362,6 +374,19 @@
   function renderStats(stats) {
     setText('stats-audit', (stats.total_audit_events ?? '—').toLocaleString());
     setText('stats-approvals', stats.pending_approvals ?? '—');
+    setText('stats-jobs', stats.active_jobs ?? '—');
+    setText('stats-federations', stats.federation_count ?? '—');
+    if (stats.version) {
+      const vEl = qs('stats-version');
+      if (vEl) vEl.textContent = 'v' + stats.version;
+    }
+    if (stats.uptime_seconds != null) {
+      const u = stats.uptime_seconds;
+      const h = Math.floor(u / 3600);
+      const m = Math.floor((u % 3600) / 60);
+      const uEl = qs('stats-uptime');
+      if (uEl) uEl.textContent = 'Uptime: ' + (h > 0 ? h + 'h ' : '') + m + 'm';
+    }
   }
 
   function applyData(data) {
@@ -393,7 +418,6 @@
     }
   }
 
-  // Initial load + start timers
   fetchDashboard();
   setInterval(tickCountdown, 1000);
 })();

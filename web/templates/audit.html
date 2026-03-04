@@ -9,15 +9,17 @@
 
 {{define "content"}}
 <section class="panel">
-  <div class="filters">
-    <input id="filter-text" type="text" placeholder="Filter by probe, actor, summary…" class="input" />
-    <select id="filter-type" class="input">
-      <option value="">All event types</option>
-      <option value="command">Command</option>
-      <option value="probe">Probe</option>
-      <option value="approval">Approval</option>
-      <option value="policy">Policy</option>
-    </select>
+  <div class="audit-search-row">
+    <input id="filter-text" type="text" placeholder="Search probe, actor, summary…" class="input" />
+  </div>
+  <div class="audit-filter-btns" id="type-filters">
+    <button class="audit-filter-btn active" data-type="">All</button>
+    <button class="audit-filter-btn" data-type="command">Command</button>
+    <button class="audit-filter-btn" data-type="probe">Probe</button>
+    <button class="audit-filter-btn" data-type="approval">Approval</button>
+    <button class="audit-filter-btn" data-type="policy">Policy</button>
+    <button class="audit-filter-btn" data-type="auth">Auth</button>
+    <button class="audit-filter-btn" data-type="system">System</button>
   </div>
   <div class="table-wrap">
     <table class="data-table">
@@ -35,13 +37,41 @@
       </tbody>
     </table>
   </div>
+  <div class="audit-pagination" id="audit-pagination" style="display:none">
+    <span id="audit-page-info" style="color:var(--fg-2); font-size:0.78rem;"></span>
+    <div class="audit-pagination-btns">
+      <button class="btn" id="audit-prev" onclick="auditPrevPage()">← Prev</button>
+      <button class="btn" id="audit-next" onclick="auditNextPage()">Next →</button>
+    </div>
+  </div>
 </section>
 {{end}}
 
 {{define "scripts"}}
+<style>
+  .audit-search-row {
+    margin-bottom: 8px;
+  }
+  .audit-filter-btns {
+    margin-bottom: 12px;
+  }
+  .data-table tbody tr.probe-row:nth-child(odd) {
+    background: transparent;
+  }
+  .data-table tbody tr.probe-row:nth-child(even) {
+    background: rgba(255,255,255,0.02);
+  }
+  .data-table tbody tr.probe-row:hover {
+    background: var(--bg-2) !important;
+  }
+</style>
 <script>
 (() => {
   let latestEvents = [];
+  let filteredEvents = [];
+  let currentPage = 0;
+  const PAGE_SIZE = 50;
+  let activeType = '';
 
   function typeClass(type) {
     const t = (type || '').toLowerCase();
@@ -57,66 +87,128 @@
     return new Date(value).toLocaleString();
   }
 
+  function fmtDate(value) {
+    if (!value) return null;
+    const d = new Date(value);
+    return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  }
+
+  function isoDate(value) {
+    if (!value) return '';
+    return new Date(value).toISOString().slice(0, 10);
+  }
+
   function matchesFilters(event) {
     const textFilter = (document.getElementById('filter-text').value || '').trim().toLowerCase();
-    const typeFilter = (document.getElementById('filter-type').value || '').trim().toLowerCase();
-
     const type = (event.type || '').toLowerCase();
     const probe = (event.probe_id || '').toLowerCase();
     const actor = (event.actor || '').toLowerCase();
     const summary = (event.summary || '').toLowerCase();
 
-    if (typeFilter && !type.includes(typeFilter)) return false;
+    if (activeType && !type.includes(activeType)) return false;
     if (!textFilter) return true;
-
     return type.includes(textFilter) || probe.includes(textFilter) || actor.includes(textFilter) || summary.includes(textFilter);
   }
 
-  function render(events) {
+  function renderPage() {
     const body = document.getElementById('audit-body');
-    const filtered = (events || []).filter(matchesFilters);
+    const pagination = document.getElementById('audit-pagination');
+    const pageInfo = document.getElementById('audit-page-info');
+    const prevBtn = document.getElementById('audit-prev');
+    const nextBtn = document.getElementById('audit-next');
 
-    if (!filtered.length) {
+    if (!filteredEvents.length) {
       body.innerHTML = '<tr><td colspan="5" class="empty-state">No matching audit events.</td></tr>';
+      if (pagination) pagination.style.display = 'none';
       return;
     }
 
-    body.innerHTML = filtered.map((event, idx) => `
-      <tr class="probe-row" onclick="toggleAuditDetail(${idx})">
-        <td>${fmtTime(event.timestamp)}</td>
-        <td><span class="tag ${typeClass(event.type)}">${event.type || '—'}</span></td>
-        <td>${event.probe_id || '—'}</td>
-        <td>${event.actor || 'system'}</td>
-        <td>${event.summary || '—'}</td>
-      </tr>
-      <tr id="audit-detail-${idx}" style="display:none;">
-        <td colspan="5"><pre class="chat-code">${JSON.stringify(event, null, 2)}</pre></td>
-      </tr>
-    `).join('');
+    const totalPages = Math.ceil(filteredEvents.length / PAGE_SIZE);
+    if (currentPage >= totalPages) currentPage = totalPages - 1;
+    if (currentPage < 0) currentPage = 0;
+
+    const start = currentPage * PAGE_SIZE;
+    const end = Math.min(start + PAGE_SIZE, filteredEvents.length);
+    const pageEvents = filteredEvents.slice(start, end);
+
+    // Build rows with date group separators
+    let lastDate = '';
+    let html = '';
+    pageEvents.forEach((event, idx) => {
+      const eventDate = isoDate(event.timestamp);
+      if (eventDate && eventDate !== lastDate) {
+        lastDate = eventDate;
+        const dateLabel = fmtDate(event.timestamp);
+        html += `<tr class="audit-date-row"><td colspan="5">— ${dateLabel} —</td></tr>`;
+      }
+      const globalIdx = start + idx;
+      html += `
+        <tr class="probe-row" onclick="toggleAuditDetail(${globalIdx})">
+          <td>${fmtTime(event.timestamp)}</td>
+          <td><span class="tag ${typeClass(event.type)}">${event.type || '—'}</span></td>
+          <td>${event.probe_id || '—'}</td>
+          <td>${event.actor || 'system'}</td>
+          <td>${event.summary || '—'}</td>
+        </tr>
+        <tr id="audit-detail-${globalIdx}" style="display:none;">
+          <td colspan="5"><pre class="chat-code">${JSON.stringify(event, null, 2)}</pre></td>
+        </tr>`;
+    });
+    body.innerHTML = html;
+
+    // Update pagination controls
+    if (pagination) pagination.style.display = totalPages > 1 ? 'flex' : 'none';
+    if (pageInfo) pageInfo.textContent = `Showing ${start + 1}–${end} of ${filteredEvents.length} events (page ${currentPage + 1} of ${totalPages})`;
+    if (prevBtn) prevBtn.disabled = currentPage === 0;
+    if (nextBtn) nextBtn.disabled = currentPage >= totalPages - 1;
   }
 
-  window.toggleAuditDetail = function (idx) {
+  function applyFilters() {
+    filteredEvents = (latestEvents || []).filter(matchesFilters);
+    currentPage = 0;
+    renderPage();
+  }
+
+  window.auditPrevPage = function() {
+    if (currentPage > 0) { currentPage--; renderPage(); }
+  };
+
+  window.auditNextPage = function() {
+    const totalPages = Math.ceil(filteredEvents.length / PAGE_SIZE);
+    if (currentPage < totalPages - 1) { currentPage++; renderPage(); }
+  };
+
+  window.toggleAuditDetail = function(idx) {
     const row = document.getElementById('audit-detail-' + idx);
     if (!row) return;
     row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
   };
 
+  // Type filter buttons
+  document.getElementById('type-filters').addEventListener('click', function(e) {
+    const btn = e.target.closest('.audit-filter-btn');
+    if (!btn) return;
+    document.querySelectorAll('.audit-filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeType = btn.dataset.type || '';
+    applyFilters();
+  });
+
+  document.getElementById('filter-text').addEventListener('input', applyFilters);
+
   function refresh() {
-    fetch('/api/v1/audit?limit=300', { cache: 'no-store' })
+    fetch('/api/v1/audit?limit=500', { cache: 'no-store' })
       .then((resp) => resp.json())
       .then((payload) => {
         const events = Array.isArray(payload) ? payload : (payload && Array.isArray(payload.events) ? payload.events : []);
         events.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
         latestEvents = events;
-        render(latestEvents);
+        applyFilters();
       })
       .catch(() => {
         document.getElementById('audit-body').innerHTML = '<tr><td colspan="5" class="empty-state">Failed to load audit events.</td></tr>';
       });
   }
-
-  document.getElementById('filter-text').addEventListener('input', () => render(latestEvents));
-  document.getElementById('filter-type').addEventListener('change', () => render(latestEvents));
 
   refresh();
   setInterval(refresh, 10000);
