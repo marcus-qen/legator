@@ -1,0 +1,31 @@
+---
+# molecule/default/converge.yml
+- name: "Converge"
+  hosts: all
+  gather_facts: true
+  become: true
+
+  vars:
+    # Use a mock/stub URL — molecule doesn't have a real CP
+    legator_control_plane_url: "https://legator-test.internal"
+    legator_probe_api_key: "lgk_testkey_molecule_placeholder_64hexchars_padded_here000000"
+    legator_probe_tags:
+      - molecule
+      - test
+    legator_probe_policy_level: "observe"
+    # Skip real binary download in molecule — use a stub
+    legator_probe_install_method: "binary"
+    legator_probe_download_url: "https://github.com/marcus-qen/legator/releases/latest/download/probe-linux-amd64"
+    # Skip healthcheck retries in molecule (no real CP)
+    legator_probe_healthcheck_retries: 1
+    legator_probe_healthcheck_delay: 1
+
+  pre_tasks:
+    - name: "molecule | install curl (needed by tasks)"
+      ansible.builtin.package:
+        name: curl
+        state: present
+      when: ansible_os_family in ['Debian', 'RedHat']
+
+  roles:
+    - role: legator-probe

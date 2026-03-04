@@ -1,0 +1,63 @@
+---
+# defaults/main.yml — legator-probe role
+
+# --- Binary installation ---
+legator_probe_version: "latest"
+legator_probe_install_method: "binary"   # binary | deb | rpm
+legator_probe_install_dir: "/usr/local/bin"
+legator_probe_binary_name: "legator-probe"
+legator_probe_arch: "{{ ansible_architecture | replace('x86_64','amd64') | replace('aarch64','arm64') }}"
+legator_probe_os: "linux"
+
+# GitHub release download base URL (used when install_method=binary or github_release=true)
+legator_probe_download_base: "https://github.com/marcus-qen/legator/releases"
+# Full URL — override to use a control-plane hosted binary instead
+legator_probe_download_url: >-
+  {% if legator_probe_version == 'latest' %}
+  {{ legator_probe_download_base }}/latest/download/probe-{{ legator_probe_os }}-{{ legator_probe_arch }}
+  {% else %}
+  {{ legator_probe_download_base }}/download/{{ legator_probe_version }}/probe-{{ legator_probe_os }}-{{ legator_probe_arch }}
+  {% endif %}
+
+# --- Control plane connection ---
+legator_control_plane_url: "https://legator.example.com"    # REQUIRED — override per inventory
+legator_probe_token: ""                                       # Registration token (one-time, from CP)
+legator_probe_api_key: ""                                     # Set post-registration or supply directly
+legator_probe_id: ""                                          # Leave blank to auto-assign on first run
+
+# --- Probe identity ---
+legator_probe_tags: []          # e.g. ["web", "prod", "region-eu"]
+legator_probe_policy_level: "observe"   # observe | enforce
+
+# --- System user & dirs ---
+legator_probe_user: "legator"
+legator_probe_group: "legator"
+legator_probe_config_dir: "/etc/legator"
+legator_probe_data_dir: "/var/lib/legator"
+legator_probe_log_dir: "/var/log/legator"
+legator_probe_config_file: "{{ legator_probe_config_dir }}/probe.yaml"
+
+# --- Systemd service ---
+legator_probe_service_name: "legator-probe"
+legator_probe_service_enabled: true
+legator_probe_service_state: "started"
+legator_probe_restart_sec: 5
+
+# --- Health check ---
+legator_probe_healthcheck_retries: 10
+legator_probe_healthcheck_delay: 3      # seconds between retries
+legator_probe_healthcheck_timeout: 60   # total timeout seconds
+
+# --- Package manager (deb/rpm paths) ---
+legator_probe_deb_url: >-
+  {% if legator_probe_version == 'latest' %}
+  {{ legator_probe_download_base }}/latest/download/legator-probe_{{ legator_probe_os }}_{{ legator_probe_arch }}.deb
+  {% else %}
+  {{ legator_probe_download_base }}/download/{{ legator_probe_version }}/legator-probe_{{ legator_probe_os }}_{{ legator_probe_arch }}.deb
+  {% endif %}
+legator_probe_rpm_url: >-
+  {% if legator_probe_version == 'latest' %}
+  {{ legator_probe_download_base }}/latest/download/legator-probe_{{ legator_probe_os }}_{{ legator_probe_arch }}.rpm
+  {% else %}
+  {{ legator_probe_download_base }}/download/{{ legator_probe_version }}/legator-probe_{{ legator_probe_os }}_{{ legator_probe_arch }}.rpm
+  {% endif %}

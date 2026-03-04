@@ -1,0 +1,40 @@
+[Unit]
+Description=Legator Probe Agent
+Documentation=https://github.com/marcus-qen/legator
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User={{ legator_probe_user }}
+Group={{ legator_probe_group }}
+ExecStart={{ legator_probe_install_dir }}/{{ legator_probe_binary_name }} \
+    --config {{ legator_probe_config_file }}
+Restart=on-failure
+RestartSec={{ legator_probe_restart_sec }}
+TimeoutStopSec=30
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier={{ legator_probe_service_name }}
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths={{ legator_probe_data_dir }} {{ legator_probe_log_dir }}
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

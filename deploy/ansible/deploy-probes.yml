@@ -1,0 +1,105 @@
+---
+# deploy-probes.yml — Legator probe fleet deployment playbook
+#
+# Usage:
+#   ansible-playbook -i inventory.yml deploy-probes.yml
+#   ansible-playbook -i inventory.yml deploy-probes.yml --limit web_servers
+#   ansible-playbook -i inventory.yml deploy-probes.yml --tags verify
+#   ansible-playbook -i inventory.yml deploy-probes.yml -e legator_probe_version=v0.3.0
+#
+# Required variables (set in inventory or extra-vars):
+#   legator_control_plane_url  — your control plane base URL
+#   legator_probe_token        — registration token (first deploy)
+#   legator_probe_api_key      — API key (subsequent deploys / re-deploys)
+
+- name: "Pre-flight checks"
+  hosts: localhost
+  gather_facts: false
+  tags: [always, preflight]
+  tasks:
+    - name: "preflight | confirm Ansible version >= 2.12"
+      ansible.builtin.assert:
+        that:
+          - ansible_version.full is version('2.12', '>=')
+        fail_msg: "Ansible 2.12+ required. Got: {{ ansible_version.full }}"
+
+    - name: "preflight | confirm target group is defined"
+      ansible.builtin.assert:
+        that:
+          - groups['legator_probes'] is defined
+          - groups['legator_probes'] | length > 0
+        fail_msg: >-
+          No hosts found in [legator_probes] inventory group.
+          Check your inventory file.
+
+- name: "Deploy Legator probes"
+  hosts: legator_probes
+  gather_facts: true
+  become: true
+  serial: "{{ deploy_batch_size | default('50%') }}"
+  max_fail_percentage: 20
+
+  pre_tasks:
+    - name: "pre | assert OS is Linux"
+      ansible.builtin.assert:
+        that:
+          - ansible_system == "Linux"
+        fail_msg: >-
+          Legator probe deployment only supports Linux targets.
+          Host {{ inventory_hostname }} reports OS: {{ ansible_system }}
+
+    - name: "pre | assert supported architecture"
+      ansible.builtin.assert:
+        that:
+          - ansible_architecture in ['x86_64', 'aarch64']
+        fail_msg: >-
+          Unsupported architecture: {{ ansible_architecture }}.
+          Legator probes support x86_64 (amd64) and aarch64 (arm64).
+
+    - name: "pre | check systemd is available"
+      ansible.builtin.command:
+        cmd: systemctl --version
+      changed_when: false
+      failed_when: false
+      register: _systemd_check
+
+    - name: "pre | assert systemd present"
+      ansible.builtin.assert:
+        that: _systemd_check.rc == 0
+        fail_msg: "systemd not found on {{ inventory_hostname }}. Required for service management."
+
+  roles:
+    - role: legator-probe
+
+  post_tasks:
+    - name: "post | record deployment timestamp"
+      ansible.builtin.set_fact:
+        _deploy_timestamp: "{{ ansible_date_time.iso8601 }}"
+
+    - name: "post | deployment summary"
+      ansible.builtin.debug:
+        msg: >-
+          ✅ Legator probe deployed on {{ inventory_hostname }}
+          at {{ _deploy_timestamp }}.
+          Control plane: {{ legator_control_plane_url }}
+
+- name: "Post-deploy verification summary"
+  hosts: legator_probes
+  gather_facts: false
+  tags: [verify, post-deploy]
+  tasks:
+    - name: "summary | collect service status"
+      ansible.builtin.command:
+        cmd: "systemctl is-active legator-probe"
+      register: _final_status
+      changed_when: false
+      failed_when: false
+
+    - name: "summary | report per-host status"
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: legator-probe is {{ _final_status.stdout | trim }}"
+
+    - name: "summary | fail if any probe is not active"
+      ansible.builtin.fail:
+        msg: "legator-probe is NOT active on {{ inventory_hostname }}"
+      when: _final_status.stdout | trim != "active"

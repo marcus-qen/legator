@@ -1,0 +1,9 @@
+---
+# molecule/default/requirements.yml
+# No external role dependencies required
+roles: []
+collections:
+  - name: ansible.posix
+    version: ">=1.5.0"
+  - name: community.general
+    version: ">=7.0.0"

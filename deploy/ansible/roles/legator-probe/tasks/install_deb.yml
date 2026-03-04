@@ -1,0 +1,20 @@
+---
+# tasks/install_deb.yml — install via .deb package
+
+- name: "legator-probe | download .deb package"
+  ansible.builtin.get_url:
+    url: "{{ legator_probe_deb_url | trim }}"
+    dest: "/tmp/legator-probe.deb"
+    mode: "0644"
+    force: false
+
+- name: "legator-probe | install .deb package"
+  ansible.builtin.apt:
+    deb: "/tmp/legator-probe.deb"
+    state: present
+  notify: restart legator-probe
+
+- name: "legator-probe | clean up downloaded .deb"
+  ansible.builtin.file:
+    path: "/tmp/legator-probe.deb"
+    state: absent

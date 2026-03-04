@@ -1,0 +1,48 @@
+---
+# tasks/install_binary.yml — download and install the probe binary
+
+- name: "legator-probe | check current installed version"
+  ansible.builtin.command:
+    cmd: "{{ legator_probe_install_dir }}/{{ legator_probe_binary_name }} --version"
+  register: _probe_current_version
+  changed_when: false
+  failed_when: false
+
+- name: "legator-probe | resolve 'latest' version tag from GitHub"
+  ansible.builtin.uri:
+    url: "https://api.github.com/repos/marcus-qen/legator/releases/latest"
+    return_content: true
+    headers:
+      Accept: "application/vnd.github+json"
+  register: _github_latest
+  when: legator_probe_version == "latest"
+  changed_when: false
+
+- name: "legator-probe | set resolved version fact"
+  ansible.builtin.set_fact:
+    _legator_probe_resolved_version: >-
+      {% if legator_probe_version == 'latest' %}
+      {{ _github_latest.json.tag_name }}
+      {% else %}
+      {{ legator_probe_version }}
+      {% endif %}
+  when: legator_probe_version == "latest" or legator_probe_version != "latest"
+
+- name: "legator-probe | download probe binary"
+  ansible.builtin.get_url:
+    url: "{{ legator_probe_download_url | trim }}"
+    dest: "{{ legator_probe_install_dir }}/{{ legator_probe_binary_name }}"
+    owner: root
+    group: root
+    mode: "0755"
+    tmp_dest: "/tmp"
+    force: false
+  notify: restart legator-probe
+  register: _probe_download
+
+- name: "legator-probe | verify binary is executable"
+  ansible.builtin.command:
+    cmd: "{{ legator_probe_install_dir }}/{{ legator_probe_binary_name }} --version"
+  register: _probe_version_check
+  changed_when: false
+  failed_when: _probe_version_check.rc != 0

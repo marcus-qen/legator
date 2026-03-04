@@ -1,0 +1,66 @@
+---
+# molecule/default/molecule.yml
+dependency:
+  name: galaxy
+driver:
+  name: docker
+platforms:
+  - name: instance-ubuntu-jammy
+    image: "geerlingguy/docker-ubuntu2204-ansible:latest"
+    pre_build_image: true
+    command: /lib/systemd/systemd
+    privileged: false
+    capabilities:
+      - SYS_ADMIN
+    volumes:
+      - "/sys/fs/cgroup:/sys/fs/cgroup:rw"
+    cgroupns_mode: host
+    groups:
+      - legator_probes
+
+  - name: instance-debian-bookworm
+    image: "geerlingguy/docker-debian12-ansible:latest"
+    pre_build_image: true
+    command: /lib/systemd/systemd
+    privileged: false
+    capabilities:
+      - SYS_ADMIN
+    volumes:
+      - "/sys/fs/cgroup:/sys/fs/cgroup:rw"
+    cgroupns_mode: host
+    groups:
+      - legator_probes
+
+  - name: instance-rhel9
+    image: "geerlingguy/docker-rockylinux9-ansible:latest"
+    pre_build_image: true
+    command: /usr/lib/systemd/systemd
+    privileged: false
+    capabilities:
+      - SYS_ADMIN
+    volumes:
+      - "/sys/fs/cgroup:/sys/fs/cgroup:rw"
+    cgroupns_mode: host
+    groups:
+      - legator_probes
+
+provisioner:
+  name: ansible
+  playbooks:
+    converge: converge.yml
+    verify: verify.yml
+  inventory:
+    group_vars:
+      legator_probes:
+        legator_control_plane_url: "https://legator-test.internal"
+        legator_probe_api_key: "lgk_testkey_molecule_placeholder_64hexchars_padded_here000000"
+  options:
+    v: false
+
+verifier:
+  name: ansible
+
+lint: |
+  set -e
+  yamllint .
+  ansible-lint

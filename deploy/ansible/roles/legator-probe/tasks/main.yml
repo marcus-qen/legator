@@ -1,0 +1,104 @@
+---
+# tasks/main.yml — legator-probe role
+
+- name: "legator-probe | assert required variables"
+  ansible.builtin.assert:
+    that:
+      - legator_control_plane_url | length > 0
+      - legator_control_plane_url != "https://legator.example.com"
+    fail_msg: >-
+      legator_control_plane_url must be set to your actual control plane URL.
+      Got: {{ legator_control_plane_url }}
+    success_msg: "Control plane URL looks good: {{ legator_control_plane_url }}"
+
+- name: "legator-probe | assert token or api_key provided"
+  ansible.builtin.assert:
+    that:
+      - legator_probe_token | length > 0 or legator_probe_api_key | length > 0
+    fail_msg: >-
+      Either legator_probe_token (for first-time registration) or
+      legator_probe_api_key (for already-registered probes) must be provided.
+
+- name: "legator-probe | create system group"
+  ansible.builtin.group:
+    name: "{{ legator_probe_group }}"
+    system: true
+    state: present
+
+- name: "legator-probe | create system user"
+  ansible.builtin.user:
+    name: "{{ legator_probe_user }}"
+    group: "{{ legator_probe_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ legator_probe_data_dir }}"
+    create_home: false
+    comment: "Legator probe service account"
+    state: present
+
+- name: "legator-probe | create required directories"
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ legator_probe_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ legator_probe_config_dir }}"
+      owner: root
+      mode: "0750"
+    - path: "{{ legator_probe_data_dir }}"
+      owner: "{{ legator_probe_user }}"
+      mode: "0750"
+    - path: "{{ legator_probe_log_dir }}"
+      owner: "{{ legator_probe_user }}"
+      mode: "0750"
+
+- name: "legator-probe | install via binary"
+  ansible.builtin.include_tasks: install_binary.yml
+  when: legator_probe_install_method == "binary"
+
+- name: "legator-probe | install via deb package"
+  ansible.builtin.include_tasks: install_deb.yml
+  when:
+    - legator_probe_install_method == "deb"
+    - ansible_os_family == "Debian"
+
+- name: "legator-probe | install via rpm package"
+  ansible.builtin.include_tasks: install_rpm.yml
+  when:
+    - legator_probe_install_method == "rpm"
+    - ansible_os_family == "RedHat"
+
+- name: "legator-probe | write probe configuration"
+  ansible.builtin.template:
+    src: probe-config.yaml.j2
+    dest: "{{ legator_probe_config_file }}"
+    owner: "{{ legator_probe_user }}"
+    group: "{{ legator_probe_group }}"
+    mode: "0640"
+  notify: restart legator-probe
+
+- name: "legator-probe | install systemd service unit"
+  ansible.builtin.template:
+    src: legator-probe.service.j2
+    dest: "/etc/systemd/system/{{ legator_probe_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart legator-probe
+
+- name: "legator-probe | flush handlers to apply service changes"
+  ansible.builtin.meta: flush_handlers
+
+- name: "legator-probe | enable and start service"
+  ansible.builtin.systemd:
+    name: "{{ legator_probe_service_name }}"
+    enabled: "{{ legator_probe_service_enabled }}"
+    state: "{{ legator_probe_service_state }}"
+    daemon_reload: false   # already done in handler
+
+- name: "legator-probe | run post-deploy health check"
+  ansible.builtin.include_tasks: verify.yml

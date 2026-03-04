@@ -1,0 +1,31 @@
+# Legator Probe Configuration
+# Managed by Ansible — do not edit manually
+# Role: legator-probe | Host: {{ inventory_hostname }}
+
+# Control plane WebSocket endpoint
+server: "{{ legator_control_plane_url | regex_replace('^https://', 'wss://') | regex_replace('^http://', 'ws://') }}"
+
+{% if legator_probe_id | length > 0 %}
+# Probe identity (assigned at registration)
+probe_id: "{{ legator_probe_id }}"
+{% endif %}
+
+# Authentication
+api_key: "{{ legator_probe_api_key }}"
+
+# Probe behaviour
+policy_level: "{{ legator_probe_policy_level }}"
+
+{% if legator_probe_tags | length > 0 %}
+# Discovery / grouping tags
+tags:
+{% for tag in legator_probe_tags %}
+  - "{{ tag }}"
+{% endfor %}
+{% else %}
+tags: []
+{% endif %}
+
+# Data & logging directories
+data_dir: "{{ legator_probe_data_dir }}"
+log_dir: "{{ legator_probe_log_dir }}"

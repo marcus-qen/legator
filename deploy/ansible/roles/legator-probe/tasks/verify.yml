@@ -1,0 +1,65 @@
+---
+# tasks/verify.yml — post-deploy health check
+
+- name: "legator-probe | verify | wait for service to become active"
+  ansible.builtin.systemd:
+    name: "{{ legator_probe_service_name }}"
+  register: _svc_status
+  until: _svc_status.status.ActiveState == "active"
+  retries: "{{ legator_probe_healthcheck_retries }}"
+  delay: "{{ legator_probe_healthcheck_delay }}"
+  changed_when: false
+
+- name: "legator-probe | verify | check service is enabled"
+  ansible.builtin.assert:
+    that:
+      - _svc_status.status.ActiveState == "active"
+      - _svc_status.status.SubState == "running"
+    fail_msg: >-
+      legator-probe service is not running on {{ inventory_hostname }}.
+      ActiveState={{ _svc_status.status.ActiveState }},
+      SubState={{ _svc_status.status.SubState }}
+    success_msg: "legator-probe is active and running on {{ inventory_hostname }}"
+
+- name: "legator-probe | verify | check binary responds to --version"
+  ansible.builtin.command:
+    cmd: "{{ legator_probe_install_dir }}/{{ legator_probe_binary_name }} --version"
+  register: _version_out
+  changed_when: false
+
+- name: "legator-probe | verify | probe version installed"
+  ansible.builtin.debug:
+    msg: "Probe version on {{ inventory_hostname }}: {{ _version_out.stdout | trim }}"
+
+- name: "legator-probe | verify | check config file exists and is readable"
+  ansible.builtin.stat:
+    path: "{{ legator_probe_config_file }}"
+  register: _config_stat
+
+- name: "legator-probe | verify | assert config file present"
+  ansible.builtin.assert:
+    that:
+      - _config_stat.stat.exists
+      - _config_stat.stat.size > 0
+    fail_msg: "Probe config file missing or empty: {{ legator_probe_config_file }}"
+
+- name: "legator-probe | verify | check probe service journal for errors (last 20 lines)"
+  ansible.builtin.command:
+    cmd: "journalctl -u {{ legator_probe_service_name }} -n 20 --no-pager"
+  register: _journal_out
+  changed_when: false
+  failed_when: false
+
+- name: "legator-probe | verify | display recent journal entries"
+  ansible.builtin.debug:
+    var: _journal_out.stdout_lines
+
+- name: "legator-probe | verify | confirm no fatal errors in journal"
+  ansible.builtin.assert:
+    that:
+      - "'FATAL' not in _journal_out.stdout"
+      - "'panic' not in _journal_out.stdout"
+    fail_msg: >-
+      FATAL error or panic detected in legator-probe journal on {{ inventory_hostname }}.
+      Check: journalctl -u {{ legator_probe_service_name }} -n 50
+    success_msg: "No fatal errors in legator-probe journal on {{ inventory_hostname }}"

@@ -1,0 +1,82 @@
+---
+# inventory.example.yml — Legator probe fleet inventory example
+#
+# Copy to inventory.yml and fill in your hosts.
+# Run: ansible-playbook -i inventory.yml deploy-probes.yml
+
+all:
+  vars:
+    # SSH connection settings
+    ansible_user: root
+    ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+
+    # Legator control plane (REQUIRED — change to your URL)
+    legator_control_plane_url: "https://legator.example.com"
+
+    # Probe behaviour defaults (can be overridden per group/host)
+    legator_probe_install_method: "binary"   # binary | deb | rpm
+    legator_probe_version: "latest"
+    legator_probe_policy_level: "observe"
+
+  children:
+    # All probe targets must be in legator_probes (required by playbook)
+    legator_probes:
+      children:
+        web_servers:
+          vars:
+            legator_probe_tags:
+              - web
+              - prod
+            # Provide the registration token or api_key for this group
+            legator_probe_api_key: "lgk_REPLACE_WITH_WEB_GROUP_API_KEY"
+          hosts:
+            web-01.example.com:
+              ansible_host: 10.0.1.11
+            web-02.example.com:
+              ansible_host: 10.0.1.12
+            web-03.example.com:
+              ansible_host: 10.0.1.13
+
+        db_servers:
+          vars:
+            legator_probe_tags:
+              - database
+              - prod
+            legator_probe_api_key: "lgk_REPLACE_WITH_DB_GROUP_API_KEY"
+            # Override install method per group
+            legator_probe_install_method: "deb"
+          hosts:
+            db-primary.example.com:
+              ansible_host: 10.0.2.10
+              legator_probe_tags:
+                - database
+                - primary
+                - prod
+            db-replica-01.example.com:
+              ansible_host: 10.0.2.11
+
+        edge_nodes:
+          vars:
+            legator_probe_tags:
+              - edge
+              - region-eu
+            legator_probe_api_key: "lgk_REPLACE_WITH_EDGE_GROUP_API_KEY"
+          hosts:
+            edge-eu-01.example.com:
+              ansible_host: 185.100.0.10
+            edge-eu-02.example.com:
+              ansible_host: 185.100.0.11
+
+    # Staging — separate token/key set
+    staging:
+      vars:
+        legator_control_plane_url: "https://legator-staging.example.com"
+        legator_probe_api_key: "lgk_REPLACE_WITH_STAGING_API_KEY"
+        legator_probe_tags:
+          - staging
+      children:
+        legator_probes_staging:
+          hosts:
+            staging-01.example.com:
+              ansible_host: 10.99.0.10

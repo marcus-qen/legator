@@ -1,0 +1,36 @@
+---
+# meta/main.yml — legator-probe role metadata
+
+galaxy_info:
+  role_name: legator_probe
+  author: marcus-qen
+  description: >
+    Deploy and manage Legator probe agents at scale across a Linux fleet.
+    Supports binary, deb, and rpm installation methods with systemd service
+    management and post-deploy health verification.
+  company: ""
+  license: Apache-2.0
+  min_ansible_version: "2.12"
+  platforms:
+    - name: EL
+      versions:
+        - "8"
+        - "9"
+    - name: Ubuntu
+      versions:
+        - focal
+        - jammy
+        - noble
+    - name: Debian
+      versions:
+        - bullseye
+        - bookworm
+  galaxy_tags:
+    - monitoring
+    - agent
+    - fleet
+    - legator
+    - probe
+    - systemd
+
+dependencies: []

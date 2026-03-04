@@ -1,0 +1,95 @@
+---
+# molecule/default/verify.yml
+- name: "Verify legator-probe role"
+  hosts: all
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: "verify | check probe binary exists"
+      ansible.builtin.stat:
+        path: "/usr/local/bin/legator-probe"
+      register: _binary
+
+    - name: "verify | assert binary present and executable"
+      ansible.builtin.assert:
+        that:
+          - _binary.stat.exists
+          - _binary.stat.executable
+        fail_msg: "Probe binary not found or not executable at /usr/local/bin/legator-probe"
+
+    - name: "verify | check config file"
+      ansible.builtin.stat:
+        path: "/etc/legator/probe.yaml"
+      register: _config
+
+    - name: "verify | assert config file exists"
+      ansible.builtin.assert:
+        that:
+          - _config.stat.exists
+          - _config.stat.size > 0
+        fail_msg: "Probe config missing or empty at /etc/legator/probe.yaml"
+
+    - name: "verify | read config content"
+      ansible.builtin.slurp:
+        src: "/etc/legator/probe.yaml"
+      register: _config_content
+
+    - name: "verify | assert config contains server URL"
+      ansible.builtin.assert:
+        that:
+          - "'legator-test.internal' in (_config_content.content | b64decode)"
+        fail_msg: "Config does not contain expected control plane URL"
+
+    - name: "verify | assert config contains api_key"
+      ansible.builtin.assert:
+        that:
+          - "'api_key' in (_config_content.content | b64decode)"
+        fail_msg: "Config does not contain api_key field"
+
+    - name: "verify | check system user exists"
+      ansible.builtin.getent:
+        database: passwd
+        key: legator
+      register: _user
+
+    - name: "verify | assert legator user exists"
+      ansible.builtin.assert:
+        that: _user.ansible_facts.getent_passwd.legator is defined
+        fail_msg: "System user 'legator' not found"
+
+    - name: "verify | check required directories"
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: _dirs
+      loop:
+        - /etc/legator
+        - /var/lib/legator
+        - /var/log/legator
+
+    - name: "verify | assert directories exist"
+      ansible.builtin.assert:
+        that: item.stat.exists and item.stat.isdir
+        fail_msg: "Required directory missing: {{ item.item }}"
+      loop: "{{ _dirs.results }}"
+
+    - name: "verify | check systemd unit file"
+      ansible.builtin.stat:
+        path: "/etc/systemd/system/legator-probe.service"
+      register: _unit
+
+    - name: "verify | assert unit file exists"
+      ansible.builtin.assert:
+        that: _unit.stat.exists
+        fail_msg: "systemd unit file not found at /etc/systemd/system/legator-probe.service"
+
+    - name: "verify | get service status"
+      ansible.builtin.command:
+        cmd: "systemctl is-active legator-probe"
+      register: _svc_active
+      changed_when: false
+      failed_when: false
+
+    - name: "verify | report service active state"
+      ansible.builtin.debug:
+        msg: "legator-probe service state: {{ _svc_active.stdout | trim }}"

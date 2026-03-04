@@ -1,0 +1,9 @@
+---
+# tasks/install_rpm.yml — install via .rpm package
+
+- name: "legator-probe | install .rpm package from URL"
+  ansible.builtin.dnf:
+    name: "{{ legator_probe_rpm_url | trim }}"
+    state: present
+    disable_gpg_check: false
+  notify: restart legator-probe
