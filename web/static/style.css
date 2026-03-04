@@ -1749,3 +1749,111 @@ body[data-page='federation'] .federation-tags {
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ── Artifact table ──────────────────────────────────────── */
+.artifact-kind {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.artifact-kind-file {
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+.artifact-kind-diff {
+  background: rgba(251, 191, 36, 0.12);
+  color: var(--amber);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+.artifact-kind-log {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--green);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+/* ── Diff viewer ─────────────────────────────────────────── */
+.artifact-diff-container {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-panel);
+}
+
+.artifact-diff-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border);
+}
+
+.artifact-diff-path {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-diff-summary {
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.artifact-diff-content {
+  margin: 0;
+  padding: 8px 0;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.diff-add,
+.diff-del,
+.diff-ctx {
+  display: block;
+  padding: 0 12px;
+  white-space: pre;
+}
+
+.diff-add {
+  background: rgba(16, 185, 129, 0.12);
+  color: #6ee7b7;
+}
+
+.diff-del {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+}
+
+.diff-ctx {
+  color: var(--text-muted);
+}
+
+.diff-header {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.diff-hunk {
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.08);
+}

@@ -514,6 +514,113 @@
       .then((tasks) => renderTasks(Array.isArray(tasks) ? tasks : []))
       .catch(() => {}); // silently ignore; server-rendered table is still visible
 
+    // ── Artifacts ─────────────────────────────────────────────────────────────
+    const artifactsBody  = document.getElementById('artifacts-table-body');
+    const artifactsMeta  = document.getElementById('artifacts-meta');
+    const diffViewer     = document.getElementById('artifact-diff-viewer');
+    const diffTitle      = document.getElementById('artifact-diff-title');
+    const diffSummaryEl  = document.getElementById('artifact-diff-summary');
+    const diffContent    = document.getElementById('artifact-diff-content');
+    const diffClose      = document.getElementById('artifact-diff-close');
+
+    function humanBytes(n) {
+      if (n === undefined || n === null) return '—';
+      if (n < 1024) return n + ' B';
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+      return (n / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function kindBadge(kind) {
+      const k = sandboxEsc(String(kind || 'file').toLowerCase());
+      return '<span class="artifact-kind artifact-kind-' + k + '">' + k + '</span>';
+    }
+
+    function renderDiffInline(raw) {
+      if (!diffContent) return;
+      const lines = raw.split('\n');
+      diffContent.innerHTML = '';
+      lines.forEach(function(line) {
+        const span = document.createElement('span');
+        if (line.startsWith('+++') || line.startsWith('---')) {
+          span.className = 'diff-ctx diff-header';
+        } else if (line.startsWith('+')) {
+          span.className = 'diff-add';
+        } else if (line.startsWith('-')) {
+          span.className = 'diff-del';
+        } else if (line.startsWith('@')) {
+          span.className = 'diff-ctx diff-hunk';
+        } else {
+          span.className = 'diff-ctx';
+        }
+        span.textContent = line + '\n';
+        diffContent.appendChild(span);
+      });
+    }
+
+    async function showDiff(artifactId, path, diffSummary) {
+      if (!diffViewer) return;
+      try {
+        const resp = await fetch(
+          '/api/v1/sandboxes/' + encodeURIComponent(sandboxId) + '/artifacts/' + encodeURIComponent(artifactId) + '/content'
+        );
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const text = await resp.text();
+        diffTitle && (diffTitle.textContent = path);
+        diffSummaryEl && (diffSummaryEl.textContent = diffSummary || '');
+        renderDiffInline(text);
+        diffViewer.style.display = '';
+        diffViewer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } catch (err) {
+        window.LegatorUI && window.LegatorUI.showToast && window.LegatorUI.showToast('Failed to load diff: ' + err.message, 'error');
+      }
+    }
+
+    diffClose && diffClose.addEventListener('click', function() {
+      diffViewer && (diffViewer.style.display = 'none');
+    });
+
+    function renderArtifacts(artifacts) {
+      if (!artifactsBody) return;
+      if (!artifacts || !artifacts.length) {
+        artifactsBody.innerHTML = '<tr><td colspan="6" class="empty-state">No artifacts yet.</td></tr>';
+        artifactsMeta && (artifactsMeta.textContent = '0 artifacts');
+        return;
+      }
+      const count = artifacts.length;
+      artifactsMeta && (artifactsMeta.textContent = count + ' artifact' + (count === 1 ? '' : 's'));
+      artifactsBody.innerHTML = artifacts.map(function(a) {
+        const sha = (a.sha256 || '').substring(0, 12);
+        const path = sandboxEsc(a.path || '—');
+        const isDiff = a.kind === 'diff';
+        const viewBtn = isDiff
+          ? '<button class="btn btn-small" type="button" data-view-diff="' + sandboxEsc(a.id) + '" data-diff-path="' + sandboxEsc(a.path) + '" data-diff-summary="' + sandboxEsc(a.diff_summary || '') + '">View Diff</button>'
+          : '';
+        const dlUrl = '/api/v1/sandboxes/' + encodeURIComponent(sandboxId) + '/artifacts/' + encodeURIComponent(a.id) + '/content';
+        return '<tr>' +
+          '<td class="id-text" title="' + path + '">' + path + '</td>' +
+          '<td>' + kindBadge(a.kind) + '</td>' +
+          '<td class="muted">' + sandboxEsc(humanBytes(a.size)) + '</td>' +
+          '<td class="id-text" title="' + sandboxEsc(a.sha256 || '') + '">' + sandboxEsc(sha) + '</td>' +
+          '<td class="id-text">' + sandboxEsc((a.task_id || '').substring(0, 8) || '—') + '</td>' +
+          '<td>' + viewBtn + ' <a class="btn btn-small" href="' + dlUrl + '" download>Download</a></td>' +
+          '</tr>';
+      }).join('');
+    }
+
+    // Click handler for "View Diff" buttons
+    artifactsBody && artifactsBody.addEventListener('click', async function(e) {
+      const btn = e.target.closest('button[data-view-diff]');
+      if (!btn) return;
+      await showDiff(btn.dataset.viewDiff, btn.dataset.diffPath, btn.dataset.diffSummary);
+    });
+
+    // Load artifacts from API
+    sandboxRequest('/api/v1/sandboxes/' + encodeURIComponent(sandboxId) + '/artifacts')
+      .then(function(resp) { renderArtifacts(resp && resp.artifacts ? resp.artifacts : []); })
+      .catch(function() {
+        if (artifactsBody) artifactsBody.innerHTML = '<tr><td colspan="6" class="empty-state muted">Could not load artifacts.</td></tr>';
+      });
+
     // Connect WebSocket for live output
     connectWS();
   }

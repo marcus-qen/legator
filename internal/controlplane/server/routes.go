@@ -329,6 +329,13 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 			mux.HandleFunc("GET /api/v1/sandboxes/{id}/output", s.withPermission(auth.PermFleetRead, s.sandboxStreamHandler.HandleGetOutput))
 			mux.HandleFunc("GET /ws/sandboxes/{id}/stream", s.sandboxStreamHandler.HandleStreamOutput)
 		}
+		// Sandbox artifact routes
+		if s.sandboxArtifactHandler != nil {
+			mux.HandleFunc("POST /api/v1/sandboxes/{id}/artifacts", s.sandboxArtifactHandler.HandleUploadArtifact)
+			mux.HandleFunc("GET /api/v1/sandboxes/{id}/artifacts", s.withPermission(auth.PermFleetRead, s.sandboxArtifactHandler.HandleListArtifacts))
+			mux.HandleFunc("GET /api/v1/sandboxes/{id}/artifacts/{artifactId}", s.withPermission(auth.PermFleetRead, s.sandboxArtifactHandler.HandleGetArtifact))
+			mux.HandleFunc("GET /api/v1/sandboxes/{id}/artifacts/{artifactId}/content", s.withPermission(auth.PermFleetRead, s.sandboxArtifactHandler.HandleDownloadArtifact))
+		}
 	} else {
 		mux.HandleFunc("POST /api/v1/sandboxes", s.withPermission(auth.PermFleetWrite, s.handleSandboxUnavailable))
 		mux.HandleFunc("GET /api/v1/sandboxes", s.withPermission(auth.PermFleetRead, s.handleSandboxUnavailable))

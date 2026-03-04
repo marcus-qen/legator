@@ -174,13 +174,15 @@ type Server struct {
 	tenantStore *tenant.Store
 
 	// Sandbox session lifecycle
-	sandboxStore         *sandbox.Store
-	sandboxHandler       *sandbox.Handler
-	sandboxTaskStore     *sandbox.TaskStore
-	sandboxTaskHandler   *sandbox.TaskHandler
-	sandboxStreamStore   *sandbox.StreamStore
-	sandboxStreamHub     *sandbox.StreamHub
-	sandboxStreamHandler *sandbox.StreamHandler
+	sandboxStore           *sandbox.Store
+	sandboxHandler         *sandbox.Handler
+	sandboxTaskStore       *sandbox.TaskStore
+	sandboxTaskHandler     *sandbox.TaskHandler
+	sandboxStreamStore     *sandbox.StreamStore
+	sandboxStreamHub       *sandbox.StreamHub
+	sandboxStreamHandler   *sandbox.StreamHandler
+	sandboxArtifactStore   *sandbox.ArtifactStore
+	sandboxArtifactHandler *sandbox.ArtifactHandler
 
 	// MCP
 	mcpServer *mcpserver.MCPServer
@@ -1031,6 +1033,23 @@ func (s *Server) initSandbox() {
 		s.logger.Named("sandbox.stream"),
 	)
 	s.sandboxStreamHandler = streamHandler
+
+	// Artifact store and handler for sandbox task artifacts.
+	artifactStore, artifactStoreErr := sandbox.NewArtifactStore(store.DB())
+	if artifactStoreErr != nil {
+		s.logger.Warn("cannot init sandbox artifact store; artifact API disabled", zap.Error(artifactStoreErr))
+		return
+	}
+	s.sandboxArtifactStore = artifactStore
+
+	ah := sandbox.NewArtifactHandler(
+		store,
+		artifactStore,
+		&sandboxEventAdapter{bus: s.eventBus},
+		&sandboxAuditAdapter{s: s},
+		s.logger.Named("sandbox.artifacts"),
+	)
+	s.sandboxArtifactHandler = ah
 }
 
 // handleSandboxUnavailable is a placeholder returned when the sandbox store

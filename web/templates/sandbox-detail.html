@@ -154,6 +154,38 @@
   <div class="terminal-pane" id="terminal-pane" role="log" aria-live="polite" aria-label="Sandbox output"></div>
 </section>
 
+<section class="panel" id="artifacts-panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Artifacts</h2>
+    <span class="panel-sub" id="artifacts-meta">Loading…</span>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table" id="artifacts-table">
+      <thead>
+        <tr>
+          <th>Path</th>
+          <th>Kind</th>
+          <th>Size</th>
+          <th>SHA256</th>
+          <th>Task</th>
+          <th>Download</th>
+        </tr>
+      </thead>
+      <tbody id="artifacts-table-body">
+        <tr><td colspan="6" class="empty-state">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div id="artifact-diff-viewer" class="artifact-diff-container" style="display:none;">
+    <div class="artifact-diff-header">
+      <span id="artifact-diff-title" class="artifact-diff-path"></span>
+      <span id="artifact-diff-summary" class="artifact-diff-summary"></span>
+      <button class="btn btn-small" type="button" id="artifact-diff-close">Close</button>
+    </div>
+    <pre class="artifact-diff-content" id="artifact-diff-content"></pre>
+  </div>
+</section>
+
 </div><!-- /data-sandbox-id -->
 {{end}}
 
