@@ -250,3 +250,8 @@ PUT /api/v1/users/{id}/tenants
 ### Workspace Permission Token (API Key / User)
 # - `workspace_scope_ambiguous`  (403) — multiple concrete workspace grants
 # - `workspace_scope_required`   (403) — no workspace: grant in token
+GET /api/v1/modeldock/trials
+GET /api/v1/modeldock/trials/{id}/compare
+GET /api/v1/modeldock/trials/{id}/results
+POST /api/v1/modeldock/trials
+POST /api/v1/modeldock/trials/{id}/run

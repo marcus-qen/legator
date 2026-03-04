@@ -406,6 +406,12 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/v1/model-profiles/{id}/activate", s.withPermission(auth.PermFleetWrite, s.modelDockHandlers.HandleActivateProfile))
 		mux.HandleFunc("GET /api/v1/model-profiles/active", s.withPermission(auth.PermFleetRead, s.modelDockHandlers.HandleGetActiveProfile))
 		mux.HandleFunc("GET /api/v1/model-usage", s.withPermission(auth.PermFleetRead, s.modelDockHandlers.HandleGetUsage))
+		// Model Trials API
+		mux.HandleFunc("POST /api/v1/modeldock/trials", s.withPermission(auth.PermFleetWrite, s.modelDockHandlers.HandleCreateTrial))
+		mux.HandleFunc("GET /api/v1/modeldock/trials", s.withPermission(auth.PermFleetRead, s.modelDockHandlers.HandleListTrials))
+		mux.HandleFunc("POST /api/v1/modeldock/trials/{id}/run", s.withPermission(auth.PermFleetWrite, s.modelDockHandlers.HandleRunTrial))
+		mux.HandleFunc("GET /api/v1/modeldock/trials/{id}/results", s.withPermission(auth.PermFleetRead, s.modelDockHandlers.HandleGetTrialResults))
+		mux.HandleFunc("GET /api/v1/modeldock/trials/{id}/compare", s.withPermission(auth.PermFleetRead, s.modelDockHandlers.HandleCompareTrialResults))
 	} else {
 		mux.HandleFunc("GET /api/v1/model-profiles", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
 		mux.HandleFunc("POST /api/v1/model-profiles", s.withPermission(auth.PermFleetWrite, s.handleModelDockUnavailable))
@@ -414,6 +420,12 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/v1/model-profiles/{id}/activate", s.withPermission(auth.PermFleetWrite, s.handleModelDockUnavailable))
 		mux.HandleFunc("GET /api/v1/model-profiles/active", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
 		mux.HandleFunc("GET /api/v1/model-usage", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
+		// Model Trials API (unavailable)
+		mux.HandleFunc("POST /api/v1/modeldock/trials", s.withPermission(auth.PermFleetWrite, s.handleModelDockUnavailable))
+		mux.HandleFunc("GET /api/v1/modeldock/trials", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
+		mux.HandleFunc("POST /api/v1/modeldock/trials/{id}/run", s.withPermission(auth.PermFleetWrite, s.handleModelDockUnavailable))
+		mux.HandleFunc("GET /api/v1/modeldock/trials/{id}/results", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
+		mux.HandleFunc("GET /api/v1/modeldock/trials/{id}/compare", s.withPermission(auth.PermFleetRead, s.handleModelDockUnavailable))
 	}
 
 	// Cloud Connectors API

@@ -397,3 +397,8 @@ func scanProfile(row scanner) (*Profile, error) {
 func IsNotFound(err error) bool {
 	return errors.Is(err, sql.ErrNoRows)
 }
+
+// DB returns the underlying *sql.DB, used to share connections with TrialStore.
+func (s *Store) DB() *sql.DB {
+	return s.db
+}

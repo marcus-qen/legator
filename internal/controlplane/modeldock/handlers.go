@@ -14,14 +14,21 @@ type Handler struct {
 	store      *Store
 	providers  *ProviderManager
 	envProfile envProfileResolver
+	trialStore *TrialStore
 }
 
 func NewHandler(store *Store, providers *ProviderManager, envProfile envProfileResolver) *Handler {
-	return &Handler{
+	h := &Handler{
 		store:      store,
 		providers:  providers,
 		envProfile: envProfile,
 	}
+	if store != nil {
+		if ts, err := NewTrialStore(store.DB()); err == nil {
+			h.trialStore = ts
+		}
+	}
+	return h
 }
 
 type profileWriteRequest struct {
