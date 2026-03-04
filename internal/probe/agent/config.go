@@ -38,6 +38,9 @@ type Config struct {
 	PolicyMaxRuntimeSec          int                       `yaml:"policy_max_runtime_sec,omitempty"`
 	PolicyAllowedScopes          []string                  `yaml:"policy_allowed_scopes,omitempty"`
 
+	// WinRMTargets defines remote Windows hosts managed via WinRM (no probe binary required).
+	WinRMTargets []WinRMTargetConfig `yaml:"winrm_targets,omitempty"`
+
 	ConfigDir string `yaml:"-"` // not persisted
 }
 
