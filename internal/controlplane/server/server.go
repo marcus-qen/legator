@@ -183,6 +183,7 @@ type Server struct {
 	sandboxStreamHandler   *sandbox.StreamHandler
 	sandboxArtifactStore   *sandbox.ArtifactStore
 	sandboxArtifactHandler *sandbox.ArtifactHandler
+	sandboxReplayHandler   *sandbox.ReplayHandler
 
 	// MCP
 	mcpServer *mcpserver.MCPServer
@@ -1050,6 +1051,16 @@ func (s *Server) initSandbox() {
 		s.logger.Named("sandbox.artifacts"),
 	)
 	s.sandboxArtifactHandler = ah
+
+	rh := sandbox.NewReplayHandler(
+		store,
+		streamStore,
+		taskStore,
+		artifactStore,
+		&sandboxAuditAdapter{s: s},
+		s.logger.Named("sandbox.replay"),
+	)
+	s.sandboxReplayHandler = rh
 }
 
 // handleSandboxUnavailable is a placeholder returned when the sandbox store

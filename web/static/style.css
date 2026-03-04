@@ -1857,3 +1857,131 @@ body[data-page='federation'] .federation-tags {
   color: #93c5fd;
   background: rgba(59, 130, 246, 0.08);
 }
+
+/* ── Replay Player ──────────────────────────────────────────────────────────── */
+
+.replay-section {
+  display: none;
+}
+
+.replay-section.replay-visible {
+  display: block;
+}
+
+.replay-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  flex-wrap: wrap;
+}
+
+.replay-play-btn {
+  min-width: 80px;
+}
+
+.replay-timestamp {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  min-width: 120px;
+}
+
+.replay-speed {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.replay-speed .btn {
+  min-width: 40px;
+  padding: 3px 8px;
+  font-size: 0.75rem;
+}
+
+.replay-speed .btn.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+/* Timeline scrubber */
+.replay-timeline {
+  position: relative;
+  width: 100%;
+  height: 24px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  margin: 8px 0;
+  overflow: hidden;
+}
+
+.replay-timeline-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: rgba(99, 102, 241, 0.3);
+  transition: width 0.1s linear;
+  pointer-events: none;
+}
+
+.replay-timeline-cursor {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background: var(--accent);
+  pointer-events: none;
+  transition: left 0.1s linear;
+}
+
+/* Event markers on timeline */
+.replay-marker {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.replay-marker-output {
+  background: var(--text-muted);
+}
+
+.replay-marker-task_state {
+  background: #a78bfa;
+}
+
+.replay-marker-artifact {
+  background: #34d399;
+}
+
+.replay-marker-sandbox_state {
+  background: #60a5fa;
+}
+
+/* Replay event log */
+.replay-event-log {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  max-height: 40px;
+  overflow: hidden;
+  padding: 4px 0;
+}
+
+.replay-event-label {
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.replay-event-label-task_state { background: rgba(167,139,250,0.2); color: #a78bfa; }
+.replay-event-label-artifact   { background: rgba(52,211,153,0.2);  color: #34d399; }

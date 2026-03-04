@@ -336,6 +336,11 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 			mux.HandleFunc("GET /api/v1/sandboxes/{id}/artifacts/{artifactId}", s.withPermission(auth.PermFleetRead, s.sandboxArtifactHandler.HandleGetArtifact))
 			mux.HandleFunc("GET /api/v1/sandboxes/{id}/artifacts/{artifactId}/content", s.withPermission(auth.PermFleetRead, s.sandboxArtifactHandler.HandleDownloadArtifact))
 		}
+		// Sandbox replay routes
+		if s.sandboxReplayHandler != nil {
+			mux.HandleFunc("GET /api/v1/sandboxes/{id}/replay", s.withPermission(auth.PermFleetRead, s.sandboxReplayHandler.HandleReplay))
+			mux.HandleFunc("GET /api/v1/sandboxes/{id}/replay/summary", s.withPermission(auth.PermFleetRead, s.sandboxReplayHandler.HandleReplaySummary))
+		}
 	} else {
 		mux.HandleFunc("POST /api/v1/sandboxes", s.withPermission(auth.PermFleetWrite, s.handleSandboxUnavailable))
 		mux.HandleFunc("GET /api/v1/sandboxes", s.withPermission(auth.PermFleetRead, s.handleSandboxUnavailable))

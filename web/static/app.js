@@ -625,6 +625,276 @@
     connectWS();
   }
 
+
+  // ── Replay Player ──────────────────────────────────────────────────────────
+  //
+  // initReplayPlayer(sandboxId) — fetches replay timeline and drives playback.
+  // Only called for terminal sandboxes (the template gate handles visibility).
+
+  function initReplayPlayer(sandboxId) {
+    const section      = document.getElementById('replay-section');
+    const statusEl     = document.getElementById('replay-status');
+    const controlsEl   = document.getElementById('replay-controls');
+    const playBtn      = document.getElementById('replay-play-btn');
+    const tsEl         = document.getElementById('replay-timestamp');
+    const speedGroup   = document.getElementById('replay-speed');
+    const timelineEl   = document.getElementById('replay-timeline');
+    const fillEl       = document.getElementById('replay-timeline-fill');
+    const cursorEl     = document.getElementById('replay-timeline-cursor');
+    const termPane     = document.getElementById('replay-terminal-pane');
+    const tasksBody    = document.getElementById('tasks-table-body');
+    const tasksMeta    = document.getElementById('tasks-meta');
+    const artifactsBody = document.getElementById('artifacts-table-body');
+    const artifactsMeta = document.getElementById('artifacts-meta');
+    const eventLogEl   = document.getElementById('replay-event-log');
+
+    if (!section) return;
+
+    let timeline   = null;  // ReplayTimeline from API
+    let playing    = false;
+    let speed      = 1;
+    let curPos     = 0;     // current playback position in ms from start
+    let rafHandle  = null;
+    let lastRafTs  = null;
+    let eventIndex = 0;     // next event to dispatch
+
+    // ── Utilities ──────────────────────────────────────────────────────────
+
+    function fmtDuration(ms) {
+      if (ms < 0) ms = 0;
+      const mins = Math.floor(ms / 60000);
+      const secs = Math.floor((ms % 60000) / 1000);
+      const msec = Math.floor(ms % 1000);
+      return String(mins).padStart(2, '0') + ':' +
+             String(secs).padStart(2, '0') + '.' +
+             String(msec).padStart(3, '0');
+    }
+
+    function updateTimestampEl() {
+      if (tsEl) tsEl.textContent = fmtDuration(curPos);
+    }
+
+    function updateScrubber() {
+      if (!timeline || timeline.duration_ns <= 0) return;
+      const pct = Math.min(100, curPos / (timeline.duration_ns / 1e6) * 100);
+      if (fillEl)  fillEl.style.width  = pct + '%';
+      if (cursorEl) cursorEl.style.left = pct + '%';
+    }
+
+    // ── Replay output appending ────────────────────────────────────────────
+
+    function replayAppendChunk(chunk) {
+      if (!termPane) return;
+      const lines = (chunk.data || '').split('\n');
+      const kind  = chunk.stream === 'stderr' ? 'stderr' : 'stdout';
+      lines.forEach((line, i) => {
+        if (i === lines.length - 1 && line === '') return;
+        const span = document.createElement('span');
+        span.className = 'terminal-line terminal-' + kind;
+        span.textContent = line;
+        termPane.appendChild(span);
+      });
+      termPane.scrollTop = termPane.scrollHeight;
+    }
+
+    function showEventLog(msg, kind) {
+      if (!eventLogEl) return;
+      const label = kind && kind !== 'output' ? kind : '';
+      eventLogEl.innerHTML = label
+        ? '<span class="replay-event-label replay-event-label-' + sandboxEsc(label) + '">' + sandboxEsc(label) + '</span> ' + sandboxEsc(msg)
+        : '<span class="muted">' + sandboxEsc(msg) + '</span>';
+    }
+
+    // ── Event dispatch ─────────────────────────────────────────────────────
+
+    function dispatchEvent(evt) {
+      switch (evt.kind) {
+        case 'output':
+          replayAppendChunk(evt.data);
+          break;
+        case 'task_state': {
+          const ts = evt.data;
+          showEventLog(`Task ${(ts.task_id || '').substring(0, 8)}: ${ts.to_state}`, 'task_state');
+          // Refresh task table after state change
+          sandboxRequest('/api/v1/sandboxes/' + encodeURIComponent(sandboxId) + '/tasks')
+            .then((tasks) => {
+              if (window._renderReplayTasks) window._renderReplayTasks(tasks);
+            })
+            .catch(() => {});
+          break;
+        }
+        case 'artifact': {
+          const a = evt.data;
+          showEventLog('Artifact: ' + (a.path || ''), 'artifact');
+          if (artifactsBody) {
+            const rows = artifactsBody.querySelectorAll('tr');
+            rows.forEach((row) => {
+              if (row.textContent.includes(a.path || '')) {
+                row.style.transition = 'background 0.3s';
+                row.style.background = 'rgba(52,211,153,0.2)';
+                setTimeout(() => { row.style.background = ''; }, 800);
+              }
+            });
+          }
+          break;
+        }
+        default:
+          break;
+      }
+    }
+
+    // ── Tick (RAF loop) ────────────────────────────────────────────────────
+
+    function tick(rafTs) {
+      if (!playing) return;
+      if (lastRafTs !== null) {
+        const wall = rafTs - lastRafTs;
+        curPos += wall * speed;
+      }
+      lastRafTs = rafTs;
+
+      const durationMs = timeline.duration_ns / 1e6;
+      if (curPos >= durationMs) {
+        curPos = durationMs;
+        playing = false;
+        if (playBtn) playBtn.textContent = '\u25B6 Play';
+        updateScrubber();
+        updateTimestampEl();
+        // Flush remaining events
+        flushEventsUpTo(curPos);
+        return;
+      }
+
+      flushEventsUpTo(curPos);
+      updateScrubber();
+      updateTimestampEl();
+      rafHandle = requestAnimationFrame(tick);
+    }
+
+    function flushEventsUpTo(posMs) {
+      if (!timeline || !timeline.events) return;
+      const startMs = new Date(timeline.start_time).getTime();
+      while (eventIndex < timeline.events.length) {
+        const evt    = timeline.events[eventIndex];
+        const evtMs  = new Date(evt.timestamp).getTime() - startMs;
+        if (evtMs > posMs) break;
+        dispatchEvent(evt);
+        eventIndex++;
+      }
+    }
+
+    // ── Controls ───────────────────────────────────────────────────────────
+
+    function startPlay() {
+      if (!timeline) return;
+      playing    = true;
+      lastRafTs  = null;
+      if (playBtn) playBtn.textContent = '\u23F8 Pause';
+      rafHandle = requestAnimationFrame(tick);
+    }
+
+    function pausePlay() {
+      playing   = false;
+      lastRafTs = null;
+      if (rafHandle) cancelAnimationFrame(rafHandle);
+      if (playBtn) playBtn.textContent = '\u25B6 Play';
+    }
+
+    function seekTo(posMs) {
+      const wasPaying = playing;
+      pausePlay();
+
+      // Reset terminal and replay from scratch up to posMs
+      if (termPane) termPane.innerHTML = '';
+      eventIndex = 0;
+      curPos = posMs;
+
+      flushEventsUpTo(posMs);
+      updateScrubber();
+      updateTimestampEl();
+
+      if (wasPaying) startPlay();
+    }
+
+    playBtn && playBtn.addEventListener('click', () => {
+      if (playing) pausePlay();
+      else startPlay();
+    });
+
+    // Speed buttons
+    speedGroup && speedGroup.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-speed]');
+      if (!btn) return;
+      speed = parseFloat(btn.dataset.speed) || 1;
+      speedGroup.querySelectorAll('[data-speed]').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+
+    // Timeline scrubber — seek on click
+    timelineEl && timelineEl.addEventListener('click', (e) => {
+      if (!timeline || timeline.duration_ns <= 0) return;
+      const rect = timelineEl.getBoundingClientRect();
+      const pct  = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      seekTo(pct * timeline.duration_ns / 1e6);
+    });
+
+    // Keyboard: Space = play/pause, Left/Right = skip 5s
+    document.addEventListener('keydown', (e) => {
+      if (!section || !section.classList.contains('replay-visible')) return;
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (playing) pausePlay(); else startPlay();
+      } else if (e.code === 'ArrowLeft') {
+        e.preventDefault();
+        seekTo(Math.max(0, curPos - 5000));
+      } else if (e.code === 'ArrowRight') {
+        e.preventDefault();
+        if (timeline) seekTo(Math.min(timeline.duration_ns / 1e6, curPos + 5000));
+      }
+    });
+
+    // ── Marker rendering ───────────────────────────────────────────────────
+
+    function renderMarkers() {
+      if (!timeline || !timelineEl || timeline.duration_ns <= 0) return;
+      const durMs = timeline.duration_ns / 1e6;
+      const startMs = new Date(timeline.start_time).getTime();
+      // Only render task and artifact markers (not output — too many)
+      timeline.events.forEach((evt) => {
+        if (evt.kind === 'output') return;
+        const evtMs = new Date(evt.timestamp).getTime() - startMs;
+        const pct   = Math.min(100, (evtMs / durMs) * 100);
+        const dot   = document.createElement('div');
+        dot.className = 'replay-marker replay-marker-' + sandboxEsc(evt.kind);
+        dot.style.left = pct + '%';
+        timelineEl.appendChild(dot);
+      });
+    }
+
+    // ── Load timeline ──────────────────────────────────────────────────────
+
+    sandboxRequest('/api/v1/sandboxes/' + encodeURIComponent(sandboxId) + '/replay')
+      .then((tl) => {
+        timeline = tl;
+        if (statusEl) statusEl.textContent =
+          tl.event_count + ' events  \u00B7  ' +
+          fmtDuration(tl.duration_ns / 1e6);
+
+        // Show controls and timeline
+        if (controlsEl) controlsEl.style.display = '';
+        if (timelineEl) timelineEl.style.display  = '';
+        if (termPane)   termPane.style.display     = '';
+
+        renderMarkers();
+        updateScrubber();
+        updateTimestampEl();
+      })
+      .catch((err) => {
+        if (statusEl) statusEl.textContent = 'Replay unavailable: ' + err.message;
+      });
+  }
+
   window.LegatorUI = {
     showToast,
     updateBadges,
@@ -632,5 +902,6 @@
     initResizable,
     initSandboxes,
     initSandboxDetail,
+    initReplayPlayer,
   };
 })();

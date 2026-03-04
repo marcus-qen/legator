@@ -186,6 +186,36 @@
   </div>
 </section>
 
+
+{{if .Session.IsTerminal}}
+<section class="panel replay-section replay-visible" id="replay-section">
+  <div class="panel-header">
+    <h2 class="panel-title">&#9654; Replay</h2>
+    <span class="panel-sub" id="replay-status">Loading timeline&hellip;</span>
+  </div>
+
+  <div class="replay-controls" id="replay-controls" style="display:none;">
+    <button class="btn btn-primary replay-play-btn" id="replay-play-btn" type="button">&#9654; Play</button>
+    <span class="replay-timestamp" id="replay-timestamp">00:00.000</span>
+    <div class="replay-speed" id="replay-speed">
+      <span class="muted" style="font-size:0.8rem;">Speed:</span>
+      <button class="btn active" data-speed="1" type="button">1x</button>
+      <button class="btn" data-speed="2" type="button">2x</button>
+      <button class="btn" data-speed="5" type="button">5x</button>
+      <button class="btn" data-speed="10" type="button">10x</button>
+    </div>
+    <div class="replay-event-log" id="replay-event-log"></div>
+  </div>
+
+  <div class="replay-timeline" id="replay-timeline" title="Click to seek" style="display:none;">
+    <div class="replay-timeline-fill" id="replay-timeline-fill"></div>
+    <div class="replay-timeline-cursor" id="replay-timeline-cursor"></div>
+  </div>
+
+  <div class="terminal-pane" id="replay-terminal-pane" role="log" aria-label="Replay output"
+       style="margin-top:8px; display:none;"></div>
+</section>
+{{end}}
 </div><!-- /data-sandbox-id -->
 {{end}}
 
@@ -197,6 +227,12 @@
   if (sandboxId && window.LegatorUI && window.LegatorUI.initSandboxDetail) {
     window.LegatorUI.initSandboxDetail(sandboxId);
   }
+  // Initialise replay player for terminal sandboxes.
+  {{if .Session.IsTerminal}}
+  if (sandboxId && window.LegatorUI && window.LegatorUI.initReplayPlayer) {
+    window.LegatorUI.initReplayPlayer(sandboxId);
+  }
+  {{end}}
 })();
 </script>
 {{end}}
