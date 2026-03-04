@@ -193,6 +193,15 @@ func (l *Log) MarshalJSON() ([]byte, error) {
 
 // Login audit event types.
 const (
+	EventSandboxCreated   EventType = "sandbox.created"
+	EventSandboxDestroyed EventType = "sandbox.destroyed"
+	EventSandboxTaskRun   EventType = "sandbox.task_run"
+	EventSandboxArtifact  EventType = "sandbox.artifact_read"
+	EventMCPSandboxDenied EventType = "mcp.sandbox_denied"
+)
+
+// Login audit event types.
+const (
 	EventLoginSuccess        EventType = "auth.login"
 	EventLoginFailed         EventType = "auth.login_failed"
 	EventAuthorizationDenied EventType = "auth.authorization_denied"

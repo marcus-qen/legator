@@ -298,6 +298,29 @@ func (s *MCPServer) registerTools() {
 			Description: "Cancel a Kubeflow run/job through policy gates",
 		}, s.handleKubeflowCancelRun)
 	}
+
+	if s.sandboxStore != nil && s.tokenBroker != nil {
+		mcp.AddTool(s.server, &mcp.Tool{
+			Name:        "sandbox_create",
+			Description: "Create a new sandbox session (requires run token with scope mcp:sandbox)",
+		}, s.handleSandboxCreate)
+		mcp.AddTool(s.server, &mcp.Tool{
+			Name:        "sandbox_run",
+			Description: "Run a command in a sandbox session (requires run token with scope mcp:sandbox)",
+		}, s.handleSandboxRun)
+		mcp.AddTool(s.server, &mcp.Tool{
+			Name:        "sandbox_read_output",
+			Description: "Read task output from a sandbox execution (requires run token with scope mcp:sandbox)",
+		}, s.handleSandboxReadOutput)
+		mcp.AddTool(s.server, &mcp.Tool{
+			Name:        "sandbox_get_artifact",
+			Description: "Get an artifact produced by a sandbox task (requires run token with scope mcp:sandbox)",
+		}, s.handleSandboxGetArtifact)
+		mcp.AddTool(s.server, &mcp.Tool{
+			Name:        "sandbox_destroy",
+			Description: "Destroy a sandbox session (requires run token with scope mcp:sandbox)",
+		}, s.handleSandboxDestroy)
+	}
 }
 
 func (s *MCPServer) handleListProbes(_ context.Context, _ *mcp.CallToolRequest, input listProbesInput) (*mcp.CallToolResult, any, error) {

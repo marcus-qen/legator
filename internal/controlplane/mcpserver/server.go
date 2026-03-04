@@ -14,6 +14,8 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/grafana"
 	"github.com/marcus-qen/legator/internal/controlplane/jobs"
 	"github.com/marcus-qen/legator/internal/controlplane/kubeflow"
+	"github.com/marcus-qen/legator/internal/controlplane/sandbox"
+	"github.com/marcus-qen/legator/internal/controlplane/tokenbroker"
 	cpws "github.com/marcus-qen/legator/internal/controlplane/websocket"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.uber.org/zap"
@@ -24,22 +26,26 @@ var Version = "dev"
 
 // MCPServer exposes Legator control-plane capabilities as MCP tools/resources.
 type MCPServer struct {
-	server            *mcp.Server
-	handler           http.Handler
-	fleetStore        *fleet.Store
-	federationStore   *fleet.FederationStore
-	auditStore        *audit.Store
-	jobsStore         *jobs.Store
-	eventBus          *events.Bus
-	hub               *cpws.Hub
-	dispatcher        *corecommanddispatch.Service
-	decideApproval    func(id string, request *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error)
-	kubeflowRunStatus func(context.Context, kubeflow.RunStatusRequest) (kubeflow.RunStatusResult, error)
-	kubeflowSubmitRun func(context.Context, kubeflow.SubmitRunRequest) (map[string]any, error)
-	kubeflowCancelRun func(context.Context, kubeflow.CancelRunRequest) (map[string]any, error)
-	grafanaClient     grafana.Client
-	permissionChecker func(context.Context, auth.Permission) error
-	logger            *zap.Logger
+	server               *mcp.Server
+	handler              http.Handler
+	fleetStore           *fleet.Store
+	federationStore      *fleet.FederationStore
+	auditStore           *audit.Store
+	jobsStore            *jobs.Store
+	eventBus             *events.Bus
+	hub                  *cpws.Hub
+	dispatcher           *corecommanddispatch.Service
+	decideApproval       func(id string, request *coreapprovalpolicy.DecideApprovalRequest) (*coreapprovalpolicy.ApprovalDecisionResult, error)
+	kubeflowRunStatus    func(context.Context, kubeflow.RunStatusRequest) (kubeflow.RunStatusResult, error)
+	kubeflowSubmitRun    func(context.Context, kubeflow.SubmitRunRequest) (map[string]any, error)
+	kubeflowCancelRun    func(context.Context, kubeflow.CancelRunRequest) (map[string]any, error)
+	grafanaClient        grafana.Client
+	sandboxStore         *sandbox.Store
+	sandboxTaskStore     *sandbox.TaskStore
+	sandboxArtifactStore *sandbox.ArtifactStore
+	tokenBroker          *tokenbroker.Broker
+	permissionChecker    func(context.Context, auth.Permission) error
+	logger               *zap.Logger
 }
 
 // Option customizes MCP server wiring.
@@ -88,6 +94,24 @@ func WithPermissionChecker(checker func(context.Context, auth.Permission) error)
 			return
 		}
 		server.permissionChecker = checker
+	}
+}
+
+// WithSandboxTools wires sandbox session stores and a token broker for MCP sandbox tools.
+func WithSandboxTools(
+	store *sandbox.Store,
+	taskStore *sandbox.TaskStore,
+	artifactStore *sandbox.ArtifactStore,
+	broker *tokenbroker.Broker,
+) Option {
+	return func(server *MCPServer) {
+		if server == nil {
+			return
+		}
+		server.sandboxStore = store
+		server.sandboxTaskStore = taskStore
+		server.sandboxArtifactStore = artifactStore
+		server.tokenBroker = broker
 	}
 }
 
