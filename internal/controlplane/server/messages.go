@@ -111,6 +111,42 @@ func (s *Server) handleProbeMessage(probeID string, env protocol.Envelope) {
 			s.completeAsyncJobByRequestID(chunk.RequestID, chunk.ExitCode, chunk.Data)
 		}
 
+	case protocol.MsgDiscoveryReport:
+		data, _ := json.Marshal(env.Payload)
+		var report protocol.DiscoveryReportPayload
+		if err := json.Unmarshal(data, &report); err != nil {
+			s.logger.Warn("bad discovery report payload", zap.String("probe", probeID), zap.Error(err))
+			return
+		}
+		report.ProbeID = probeID
+		if s.candidateHandlers != nil {
+			if err := s.candidateHandlers.HandleDiscoveryReport(probeID, report); err != nil {
+				s.logger.Warn("handle discovery report", zap.String("probe", probeID), zap.Error(err))
+			}
+		}
+		s.logger.Info("discovery report received",
+			zap.String("probe", probeID),
+			zap.Int("hosts", len(report.Hosts)),
+		)
+
+	case protocol.MsgDeployResult:
+		data, _ := json.Marshal(env.Payload)
+		var result protocol.DeployResultPayload
+		if err := json.Unmarshal(data, &result); err != nil {
+			s.logger.Warn("bad deploy result payload", zap.String("probe", probeID), zap.Error(err))
+			return
+		}
+		if s.candidateHandlers != nil {
+			if err := s.candidateHandlers.HandleDeployResult(probeID, result); err != nil {
+				s.logger.Warn("handle deploy result", zap.String("probe", probeID), zap.Error(err))
+			}
+		}
+		s.logger.Info("deploy result received",
+			zap.String("probe", probeID),
+			zap.String("candidate", result.CandidateID),
+			zap.Bool("success", result.Success),
+		)
+
 	default:
 		s.logger.Debug("unhandled message type",
 			zap.String("probe", probeID),

@@ -166,6 +166,7 @@ type Server struct {
 
 	discoveryStore    *discovery.Store
 	discoveryHandlers *discovery.Handler
+	candidateHandlers *discovery.CandidateHandler
 
 	// Compliance
 	complianceStore          *compliance.Store
@@ -1457,6 +1458,11 @@ func (s *Server) initDiscovery() {
 	s.discoveryStore = store
 	s.discoveryHandlers = discovery.NewHandler(store, discovery.NewScanner(), s.tokenStore)
 	s.logger.Info("discovery store opened", zap.String("path", discoveryDBPath))
+	if cs, err := store.OpenCandidateStore(); err == nil {
+		s.candidateHandlers = discovery.NewCandidateHandler(cs)
+	} else {
+		s.logger.Warn("cannot initialize candidate store", zap.Error(err))
+	}
 }
 
 func (s *Server) initCompliance() {

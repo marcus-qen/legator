@@ -130,6 +130,18 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/v1/discovery/runs/{id}", s.withPermission(auth.PermFleetRead, s.handleDiscoveryUnavailable))
 		mux.HandleFunc("POST /api/v1/discovery/install-token", s.withPermission(auth.PermFleetWrite, s.handleDiscoveryUnavailable))
 	}
+	// Deployment candidate API (probe-deploys-probe lateral discovery)
+	if s.candidateHandlers != nil {
+		mux.HandleFunc("GET /api/v1/discovery/candidates", s.withPermission(auth.PermFleetRead, s.candidateHandlers.HandleListCandidates))
+		mux.HandleFunc("GET /api/v1/discovery/candidates/{id}", s.withPermission(auth.PermFleetRead, s.candidateHandlers.HandleGetCandidate))
+		mux.HandleFunc("POST /api/v1/discovery/candidates/{id}/approve", s.withPermission(auth.PermFleetWrite, s.candidateHandlers.HandleApproveCandidate))
+		mux.HandleFunc("POST /api/v1/discovery/candidates/{id}/reject", s.withPermission(auth.PermFleetWrite, s.candidateHandlers.HandleRejectCandidate))
+	} else {
+		mux.HandleFunc("GET /api/v1/discovery/candidates", s.withPermission(auth.PermFleetRead, s.handleDiscoveryUnavailable))
+		mux.HandleFunc("GET /api/v1/discovery/candidates/{id}", s.withPermission(auth.PermFleetRead, s.handleDiscoveryUnavailable))
+		mux.HandleFunc("POST /api/v1/discovery/candidates/{id}/approve", s.withPermission(auth.PermFleetWrite, s.handleDiscoveryUnavailable))
+		mux.HandleFunc("POST /api/v1/discovery/candidates/{id}/reject", s.withPermission(auth.PermFleetWrite, s.handleDiscoveryUnavailable))
+	}
 
 	// Compliance
 	if s.complianceHandlers != nil {
@@ -483,6 +495,10 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/v1/network-devices/{id}/command", s.withPermission(auth.PermFleetWrite, s.networkDeviceHandlers.HandleCommandDevice))
 		mux.HandleFunc("POST /api/v1/network-devices/{id}/scan", s.withPermission(auth.PermFleetWrite, s.networkDeviceHandlers.HandleScanDevice))
 		mux.HandleFunc("GET /api/v1/network-devices/{id}/inventory", s.withPermission(auth.PermFleetRead, s.networkDeviceHandlers.HandleGetInventory))
+		mux.HandleFunc("POST /api/v1/network/devices/{id}/enrich", s.withPermission(auth.PermFleetWrite, s.networkDeviceHandlers.HandleEnrichDevice))
+		mux.HandleFunc("GET /api/v1/network/devices/{id}/interfaces", s.withPermission(auth.PermFleetRead, s.networkDeviceHandlers.HandleGetInterfaces))
+		mux.HandleFunc("POST /api/v1/network-devices/{id}/enrich", s.withPermission(auth.PermFleetWrite, s.networkDeviceHandlers.HandleEnrichDevice))
+		mux.HandleFunc("GET /api/v1/network-devices/{id}/interfaces", s.withPermission(auth.PermFleetRead, s.networkDeviceHandlers.HandleGetInterfaces))
 	} else {
 		mux.HandleFunc("GET /api/v1/network/devices", s.withPermission(auth.PermFleetRead, s.handleNetworkDevicesUnavailable))
 		mux.HandleFunc("POST /api/v1/network/devices", s.withPermission(auth.PermFleetWrite, s.handleNetworkDevicesUnavailable))
@@ -497,6 +513,10 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/v1/network-devices/{id}/command", s.withPermission(auth.PermFleetWrite, s.handleNetworkDevicesUnavailable))
 		mux.HandleFunc("POST /api/v1/network-devices/{id}/scan", s.withPermission(auth.PermFleetWrite, s.handleNetworkDevicesUnavailable))
 		mux.HandleFunc("GET /api/v1/network-devices/{id}/inventory", s.withPermission(auth.PermFleetRead, s.handleNetworkDevicesUnavailable))
+		mux.HandleFunc("POST /api/v1/network/devices/{id}/enrich", s.withPermission(auth.PermFleetWrite, s.handleNetworkDevicesUnavailable))
+		mux.HandleFunc("GET /api/v1/network/devices/{id}/interfaces", s.withPermission(auth.PermFleetRead, s.handleNetworkDevicesUnavailable))
+		mux.HandleFunc("POST /api/v1/network-devices/{id}/enrich", s.withPermission(auth.PermFleetWrite, s.handleNetworkDevicesUnavailable))
+		mux.HandleFunc("GET /api/v1/network-devices/{id}/interfaces", s.withPermission(auth.PermFleetRead, s.handleNetworkDevicesUnavailable))
 	}
 
 	// Binary download + install script

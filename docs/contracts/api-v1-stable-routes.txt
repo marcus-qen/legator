@@ -1,7 +1,12 @@
+
+### Affected Endpoints
 # Append-only list. Do not remove entries; use docs/contracts/deprecations.json with status="removed".
+# [compat:additive] POST /api/v1/jobs/{id}/approve may return status pending_second_approval when quorum is enabled (approval.two_person_mode=true + policy require_second_approver=true) and only resumes execution after two distinct approvers.
+# [compat:additive] POST /api/v1/policies accepts optional policy field require_second_approver to require dual approval for high-risk mutation classes when two-person mode is enabled.
+# [compat:additive] POST /api/v1/probes/{id}/command accepts optional breakglass confirmation fields: breakglass_reason, breakglass_token.
+# [compat:additive] Sandbox session, task, artifact, replay, and certificate management endpoints (SBX series)
 DELETE /api/v1/alerts/escalation/policies/{id}
 DELETE /api/v1/alerts/{id}
-DELETE /api/v1/notification-channels/{id}
 DELETE /api/v1/alerts/routing/policies/{id}
 DELETE /api/v1/audit/purge
 DELETE /api/v1/auth/keys/{id}
@@ -9,19 +14,20 @@ DELETE /api/v1/cloud/connectors/{id}
 DELETE /api/v1/jobs/{id}
 DELETE /api/v1/model-profiles/{id}
 DELETE /api/v1/network/devices/{id}
+DELETE /api/v1/notification-channels/{id}
 DELETE /api/v1/policies/{id}
 DELETE /api/v1/probes/{id}
 DELETE /api/v1/probes/{id}/chat
 DELETE /api/v1/reliability/incidents/{id}
 DELETE /api/v1/roles/{name}
 DELETE /api/v1/runners/{id}
+DELETE /api/v1/sandboxes/{id}
 DELETE /api/v1/tenants/{id}
 DELETE /api/v1/users/{id}
 DELETE /api/v1/webhooks/{id}
+### Error Codes (when isolation enabled)
 GET /api/v1/alerts
 GET /api/v1/alerts/active
-GET /api/v1/notification-channels
-GET /api/v1/notification-channels/{id}
 GET /api/v1/alerts/escalation/policies
 GET /api/v1/alerts/escalation/policies/{id}
 GET /api/v1/alerts/{id}
@@ -31,10 +37,14 @@ GET /api/v1/alerts/routing/policies/{id}
 GET /api/v1/approvals
 GET /api/v1/approvals/{id}
 GET /api/v1/audit
-GET /api/v1/audit/verify
 GET /api/v1/audit/export
-GET /api/v1/audit/export/csv
 GET /api/v1/audit/export/bundle
+# - GET    /api/v1/audit/export/bundle  — filters export to requesting workspace
+GET /api/v1/audit/export/csv
+# - GET    /api/v1/audit/export/csv     — filters export to requesting workspace
+# - GET    /api/v1/audit/export/jsonl   — filters export to requesting workspace
+# - GET    /api/v1/audit                — filters events to requesting workspace
+GET /api/v1/audit/verify
 GET /api/v1/auth/keys
 GET /api/v1/auth/permissions
 GET /api/v1/automation-packs
@@ -45,8 +55,11 @@ GET /api/v1/automation-packs/{id}
 GET /api/v1/cloud/assets
 GET /api/v1/cloud/connectors
 GET /api/v1/commands/pending
+# - GET    /api/v1/commands/pending     — filters list to requesting workspace
 GET /api/v1/commands/{requestId}/replay
+# - GET    /api/v1/commands/{requestId}/replay  — denies cross-workspace access
 GET /api/v1/commands/{requestId}/stream
+# - GET    /api/v1/commands/{requestId}/stream  — denies cross-workspace access
 GET /api/v1/compliance/checks
 GET /api/v1/compliance/export/csv
 GET /api/v1/compliance/export/pdf
@@ -74,6 +87,8 @@ GET /api/v1/jobs/runs
 GET /api/v1/kubeflow/inventory
 GET /api/v1/kubeflow/runs/{name}/status
 GET /api/v1/kubeflow/status
+GET /api/v1/mcp/servers
+GET /api/v1/mcp/tools
 GET /api/v1/me
 GET /api/v1/metrics
 GET /api/v1/model-profiles
@@ -81,13 +96,18 @@ GET /api/v1/model-profiles/active
 GET /api/v1/model-usage
 GET /api/v1/network/devices
 GET /api/v1/network/devices/{id}
+GET /api/v1/network-devices/{id}/interfaces
+GET /api/v1/network/devices/{id}/interfaces
 GET /api/v1/network-devices/{id}/inventory
 GET /api/v1/network/devices/{id}/inventory
+GET /api/v1/notification-channels
+GET /api/v1/notification-channels/{id}
 GET /api/v1/openapi.yaml
 GET /api/v1/policies
 GET /api/v1/policies/{id}
 GET /api/v1/probes
 GET /api/v1/probes/{id}
+GET /api/v1/probes/{id}/certificates
 GET /api/v1/probes/{id}/chat
 GET /api/v1/probes/{id}/health
 GET /api/v1/reliability/drills
@@ -97,6 +117,16 @@ GET /api/v1/reliability/incidents/{id}
 GET /api/v1/reliability/incidents/{id}/export
 GET /api/v1/reliability/scorecard
 GET /api/v1/roles
+GET /api/v1/sandboxes
+GET /api/v1/sandboxes/{id}
+GET /api/v1/sandboxes/{id}/artifacts
+GET /api/v1/sandboxes/{id}/artifacts/{artifactId}
+GET /api/v1/sandboxes/{id}/artifacts/{artifactId}/content
+GET /api/v1/sandboxes/{id}/output
+GET /api/v1/sandboxes/{id}/replay
+GET /api/v1/sandboxes/{id}/replay/summary
+GET /api/v1/sandboxes/{id}/tasks
+GET /api/v1/sandboxes/{id}/tasks/{taskId}
 GET /api/v1/tenants
 GET /api/v1/tenants/{id}
 GET /api/v1/tokens
@@ -109,11 +139,11 @@ GET /healthz
 GET /mcp
 GET /version
 # New stable entries must be reflected in CHANGELOG.md and docs/releases/README.md annotations.
+# - No workspace grant     — 403 workspace_scope_required when isolation enabled
 PATCH /api/v1/reliability/incidents/{id}
 PATCH /api/v1/tenants/{id}
+# Permission grant: `workspace:<workspace-id>` or `workspace:*`
 POST /api/v1/alerts
-POST /api/v1/notification-channels
-POST /api/v1/notification-channels/{id}/test
 POST /api/v1/alerts/escalation/policies
 POST /api/v1/alerts/routing/policies
 POST /api/v1/alerts/routing/resolve
@@ -127,38 +157,48 @@ POST /api/v1/cloud/connectors/{id}/scan
 POST /api/v1/compliance/scan
 POST /api/v1/discovery/install-token
 POST /api/v1/discovery/scan
+GET /api/v1/discovery/candidates
+GET /api/v1/discovery/candidates/{id}
+POST /api/v1/discovery/candidates/{id}/approve
+POST /api/v1/discovery/candidates/{id}/reject
 POST /api/v1/fleet/by-tag/{tag}/command
 POST /api/v1/fleet/chat
 POST /api/v1/fleet/cleanup
 POST /api/v1/jobs
-POST /api/v1/jobs/{id}/cancel
 POST /api/v1/jobs/{id}/approve
-# [compat:additive] POST /api/v1/jobs/{id}/approve may return status pending_second_approval when quorum is enabled (approval.two_person_mode=true + policy require_second_approver=true) and only resumes execution after two distinct approvers.
-POST /api/v1/jobs/{id}/reject
+# - POST   /api/v1/jobs/{id}/approve    — enforces job workspace match before approval
+POST /api/v1/jobs/{id}/cancel
 POST /api/v1/jobs/{id}/disable
 POST /api/v1/jobs/{id}/enable
+POST /api/v1/jobs/{id}/reject
+# - POST   /api/v1/jobs/{id}/reject     — enforces job workspace match before rejection
 POST /api/v1/jobs/{id}/run
 POST /api/v1/jobs/{id}/runs/{runId}/cancel
 POST /api/v1/jobs/{id}/runs/{runId}/retry
 POST /api/v1/kubeflow/actions/refresh
 POST /api/v1/kubeflow/runs/{name}/cancel
 POST /api/v1/kubeflow/runs/submit
+POST /api/v1/mcp/invoke
 POST /api/v1/model-profiles
 POST /api/v1/model-profiles/{id}/activate
 POST /api/v1/network/devices
 POST /api/v1/network-devices/{id}/command
 POST /api/v1/network/devices/{id}/command
+POST /api/v1/network-devices/{id}/enrich
+POST /api/v1/network/devices/{id}/enrich
 POST /api/v1/network/devices/{id}/inventory
 POST /api/v1/network-devices/{id}/scan
 POST /api/v1/network/devices/{id}/scan
 POST /api/v1/network/devices/{id}/test
+POST /api/v1/notification-channels
+POST /api/v1/notification-channels/{id}/test
 POST /api/v1/policies
-# [compat:additive] POST /api/v1/policies accepts optional policy field require_second_approver to require dual approval for high-risk mutation classes when two-person mode is enabled.
 POST /api/v1/probes
 POST /api/v1/probes/{id}/apply-policy/{policyId}
+POST /api/v1/probes/{id}/certificates/issue
+POST /api/v1/probes/{id}/certificates/register
 POST /api/v1/probes/{id}/chat
 POST /api/v1/probes/{id}/command
-# [compat:additive] POST /api/v1/probes/{id}/command accepts optional breakglass confirmation fields: breakglass_reason, breakglass_token.
 POST /api/v1/probes/{id}/command/simulate
 POST /api/v1/probes/{id}/rotate-key
 POST /api/v1/probes/{id}/task
@@ -171,9 +211,19 @@ POST /api/v1/roles
 POST /api/v1/runners
 POST /api/v1/runners/{id}/start
 POST /api/v1/runners/{id}/stop
+# - POST   /api/v1/runners              — restricts create to scope workspace
 POST /api/v1/runs
 POST /api/v1/runs/{id}/artifacts/presign
+# - POST   /api/v1/runs/{id}/artifacts/presign  — enforces run workspace match
 POST /api/v1/runs/{id}/provider-proxy
+# - POST   /api/v1/runs/{id}/provider-proxy     — enforces run workspace match
+# - POST   /api/v1/runs                 — scopes token issuance to matching runner workspace
+POST /api/v1/sandboxes
+POST /api/v1/sandboxes/{id}/artifacts
+POST /api/v1/sandboxes/{id}/output
+POST /api/v1/sandboxes/{id}/tasks
+POST /api/v1/sandboxes/{id}/tasks/{taskId}/cancel
+POST /api/v1/sandboxes/{id}/transition
 POST /api/v1/tenants
 POST /api/v1/tokens
 POST /api/v1/users
@@ -182,69 +232,21 @@ POST /api/v1/webhooks/{id}/test
 POST /mcp
 PUT /api/v1/alerts/escalation/policies/{id}
 PUT /api/v1/alerts/{id}
-PUT /api/v1/notification-channels/{id}
 PUT /api/v1/alerts/routing/policies/{id}
 PUT /api/v1/cloud/connectors/{id}
 PUT /api/v1/jobs/{id}
 PUT /api/v1/model-profiles/{id}
 PUT /api/v1/network/devices/{id}
+PUT /api/v1/notification-channels/{id}
 PUT /api/v1/probes/{id}/tags
 PUT /api/v1/users/{id}/role
 PUT /api/v1/users/{id}/tenants
 # Stable REST API routes (v1 + health/version + MCP transport)
-
-
-# [compat:additive] Sandbox session, task, artifact, replay, and certificate management endpoints (SBX series)
-DELETE /api/v1/sandboxes/{id}
-GET /api/v1/probes/{id}/certificates
-GET /api/v1/sandboxes
-GET /api/v1/sandboxes/{id}
-GET /api/v1/sandboxes/{id}/artifacts
-GET /api/v1/sandboxes/{id}/artifacts/{artifactId}
-GET /api/v1/sandboxes/{id}/artifacts/{artifactId}/content
-GET /api/v1/sandboxes/{id}/output
-GET /api/v1/sandboxes/{id}/replay
-GET /api/v1/sandboxes/{id}/replay/summary
-GET /api/v1/sandboxes/{id}/tasks
-GET /api/v1/sandboxes/{id}/tasks/{taskId}
-POST /api/v1/probes/{id}/certificates/issue
-POST /api/v1/probes/{id}/certificates/register
-POST /api/v1/sandboxes
-POST /api/v1/sandboxes/{id}/artifacts
-POST /api/v1/sandboxes/{id}/output
-POST /api/v1/sandboxes/{id}/tasks
-POST /api/v1/sandboxes/{id}/tasks/{taskId}/cancel
-POST /api/v1/sandboxes/{id}/transition
-
-## Workspace Isolation (feature-flag: workspace_isolation.enabled)
-
 # When `workspace_isolation.enabled = true`, the following auth claims/headers are enforced:
-
-### Workspace Permission Token (API Key / User)
-# Permission grant: `workspace:<workspace-id>` or `workspace:*`
 # - `workspace:*`          — admin-level; can access all workspaces
-# - `workspace:my-org`     — scoped to workspace "my-org" only
-# - No workspace grant     — 403 workspace_scope_required when isolation enabled
-
-### Affected Endpoints
-# - POST   /api/v1/runners              — restricts create to scope workspace
-# - POST   /api/v1/runs                 — scopes token issuance to matching runner workspace
-# - POST   /api/v1/runs/{id}/artifacts/presign  — enforces run workspace match
-# - POST   /api/v1/runs/{id}/provider-proxy     — enforces run workspace match
-# - POST   /api/v1/jobs/{id}/approve    — enforces job workspace match before approval
-# - POST   /api/v1/jobs/{id}/reject     — enforces job workspace match before rejection
-# - GET    /api/v1/audit                — filters events to requesting workspace
-# - GET    /api/v1/audit/export/jsonl   — filters export to requesting workspace
-# - GET    /api/v1/audit/export/csv     — filters export to requesting workspace
-# - GET    /api/v1/audit/export/bundle  — filters export to requesting workspace
-# - GET    /api/v1/commands/pending     — filters list to requesting workspace
-# - GET    /api/v1/commands/{requestId}/stream  — denies cross-workspace access
-# - GET    /api/v1/commands/{requestId}/replay  — denies cross-workspace access
-
-### Error Codes (when isolation enabled)
-# - `workspace_scope_required`   (403) — no workspace: grant in token
-# - `workspace_scope_ambiguous`  (403) — multiple concrete workspace grants
 # - `workspace_forbidden`        (403) — resource belongs to different workspace
-GET /api/v1/mcp/servers
-GET /api/v1/mcp/tools
-POST /api/v1/mcp/invoke
+## Workspace Isolation (feature-flag: workspace_isolation.enabled)
+# - `workspace:my-org`     — scoped to workspace "my-org" only
+### Workspace Permission Token (API Key / User)
+# - `workspace_scope_ambiguous`  (403) — multiple concrete workspace grants
+# - `workspace_scope_required`   (403) — no workspace: grant in token

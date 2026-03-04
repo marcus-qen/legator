@@ -62,5 +62,6 @@ github.com/marcus-qen/legator/internal/controlplane/server (surfaces) -> github.
 github.com/marcus-qen/legator/internal/probe/agent (probe-runtime) -> github.com/marcus-qen/legator/internal/protocol (platform-runtime)
 github.com/marcus-qen/legator/internal/probe/agent (probe-runtime) -> github.com/marcus-qen/legator/internal/shared/signing (platform-runtime)
 github.com/marcus-qen/legator/internal/probe/connection (probe-runtime) -> github.com/marcus-qen/legator/internal/protocol (platform-runtime)
+github.com/marcus-qen/legator/internal/probe/discovery (probe-runtime) -> github.com/marcus-qen/legator/internal/protocol (platform-runtime)
 github.com/marcus-qen/legator/internal/probe/executor (probe-runtime) -> github.com/marcus-qen/legator/internal/protocol (platform-runtime)
 github.com/marcus-qen/legator/internal/probe/inventory (probe-runtime) -> github.com/marcus-qen/legator/internal/protocol (platform-runtime)
