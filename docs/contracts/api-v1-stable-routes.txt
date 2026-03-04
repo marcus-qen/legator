@@ -48,6 +48,10 @@ GET /api/v1/commands/pending
 GET /api/v1/commands/{requestId}/replay
 GET /api/v1/commands/{requestId}/stream
 GET /api/v1/compliance/checks
+GET /api/v1/compliance/export/csv
+GET /api/v1/compliance/export/pdf
+GET /api/v1/compliance/exports
+GET /api/v1/compliance/exports/{id}
 GET /api/v1/compliance/results
 GET /api/v1/compliance/summary
 GET /api/v1/dashboard

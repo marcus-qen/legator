@@ -71,6 +71,11 @@ func NewStore(dbPath string) (*Store, error) {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_ch_probe_id   ON compliance_history(probe_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_ch_timestamp  ON compliance_history(timestamp)`)
 
+	if err := initExportTable(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("init export table: %w", err)
+	}
+
 	return &Store{db: db}, nil
 }
 

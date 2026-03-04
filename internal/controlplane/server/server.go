@@ -168,8 +168,10 @@ type Server struct {
 	discoveryHandlers *discovery.Handler
 
 	// Compliance
-	complianceStore    *compliance.Store
-	complianceHandlers *compliance.Handler
+	complianceStore          *compliance.Store
+	complianceHandlers       *compliance.Handler
+	complianceExportHandlers *compliance.ExportHandler
+	complianceScheduler      *compliance.ExportScheduler
 
 	// Multi-tenant isolation
 	tenantStore *tenant.Store
@@ -1473,6 +1475,10 @@ func (s *Server) initCompliance() {
 
 	scanner := compliance.NewScanner(s.fleetMgr, s.remoteExecutor, store, s.logger.Named("compliance"))
 	s.complianceHandlers = compliance.NewHandler(scanner, store)
+	scheduler := compliance.NewScheduler(store, "all probes", s.logger.Named("compliance.scheduler"))
+	s.complianceScheduler = scheduler
+	s.complianceExportHandlers = compliance.NewExportHandler(store, scheduler)
+	scheduler.Start(context.Background())
 	s.logger.Info("compliance store opened", zap.String("path", complianceDBPath))
 }
 

@@ -137,11 +137,19 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/v1/compliance/results", s.withPermission(auth.PermFleetRead, s.complianceHandlers.HandleResults))
 		mux.HandleFunc("GET /api/v1/compliance/summary", s.withPermission(auth.PermFleetRead, s.complianceHandlers.HandleSummary))
 		mux.HandleFunc("GET /api/v1/compliance/checks", s.withPermission(auth.PermFleetRead, s.complianceHandlers.HandleChecks))
+		mux.HandleFunc("GET /api/v1/compliance/export/csv", s.withPermission(auth.PermFleetRead, s.complianceExportHandlers.HandleExportCSV))
+		mux.HandleFunc("GET /api/v1/compliance/export/pdf", s.withPermission(auth.PermFleetRead, s.complianceExportHandlers.HandleExportPDF))
+		mux.HandleFunc("GET /api/v1/compliance/exports", s.withPermission(auth.PermFleetRead, s.complianceExportHandlers.HandleListExports))
+		mux.HandleFunc("GET /api/v1/compliance/exports/{id}", s.withPermission(auth.PermFleetRead, s.complianceExportHandlers.HandleGetExport))
 	} else {
 		mux.HandleFunc("POST /api/v1/compliance/scan", s.withPermission(auth.PermFleetWrite, s.handleComplianceUnavailable))
 		mux.HandleFunc("GET /api/v1/compliance/results", s.withPermission(auth.PermFleetRead, s.handleComplianceUnavailable))
 		mux.HandleFunc("GET /api/v1/compliance/summary", s.withPermission(auth.PermFleetRead, s.handleComplianceUnavailable))
 		mux.HandleFunc("GET /api/v1/compliance/checks", s.withPermission(auth.PermFleetRead, s.handleComplianceUnavailable))
+		mux.HandleFunc("GET /api/v1/compliance/export/csv", s.withPermission(auth.PermFleetRead, s.handleComplianceUnavailable))
+		mux.HandleFunc("GET /api/v1/compliance/export/pdf", s.withPermission(auth.PermFleetRead, s.handleComplianceUnavailable))
+		mux.HandleFunc("GET /api/v1/compliance/exports", s.withPermission(auth.PermFleetRead, s.handleComplianceUnavailable))
+		mux.HandleFunc("GET /api/v1/compliance/exports/{id}", s.withPermission(auth.PermFleetRead, s.handleComplianceUnavailable))
 	}
 
 	// Metrics
