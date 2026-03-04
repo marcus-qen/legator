@@ -111,6 +111,7 @@ func (h *Handler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID  string            `json:"workspace_id"`
 		ProbeID      string            `json:"probe_id"`
 		TemplateID   string            `json:"template_id"`
+		Lane         string            `json:"lane"`
 		RuntimeClass string            `json:"runtime_class"`
 		CreatedBy    string            `json:"created_by"`
 		TTLSeconds   int64             `json:"ttl_seconds"`
@@ -120,6 +121,30 @@ func (h *Handler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
 		return
 	}
+
+	// If a named lane is specified, apply its defaults (overrides explicit runtime_class).
+	lane := strings.TrimSpace(body.Lane)
+	if lane != "" {
+		ld, err := ResolveLane(lane)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid_lane", err.Error())
+			return
+		}
+		// Apply lane defaults when not explicitly overridden.
+		if strings.TrimSpace(body.RuntimeClass) == "" {
+			body.RuntimeClass = ld.RuntimeClass
+		}
+		if strings.TrimSpace(body.TemplateID) == "" {
+			body.TemplateID = ld.TemplateID
+		}
+		if body.Metadata == nil {
+			body.Metadata = make(map[string]string)
+		}
+		body.Metadata["lane"] = lane
+		body.Metadata["lane_cpu_millis"] = fmt.Sprintf("%d", ld.CPUMillis)
+		body.Metadata["lane_memory_mib"] = fmt.Sprintf("%d", ld.MemoryMiB)
+	}
+
 	if strings.TrimSpace(body.RuntimeClass) == "" {
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", "runtime_class is required")
 		return

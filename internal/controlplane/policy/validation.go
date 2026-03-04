@@ -95,7 +95,7 @@ func NormalizeTemplateOptions(opts TemplateOptions) TemplateOptions {
 
 func ValidateExecutionClass(class protocol.ExecutionClass) error {
 	switch class {
-	case "", protocol.ExecObserveDirect, protocol.ExecDiagnoseSandbox, protocol.ExecRemediateSandbox, protocol.ExecBreakglassDirect:
+	case "", protocol.ExecObserveDirect, protocol.ExecDiagnoseSandbox, protocol.ExecRemediateSandbox, protocol.ExecBreakglassDirect, protocol.ExecWasmSandbox:
 		return nil
 	default:
 		return fmt.Errorf("invalid execution_class_required %q", class)

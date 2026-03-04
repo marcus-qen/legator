@@ -27,6 +27,12 @@ type Template struct {
 	MaxRuntimeSec          int                       `json:"max_runtime_sec,omitempty"`
 	AllowedScopes          []string                  `json:"allowed_scopes,omitempty"`
 
+	// WASM lane runtime configuration.
+	RuntimeClass        string   `json:"runtime_class,omitempty"`
+	CPUMillis           int      `json:"cpu_millis,omitempty"`
+	MemoryMiB           int      `json:"memory_mib,omitempty"`
+	AllowedCapabilities []string `json:"allowed_capabilities,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -41,6 +47,12 @@ type TemplateOptions struct {
 	Breakglass               protocol.BreakglassPolicy
 	MaxRuntimeSec            int
 	AllowedScopes            []string
+
+	// WASM lane resource constraints.
+	RuntimeClass        string
+	CPUMillis           int
+	MemoryMiB           int
+	AllowedCapabilities []string
 }
 
 // PolicyManager is the interface used by handlers for policy CRUD.
@@ -110,6 +122,27 @@ func NewStore() *Store {
 		ExecutionClassRequired: protocol.ExecRemediateSandbox,
 		SandboxRequired:        true,
 		ApprovalMode:           protocol.ApprovalMutationGate,
+	})
+
+	s.templates["wasm-fast-lane"] = &Template{
+		ID:                  "wasm-fast-lane",
+		Name:                "WASM Fast Lane",
+		Description:         "Lightweight WASM sandbox with wasmtime runtime class. Minimal capabilities, strict resource limits, no host-direct mutations.",
+		Level:               protocol.CapDiagnose,
+		Blocked:             []string{"rm -rf", "mkfs", "dd", "reboot", "shutdown", "mount", "chroot"},
+		RuntimeClass:        "wasmtime",
+		CPUMillis:           500,
+		MemoryMiB:           256,
+		AllowedCapabilities: []string{},
+		CreatedAt:           now,
+		UpdatedAt:           now,
+	}
+	s.applyOptions(s.templates["wasm-fast-lane"], TemplateOptions{
+		ExecutionClassRequired: protocol.ExecWasmSandbox,
+		SandboxRequired:        true,
+		ApprovalMode:           protocol.ApprovalMutationGate,
+		MaxRuntimeSec:          300,
+		AllowedScopes:          []string{"wasm:exec", "wasm:read"},
 	})
 	return s
 }
@@ -222,4 +255,16 @@ func (s *Store) applyOptions(tpl *Template, opts TemplateOptions) {
 	tpl.Breakglass = opts.Breakglass
 	tpl.MaxRuntimeSec = opts.MaxRuntimeSec
 	tpl.AllowedScopes = append([]string(nil), opts.AllowedScopes...)
+	if opts.RuntimeClass != "" {
+		tpl.RuntimeClass = opts.RuntimeClass
+	}
+	if opts.CPUMillis != 0 {
+		tpl.CPUMillis = opts.CPUMillis
+	}
+	if opts.MemoryMiB != 0 {
+		tpl.MemoryMiB = opts.MemoryMiB
+	}
+	if opts.AllowedCapabilities != nil {
+		tpl.AllowedCapabilities = append([]string(nil), opts.AllowedCapabilities...)
+	}
 }

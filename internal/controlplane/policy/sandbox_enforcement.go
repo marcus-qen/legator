@@ -81,3 +81,15 @@ func BreakglassReasonAllowed(reason string, allowed []string) bool {
 	}
 	return false
 }
+
+// IsWasmLane returns true when the selected execution lane is the WASM sandbox.
+func IsWasmLane(lane protocol.ExecutionClass) bool {
+	return lane == protocol.ExecWasmSandbox
+}
+
+// WasmLaneRejectsHostDirect returns true when a request should be rejected
+// because it attempts a host-direct mutation inside a WASM-lane sandbox.
+// WASM workloads are strictly sandboxed; host-direct execution is not permitted.
+func WasmLaneRejectsHostDirect(sandboxLane protocol.ExecutionClass, requestedLane protocol.ExecutionClass, category string) bool {
+	return IsWasmLane(sandboxLane) && IsHostDirectLane(requestedLane) && IsMutationCategory(category)
+}

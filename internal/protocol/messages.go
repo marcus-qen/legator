@@ -82,6 +82,7 @@ const (
 	ExecDiagnoseSandbox  ExecutionClass = "diagnose_sandbox"
 	ExecRemediateSandbox ExecutionClass = "remediate_sandbox"
 	ExecBreakglassDirect ExecutionClass = "breakglass_direct"
+	ExecWasmSandbox      ExecutionClass = "wasm_sandbox"
 )
 
 // ApprovalMode defines what human approval is required for execution.
