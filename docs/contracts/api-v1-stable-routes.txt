@@ -241,3 +241,6 @@ POST /api/v1/sandboxes/{id}/transition
 # - `workspace_scope_required`   (403) — no workspace: grant in token
 # - `workspace_scope_ambiguous`  (403) — multiple concrete workspace grants
 # - `workspace_forbidden`        (403) — resource belongs to different workspace
+GET /api/v1/mcp/servers
+GET /api/v1/mcp/tools
+POST /api/v1/mcp/invoke

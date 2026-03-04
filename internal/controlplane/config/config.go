@@ -82,6 +82,9 @@ type Config struct {
 	// MCP endpoint enablement
 	MCPEnabled bool `json:"mcp_enabled"`
 
+	// MCPServers configures external MCP servers the control plane connects to as a client.
+	MCPServers []MCPServerConfig `json:"mcp_servers,omitempty"`
+
 	// SandboxEnforcement blocks mutation-capable host-direct execution unless
 	// explicit breakglass confirmation is supplied.
 	SandboxEnforcement bool `json:"sandbox_enforcement"`
@@ -710,6 +713,46 @@ func (c Config) Save(path string) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0640)
+}
+
+// MCPServerConfig defines an external MCP server to connect to as a client.
+type MCPServerConfig struct {
+	// Name is a unique identifier for this server (used as namespace prefix).
+	Name string `json:"name"`
+	// Transport is "stdio" or "sse".
+	Transport string `json:"transport"`
+	// Command and Args are used for stdio transport.
+	Command string   `json:"command,omitempty"`
+	Args    []string `json:"args,omitempty"`
+	// Endpoint is used for SSE transport (e.g. http://localhost:8080/mcp).
+	Endpoint string `json:"endpoint,omitempty"`
+	// Timeout is the connect/call timeout (default "30s").
+	Timeout string `json:"timeout,omitempty"`
+	// Enabled controls whether this server is active (nil == true by default).
+	Enabled *bool `json:"enabled,omitempty"`
+	// Env are extra environment variables for stdio transport.
+	Env []string `json:"env,omitempty"`
+}
+
+// IsEnabled returns true when the server config is enabled.
+func (m MCPServerConfig) IsEnabled() bool {
+	if m.Enabled == nil {
+		return true
+	}
+	return *m.Enabled
+}
+
+// TimeoutDuration parses the timeout string, defaulting to 30s.
+func (m MCPServerConfig) TimeoutDuration() time.Duration {
+	raw := strings.TrimSpace(m.Timeout)
+	if raw == "" {
+		return 30 * time.Second
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 30 * time.Second
+	}
+	return d
 }
 
 // HasTLS returns true if TLS is configured.

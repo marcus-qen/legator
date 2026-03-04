@@ -176,6 +176,11 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.Handle("POST /mcp", s.mcpServer.Handler())
 	}
 
+	// MCP client API (external server connections)
+	mux.HandleFunc("GET /api/v1/mcp/servers", s.withPermission(auth.PermFleetRead, s.handleListMCPServers))
+	mux.HandleFunc("GET /api/v1/mcp/tools", s.withPermission(auth.PermFleetRead, s.handleListMCPTools))
+	mux.HandleFunc("POST /api/v1/mcp/invoke", s.withPermission(auth.PermFleetWrite, s.handleInvokeMCPTool))
+
 	// Commands
 	mux.HandleFunc("GET /api/v1/commands/pending", s.withPermission(auth.PermCommandExec, s.handlePendingCommands))
 	mux.HandleFunc("GET /api/v1/commands/{requestId}/stream", s.withPermission(auth.PermCommandExec, s.handleSSEStream))

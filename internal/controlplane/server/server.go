@@ -38,6 +38,7 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/jobs"
 	"github.com/marcus-qen/legator/internal/controlplane/kubeflow"
 	"github.com/marcus-qen/legator/internal/controlplane/llm"
+	"github.com/marcus-qen/legator/internal/controlplane/mcpclient"
 	"github.com/marcus-qen/legator/internal/controlplane/mcpserver"
 	"github.com/marcus-qen/legator/internal/controlplane/metrics"
 	"github.com/marcus-qen/legator/internal/controlplane/modeldock"
@@ -186,7 +187,8 @@ type Server struct {
 	sandboxReplayHandler   *sandbox.ReplayHandler
 
 	// MCP
-	mcpServer *mcpserver.MCPServer
+	mcpServer   *mcpserver.MCPServer
+	mcpRegistry *mcpclient.Registry
 
 	// Templates
 	pages *pageTemplates
@@ -314,6 +316,29 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 			}),
 		)
 		s.logger.Info("mcp server enabled", zap.String("path", "/mcp"), zap.String("version", mcpserver.Version))
+	}
+	// Initialize MCP client registry from config
+	if len(s.cfg.MCPServers) > 0 {
+		s.mcpRegistry = mcpclient.NewRegistry(s.logger)
+		for _, srvCfg := range s.cfg.MCPServers {
+			if !srvCfg.IsEnabled() {
+				continue
+			}
+			clientCfg := mcpclient.ServerConfig{
+				Name:           srvCfg.Name,
+				Transport:      mcpclient.TransportType(srvCfg.Transport),
+				Command:        srvCfg.Command,
+				Args:           srvCfg.Args,
+				Endpoint:       srvCfg.Endpoint,
+				ConnectTimeout: srvCfg.TimeoutDuration(),
+				CallTimeout:    srvCfg.TimeoutDuration(),
+				Env:            srvCfg.Env,
+			}
+			if err := s.mcpRegistry.Add(context.Background(), clientCfg); err != nil {
+				s.logger.Warn("mcp client: failed to connect to server", zap.String("name", srvCfg.Name), zap.Error(err))
+			}
+		}
+		s.logger.Info("mcp client registry initialized", zap.Int("servers", len(s.cfg.MCPServers)))
 	}
 	s.wireChatLLM()
 	s.initAuth()
