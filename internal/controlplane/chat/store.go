@@ -18,8 +18,9 @@ import (
 // Store provides persistent chat backed by SQLite.
 // Wraps the in-memory Manager — reads from memory, writes to both.
 type Store struct {
-	db  *sql.DB
-	mgr *Manager
+	db   *sql.DB
+	mgr  *Manager
+	done chan struct{}
 }
 
 // NewStore opens (or creates) a SQLite-backed chat store.
@@ -53,7 +54,7 @@ func NewStore(dbPath string, logger *zap.Logger) (*Store, error) {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_chat_probe ON chat_messages(probe_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_chat_ts ON chat_messages(timestamp)`)
 
-	s := &Store{db: db, mgr: NewManager(logger)}
+	s := &Store{db: db, mgr: NewManager(logger), done: make(chan struct{})}
 
 	if err := s.loadAll(); err != nil {
 		db.Close()
@@ -64,6 +65,8 @@ func NewStore(dbPath string, logger *zap.Logger) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("ensure schema version: %w", err)
 	}
+
+	s.startPruner(1*time.Hour, 24*time.Hour)
 	return s, nil
 }
 
@@ -105,8 +108,14 @@ func (s *Store) SetResponder(fn ResponderFunc) {
 	s.mgr.SetResponder(fn)
 }
 
-// Close shuts down the store.
+// Close shuts down the store, stopping the background pruner and closing the database.
 func (s *Store) Close() error {
+	select {
+	case <-s.done:
+		// already closed
+	default:
+		close(s.done)
+	}
 	return s.db.Close()
 }
 

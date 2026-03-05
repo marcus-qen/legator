@@ -77,16 +77,15 @@ func (fr *FleetChatResponder) Respond(ctx context.Context, history []ChatMessage
 		Content: fleetChatSystemPrompt + "\n\n[Fleet Context]\n" + fleetCtx,
 	}}
 
-	histStart := 0
-	if len(history) > 20 {
-		histStart = len(history) - 20
-	}
-	for _, msg := range history[histStart:] {
+	histMessages := make([]Message, 0, len(history))
+	for _, msg := range history {
 		if msg.Role == RoleSystem {
 			continue
 		}
-		messages = append(messages, Message(msg))
+		histMessages = append(histMessages, Message(msg))
 	}
+	histMessages = trimToTokenBudget(histMessages, defaultHistoryTokenBudget)
+	messages = append(messages, histMessages...)
 	messages = append(messages, Message{Role: RoleUser, Content: userMsg})
 
 	for step := 0; step < fr.maxSteps; step++ {

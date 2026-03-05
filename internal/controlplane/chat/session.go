@@ -206,6 +206,29 @@ func (m *Manager) publish(probeID string, msg Message) {
 	}
 }
 
+// PruneOlderThan removes all messages with a timestamp before cutoff from
+// every in-memory session.
+func (m *Manager) PruneOlderThan(cutoff time.Time) {
+	m.mu.RLock()
+	sessions := make([]*Session, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		sessions = append(sessions, s)
+	}
+	m.mu.RUnlock()
+
+	for _, sess := range sessions {
+		sess.mu.Lock()
+		kept := sess.Messages[:0]
+		for _, msg := range sess.Messages {
+			if !msg.Timestamp.Before(cutoff) {
+				kept = append(kept, msg)
+			}
+		}
+		sess.Messages = kept
+		sess.mu.Unlock()
+	}
+}
+
 // SetResponder sets the function used to generate assistant replies.
 func (m *Manager) SetResponder(fn ResponderFunc) {
 	m.mu.Lock()

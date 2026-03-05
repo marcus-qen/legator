@@ -91,17 +91,16 @@ func (cr *ChatResponder) Respond(
 		{Role: RoleSystem, Content: chatSystemPrompt + "\n\n[Server Context]\n" + invCtx},
 	}
 
-	// Add recent chat history (last 20 messages max to control context)
-	histStart := 0
-	if len(history) > 20 {
-		histStart = len(history) - 20
-	}
-	for _, msg := range history[histStart:] {
+	// Add recent chat history, trimmed to stay within the token budget.
+	histMessages := make([]Message, 0, len(history))
+	for _, msg := range history {
 		if msg.Role == "system" {
-			continue // skip system messages from chat
+			continue
 		}
-		messages = append(messages, Message(msg))
+		histMessages = append(histMessages, Message(msg))
 	}
+	histMessages = trimToTokenBudget(histMessages, defaultHistoryTokenBudget)
+	messages = append(messages, histMessages...)
 
 	// Add the new user message
 	messages = append(messages, Message{Role: RoleUser, Content: userMsg})

@@ -7,6 +7,7 @@
 </div>
 <div class="right">
   <a href="/probe/{{.Probe.ID}}" class="btn">Probe Detail</a>
+  <button class="btn btn-secondary" type="button" id="new-chat-btn" style="font-size:0.8em;background:#1a1a1a;border-color:#444;">New Chat</button>
   <button class="btn" type="button" data-context-toggle aria-expanded="false" aria-controls="probe-context-panel">Context</button>
   <span id="connection-status" class="tag"><span id="connection-dot" class="dot dot-pending"></span> <span id="connection-text">Connecting…</span></span>
 </div>
@@ -100,6 +101,28 @@
       chatForm.requestSubmit();
     }
   });
+
+  function addSystemMessage(text) {
+    renderMessage({
+      id: `sys-${Date.now()}`,
+      role: 'system',
+      content: text,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  const newChatBtn = document.getElementById('new-chat-btn');
+  if (newChatBtn) {
+    newChatBtn.addEventListener('click', () => {
+      if (!confirm('Clear chat history?')) return;
+      fetch('/api/v1/chat/{{.Probe.ID}}', { method: 'DELETE' }).then(() => {
+        document.getElementById('message-list').innerHTML = '';
+        knownMessageIds.clear();
+        emptyState.style.display = '';
+        addSystemMessage('Chat cleared. Previous context has been reset.');
+      });
+    });
+  }
 
   const pathParts = window.location.pathname.split('/').filter(Boolean);
   const probeID = pathParts[1] || '';
