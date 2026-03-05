@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Legator — What Can You Actually Do With It?</title>
+  <style>
+    :root{--bg:#0f1117;--card:#161921;--card-hover:#1c1f2b;--text:#e6e8ef;--muted:#9ca3af;--line:#2a2f3a;--accent:#d4a053;--green:#22c55e;--red:#ef4444;--blue:#3b82f6;--purple:#a78bfa;--cyan:#06b6d4}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;line-height:1.65}
+    a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+
+    /* NAV */
+    nav{position:sticky;top:0;z-index:100;background:rgba(15,17,23,0.92);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);padding:0.8rem 2rem;display:flex;align-items:center;gap:1.5rem}
+    nav .logo{color:var(--accent);font-weight:700;font-size:1.1rem;letter-spacing:0.02em}
+    nav a{color:var(--muted);font-size:0.85rem}nav a:hover{color:var(--text);text-decoration:none}
+    .back-link{margin-left:auto}
+
+    /* HERO */
+    .hero{max-width:64rem;margin:0 auto;padding:4rem 2rem 3rem;text-align:center}
+    .hero h1{font-size:clamp(2rem,5vw,3.2rem);letter-spacing:-0.02em;line-height:1.15;margin-bottom:1rem}
+    .hero h1 em{font-style:normal;color:var(--accent)}
+    .hero .sub{font-size:clamp(1rem,2vw,1.25rem);color:var(--muted);max-width:44rem;margin:0 auto 2rem}
+    .pillars{display:flex;gap:1.5rem;justify-content:center;flex-wrap:wrap;margin-bottom:2.5rem}
+    .pillar{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:1.2rem 1.6rem;min-width:200px;max-width:240px;text-align:center}
+    .pillar .icon{font-size:2rem;margin-bottom:0.5rem}
+    .pillar h3{font-size:0.95rem;margin-bottom:0.3rem}
+    .pillar p{font-size:0.82rem;color:var(--muted)}
+
+    /* SECTION */
+    .section{max-width:64rem;margin:0 auto;padding:0 2rem 4rem}
+    .section-label{display:inline-block;color:var(--accent);font-size:0.75rem;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:0.5rem}
+    .section h2{font-size:clamp(1.4rem,3vw,2rem);margin-bottom:0.6rem;line-height:1.2}
+    .section .desc{color:var(--muted);max-width:40rem;margin-bottom:2rem;font-size:0.95rem}
+
+    /* USE CASE CARD */
+    .usecase{background:var(--card);border:1px solid var(--line);border-radius:10px;margin-bottom:2.5rem;overflow:hidden}
+    .usecase-header{padding:2rem 2rem 1rem;display:flex;align-items:flex-start;gap:1.2rem}
+    .usecase-num{display:flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:50%;background:rgba(212,160,83,0.12);color:var(--accent);font-weight:700;font-size:1.2rem;flex-shrink:0}
+    .usecase-header h3{font-size:1.3rem;margin-bottom:0.3rem}
+    .usecase-header .persona{font-size:0.82rem;color:var(--muted)}
+    .usecase-header .persona strong{color:var(--cyan)}
+    .usecase-body{padding:0 2rem 2rem}
+
+    /* BEFORE/AFTER */
+    .compare{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin:1.5rem 0}
+    @media(max-width:700px){.compare{grid-template-columns:1fr}}
+    .compare-col{border-radius:8px;padding:1.2rem 1.4rem}
+    .compare-col.before{background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.2)}
+    .compare-col.after{background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2)}
+    .compare-col h4{font-size:0.8rem;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:0.7rem}
+    .compare-col.before h4{color:var(--red)}
+    .compare-col.after h4{color:var(--green)}
+    .compare-col ul{list-style:none;padding:0}
+    .compare-col li{font-size:0.88rem;color:var(--muted);padding:0.3rem 0;padding-left:1.4rem;position:relative}
+    .compare-col.before li::before{content:"✗";position:absolute;left:0;color:var(--red)}
+    .compare-col.after li::before{content:"✓";position:absolute;left:0;color:var(--green)}
+
+    /* STORYBOARD */
+    .storyboard{display:flex;gap:0;align-items:stretch;overflow-x:auto;padding:0.5rem 0 1rem;-webkit-overflow-scrolling:touch}
+    .step{flex:0 0 auto;width:180px;position:relative;text-align:center;padding:1rem 0.8rem}
+    .step-num{width:32px;height:32px;border-radius:50%;background:var(--accent);color:var(--bg);font-weight:700;font-size:0.85rem;display:inline-flex;align-items:center;justify-content:center;margin-bottom:0.5rem}
+    .step-text{font-size:0.8rem;color:var(--muted);line-height:1.4}
+    .step-text strong{color:var(--text);display:block;margin-bottom:0.2rem;font-size:0.85rem}
+    .step::after{content:"→";position:absolute;right:-8px;top:50%;transform:translateY(-50%);color:var(--line);font-size:1.2rem}
+    .step:last-child::after{display:none}
+
+    /* DIAGRAM */
+    .diagram{background:rgba(255,255,255,0.02);border:1px solid var(--line);border-radius:8px;padding:1.5rem;margin:1.5rem 0;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,monospace;font-size:0.82rem;line-height:1.7;color:var(--muted);overflow-x:auto;white-space:pre}
+    .diagram .hl{color:var(--accent)}
+    .diagram .gr{color:var(--green)}
+    .diagram .bl{color:var(--blue)}
+    .diagram .rd{color:var(--red)}
+
+    /* TAG */
+    .tag{display:inline-block;padding:0.15rem 0.5rem;border-radius:3px;font-size:0.72rem;letter-spacing:0.03em;margin-left:0.4rem}
+    .tag-works{background:rgba(34,197,94,0.12);color:var(--green);border:1px solid rgba(34,197,94,0.3)}
+    .tag-needs{background:rgba(212,160,83,0.12);color:var(--accent);border:1px solid rgba(212,160,83,0.3)}
+    .tag-market{background:rgba(167,139,250,0.12);color:var(--purple);border:1px solid rgba(167,139,250,0.3)}
+
+    /* MARKET BOX */
+    .market-box{background:rgba(167,139,250,0.06);border:1px solid rgba(167,139,250,0.2);border-radius:8px;padding:1rem 1.4rem;margin-top:1.2rem}
+    .market-box h4{color:var(--purple);font-size:0.8rem;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:0.5rem}
+    .market-box p{font-size:0.85rem;color:var(--muted)}
+    .market-box strong{color:var(--text)}
+
+    /* CTA */
+    .cta-section{text-align:center;padding:3rem 2rem 4rem;max-width:40rem;margin:0 auto}
+    .cta-section h2{margin-bottom:1rem}
+    .cta-section p{color:var(--muted);margin-bottom:1.5rem}
+    .cta-btn{display:inline-block;padding:0.7rem 1.8rem;border:1px solid var(--accent);color:var(--accent);font-size:0.95rem;border-radius:4px;transition:background 0.2s}
+    .cta-btn:hover{background:rgba(212,160,83,0.1);text-decoration:none}
+
+    footer{text-align:center;padding:2rem;border-top:1px solid var(--line);color:var(--muted);font-size:0.82rem}
+  </style>
+</head>
+<body>
+  <nav>
+    <span class="logo">Legator</span>
+    <a href="#usecases">Use Cases</a>
+    <a href="#how-it-works">How It Works</a>
+    <a class="back-link" href="/">← Back to main</a>
+  </nav>
+
+  <!-- HERO -->
+  <div class="hero">
+    <h1>See everything. Automate safely.<br/><em>Prove compliance.</em></h1>
+    <p class="sub">
+      Legator is a self-hosted fleet control plane. Install a 7MB probe on each server.
+      Get instant visibility, run safe automation with approval gates, and generate
+      auditor-ready compliance reports. All from one dashboard. No SaaS. No vendor lock-in.
+    </p>
+    <div class="pillars">
+      <div class="pillar">
+        <div class="icon">👁️</div>
+        <h3>See Everything</h3>
+        <p>Every server, every service, every package. Live. No SSH needed.</p>
+      </div>
+      <div class="pillar">
+        <div class="icon">🔒</div>
+        <h3>Automate Safely</h3>
+        <p>Jobs with approval gates. Sandboxed execution. Full audit trail.</p>
+      </div>
+      <div class="pillar">
+        <div class="icon">📋</div>
+        <h3>Prove Compliance</h3>
+        <p>Scan against frameworks. Export PDF/CSV. Hand it to the auditor.</p>
+      </div>
+      <div class="pillar">
+        <div class="icon">🤖</div>
+        <h3>AI-Native</h3>
+        <p>Chat with your fleet. MCP server built in. Your AI tools work out of the box.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- HOW IT WORKS -->
+  <div class="section" id="how-it-works">
+    <span class="section-label">Architecture</span>
+    <h2>How it works — in 60 seconds</h2>
+    <p class="desc">One binary. One install command. No agents, no dependencies, no Java, no Docker required.</p>
+    <div class="diagram"><span class="hl">You</span> → Install probe (7MB static binary) on each server
+              ↓
+<span class="bl">Probe</span> → Connects home over WebSocket (TLS)
+              → Collects inventory: OS, CPU, RAM, disk, packages, services, users
+              → Sends heartbeat every 30 seconds
+              ↓
+<span class="hl">Control Plane</span> → Dashboard shows everything
+                    → You type a question in Chat — AI has <span class="gr">live probe data</span>
+                    → AI suggests a fix → you approve → probe executes
+                    → Every action logged with before/after state
+                    ↓
+<span class="gr">Policy Engine</span> → Probe can only do what policy allows
+                  → Observe (read-only) → Diagnose → Remediate
+                  → Risky commands require human approval
+                  → <span class="rd">AI never has root. Probe never reasons alone.</span></div>
+  </div>
+
+  <!-- USE CASES -->
+  <div class="section" id="usecases">
+    <span class="section-label">Practical Use Cases</span>
+    <h2>What real people actually do with Legator</h2>
+    <p class="desc">Not feature lists. Not marketing. Seven real scenarios from real IT teams.</p>
+
+    <!-- USE CASE 1 -->
+    <div class="usecase">
+      <div class="usecase-header">
+        <div class="usecase-num">1</div>
+        <div>
+          <h3>"What's actually running on my servers?" <span class="tag tag-works">Works today</span></h3>
+          <p class="persona"><strong>Sam</strong> — sysadmin who just inherited 25 undocumented servers</p>
+        </div>
+      </div>
+      <div class="usecase-body">
+        <div class="compare">
+          <div class="compare-col before">
+            <h4>Without Legator</h4>
+            <ul>
+              <li>SSH into each server one by one</li>
+              <li>Run uname, df, systemctl, apt list manually</li>
+              <li>Copy output into a spreadsheet</li>
+              <li>Takes 2–3 hours. Out of date immediately.</li>
+              <li>Repeat next month. Or don't. Nobody checks.</li>
+            </ul>
+          </div>
+          <div class="compare-col after">
+            <h4>With Legator</h4>
+            <ul>
+              <li>One install command per server (or push via Ansible)</li>
+              <li>Dashboard shows everything: OS, services, packages, users, disk</li>
+              <li>Live updates every 30 seconds</li>
+              <li>Filter: "Ubuntu 22.04 servers with &lt;10% disk free"</li>
+              <li>Takes 10 minutes to deploy. Never out of date.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="storyboard">
+          <div class="step"><div class="step-num">1</div><div class="step-text"><strong>Install</strong>curl | bash on each server (30 seconds each)</div></div>
+          <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Probes connect</strong>Appear in dashboard within seconds</div></div>
+          <div class="step"><div class="step-num">3</div><div class="step-text"><strong>Inventory arrives</strong>OS, packages, services, users, disk, CPU, RAM</div></div>
+          <div class="step"><div class="step-num">4</div><div class="step-text"><strong>Browse</strong>Click any server → full detail view</div></div>
+          <div class="step"><div class="step-num">5</div><div class="step-text"><strong>Filter & search</strong>"Show me all servers running nginx"</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- USE CASE 2 -->
+    <div class="usecase">
+      <div class="usecase-header">
+        <div class="usecase-num">2</div>
+        <div>
+          <h3>"Am I compliant? Prove it." <span class="tag tag-market">£50B market</span></h3>
+          <p class="persona"><strong>Dave</strong> — IT manager, needs Cyber Essentials for government contracts</p>
+        </div>
+      </div>
+      <div class="usecase-body">
+        <div class="compare">
+          <div class="compare-col before">
+            <h4>Without Legator</h4>
+            <ul>
+              <li>Hire a consultant: £500–2,000 per assessment</li>
+              <li>Consultant SSHes into each server manually</li>
+              <li>Writes a report in Word. Takes 1–2 days.</li>
+              <li>Valid for one year. Out of date within a week.</li>
+              <li>Or pay Vanta $10K+/year (SaaS only)</li>
+            </ul>
+          </div>
+          <div class="compare-col after">
+            <h4>With Legator</h4>
+            <ul>
+              <li>Click "Run Compliance Scan" → scans all servers</li>
+              <li>Checks mapped to Cyber Essentials 5 controls</li>
+              <li>Results in dashboard: 23/25 pass, 2 need fixes</li>
+              <li>Click "Export PDF" → hand it to the auditor</li>
+              <li>Run it weekly. Always audit-ready. Self-hosted.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="storyboard">
+          <div class="step"><div class="step-num">1</div><div class="step-text"><strong>Scan</strong>Click "Compliance" → "Run Scan"</div></div>
+          <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Probes check</strong>Firewall, SSH, patching, encryption, accounts, services</div></div>
+          <div class="step"><div class="step-num">3</div><div class="step-text"><strong>Results</strong>Pass/Fail per server per control. Evidence captured.</div></div>
+          <div class="step"><div class="step-num">4</div><div class="step-text"><strong>Fix issues</strong>Click failing check → see exactly what to fix</div></div>
+          <div class="step"><div class="step-num">5</div><div class="step-text"><strong>Export</strong>PDF or CSV mapped to CE/CIS controls → auditor</div></div>
+        </div>
+        <div class="diagram"><span class="hl">Built-in compliance checks (7 today, growing):</span>
+
+  <span class="gr">✓</span> Firewall active         — iptables / nftables / ufw rules present?
+  <span class="gr">✓</span> SSH root login           — PermitRootLogin set to no?
+  <span class="gr">✓</span> SSH password auth        — Key-only access enforced?
+  <span class="gr">✓</span> OS security patches      — Any pending via apt/yum/dnf?
+  <span class="gr">✓</span> Disk encryption          — LUKS/dm-crypt volumes present?
+  <span class="gr">✓</span> Passwordless accounts    — Any users with empty passwords?
+  <span class="gr">✓</span> Unnecessary services     — telnet, rsh, rlogin, tftp running?
+
+<span class="hl">Maps to:</span> Cyber Essentials (UK) · CIS Benchmarks · ISO 27001 Annex A</div>
+        <div class="market-box">
+          <h4>Why this matters</h4>
+          <p><strong>Cyber Essentials</strong> is mandatory for UK government contracts. <strong>Vanta</strong> charges $10K+/year for SaaS compliance. <strong>Qualys</strong> just launched automated CE+ evidence (March 2026). The GRC market is <strong>$50.7B</strong> and growing 10%/year. Nobody offers self-hosted compliance evidence generation. This is the gap.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- USE CASE 3 -->
+    <div class="usecase">
+      <div class="usecase-header">
+        <div class="usecase-num">3</div>
+        <div>
+          <h3>"It's 3am and the website is down" <span class="tag tag-works">Works today</span></h3>
+          <p class="persona"><strong>Alex</strong> — junior on-call engineer, 6 months experience</p>
+        </div>
+      </div>
+      <div class="usecase-body">
+        <div class="compare">
+          <div class="compare-col before">
+            <h4>Without Legator</h4>
+            <ul>
+              <li>Alex pages the senior engineer at 3am</li>
+              <li>Senior logs in remotely. SSHes in. Investigates.</li>
+              <li>30–60 minutes including wake-up time</li>
+              <li>No record of what was tried or what fixed it</li>
+              <li>Senior is grumpy tomorrow. Alex learned nothing.</li>
+            </ul>
+          </div>
+          <div class="compare-col after">
+            <h4>With Legator</h4>
+            <ul>
+              <li>Alex opens Legator → clicks web server → Chat</li>
+              <li>Types: "Website is returning 503s. What's wrong?"</li>
+              <li>AI has live probe data: sees /var/log at 98% full</li>
+              <li>"Nginx can't write logs → 503s. Want me to rotate logs?"</li>
+              <li>Alex approves. Fixed in 2 minutes. Full audit trail.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="storyboard">
+          <div class="step"><div class="step-num">1</div><div class="step-text"><strong>Alert fires</strong>Website down. Alex opens Legator.</div></div>
+          <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Ask the AI</strong>"What's wrong with web-01?"</div></div>
+          <div class="step"><div class="step-num">3</div><div class="step-text"><strong>AI diagnoses</strong>Reads live data: disk 98%, nginx error logs</div></div>
+          <div class="step"><div class="step-num">4</div><div class="step-text"><strong>Suggests fix</strong>"Rotate logs to free space. Approve?"</div></div>
+          <div class="step"><div class="step-num">5</div><div class="step-text"><strong>Execute</strong>Approved → runs → disk drops to 45% → site up</div></div>
+          <div class="step"><div class="step-num">6</div><div class="step-text"><strong>Audit trail</strong>Who, what, when, before/after state</div></div>
+        </div>
+        <div class="diagram"><span class="hl">Why this isn't just ChatGPT:</span>
+
+  <span class="rd">✗</span> ChatGPT has no access to your servers
+  <span class="rd">✗</span> ChatGPT can only suggest, not execute
+  <span class="rd">✗</span> ChatGPT conversations aren't audited
+
+  <span class="gr">✓</span> Legator AI has <span class="gr">live probe data</span> (actual disk usage, service status, logs)
+  <span class="gr">✓</span> Legator can <span class="gr">execute commands</span> (with human approval)
+  <span class="gr">✓</span> Every action is <span class="gr">audited</span> with before/after state
+  <span class="gr">✓</span> Policy limits what AI can do per server</div>
+      </div>
+    </div>
+
+    <!-- USE CASE 4 -->
+    <div class="usecase">
+      <div class="usecase-header">
+        <div class="usecase-num">4</div>
+        <div>
+          <h3>"Run monthly maintenance on all 25 servers" <span class="tag tag-needs">Needs validation</span></h3>
+          <p class="persona"><strong>Sam</strong> — solo sysadmin, 25 servers, not enough hours in the day</p>
+        </div>
+      </div>
+      <div class="usecase-body">
+        <div class="compare">
+          <div class="compare-col before">
+            <h4>Without Legator</h4>
+            <ul>
+              <li>SSH into each server. Run same 5 commands.</li>
+              <li>Copy output. Paste into document.</li>
+              <li>Takes 2–3 hours. Boring. Error-prone.</li>
+              <li>Gets skipped when Sam is busy (which is always)</li>
+              <li>Management asks "are we patched?" Sam guesses.</li>
+            </ul>
+          </div>
+          <div class="compare-col after">
+            <h4>With Legator</h4>
+            <ul>
+              <li>Create Job: "Monthly Maintenance Check"</li>
+              <li>Steps: check patches, disk, SSL certs, stale services</li>
+              <li>Schedule: 1st of month, 2am. Runs automatically.</li>
+              <li>Results in dashboard next morning</li>
+              <li>"Are we patched?" Click. Here's the report.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="storyboard">
+          <div class="step"><div class="step-num">1</div><div class="step-text"><strong>Define job</strong>Name it, add check commands</div></div>
+          <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Target fleet</strong>All servers, or filter by tag</div></div>
+          <div class="step"><div class="step-num">3</div><div class="step-text"><strong>Schedule</strong>Monthly, weekly, or on-demand</div></div>
+          <div class="step"><div class="step-num">4</div><div class="step-text"><strong>Runs at 2am</strong>Checks every server automatically</div></div>
+          <div class="step"><div class="step-num">5</div><div class="step-text"><strong>Morning report</strong>Dashboard shows results + issues</div></div>
+        </div>
+        <div class="market-box">
+          <h4>This is what Rundeck sells</h4>
+          <p><strong>PagerDuty acquired Rundeck</strong> because customers wanted scheduled ops tasks with visibility and approval gates. Rundeck Enterprise costs <strong>$20K+/year</strong>. AWX requires PostgreSQL + Redis + containers. Legator does it in one binary.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- USE CASE 5 -->
+    <div class="usecase">
+      <div class="usecase-header">
+        <div class="usecase-num">5</div>
+        <div>
+          <h3>"Give each client a monthly report" <span class="tag tag-needs">Needs building</span></h3>
+          <p class="persona"><strong>Priya</strong> — MSP engineer, manages 12 clients' infrastructure</p>
+        </div>
+      </div>
+      <div class="usecase-body">
+        <div class="compare">
+          <div class="compare-col before">
+            <h4>Without Legator</h4>
+            <ul>
+              <li>Log into 4 different monitoring tools</li>
+              <li>Manually compile reports in Word</li>
+              <li>Takes half a day across all clients</li>
+              <li>Some clients have Zabbix, one has PRTG, one has Nagios</li>
+              <li>Nobody reads the reports anyway</li>
+            </ul>
+          </div>
+          <div class="compare-col after">
+            <h4>With Legator</h4>
+            <ul>
+              <li>Each client = a workspace (data fully isolated)</li>
+              <li>Click client → "Export Monthly Report"</li>
+              <li>PDF: fleet health, patches, incidents, resources</li>
+              <li>5 minutes for all 12 clients</li>
+              <li>Clients can log in and see their own dashboard</li>
+            </ul>
+          </div>
+        </div>
+        <div class="storyboard">
+          <div class="step"><div class="step-num">1</div><div class="step-text"><strong>Select client</strong>Switch workspace in dashboard</div></div>
+          <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Review health</strong>Green/amber/red at a glance</div></div>
+          <div class="step"><div class="step-num">3</div><div class="step-text"><strong>Export</strong>One-click PDF report</div></div>
+          <div class="step"><div class="step-num">4</div><div class="step-text"><strong>Send</strong>Email to client contact</div></div>
+          <div class="step"><div class="step-num">5</div><div class="step-text"><strong>Next client</strong>Repeat. 5 minutes total.</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- USE CASE 6 -->
+    <div class="usecase">
+      <div class="usecase-header">
+        <div class="usecase-num">6</div>
+        <div>
+          <h3>"Can my AI tools manage my servers?" <span class="tag tag-works">Built — 20+ tools</span></h3>
+          <p class="persona"><strong>Any engineer</strong> using Claude, Cursor, or any MCP-compatible AI tool</p>
+        </div>
+      </div>
+      <div class="usecase-body">
+        <div class="diagram"><span class="hl">Legator is an MCP server.</span> Connect any MCP client and your AI can:
+
+  <span class="bl">legator_list_probes</span>       → "Which servers are online?"
+  <span class="bl">legator_probe_info</span>        → "What's running on web-01?"
+  <span class="bl">legator_get_inventory</span>     → "Show me all packages on db-02"
+  <span class="bl">legator_fleet_query</span>       → "Which servers have high disk usage?"
+  <span class="bl">legator_run_command</span>       → "Check nginx status on web-01"
+  <span class="bl">legator_search_audit</span>      → "What changed on db-02 yesterday?"
+  <span class="bl">legator_list_jobs</span>         → "What scheduled jobs exist?"
+  <span class="bl">legator_decide_approval</span>   → "Approve the pending restart"
+  <span class="bl">legator_probe_health</span>      → "Is anything unhealthy?"
+
+  <span class="hl">+ 11 more tools</span> for federation, Grafana, Kubeflow, sandbox execution</div>
+        <div class="storyboard">
+          <div class="step"><div class="step-num">1</div><div class="step-text"><strong>Configure</strong>Add Legator MCP URL to your AI tool</div></div>
+          <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Ask</strong>"Which servers have pending updates?"</div></div>
+          <div class="step"><div class="step-num">3</div><div class="step-text"><strong>AI queries</strong>Calls legator_fleet_query with live data</div></div>
+          <div class="step"><div class="step-num">4</div><div class="step-text"><strong>Respond</strong>"3 servers: web-01, db-02, worker-05"</div></div>
+          <div class="step"><div class="step-num">5</div><div class="step-text"><strong>Act</strong>"Schedule updates on web-01 tonight"</div></div>
+        </div>
+        <div class="market-box">
+          <h4>Nobody else has this</h4>
+          <p><strong>Google</strong> launched MCP servers for GKE and BigQuery (Dec 2025). MCP gateways are now a product category. But nobody offers a <strong>self-hosted fleet manager that's also an MCP server</strong>. Your AI tools can query and manage your infrastructure without leaving the conversation.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- USE CASE 7 -->
+    <div class="usecase">
+      <div class="usecase-header">
+        <div class="usecase-num">7</div>
+        <div>
+          <h3>"What happened? Show me the timeline." <span class="tag tag-needs">Needs validation</span></h3>
+          <p class="persona"><strong>Everyone</strong> — after an incident, during an audit, or when things break</p>
+        </div>
+      </div>
+      <div class="usecase-body">
+        <div class="storyboard">
+          <div class="step"><div class="step-num">1</div><div class="step-text"><strong>Something breaks</strong>Production DB went down at 2pm</div></div>
+          <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Open audit log</strong>Filter: server=db-01, time=1:30–2:30pm</div></div>
+          <div class="step"><div class="step-num">3</div><div class="step-text"><strong>See what happened</strong>1:47pm: user jenkins ran "restart postgresql"</div></div>
+          <div class="step"><div class="step-num">4</div><div class="step-text"><strong>Create incident</strong>Timeline auto-populated from audit events</div></div>
+          <div class="step"><div class="step-num">5</div><div class="step-text"><strong>Export</strong>Post-mortem PDF with full timeline</div></div>
+        </div>
+        <div class="diagram"><span class="hl">Audit log captures everything:</span>
+
+  <span class="muted">1:45:12</span>  <span class="bl">jenkins-ci</span>  ran <span class="hl">legator_run_command</span> on db-01
+  <span class="muted">1:47:03</span>  <span class="bl">jenkins-ci</span>  executed <span class="rd">systemctl restart postgresql</span>
+  <span class="muted">1:47:04</span>  probe db-01  service postgresql <span class="rd">status: stopped</span>
+  <span class="muted">1:47:15</span>  probe db-01  service postgresql <span class="rd">status: failed</span> (migration error)
+  <span class="muted">1:52:30</span>  <span class="bl">sam</span>         opened incident #47 "DB-01 PostgreSQL down"
+  <span class="muted">1:55:12</span>  <span class="bl">sam</span>         ran <span class="hl">legator_run_command</span>: rollback migration
+  <span class="muted">1:56:01</span>  probe db-01  service postgresql <span class="gr">status: running</span>
+
+  Every action tied to: who, what, when, which server, before/after state.
+  ISO 27001 requires this. Most teams use Slack messages and memory.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- WHO IS THIS FOR -->
+  <div class="section">
+    <span class="section-label">Target Users</span>
+    <h2>Who is Legator for?</h2>
+    <div class="compare" style="max-width:56rem">
+      <div class="compare-col after" style="background:rgba(59,130,246,0.06);border-color:rgba(59,130,246,0.2)">
+        <h4 style="color:var(--blue)">Perfect fit</h4>
+        <ul>
+          <li style="color:var(--muted)">IT teams managing 5–200 Linux servers</li>
+          <li style="color:var(--muted)">MSPs managing multiple client environments</li>
+          <li style="color:var(--muted)">Public sector / healthcare needing self-hosted compliance</li>
+          <li style="color:var(--muted)">Teams using AI tools who want fleet integration</li>
+          <li style="color:var(--muted)">Anyone who's outgrown SSH + spreadsheets but can't justify Datadog</li>
+        </ul>
+      </div>
+      <div class="compare-col before">
+        <h4>Not for</h4>
+        <ul>
+          <li>Enterprise with 10,000+ endpoints (use FleetDM, Qualys)</li>
+          <li>Teams happy with existing SaaS monitoring</li>
+          <li>Windows-only environments (Linux-first today)</li>
+          <li>Network-only monitoring (use LibreNMS, Zabbix)</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- CTA -->
+  <div class="cta-section">
+    <h2>One binary. Zero dependencies.</h2>
+    <p>Control plane: 15MB. Probe: 7MB. Install in 60 seconds. Self-hosted forever.</p>
+    <a class="cta-btn" href="https://github.com/marcus-qen/legator">Get started →</a>
+  </div>
+
+  <footer>
+    <a href="https://github.com/marcus-qen/legator">github.com/marcus-qen/legator</a> · 
+    Legator v1.0.0-beta.1 · Apache 2.0
+  </footer>
+</body>
+</html>
