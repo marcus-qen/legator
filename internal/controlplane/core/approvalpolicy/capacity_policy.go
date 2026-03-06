@@ -446,6 +446,7 @@ func classifyCommandWithMetadata(command string, args []string) commandClassifie
 		"lsof": {}, "file": {}, "stat": {}, "wc": {}, "grep": {}, "find": {}, "journalctl": {},
 		"which": {}, "type": {}, "echo": {}, "date": {}, "env": {}, "printenv": {}, "lsb_release": {},
 		"arch": {}, "nproc": {}, "getent": {}, "groups": {}, "last": {}, "w": {}, "sleep": {}, "true": {}, "false": {},
+		"sh": {}, "bash": {}, // defence-in-depth: shell invocation is observe-level; inner command determines real risk
 	}
 	if _, ok := observeCommands[baseLower]; ok {
 		if baseLower == "find" && (strings.Contains(fullLower, "-exec") || strings.Contains(fullLower, "-delete")) {
