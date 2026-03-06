@@ -278,7 +278,6 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initKubeflow()
 	s.initGrafana()
 	s.initDiscovery()
-	s.initCompliance()
 	s.initDrills()
 	s.initIncidents()
 	s.initLLM()
@@ -289,6 +288,7 @@ func New(cfg config.Config, logger *zap.Logger) (*Server, error) {
 	s.initJobs()
 	s.initRunnerManager()
 	s.initDispatchCore()
+	s.initCompliance() // must run after hub+dispatchCore are wired
 	if s.cfg.MCPEnabled {
 		mcpserver.Version = Version
 		s.mcpServer = mcpserver.New(
