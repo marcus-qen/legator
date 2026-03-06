@@ -280,6 +280,7 @@ Compatibility/deprecation policy: `docs/api-mcp-compatibility.md`.
 | [docs/deployment.md](docs/deployment.md) | Production deployment: bare metal, K8s DaemonSet, TLS, OIDC, LLM |
 | [docs/security.md](docs/security.md) | Security model: auth, permissions, signing, policy engine, sanitisation |
 | [docs/mcp-tools.md](docs/mcp-tools.md) | MCP tool and resource reference for AI assistant integration |
+| [docs/mcp-client-quickstart.md](docs/mcp-client-quickstart.md) | Quickstart for connecting Claude/OpenClaw MCP clients |
 | [docs/architecture.md](docs/architecture.md) | Internal architecture, subsystems, and boundaries |
 | [docs/configuration.md](docs/configuration.md) | Full configuration reference |
 | [docs/alert-routing.md](docs/alert-routing.md) | Alert rules, routing policies, and escalation |

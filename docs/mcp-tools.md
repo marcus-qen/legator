@@ -1,6 +1,8 @@
 # MCP Tool & Resource Reference
 
-Legator exposes a [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server over SSE transport. AI assistants (Claude, Cursor, etc.) can connect to inspect fleet state, run commands, manage approvals, and query jobs without using the REST API directly.
+Legator exposes a [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server over SSE transport. AI assistants (Claude, Cursor, OpenClaw, etc.) can connect to inspect fleet state, run commands, manage approvals, and query jobs without using the REST API directly.
+
+For a client setup walkthrough, see [docs/mcp-client-quickstart.md](mcp-client-quickstart.md).
 
 ---
 
