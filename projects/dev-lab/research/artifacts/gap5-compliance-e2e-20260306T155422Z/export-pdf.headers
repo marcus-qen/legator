@@ -1,0 +1,14 @@
+HTTP/2 200 
+alt-svc: h3=":443"; ma=2592000
+cache-control: no-cache, must-revalidate
+content-disposition: attachment; filename=compliance-20260306-155424.pdf
+content-type: application/pdf
+date: Fri, 06 Mar 2026 15:54:24 GMT
+permissions-policy: camera=(), microphone=(), geolocation=()
+referrer-policy: strict-origin-when-cross-origin
+strict-transport-security: max-age=31536000; includeSubDomains
+via: 1.1 Caddy
+x-content-type-options: nosniff
+x-frame-options: SAMEORIGIN
+x-request-id: 6893135d-1a6e-4ef9-a7f4-bcd1ca685412
+

@@ -1,0 +1,19 @@
+{
+  "summary": {
+    "total_checks": 28,
+    "passing": 0,
+    "failing": 0,
+    "warning": 0,
+    "unknown": 28,
+    "total_probes": 4,
+    "score_pct": 0
+  },
+  "calculated_from_results": {
+    "total_checks": 28,
+    "passing": 0,
+    "failing": 0,
+    "warning": 0,
+    "unknown": 28
+  },
+  "matches": true
+}

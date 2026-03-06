@@ -1,0 +1,77 @@
+{
+  "scan_id": "c6df4924-2560-439c-8274-e2e5657076fc",
+  "started_at": "2026-03-06T15:54:23.191958943Z",
+  "ended_at": "2026-03-06T15:54:23.248559068Z",
+  "summary": {
+    "total_checks": 42,
+    "total_probes": 6,
+    "passing": 0,
+    "failing": 0,
+    "warning": 0,
+    "unknown": 42,
+    "score_pct": 0,
+    "by_category": {
+      "accounts": {
+        "category": "accounts",
+        "passing": 0,
+        "failing": 0,
+        "warning": 0,
+        "unknown": 6,
+        "total": 6,
+        "score_pct": 0
+      },
+      "firewall": {
+        "category": "firewall",
+        "passing": 0,
+        "failing": 0,
+        "warning": 0,
+        "unknown": 6,
+        "total": 6,
+        "score_pct": 0
+      },
+      "patching": {
+        "category": "patching",
+        "passing": 0,
+        "failing": 0,
+        "warning": 0,
+        "unknown": 6,
+        "total": 6,
+        "score_pct": 0
+      },
+      "services": {
+        "category": "services",
+        "passing": 0,
+        "failing": 0,
+        "warning": 0,
+        "unknown": 6,
+        "total": 6,
+        "score_pct": 0
+      },
+      "ssh": {
+        "category": "ssh",
+        "passing": 0,
+        "failing": 0,
+        "warning": 0,
+        "unknown": 12,
+        "total": 12,
+        "score_pct": 0
+      },
+      "storage": {
+        "category": "storage",
+        "passing": 0,
+        "failing": 0,
+        "warning": 0,
+        "unknown": 6,
+        "total": 6,
+        "score_pct": 0
+      }
+    }
+  },
+  "total_results": 42,
+  "status_breakdown": [
+    {
+      "status": "skipped",
+      "count": 42
+    }
+  ]
+}

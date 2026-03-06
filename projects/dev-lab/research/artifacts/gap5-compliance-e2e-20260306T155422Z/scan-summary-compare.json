@@ -1,0 +1,20 @@
+{
+  "scan_summary": {
+    "total_checks": 42,
+    "passing": 0,
+    "failing": 0,
+    "warning": 0,
+    "unknown": 42,
+    "total_probes": 6,
+    "score_pct": 0
+  },
+  "calculated_from_scan_results": {
+    "total_checks": 42,
+    "passing": 0,
+    "failing": 0,
+    "warning": 0,
+    "unknown": 42,
+    "total_probes": 6
+  },
+  "matches": true
+}

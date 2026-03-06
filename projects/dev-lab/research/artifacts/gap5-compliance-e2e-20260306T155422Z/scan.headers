@@ -1,0 +1,13 @@
+HTTP/2 200 
+alt-svc: h3=":443"; ma=2592000
+cache-control: no-cache, must-revalidate
+content-type: application/json
+date: Fri, 06 Mar 2026 15:54:23 GMT
+permissions-policy: camera=(), microphone=(), geolocation=()
+referrer-policy: strict-origin-when-cross-origin
+strict-transport-security: max-age=31536000; includeSubDomains
+via: 1.1 Caddy
+x-content-type-options: nosniff
+x-frame-options: SAMEORIGIN
+x-request-id: 8cf9b8f8-48d2-4e5b-9717-cdab9be6e493
+
