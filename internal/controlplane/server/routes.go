@@ -30,6 +30,8 @@ import (
 	"github.com/marcus-qen/legator/internal/controlplane/tenant"
 	"github.com/marcus-qen/legator/internal/protocol"
 	"go.uber.org/zap"
+
+	"github.com/marcus-qen/legator/docs"
 )
 
 func (s *Server) registerRoutes(mux *http.ServeMux) {
@@ -2930,18 +2932,17 @@ func (s *Server) handleCompliancePage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleOpenAPISpec serves the OpenAPI 3.1 specification from docs/openapi.yaml.
+// handleOpenAPISpec serves the OpenAPI 3.1 specification.
+// The spec is embedded at compile time from docs/openapi.yaml.
 // No authentication is required — the spec is public API documentation.
 func (s *Server) handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
-	specPath := filepath.Join("docs", "openapi.yaml")
-	data, err := os.ReadFile(specPath)
-	if err != nil {
+	if len(docs.OpenAPISpec) == 0 {
 		writeJSONError(w, http.StatusNotFound, "not_found", "OpenAPI spec not available")
 		return
 	}
 	w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
+	_, _ = w.Write(docs.OpenAPISpec)
 }
 
 // ── Tenant API handlers ──────────────────────────────────────────────────────

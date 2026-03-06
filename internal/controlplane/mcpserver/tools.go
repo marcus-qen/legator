@@ -184,139 +184,146 @@ type probeSummary struct {
 	LastSeen time.Time `json:"last_seen"`
 }
 
+// addBuiltinTool registers a typed MCP tool with the underlying server and records
+// its metadata in the MCPServer's builtinTools list so it can be surfaced via REST.
+func addBuiltinTool[In, Out any](s *MCPServer, t *mcp.Tool, h mcp.ToolHandlerFor[In, Out]) {
+	s.builtinTools = append(s.builtinTools, BuiltinToolInfo{Name: t.Name, Description: t.Description})
+	mcp.AddTool(s.server, t, h)
+}
+
 func (s *MCPServer) registerTools() {
-	mcp.AddTool(s.server, &mcp.Tool{
+	addBuiltinTool(s, &mcp.Tool{
 		Name:        "legator_list_probes",
 		Description: "List probes in the Legator fleet with status/tag filtering",
 	}, s.handleListProbes)
 
-	mcp.AddTool(s.server, &mcp.Tool{
+	addBuiltinTool(s, &mcp.Tool{
 		Name:        "legator_probe_info",
 		Description: "Get detailed state for a specific probe",
 	}, s.handleProbeInfo)
 
-	mcp.AddTool(s.server, &mcp.Tool{
+	addBuiltinTool(s, &mcp.Tool{
 		Name:        "legator_run_command",
 		Description: "Run a command on a probe and wait for the result",
 	}, s.handleRunCommand)
 
-	mcp.AddTool(s.server, &mcp.Tool{
+	addBuiltinTool(s, &mcp.Tool{
 		Name:        "legator_get_inventory",
 		Description: "Get system inventory for a specific probe",
 	}, s.handleGetInventory)
 
-	mcp.AddTool(s.server, &mcp.Tool{
+	addBuiltinTool(s, &mcp.Tool{
 		Name:        "legator_fleet_query",
 		Description: "Answer a natural-language fleet query using summary stats",
 	}, s.handleFleetQuery)
 
-	mcp.AddTool(s.server, &mcp.Tool{
+	addBuiltinTool(s, &mcp.Tool{
 		Name:        "legator_federation_inventory",
 		Description: "Get federated inventory across sources with source/cluster/site/tag/status/search and tenant/org/scope filters",
 	}, s.handleFederationInventory)
 
-	mcp.AddTool(s.server, &mcp.Tool{
+	addBuiltinTool(s, &mcp.Tool{
 		Name:        "legator_federation_summary",
 		Description: "Get federated source health/aggregate rollups with source/cluster/site/tag/status/search and tenant/org/scope filters",
 	}, s.handleFederationSummary)
 
-	mcp.AddTool(s.server, &mcp.Tool{
+	addBuiltinTool(s, &mcp.Tool{
 		Name:        "legator_search_audit",
 		Description: "Search Legator audit events",
 	}, s.handleSearchAudit)
 
-	mcp.AddTool(s.server, &mcp.Tool{
+	addBuiltinTool(s, &mcp.Tool{
 		Name:        "legator_decide_approval",
 		Description: "Approve or deny a pending approval request and dispatch on approve",
 	}, s.handleDecideApproval)
 
-	mcp.AddTool(s.server, &mcp.Tool{
+	addBuiltinTool(s, &mcp.Tool{
 		Name:        "legator_probe_health",
 		Description: "Get health score/status/warnings for a probe",
 	}, s.handleProbeHealth)
 
-	mcp.AddTool(s.server, &mcp.Tool{
+	addBuiltinTool(s, &mcp.Tool{
 		Name:        "legator_list_jobs",
 		Description: "List configured scheduled jobs",
 	}, s.handleListJobs)
 
-	mcp.AddTool(s.server, &mcp.Tool{
+	addBuiltinTool(s, &mcp.Tool{
 		Name:        "legator_list_job_runs",
 		Description: "List job runs with optional status/time filters",
 	}, s.handleListJobRuns)
 
-	mcp.AddTool(s.server, &mcp.Tool{
+	addBuiltinTool(s, &mcp.Tool{
 		Name:        "legator_get_job_run",
 		Description: "Get details for a specific job run",
 	}, s.handleGetJobRun)
 
-	mcp.AddTool(s.server, &mcp.Tool{
+	addBuiltinTool(s, &mcp.Tool{
 		Name:        "legator_poll_job_active",
 		Description: "Poll active status for a scheduled job until terminal or timeout",
 	}, s.handlePollActiveJobStatus)
 
-	mcp.AddTool(s.server, &mcp.Tool{
+	addBuiltinTool(s, &mcp.Tool{
 		Name:        "legator_stream_job_run_output",
 		Description: "Stream incremental output chunks for a running job run",
 	}, s.handleStreamJobRunOutput)
 
-	mcp.AddTool(s.server, &mcp.Tool{
+	addBuiltinTool(s, &mcp.Tool{
 		Name:        "legator_stream_job_events",
 		Description: "Stream or poll job lifecycle events using audit/event bus infrastructure",
 	}, s.handleStreamJobEvents)
 
 	if s.grafanaClient != nil {
-		mcp.AddTool(s.server, &mcp.Tool{
+		addBuiltinTool(s, &mcp.Tool{
 			Name:        "legator_grafana_status",
 			Description: "Get Grafana adapter status (read-only capacity availability summary)",
 		}, s.handleGrafanaStatus)
-		mcp.AddTool(s.server, &mcp.Tool{
+		addBuiltinTool(s, &mcp.Tool{
 			Name:        "legator_grafana_snapshot",
 			Description: "Get Grafana adapter capacity snapshot (read-only)",
 		}, s.handleGrafanaSnapshot)
-		mcp.AddTool(s.server, &mcp.Tool{
+		addBuiltinTool(s, &mcp.Tool{
 			Name:        "legator_grafana_capacity_policy",
 			Description: "Get Grafana-derived capacity signals plus policy rationale projection",
 		}, s.handleGrafanaCapacityPolicy)
 	}
 
 	if s.kubeflowRunStatus != nil {
-		mcp.AddTool(s.server, &mcp.Tool{
+		addBuiltinTool(s, &mcp.Tool{
 			Name:        "legator_kubeflow_run_status",
 			Description: "Get Kubeflow run/job status from the control-plane adapter",
 		}, s.handleKubeflowRunStatus)
 	}
 	if s.kubeflowSubmitRun != nil {
-		mcp.AddTool(s.server, &mcp.Tool{
+		addBuiltinTool(s, &mcp.Tool{
 			Name:        "legator_kubeflow_submit_run",
 			Description: "Submit a Kubeflow run/job manifest through policy gates",
 		}, s.handleKubeflowSubmitRun)
 	}
 	if s.kubeflowCancelRun != nil {
-		mcp.AddTool(s.server, &mcp.Tool{
+		addBuiltinTool(s, &mcp.Tool{
 			Name:        "legator_kubeflow_cancel_run",
 			Description: "Cancel a Kubeflow run/job through policy gates",
 		}, s.handleKubeflowCancelRun)
 	}
 
 	if s.sandboxStore != nil && s.tokenBroker != nil {
-		mcp.AddTool(s.server, &mcp.Tool{
+		addBuiltinTool(s, &mcp.Tool{
 			Name:        "sandbox_create",
 			Description: "Create a new sandbox session (requires run token with scope mcp:sandbox)",
 		}, s.handleSandboxCreate)
-		mcp.AddTool(s.server, &mcp.Tool{
+		addBuiltinTool(s, &mcp.Tool{
 			Name:        "sandbox_run",
 			Description: "Run a command in a sandbox session (requires run token with scope mcp:sandbox)",
 		}, s.handleSandboxRun)
-		mcp.AddTool(s.server, &mcp.Tool{
+		addBuiltinTool(s, &mcp.Tool{
 			Name:        "sandbox_read_output",
 			Description: "Read task output from a sandbox execution (requires run token with scope mcp:sandbox)",
 		}, s.handleSandboxReadOutput)
-		mcp.AddTool(s.server, &mcp.Tool{
+		addBuiltinTool(s, &mcp.Tool{
 			Name:        "sandbox_get_artifact",
 			Description: "Get an artifact produced by a sandbox task (requires run token with scope mcp:sandbox)",
 		}, s.handleSandboxGetArtifact)
-		mcp.AddTool(s.server, &mcp.Tool{
+		addBuiltinTool(s, &mcp.Tool{
 			Name:        "sandbox_destroy",
 			Description: "Destroy a sandbox session (requires run token with scope mcp:sandbox)",
 		}, s.handleSandboxDestroy)

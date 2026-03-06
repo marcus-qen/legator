@@ -22,40 +22,56 @@ func (s *Server) handleListMCPServers(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"servers": servers})
 }
 
-// handleListMCPTools returns all available tools aggregated from connected MCP servers.
+// handleListMCPTools returns all available tools: built-in server tools and tools
+// from connected external MCP servers.
 //
 // GET /api/v1/mcp/tools
 func (s *Server) handleListMCPTools(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	if s.mcpRegistry == nil {
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]any{"tools": []any{}})
-		return
-	}
-	tools, err := s.mcpRegistry.ListTools(r.Context())
-	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, "mcp_error", err.Error())
-		return
-	}
 
 	type toolView struct {
 		Server        string `json:"server"`
+		Source        string `json:"source"`
 		QualifiedName string `json:"qualified_name"`
 		Name          string `json:"name"`
 		Description   string `json:"description,omitempty"`
 		InputSchema   any    `json:"input_schema,omitempty"`
 	}
 
-	out := make([]toolView, 0, len(tools))
-	for _, te := range tools {
-		out = append(out, toolView{
-			Server:        te.Server,
-			QualifiedName: te.QualifiedName,
-			Name:          te.Tool.Name,
-			Description:   te.Tool.Description,
-			InputSchema:   te.Tool.InputSchema,
-		})
+	out := make([]toolView, 0)
+
+	// Include built-in server tools when the MCP server is enabled.
+	if s.mcpServer != nil {
+		for _, bt := range s.mcpServer.ListBuiltinTools() {
+			out = append(out, toolView{
+				Server:        "builtin",
+				Source:        "builtin",
+				QualifiedName: "builtin/" + bt.Name,
+				Name:          bt.Name,
+				Description:   bt.Description,
+			})
+		}
 	}
+
+	// Merge tools from connected external MCP client servers.
+	if s.mcpRegistry != nil {
+		tools, err := s.mcpRegistry.ListTools(r.Context())
+		if err != nil {
+			writeJSONError(w, http.StatusBadGateway, "mcp_error", err.Error())
+			return
+		}
+		for _, te := range tools {
+			out = append(out, toolView{
+				Server:        te.Server,
+				Source:        "client",
+				QualifiedName: te.QualifiedName,
+				Name:          te.Tool.Name,
+				Description:   te.Tool.Description,
+				InputSchema:   te.Tool.InputSchema,
+			})
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]any{"tools": out})
 }

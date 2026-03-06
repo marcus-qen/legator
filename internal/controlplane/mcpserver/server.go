@@ -46,6 +46,7 @@ type MCPServer struct {
 	tokenBroker          *tokenbroker.Broker
 	permissionChecker    func(context.Context, auth.Permission) error
 	logger               *zap.Logger
+	builtinTools         []BuiltinToolInfo
 }
 
 // Option customizes MCP server wiring.
@@ -192,4 +193,20 @@ func (s *MCPServer) requirePermission(ctx context.Context, perm auth.Permission)
 		return nil
 	}
 	return s.permissionChecker(ctx, perm)
+}
+
+// BuiltinToolInfo describes a tool registered directly in the built-in MCP server.
+type BuiltinToolInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// ListBuiltinTools returns the list of tools registered in the built-in MCP server.
+func (s *MCPServer) ListBuiltinTools() []BuiltinToolInfo {
+	if s == nil {
+		return nil
+	}
+	out := make([]BuiltinToolInfo, len(s.builtinTools))
+	copy(out, s.builtinTools)
+	return out
 }

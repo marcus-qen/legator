@@ -3,27 +3,14 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 )
 
-// repoRoot returns the absolute path to the repository root by walking up from
-// this test file's location. This lets the test find docs/openapi.yaml
-// regardless of where  is invoked.
-func repoRoot() string {
-	_, file, _, _ := runtime.Caller(0)
-	// file is .../internal/controlplane/server/openapi_test.go
-	// walk up three directories: server -> controlplane -> internal -> repo root
-	return filepath.Join(filepath.Dir(file), "..", "..", "..")
-}
-
 func TestOpenAPISpecEndpoint(t *testing.T) {
-	t.Chdir(repoRoot())
-
+	// Spec is now embedded at compile time; no chdir needed.
 	srv := newTestServer(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/openapi.yaml", nil)
@@ -64,8 +51,9 @@ func TestOpenAPISpecEndpoint(t *testing.T) {
 	t.Logf("OpenAPI spec: version=%s paths=%d", openapiVersion, len(paths))
 }
 
-func TestOpenAPISpecNotFoundWhenMissing(t *testing.T) {
-	// Run from a temp directory where docs/openapi.yaml does not exist.
+func TestOpenAPISpecAlwaysAvailable(t *testing.T) {
+	// The spec is now embedded at compile time. It should be served from any CWD,
+	// including a temp directory where no docs/ folder exists on disk.
 	t.Chdir(t.TempDir())
 
 	srv := newTestServer(t)
@@ -75,7 +63,11 @@ func TestOpenAPISpecNotFoundWhenMissing(t *testing.T) {
 
 	srv.handleOpenAPISpec(rr, req)
 
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 when spec file absent, got %d", rr.Code)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 (spec is embedded), got %d: %s", rr.Code, rr.Body.String())
+	}
+	ct := rr.Header().Get("Content-Type")
+	if !strings.Contains(ct, "yaml") {
+		t.Fatalf("expected yaml content-type, got %q", ct)
 	}
 }
