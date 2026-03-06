@@ -1883,8 +1883,7 @@ func (s *Server) evaluateScheduledJobAdmission(ctx context.Context, job jobs.Job
 	}
 
 	payload := &protocol.CommandPayload{
-		Command: "/bin/sh",
-		Args:    []string{"-lc", strings.TrimSpace(job.Command)},
+		Command: strings.TrimSpace(job.Command),
 		Level:   protocol.CapObserve,
 	}
 	decision := s.approvalCore.EvaluateCommandPolicy(ctx, payload, protocol.CapObserve)
