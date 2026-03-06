@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marcus-qen/legator/internal/controlplane/cmdtracker"
+	corecommanddispatch "github.com/marcus-qen/legator/internal/controlplane/core/commanddispatch"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
 	"github.com/marcus-qen/legator/internal/protocol"
 	"go.uber.org/zap"
@@ -233,4 +235,75 @@ func TestBuildSummary(t *testing.T) {
 	if _, ok := summary.ByCategory["firewall"]; !ok {
 		t.Error("expected firewall in ByCategory")
 	}
+}
+
+// nopSender satisfies the unexported commandSender interface in commanddispatch.
+type nopSender struct{}
+
+func (n *nopSender) SendTo(_ string, _ protocol.MessageType, _ any) error { return nil }
+
+// nopTracker satisfies the unexported commandTracker interface in commanddispatch.
+type nopTracker struct{}
+
+func (n *nopTracker) Track(requestID, _ /*probeID*/, _ /*command*/ string, _ protocol.CapabilityLevel) *cmdtracker.PendingCommand {
+	return &cmdtracker.PendingCommand{
+		RequestID: requestID,
+		Result:    make(chan *protocol.CommandResultPayload, 1),
+	}
+}
+
+func (n *nopTracker) Cancel(_ string) {}
+
+// TestBuildExecutor verifies that buildExecutor returns a non-nil executor for an
+// online agent-type probe when commandDispatch is properly wired (non-nil hub).
+func TestBuildExecutor(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "compliance.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	// Wire up dispatch with real (non-nil) sender/tracker — simulates post-hub init state.
+	dispatch := corecommanddispatch.NewService(&nopSender{}, &nopTracker{})
+
+	sc := NewScannerWithCommandDispatch(nil, nil, store, zap.NewNop(), dispatch)
+
+	t.Run("online agent probe returns non-nil executor", func(t *testing.T) {
+		ps := &fleet.ProbeState{
+			ID:       "agent-1",
+			Hostname: "host-agent",
+			Status:   "online",
+			Type:     fleet.ProbeTypeAgent,
+		}
+		exec := sc.buildExecutor(context.Background(), ps)
+		if exec == nil {
+			t.Fatal("expected non-nil ProbeExecutor for online agent probe with wired dispatch, got nil (all checks would be skipped)")
+		}
+	})
+
+	t.Run("offline agent probe returns nil executor", func(t *testing.T) {
+		ps := &fleet.ProbeState{
+			ID:       "agent-2",
+			Hostname: "host-agent-2",
+			Status:   "offline",
+			Type:     fleet.ProbeTypeAgent,
+		}
+		exec := sc.buildExecutor(context.Background(), ps)
+		if exec != nil {
+			t.Fatal("expected nil ProbeExecutor for offline agent probe, got non-nil")
+		}
+	})
+
+	t.Run("nil dispatch returns nil executor for agent probe", func(t *testing.T) {
+		scNilDispatch := NewScannerWithCommandDispatch(nil, nil, store, zap.NewNop(), nil)
+		ps := &fleet.ProbeState{
+			ID:     "agent-3",
+			Status: "online",
+			Type:   fleet.ProbeTypeAgent,
+		}
+		exec := scNilDispatch.buildExecutor(context.Background(), ps)
+		if exec != nil {
+			t.Fatal("expected nil ProbeExecutor when dispatch is nil, got non-nil")
+		}
+	})
 }
