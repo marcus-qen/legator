@@ -281,6 +281,32 @@ func TestBuildExecutor(t *testing.T) {
 		}
 	})
 
+	t.Run("agent probe type with whitespace and mixed case returns non-nil executor", func(t *testing.T) {
+		ps := &fleet.ProbeState{
+			ID:       "agent-1b",
+			Hostname: "host-agent-1b",
+			Status:   "online",
+			Type:     "  AgEnT  ",
+		}
+		exec := sc.buildExecutor(context.Background(), ps)
+		if exec == nil {
+			t.Fatal("expected non-nil ProbeExecutor for normalized agent probe type, got nil")
+		}
+	})
+
+	t.Run("empty probe type defaults to agent and returns non-nil executor", func(t *testing.T) {
+		ps := &fleet.ProbeState{
+			ID:       "agent-legacy",
+			Hostname: "host-agent-legacy",
+			Status:   "online",
+			Type:     "",
+		}
+		exec := sc.buildExecutor(context.Background(), ps)
+		if exec == nil {
+			t.Fatal("expected non-nil ProbeExecutor for legacy empty probe type, got nil")
+		}
+	})
+
 	t.Run("offline agent probe returns nil executor", func(t *testing.T) {
 		ps := &fleet.ProbeState{
 			ID:       "agent-2",
@@ -306,4 +332,55 @@ func TestBuildExecutor(t *testing.T) {
 			t.Fatal("expected nil ProbeExecutor when dispatch is nil, got non-nil")
 		}
 	})
+}
+
+func TestScanOnlineAgentProbeTypeVariantsAreNotSkipped(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "compliance.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	dispatch := corecommanddispatch.NewService(&nopSender{}, &nopTracker{})
+
+	check := ComplianceCheck{
+		ID:       "agent-exec-path",
+		Name:     "Agent executor path",
+		Category: "test",
+		Severity: SeverityLow,
+		CheckFunc: func(_ context.Context, _ ProbeExecutor) (string, string, error) {
+			return StatusPass, "executor is available", nil
+		},
+	}
+
+	testCases := []struct {
+		name string
+		typ  string
+	}{
+		{name: "canonical agent type", typ: fleet.ProbeTypeAgent},
+		{name: "agent type with whitespace and mixed case", typ: "  AgEnT  "},
+		{name: "legacy empty type", typ: ""},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &mockFleet{probes: []*fleet.ProbeState{{
+				ID:       "agent-probe",
+				Hostname: "agent-host",
+				Status:   "online",
+				Type:     tc.typ,
+			}}}
+
+			sc := NewScannerWithCommandDispatch(f, nil, store, zap.NewNop(), dispatch)
+			sc.checks = []ComplianceCheck{check}
+
+			resp := sc.Scan(context.Background(), ScanRequest{})
+			if len(resp.Results) != 1 {
+				t.Fatalf("expected 1 result, got %d", len(resp.Results))
+			}
+			if resp.Results[0].Status == StatusSkipped {
+				t.Fatalf("expected non-skipped result for type %q, got skipped", tc.typ)
+			}
+		})
+	}
 }

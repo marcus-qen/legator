@@ -172,8 +172,18 @@ func (s *Scanner) runCheck(ctx context.Context, ps *fleet.ProbeState, chk Compli
 // buildExecutor creates a ProbeExecutor for the given probe.
 // Returns nil if the probe cannot be executed against.
 func (s *Scanner) buildExecutor(ctx context.Context, ps *fleet.ProbeState) ProbeExecutor {
+	if ps == nil {
+		return nil
+	}
+
+	probeType := strings.ToLower(strings.TrimSpace(ps.Type))
+	if probeType == "" {
+		// Legacy records can have an empty probe type; treat them as agent probes.
+		probeType = fleet.ProbeTypeAgent
+	}
+
 	// Check if this is a remote probe (SSH-style)
-	if strings.EqualFold(ps.Type, fleet.ProbeTypeRemote) && s.executor != nil && ps.Remote != nil {
+	if probeType == fleet.ProbeTypeRemote && s.executor != nil && ps.Remote != nil {
 		// Use the RemoteProbeExecutor for remote-type probes
 		return func(execCtx context.Context, cmd string) (string, int, error) {
 			result, err := s.executor.Execute(execCtx, ps, protocol.CommandPayload{
@@ -189,7 +199,7 @@ func (s *Scanner) buildExecutor(ctx context.Context, ps *fleet.ProbeState) Probe
 	}
 
 	// Check if this is an agent probe (WebSocket-connected) with command dispatch
-	if strings.EqualFold(ps.Type, fleet.ProbeTypeAgent) && s.commandDispatch != nil {
+	if probeType == fleet.ProbeTypeAgent && s.commandDispatch != nil {
 		if ps.Status != "online" {
 			return nil
 		}
