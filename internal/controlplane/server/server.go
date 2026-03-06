@@ -1479,7 +1479,7 @@ func (s *Server) initCompliance() {
 	}
 	s.complianceStore = store
 
-	scanner := compliance.NewScanner(s.fleetMgr, s.remoteExecutor, store, s.logger.Named("compliance"))
+	scanner := compliance.NewScannerWithCommandDispatch(s.fleetMgr, s.remoteExecutor, store, s.logger.Named("compliance"), s.dispatchCore)
 	s.complianceHandlers = compliance.NewHandler(scanner, store)
 	scheduler := compliance.NewScheduler(store, "all probes", s.logger.Named("compliance.scheduler"))
 	s.complianceScheduler = scheduler

@@ -9,6 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/marcus-qen/legator/internal/controlplane/fleet"
+
+	corecommanddispatch "github.com/marcus-qen/legator/internal/controlplane/core/commanddispatch"
 	"github.com/marcus-qen/legator/internal/protocol"
 	"go.uber.org/zap"
 )
@@ -20,11 +22,12 @@ type RemoteProbeExecutor interface {
 
 // Scanner runs compliance checks across the fleet.
 type Scanner struct {
-	fleet    fleet.Fleet
-	executor RemoteProbeExecutor
-	store    *Store
-	checks   []ComplianceCheck
-	logger   *zap.Logger
+	fleet           fleet.Fleet
+	executor        RemoteProbeExecutor
+	store           *Store
+	checks          []ComplianceCheck
+	logger          *zap.Logger
+	commandDispatch *corecommanddispatch.Service // For agent-type probes
 }
 
 // NewScanner creates a new compliance scanner.
@@ -36,6 +39,13 @@ func NewScanner(f fleet.Fleet, executor RemoteProbeExecutor, store *Store, logge
 		checks:   BuiltinChecks(),
 		logger:   logger,
 	}
+}
+
+// NewScannerWithCommandDispatch creates a scanner with command dispatch for agent probes.
+func NewScannerWithCommandDispatch(f fleet.Fleet, executor RemoteProbeExecutor, store *Store, logger *zap.Logger, cmdDispatch *corecommanddispatch.Service) *Scanner {
+	s := NewScanner(f, executor, store, logger)
+	s.commandDispatch = cmdDispatch
+	return s
 }
 
 // Checks returns the registered compliance checks.
@@ -162,30 +172,47 @@ func (s *Scanner) runCheck(ctx context.Context, ps *fleet.ProbeState, chk Compli
 // buildExecutor creates a ProbeExecutor for the given probe.
 // Returns nil if the probe cannot be executed against.
 func (s *Scanner) buildExecutor(ctx context.Context, ps *fleet.ProbeState) ProbeExecutor {
-	// Only support remote probes with an executor available
-	if !strings.EqualFold(ps.Type, fleet.ProbeTypeRemote) || s.executor == nil {
+	// Check if this is a remote probe (SSH-style)
+	if strings.EqualFold(ps.Type, fleet.ProbeTypeRemote) && s.executor != nil && ps.Remote != nil {
+		// Use the RemoteProbeExecutor for remote-type probes
+		return func(execCtx context.Context, cmd string) (string, int, error) {
+			result, err := s.executor.Execute(execCtx, ps, protocol.CommandPayload{
+				RequestID: uuid.NewString(),
+				Command:   "sh",
+				Args:      []string{"-c", cmd},
+			}, func(protocol.OutputChunkPayload) {})
+			if err != nil {
+				return "", -1, err
+			}
+			return result.Stdout, result.ExitCode, nil
+		}
+	}
+
+	// Check if this is an agent probe (WebSocket-connected) with command dispatch
+	if strings.EqualFold(ps.Type, fleet.ProbeTypeAgent) && s.commandDispatch != nil {
 		if ps.Status != "online" {
 			return nil
 		}
-		// Non-remote online probe: mark as unknown (no sync execution path)
-		return nil
-	}
-
-	if ps.Remote == nil {
-		return nil
-	}
-
-	return func(execCtx context.Context, cmd string) (string, int, error) {
-		result, err := s.executor.Execute(execCtx, ps, protocol.CommandPayload{
-			RequestID: uuid.NewString(),
-			Command:   "sh",
-			Args:      []string{"-c", cmd},
-		}, func(protocol.OutputChunkPayload) {})
-		if err != nil {
-			return "", -1, err
+		// Use command dispatch service for agent-type probes
+		return func(execCtx context.Context, cmd string) (string, int, error) {
+			result, err := s.commandDispatch.DispatchAndWait(execCtx, ps.ID, protocol.CommandPayload{
+				RequestID: uuid.NewString(),
+				Command:   "sh",
+				Args:      []string{"-c", cmd},
+			}, 30*time.Second)
+			if err != nil {
+				return "", -1, err
+			}
+			return corecommanddispatch.ResultText(result), result.ExitCode, nil
 		}
-		return result.Stdout, result.ExitCode, nil
 	}
+
+	// Cannot execute against this probe type
+	if ps.Status != "online" {
+		return nil
+	}
+	// Non-remote, non-agent online probe: no execution path available
+	return nil
 }
 
 // selectProbes returns the probes to scan based on the request.
